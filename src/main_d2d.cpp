@@ -229,6 +229,7 @@ struct Settings {
     int windowWidth = 1024;
     int windowHeight = 768;
     bool windowMaximized = false;
+    bool hasAskedFileAssociation = false;  // Have we asked about .md association?
 };
 
 static std::wstring getSettingsPath() {
@@ -258,6 +259,7 @@ static void saveSettings(const Settings& settings) {
     file << "windowWidth=" << settings.windowWidth << "\n";
     file << "windowHeight=" << settings.windowHeight << "\n";
     file << "windowMaximized=" << (settings.windowMaximized ? 1 : 0) << "\n";
+    file << "hasAskedFileAssociation=" << (settings.hasAskedFileAssociation ? 1 : 0) << "\n";
 }
 
 static Settings loadSettings() {
@@ -296,9 +298,96 @@ static Settings loadSettings() {
             if (h >= 200) settings.windowHeight = h;
         } else if (key == "windowMaximized") {
             settings.windowMaximized = (value == "1");
+        } else if (key == "hasAskedFileAssociation") {
+            settings.hasAskedFileAssociation = (value == "1");
         }
     }
     return settings;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILE ASSOCIATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+static bool registerFileAssociation() {
+    // Get the path to the current executable
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+
+    HKEY hKey;
+    LONG result;
+
+    // Create .md file extension entry
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.md", 0, nullptr,
+                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
+    if (result != ERROR_SUCCESS) return false;
+
+    // Set default value to our ProgID
+    const wchar_t* progId = L"Tinta.MarkdownFile";
+    RegSetValueExW(hKey, nullptr, 0, REG_SZ, (BYTE*)progId, (DWORD)((wcslen(progId) + 1) * sizeof(wchar_t)));
+    RegCloseKey(hKey);
+
+    // Create ProgID entry
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\Tinta.MarkdownFile", 0, nullptr,
+                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
+    if (result != ERROR_SUCCESS) return false;
+
+    // Set file type description
+    const wchar_t* desc = L"Markdown Document";
+    RegSetValueExW(hKey, nullptr, 0, REG_SZ, (BYTE*)desc, (DWORD)((wcslen(desc) + 1) * sizeof(wchar_t)));
+    RegCloseKey(hKey);
+
+    // Create DefaultIcon entry
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\Tinta.MarkdownFile\\DefaultIcon", 0, nullptr,
+                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
+    if (result != ERROR_SUCCESS) return false;
+
+    // Set icon to the exe's icon
+    std::wstring iconPath = exePath;
+    iconPath += L",0";
+    RegSetValueExW(hKey, nullptr, 0, REG_SZ, (BYTE*)iconPath.c_str(), (DWORD)((iconPath.length() + 1) * sizeof(wchar_t)));
+    RegCloseKey(hKey);
+
+    // Create shell\open\command entry
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\Tinta.MarkdownFile\\shell\\open\\command", 0, nullptr,
+                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
+    if (result != ERROR_SUCCESS) return false;
+
+    // Set command to open files with Tinta
+    std::wstring command = L"\"";
+    command += exePath;
+    command += L"\" \"%1\"";
+    RegSetValueExW(hKey, nullptr, 0, REG_SZ, (BYTE*)command.c_str(), (DWORD)((command.length() + 1) * sizeof(wchar_t)));
+    RegCloseKey(hKey);
+
+    // Notify shell of the change
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+
+    return true;
+}
+
+static void askAndRegisterFileAssociation(Settings& settings) {
+    if (settings.hasAskedFileAssociation) return;
+
+    int result = MessageBoxW(
+        nullptr,
+        L"Would you like to set Tinta as the default viewer for .md files?",
+        L"Tinta - File Association",
+        MB_YESNO | MB_ICONQUESTION
+    );
+
+    if (result == IDYES) {
+        if (registerFileAssociation()) {
+            MessageBoxW(nullptr, L"Tinta is now the default viewer for .md files.",
+                       L"Success", MB_OK | MB_ICONINFORMATION);
+        } else {
+            MessageBoxW(nullptr, L"Failed to register file association. Try running as administrator.",
+                       L"Error", MB_OK | MB_ICONWARNING);
+        }
+    }
+
+    settings.hasAskedFileAssociation = true;
+    saveSettings(settings);
 }
 
 // Application state
@@ -1979,8 +2068,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_DESTROY:
             {
-                // Save settings before exiting
-                Settings settings;
+                // Load existing settings to preserve values like hasAskedFileAssociation
+                Settings settings = loadSettings();
                 settings.themeIndex = app->currentThemeIndex;
                 settings.zoomFactor = app->zoomFactor;
 
@@ -2051,6 +2140,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // Parse command line
     std::string inputFile;
     bool lightMode = false;
+    bool forceRegister = false;
 
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -2060,7 +2150,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             lightMode = true;
         } else if (arg == L"-s" || arg == L"--stats") {
             app.showStats = true;
-        } else if (arg[0] != L'-') {
+        } else if (arg == L"/register" || arg == L"--register") {
+            forceRegister = true;
+        } else if (arg[0] != L'-' && arg[0] != L'/') {
             // Convert to UTF-8
             int len = WideCharToMultiByte(CP_UTF8, 0, arg.c_str(), -1, nullptr, 0, nullptr, nullptr);
             inputFile.resize(len - 1);
@@ -2068,6 +2160,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         }
     }
     LocalFree(argv);
+
+    // Handle /register command
+    if (forceRegister) {
+        if (registerFileAssociation()) {
+            MessageBoxW(nullptr, L"Tinta is now the default viewer for .md files.",
+                       L"Success", MB_OK | MB_ICONINFORMATION);
+        } else {
+            MessageBoxW(nullptr, L"Failed to register file association. Try running as administrator.",
+                       L"Error", MB_OK | MB_ICONWARNING);
+        }
+        return 0;  // Exit after registering
+    }
+
+    // Ask about file association on first run
+    askAndRegisterFileAssociation(savedSettings);
 
     if (lightMode) {
         app.currentThemeIndex = 0;  // Paper (first light theme)
@@ -2084,6 +2191,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hIcon = LoadIconW(hInstance, L"IDI_ICON1");
+    wc.hIconSm = LoadIconW(hInstance, L"IDI_ICON1");
     wc.lpszClassName = L"Tinta";
     RegisterClassExW(&wc);
 

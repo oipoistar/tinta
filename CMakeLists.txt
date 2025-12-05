@@ -37,8 +37,13 @@ set(HEADERS
     include/types.h
 )
 
+# Windows resource file (icon)
+set(RESOURCES
+    resources/tinta.rc
+)
+
 # Main executable
-add_executable(tinta WIN32 ${SOURCES} ${HEADERS})
+add_executable(tinta WIN32 ${SOURCES} ${HEADERS} ${RESOURCES})
 
 target_include_directories(tinta PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include

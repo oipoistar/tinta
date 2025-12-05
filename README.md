@@ -53,9 +53,23 @@ tinta.exe -l document.md
 
 # Show stats on startup
 tinta.exe -s document.md
+
+# Register as default .md viewer
+tinta.exe /register
 ```
 
 Or simply drag and drop a `.md` file onto the window.
+
+## File Association
+
+On first launch, Tinta will ask if you want to set it as the default viewer for `.md` files. If you choose "No", you won't be asked again.
+
+To register Tinta as the default viewer later, run:
+```bash
+tinta.exe /register
+```
+
+This sets up the file association in the Windows registry so you can double-click any `.md` file to open it in Tinta.
 
 ## Themes
 

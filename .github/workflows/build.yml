@@ -1,0 +1,49 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Get version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Tinta v${{ steps.version.outputs.VERSION }}
+          body: |
+            ## Tinta v${{ steps.version.outputs.VERSION }}
+
+            **Markdown, distilled.**
+
+            A fast, lightweight markdown reader for Windows.
+
+            ### Installation
+            1. Download `tinta.exe` below
+            2. Run it (you may need to click "More info" → "Run anyway" on SmartScreen)
+            3. Optionally run `tinta.exe /register` to set as default .md viewer
+
+            ### What's included
+            - 10 beautiful themes (5 light, 5 dark)
+            - Hardware-accelerated rendering via Direct2D
+            - ~270KB single executable, no dependencies
+          files: build/Release/tinta.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

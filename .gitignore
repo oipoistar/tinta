@@ -21,3 +21,6 @@ cmake-build-*/
 *.log
 .DS_Store
 Thumbs.db
+
+# Website (separate repo)
+web/
