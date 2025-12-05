@@ -316,23 +316,12 @@ static bool registerFileAssociation() {
 
     HKEY hKey;
     LONG result;
-
-    // Create .md file extension entry
-    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.md", 0, nullptr,
-                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
-    if (result != ERROR_SUCCESS) return false;
-
-    // Set default value to our ProgID
     const wchar_t* progId = L"Tinta.MarkdownFile";
-    RegSetValueExW(hKey, nullptr, 0, REG_SZ, (BYTE*)progId, (DWORD)((wcslen(progId) + 1) * sizeof(wchar_t)));
-    RegCloseKey(hKey);
 
-    // Create ProgID entry
+    // Create ProgID entry in Classes
     result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\Tinta.MarkdownFile", 0, nullptr,
                               REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
     if (result != ERROR_SUCCESS) return false;
-
-    // Set file type description
     const wchar_t* desc = L"Markdown Document";
     RegSetValueExW(hKey, nullptr, 0, REG_SZ, (BYTE*)desc, (DWORD)((wcslen(desc) + 1) * sizeof(wchar_t)));
     RegCloseKey(hKey);
@@ -341,8 +330,6 @@ static bool registerFileAssociation() {
     result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\Tinta.MarkdownFile\\DefaultIcon", 0, nullptr,
                               REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
     if (result != ERROR_SUCCESS) return false;
-
-    // Set icon to the exe's icon
     std::wstring iconPath = exePath;
     iconPath += L",0";
     RegSetValueExW(hKey, nullptr, 0, REG_SZ, (BYTE*)iconPath.c_str(), (DWORD)((iconPath.length() + 1) * sizeof(wchar_t)));
@@ -352,12 +339,50 @@ static bool registerFileAssociation() {
     result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\Tinta.MarkdownFile\\shell\\open\\command", 0, nullptr,
                               REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
     if (result != ERROR_SUCCESS) return false;
-
-    // Set command to open files with Tinta
     std::wstring command = L"\"";
     command += exePath;
     command += L"\" \"%1\"";
     RegSetValueExW(hKey, nullptr, 0, REG_SZ, (BYTE*)command.c_str(), (DWORD)((command.length() + 1) * sizeof(wchar_t)));
+    RegCloseKey(hKey);
+
+    // Register app capabilities (required for Windows 10/11)
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Tinta\\Capabilities", 0, nullptr,
+                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
+    if (result != ERROR_SUCCESS) return false;
+    const wchar_t* appName = L"Tinta";
+    const wchar_t* appDesc = L"A fast, lightweight markdown reader";
+    RegSetValueExW(hKey, L"ApplicationName", 0, REG_SZ, (BYTE*)appName, (DWORD)((wcslen(appName) + 1) * sizeof(wchar_t)));
+    RegSetValueExW(hKey, L"ApplicationDescription", 0, REG_SZ, (BYTE*)appDesc, (DWORD)((wcslen(appDesc) + 1) * sizeof(wchar_t)));
+    RegCloseKey(hKey);
+
+    // Register file associations in capabilities
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Tinta\\Capabilities\\FileAssociations", 0, nullptr,
+                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
+    if (result != ERROR_SUCCESS) return false;
+    RegSetValueExW(hKey, L".md", 0, REG_SZ, (BYTE*)progId, (DWORD)((wcslen(progId) + 1) * sizeof(wchar_t)));
+    RegSetValueExW(hKey, L".markdown", 0, REG_SZ, (BYTE*)progId, (DWORD)((wcslen(progId) + 1) * sizeof(wchar_t)));
+    RegCloseKey(hKey);
+
+    // Add to RegisteredApplications
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\RegisteredApplications", 0, nullptr,
+                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
+    if (result != ERROR_SUCCESS) return false;
+    const wchar_t* capPath = L"Software\\Tinta\\Capabilities";
+    RegSetValueExW(hKey, L"Tinta", 0, REG_SZ, (BYTE*)capPath, (DWORD)((wcslen(capPath) + 1) * sizeof(wchar_t)));
+    RegCloseKey(hKey);
+
+    // Add OpenWithProgids for .md
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.md\\OpenWithProgids", 0, nullptr,
+                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
+    if (result != ERROR_SUCCESS) return false;
+    RegSetValueExW(hKey, progId, 0, REG_NONE, nullptr, 0);
+    RegCloseKey(hKey);
+
+    // Add OpenWithProgids for .markdown
+    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.markdown\\OpenWithProgids", 0, nullptr,
+                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
+    if (result != ERROR_SUCCESS) return false;
+    RegSetValueExW(hKey, progId, 0, REG_NONE, nullptr, 0);
     RegCloseKey(hKey);
 
     // Notify shell of the change
@@ -366,20 +391,31 @@ static bool registerFileAssociation() {
     return true;
 }
 
+static void openDefaultAppsSettings() {
+    ShellExecuteW(nullptr, L"open", L"ms-settings:defaultapps", nullptr, nullptr, SW_SHOWNORMAL);
+}
+
 static void askAndRegisterFileAssociation(Settings& settings) {
     if (settings.hasAskedFileAssociation) return;
 
     int result = MessageBoxW(
         nullptr,
-        L"Would you like to set Tinta as the default viewer for .md files?",
+        L"Would you like to set Tinta as the default viewer for .md files?\n\n"
+        L"Windows will open Settings where you can select Tinta.",
         L"Tinta - File Association",
         MB_YESNO | MB_ICONQUESTION
     );
 
     if (result == IDYES) {
         if (registerFileAssociation()) {
-            MessageBoxW(nullptr, L"Tinta is now the default viewer for .md files.",
-                       L"Success", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(nullptr,
+                       L"Tinta has been registered.\n\n"
+                       L"In the Settings window that opens:\n"
+                       L"1. Search for '.md'\n"
+                       L"2. Click on the current default app\n"
+                       L"3. Select 'Tinta' from the list",
+                       L"Almost done!", MB_OK | MB_ICONINFORMATION);
+            openDefaultAppsSettings();
         } else {
             MessageBoxW(nullptr, L"Failed to register file association. Try running as administrator.",
                        L"Error", MB_OK | MB_ICONWARNING);
@@ -461,8 +497,12 @@ struct App {
     std::vector<LinkRect> linkRects;
     std::string hoveredLink;
 
-    // Text bounds - tracked for cursor changes
-    std::vector<D2D1_RECT_F> textRects;
+    // Text bounds - tracked for cursor changes and selection
+    struct TextRect {
+        D2D1_RECT_F rect;
+        std::wstring text;
+    };
+    std::vector<TextRect> textRects;
     bool overText = false;
 
     // Text selection
@@ -715,7 +755,7 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
 
                 // Track text bounds
                 if (renderY > -lineHeight && renderY < app.height + lineHeight) {
-                    app.textRects.push_back(D2D1::RectF(x, renderY, x + textWidth, renderY + lineHeight));
+                    app.textRects.push_back({D2D1::RectF(x, renderY, x + textWidth, renderY + lineHeight), text});
                 }
                 break;
             }
@@ -800,8 +840,8 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
                     D2D1::RectF(x, renderY, x + wordWidth + 100, renderY + lineHeight), app.brush);
                 app.drawCalls++;
 
-                // Track text bounds for cursor
-                app.textRects.push_back(D2D1::RectF(x, renderY, x + wordWidth, renderY + lineHeight));
+                // Track text bounds for cursor and selection
+                app.textRects.push_back({D2D1::RectF(x, renderY, x + wordWidth, renderY + lineHeight), word});
             }
 
             x += wordWidth;
@@ -935,8 +975,8 @@ void renderCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, f
 
             // Track text bounds for selection
             if (!wline.empty()) {
-                app.textRects.push_back(D2D1::RectF(indent + padding, lineRenderY,
-                    indent + padding + textWidth, lineRenderY + lineHeight));
+                app.textRects.push_back({D2D1::RectF(indent + padding, lineRenderY,
+                    indent + padding + textWidth, lineRenderY + lineHeight), wline});
             }
         }
 
@@ -1172,11 +1212,17 @@ void render(App& app) {
 
     // Draw selection highlights
     if ((app.selecting || app.hasSelection) && !app.textRects.empty()) {
-        // Calculate selection bounds (normalized)
-        float selLeft = (float)std::min(app.selStartX, app.selEndX);
-        float selRight = (float)std::max(app.selStartX, app.selEndX);
-        float selTop = (float)std::min(app.selStartY, app.selEndY);
-        float selBottom = (float)std::max(app.selStartY, app.selEndY);
+        // Calculate selection bounds (normalized so start is always before end)
+        float selStartX = (float)app.selStartX;
+        float selStartY = (float)app.selStartY;
+        float selEndX = (float)app.selEndX;
+        float selEndY = (float)app.selEndY;
+
+        // Swap if selection was made bottom-to-top
+        if (selStartY > selEndY || (selStartY == selEndY && selStartX > selEndX)) {
+            std::swap(selStartX, selEndX);
+            std::swap(selStartY, selEndY);
+        }
 
         // Check if this is a "select all" (selectedText is set but selection coords are same)
         bool isSelectAll = app.hasSelection && !app.selectedText.empty() &&
@@ -1184,73 +1230,97 @@ void render(App& app) {
 
         app.brush->SetColor(D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f));
 
-        size_t selectedCount = 0;
+        // Group text rects by line (Y position)
+        struct LineInfo {
+            float top, bottom;
+            float minX, maxX;
+            std::vector<const App::TextRect*> rects;
+        };
+        std::vector<LineInfo> lines;
+
         for (const auto& tr : app.textRects) {
-            bool inSelection = false;
+            const D2D1_RECT_F& rect = tr.rect;
+            bool foundLine = false;
+            for (auto& line : lines) {
+                if (std::abs(rect.top - line.top) < 5) {
+                    line.minX = std::min(line.minX, rect.left);
+                    line.maxX = std::max(line.maxX, rect.right);
+                    line.rects.push_back(&tr);
+                    foundLine = true;
+                    break;
+                }
+            }
+            if (!foundLine) {
+                lines.push_back({rect.top, rect.bottom, rect.left, rect.right, {&tr}});
+            }
+        }
+
+        // Sort lines by Y position
+        std::sort(lines.begin(), lines.end(), [](const LineInfo& a, const LineInfo& b) {
+            return a.top < b.top;
+        });
+
+        std::wstring collectedText;
+        size_t selectedCount = 0;
+
+        for (size_t i = 0; i < lines.size(); i++) {
+            const auto& line = lines[i];
+            float lineCenterY = (line.top + line.bottom) / 2;
+
+            bool lineInSelection = false;
+            float drawLeft = line.minX;
+            float drawRight = line.maxX;
 
             if (isSelectAll) {
-                // Select all - highlight everything
-                inSelection = true;
-            } else {
-                // Check if text rect intersects with selection box
-                // For text selection, we use a line-based approach:
-                // - If rect's vertical center is between selTop and selBottom
-                // - And rect overlaps horizontally with selection on that line
-                float rectCenterY = (tr.top + tr.bottom) / 2;
+                lineInSelection = true;
+            } else if (lineCenterY >= selStartY - 10 && lineCenterY <= selEndY + 10) {
+                float lineHeight = line.bottom - line.top;
+                bool isSingleLine = (selEndY - selStartY) < lineHeight;
 
-                if (rectCenterY >= selTop && rectCenterY <= selBottom) {
-                    // This line is in the selection range
-                    if (selTop == selBottom || (selBottom - selTop) < 30) {
-                        // Single line selection - check horizontal overlap
-                        if (tr.right >= selLeft && tr.left <= selRight) {
-                            inSelection = true;
-                        }
-                    } else {
-                        // Multi-line selection
-                        float lineHeight = tr.bottom - tr.top;
-                        if (rectCenterY < selTop + lineHeight) {
-                            // First line - must be right of start
-                            if (tr.right >= selLeft) inSelection = true;
-                        } else if (rectCenterY > selBottom - lineHeight) {
-                            // Last line - must be left of end
-                            if (tr.left <= selRight) inSelection = true;
-                        } else {
-                            // Middle lines - fully selected
-                            inSelection = true;
-                        }
-                    }
+                if (isSingleLine) {
+                    // Single line selection
+                    drawLeft = std::max(line.minX, selStartX);
+                    drawRight = std::min(line.maxX, selEndX);
+                    if (drawLeft < drawRight) lineInSelection = true;
+                } else if (lineCenterY < selStartY + lineHeight) {
+                    // First line - from selection start to end of line
+                    drawLeft = std::max(line.minX, selStartX);
+                    lineInSelection = true;
+                } else if (lineCenterY > selEndY - lineHeight) {
+                    // Last line - from start of line to selection end
+                    drawRight = std::min(line.maxX, selEndX);
+                    lineInSelection = true;
+                } else {
+                    // Middle line - full width
+                    lineInSelection = true;
                 }
             }
 
-            if (inSelection) {
-                app.renderTarget->FillRectangle(tr, app.brush);
+            if (lineInSelection) {
+                // Draw continuous selection bar for this line
+                app.renderTarget->FillRectangle(
+                    D2D1::RectF(drawLeft, line.top, drawRight, line.bottom),
+                    app.brush);
                 selectedCount++;
+
+                // Collect text from rects in this line that fall within selection
+                if (!collectedText.empty()) collectedText += L"\n";
+                for (const auto* tr : line.rects) {
+                    const D2D1_RECT_F& rect = tr->rect;
+                    if (rect.left < drawRight && rect.right > drawLeft) {
+                        if (!collectedText.empty() && collectedText.back() != L'\n') {
+                            collectedText += L" ";
+                        }
+                        collectedText += tr->text;
+                    }
+                }
             }
         }
         app.drawCalls += selectedCount;
 
-        // Show indicator pill if there's a selection
-        if (app.hasSelection && selectedCount > 0) {
-            const wchar_t* selText = isSelectAll ?
-                L"All text selected (Ctrl+C to copy)" :
-                L"Text selected (Ctrl+C to copy)";
-            float selWidth = isSelectAll ? 280.0f : 240.0f;
-            float selHeight = 26;
-            float pillX = (app.width - selWidth) / 2;
-            float pillY = 10;
-
-            // Background pill
-            app.brush->SetColor(D2D1::ColorF(0.2f, 0.4f, 0.8f, 0.9f));
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(D2D1::RectF(pillX, pillY, pillX + selWidth, pillY + selHeight), 13, 13),
-                app.brush);
-
-            // Text
-            app.brush->SetColor(D2D1::ColorF(1, 1, 1, 1));
-            app.renderTarget->DrawText(selText, (UINT32)wcslen(selText), app.textFormat,
-                D2D1::RectF(pillX + 10, pillY + 3, pillX + selWidth - 10, pillY + selHeight),
-                app.brush);
-            app.drawCalls++;
+        // Update selectedText for mouse selections (not select-all)
+        if (!isSelectAll && app.hasSelection && selectedCount > 0) {
+            app.selectedText = collectedText;
         }
     }
 
@@ -1267,11 +1337,11 @@ void render(App& app) {
             }
             app.copiedNotificationAlpha = alpha;
 
-            const wchar_t* copyText = L"Copied to clipboard!";
-            float copyWidth = 180.0f;
+            const wchar_t* copyText = L"Copied!";
+            float copyWidth = 100.0f;
             float copyHeight = 26;
             float pillX = (app.width - copyWidth) / 2;
-            float pillY = 45;  // Below the selection indicator
+            float pillY = 10;
 
             // Background pill (green for success)
             app.brush->SetColor(D2D1::ColorF(0.2f, 0.7f, 0.3f, 0.9f * alpha));
@@ -1741,8 +1811,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 bool wasOverText = app->overText;
                 app->overText = false;
                 for (const auto& tr : app->textRects) {
-                    if (app->mouseX >= tr.left && app->mouseX <= tr.right &&
-                        app->mouseY >= tr.top && app->mouseY <= tr.bottom) {
+                    if (app->mouseX >= tr.rect.left && app->mouseX <= tr.rect.right &&
+                        app->mouseY >= tr.rect.top && app->mouseY <= tr.rect.bottom) {
                         app->overText = true;
                         break;
                     }
@@ -2164,8 +2234,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // Handle /register command
     if (forceRegister) {
         if (registerFileAssociation()) {
-            MessageBoxW(nullptr, L"Tinta is now the default viewer for .md files.",
-                       L"Success", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(nullptr,
+                       L"Tinta has been registered.\n\n"
+                       L"In the Settings window that opens:\n"
+                       L"1. Search for '.md'\n"
+                       L"2. Click on the current default app\n"
+                       L"3. Select 'Tinta' from the list",
+                       L"Almost done!", MB_OK | MB_ICONINFORMATION);
+            openDefaultAppsSettings();
         } else {
             MessageBoxW(nullptr, L"Failed to register file association. Try running as administrator.",
                        L"Error", MB_OK | MB_ICONWARNING);
