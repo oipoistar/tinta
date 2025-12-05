@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tinta — Markdown, distilled.</title>
+    <link rel="icon" type="image/png" href="img/logo.png">
+    <link rel="apple-touch-icon" href="img/logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;1,8..60,400&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --ink: #1a1a2e;
+            --ink-light: #2d2d44;
+            --paper: #f7f3eb;
+            --paper-dark: #e8e0d0;
+            --sepia: #d4c4a8;
+            --accent: #8b4513;
+            --accent-light: #a0522d;
+            --link: #2e5a1c;
+            --code-bg: #2d2d44;
+            --code-text: #ffd54f;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Source Serif 4', Georgia, serif;
+            background: var(--paper);
+            color: var(--ink);
+            line-height: 1.7;
+            overflow-x: hidden;
+        }
+
+        /* Paper texture overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0.03;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+            z-index: 1000;
+        }
+
+        /* Ink drip decoration */
+        .ink-drip {
+            position: absolute;
+            width: 3px;
+            background: linear-gradient(to bottom, var(--ink), transparent);
+            border-radius: 0 0 50% 50%;
+            animation: drip 3s ease-in-out infinite;
+            opacity: 0.15;
+        }
+
+        @keyframes drip {
+            0%, 100% { height: 20px; }
+            50% { height: 60px; }
+        }
+
+        /* Navigation */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 1.5rem 3rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 100;
+            background: linear-gradient(to bottom, var(--paper) 60%, transparent);
+        }
+
+        .logo {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--ink);
+            text-decoration: none;
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo-img {
+            height: 32px;
+            width: auto;
+        }
+
+        .logo span {
+            display: inline-block;
+            transition: transform 0.3s ease;
+        }
+
+        .logo:hover span {
+            transform: rotate(-3deg);
+        }
+
+        nav a {
+            color: var(--ink);
+            text-decoration: none;
+            font-size: 0.95rem;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        nav a:hover {
+            opacity: 1;
+        }
+
+        .nav-github {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem;
+            border-radius: 50%;
+            transition: all 0.2s ease;
+        }
+
+        .nav-github:hover {
+            background: var(--paper-dark);
+            opacity: 1;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 6rem 2rem 4rem;
+            position: relative;
+        }
+
+        .hero-content {
+            max-width: 800px;
+            animation: fadeUp 1s ease-out;
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .tagline {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(3rem, 8vw, 6rem);
+            font-weight: 400;
+            line-height: 1.1;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.03em;
+        }
+
+        .tagline em {
+            font-style: italic;
+            color: var(--accent);
+        }
+
+        .subtitle {
+            font-size: 1.3rem;
+            color: var(--ink);
+            opacity: 0.6;
+            margin-bottom: 3rem;
+            font-style: italic;
+        }
+
+        .hero-stats {
+            display: flex;
+            gap: 3rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 3rem;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 2.5rem;
+            font-weight: 500;
+            color: var(--ink);
+            display: block;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            opacity: 0.5;
+        }
+
+        .cta-group {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem 2rem;
+            font-family: 'Source Serif 4', serif;
+            font-size: 1rem;
+            text-decoration: none;
+            border-radius: 2px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-primary {
+            background: var(--ink);
+            color: var(--paper);
+        }
+
+        .btn-primary:hover {
+            background: var(--ink-light);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(26, 26, 46, 0.2);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--ink);
+            border: 1px solid var(--sepia);
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--ink);
+            background: var(--paper-dark);
+        }
+
+        /* Scroll indicator */
+        .scroll-hint {
+            position: absolute;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            opacity: 0.4;
+            animation: bounce 2s ease-in-out infinite;
+        }
+
+        .scroll-hint span {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+        }
+
+        .scroll-hint svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateX(-50%) translateY(0); }
+            50% { transform: translateX(-50%) translateY(8px); }
+        }
+
+        /* Section styling */
+        section {
+            padding: 6rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .section-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            font-weight: 400;
+        }
+
+        .section-subtitle {
+            font-size: 1.1rem;
+            opacity: 0.6;
+            margin-bottom: 3rem;
+            max-width: 600px;
+        }
+
+        /* Speed section */
+        .speed-section {
+            background: var(--ink);
+            color: var(--paper);
+            margin: 0;
+            max-width: none;
+            padding: 6rem 2rem;
+        }
+
+        .speed-content {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .speed-section .section-title {
+            color: var(--paper);
+        }
+
+        .speed-section .section-subtitle {
+            color: var(--paper);
+            opacity: 0.7;
+        }
+
+        .comparison-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            font-weight: 400;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--paper);
+            opacity: 0.5;
+            margin-top: 3rem;
+            margin-bottom: 0;
+        }
+
+        .comparison-label:first-of-type {
+            margin-top: 0;
+        }
+
+        .speed-comparison {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+            margin-top: 1.5rem;
+        }
+
+        .speed-item {
+            text-align: center;
+            padding: 2rem;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .speed-item.highlight {
+            background: rgba(255, 213, 79, 0.1);
+            border-color: var(--code-text);
+        }
+
+        .speed-item h3 {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            font-weight: 400;
+            margin-bottom: 1rem;
+            opacity: 0.6;
+        }
+
+        .speed-item.highlight h3 {
+            color: var(--code-text);
+            opacity: 1;
+        }
+
+        .speed-bar {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+
+        .speed-bar-fill {
+            height: 100%;
+            background: var(--paper);
+            border-radius: 4px;
+            transition: width 1s ease-out;
+        }
+
+        .speed-item.highlight .speed-bar-fill {
+            background: var(--code-text);
+        }
+
+        .speed-time {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.5rem;
+        }
+
+        /* Technical details */
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        .tech-card {
+            padding: 2rem;
+            background: var(--paper-dark);
+            border-radius: 4px;
+            border-left: 3px solid var(--sepia);
+        }
+
+        .tech-card h3 {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.3rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .tech-card code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            background: var(--ink);
+            color: var(--code-text);
+            padding: 0.2em 0.5em;
+            border-radius: 2px;
+        }
+
+        .tech-card p {
+            margin-top: 1rem;
+            opacity: 0.7;
+            font-size: 0.95rem;
+        }
+
+        /* Features */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature {
+            padding: 1.5rem;
+            border: 1px solid var(--sepia);
+            border-radius: 4px;
+            transition: all 0.3s ease;
+        }
+
+        .feature:hover {
+            background: var(--paper-dark);
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+        }
+
+        .feature h3 {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+            color: var(--accent);
+        }
+
+        .feature p {
+            font-size: 0.95rem;
+            opacity: 0.7;
+        }
+
+        /* Download section */
+        .download-section {
+            text-align: center;
+            background: linear-gradient(to bottom, var(--paper), var(--paper-dark));
+            padding: 6rem 2rem;
+            max-width: none;
+            margin: 0;
+        }
+
+        .download-content {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .download-note {
+            font-style: italic;
+            opacity: 0.7;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+
+        .btn-large {
+            padding: 1.2rem 2.5rem;
+            font-size: 1.1rem;
+        }
+
+        /* Themes showcase */
+        .themes-showcase {
+            display: flex;
+            gap: 1rem;
+            overflow-x: auto;
+            padding: 1rem 0;
+            margin-top: 2rem;
+        }
+
+        .theme-preview {
+            flex-shrink: 0;
+            width: 120px;
+            height: 80px;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            transition: transform 0.3s ease;
+            cursor: default;
+        }
+
+        .theme-preview:hover {
+            transform: scale(1.05);
+        }
+
+        .theme-preview span {
+            opacity: 0.7;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 4rem 2rem;
+            border-top: 1px solid var(--sepia);
+        }
+
+        footer p {
+            font-size: 0.9rem;
+            opacity: 0.5;
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .croatian-note {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .croatian-flag {
+            border-radius: 2px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            nav {
+                padding: 1rem 1.5rem;
+            }
+
+            .hero-stats {
+                gap: 2rem;
+            }
+
+            .stat-value {
+                font-size: 2rem;
+            }
+
+            section {
+                padding: 4rem 1.5rem;
+            }
+
+            .pricing-cards {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Code block styling */
+        .code-block {
+            background: var(--ink);
+            color: var(--paper);
+            padding: 1.5rem;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+            margin: 2rem 0;
+        }
+
+        .code-block .comment {
+            color: #6a6a8a;
+        }
+
+        .code-block .string {
+            color: #98c379;
+        }
+
+        .code-block .command {
+            color: var(--code-text);
+        }
+
+        /* Keyboard shortcuts */
+        kbd {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            padding: 0.2em 0.5em;
+            background: var(--paper-dark);
+            border: 1px solid var(--sepia);
+            border-radius: 3px;
+            box-shadow: 0 2px 0 var(--sepia);
+        }
+    </style>
+</head>
+<body>
+    <!-- Decorative ink drips -->
+    <div class="ink-drip" style="left: 15%; top: 0; animation-delay: 0s;"></div>
+    <div class="ink-drip" style="left: 45%; top: 0; animation-delay: 1s;"></div>
+    <div class="ink-drip" style="left: 78%; top: 0; animation-delay: 2s;"></div>
+
+    <nav>
+        <a href="#" class="logo">
+            <img src="img/logo.png" alt="Tinta" class="logo-img">
+            <span>Tinta</span>
+        </a>
+        <a href="https://github.com/oipoistar/tinta" class="nav-github" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+            </svg>
+        </a>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-content">
+            <h1 class="tagline">Markdown, <em>distilled.</em></h1>
+            <p class="subtitle">A fast, lightweight reader for Windows</p>
+
+            <div class="hero-stats">
+                <div class="stat">
+                    <span class="stat-value">~200ms</span>
+                    <span class="stat-label">Startup time</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">~270KB</span>
+                    <span class="stat-label">Binary size</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">10</span>
+                    <span class="stat-label">Themes</span>
+                </div>
+            </div>
+
+            <div class="cta-group">
+                <a href="#download" class="btn btn-primary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Download
+                </a>
+                <a href="https://github.com/oipoistar/tinta" class="btn btn-secondary">View source</a>
+            </div>
+        </div>
+
+        <div class="scroll-hint">
+            <span>Scroll</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"/>
+            </svg>
+        </div>
+    </section>
+
+    <section class="speed-section">
+        <div class="speed-content">
+            <h2 class="section-title">Brutally fast</h2>
+            <p class="section-subtitle">No Electron. No Chromium. Just native Windows rendering at hardware speed.</p>
+
+            <h3 class="comparison-label">Startup Time</h3>
+            <div class="speed-comparison">
+                <div class="speed-item highlight">
+                    <h3>Tinta</h3>
+                    <div class="speed-bar">
+                        <div class="speed-bar-fill" style="width: 7%;"></div>
+                    </div>
+                    <span class="speed-time">~200ms</span>
+                </div>
+                <div class="speed-item">
+                    <h3>Typora</h3>
+                    <div class="speed-bar">
+                        <div class="speed-bar-fill" style="width: 50%;"></div>
+                    </div>
+                    <span class="speed-time">~1.5s</span>
+                </div>
+                <div class="speed-item">
+                    <h3>VS Code</h3>
+                    <div class="speed-bar">
+                        <div class="speed-bar-fill" style="width: 67%;"></div>
+                    </div>
+                    <span class="speed-time">~2s</span>
+                </div>
+                <div class="speed-item">
+                    <h3>Obsidian</h3>
+                    <div class="speed-bar">
+                        <div class="speed-bar-fill" style="width: 100%;"></div>
+                    </div>
+                    <span class="speed-time">~3s</span>
+                </div>
+            </div>
+
+            <h3 class="comparison-label">Install Size</h3>
+            <div class="speed-comparison">
+                <div class="speed-item highlight">
+                    <h3>Tinta</h3>
+                    <div class="speed-bar">
+                        <div class="speed-bar-fill" style="width: 1%;"></div>
+                    </div>
+                    <span class="speed-time">270 KB</span>
+                </div>
+                <div class="speed-item">
+                    <h3>Typora</h3>
+                    <div class="speed-bar">
+                        <div class="speed-bar-fill" style="width: 26%;"></div>
+                    </div>
+                    <span class="speed-time">~90 MB</span>
+                </div>
+                <div class="speed-item">
+                    <h3>Obsidian</h3>
+                    <div class="speed-bar">
+                        <div class="speed-bar-fill" style="width: 71%;"></div>
+                    </div>
+                    <span class="speed-time">~250 MB</span>
+                </div>
+                <div class="speed-item">
+                    <h3>VS Code</h3>
+                    <div class="speed-bar">
+                        <div class="speed-bar-fill" style="width: 100%;"></div>
+                    </div>
+                    <span class="speed-time">~350 MB</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2 class="section-title">Under the hood</h2>
+        <p class="section-subtitle">Built with care, without compromise.</p>
+
+        <div class="tech-grid">
+            <div class="tech-card">
+                <h3>Direct2D</h3>
+                <code>d2d1.dll</code>
+                <p>Hardware-accelerated 2D graphics. GPU-powered rendering for buttery smooth scrolling and instant redraws.</p>
+            </div>
+            <div class="tech-card">
+                <h3>DirectWrite</h3>
+                <code>dwrite.dll</code>
+                <p>ClearType subpixel rendering. The same text engine that makes Windows typography beautiful.</p>
+            </div>
+            <div class="tech-card">
+                <h3>MD4C</h3>
+                <code>CommonMark + GFM</code>
+                <p>One of the fastest markdown parsers in existence. Tables, strikethrough, and autolinks included.</p>
+            </div>
+            <div class="tech-card">
+                <h3>Zero dependencies</h3>
+                <code>~270KB</code>
+                <p>No runtime installation. No frameworks. Just a single executable that works.</p>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2 class="section-title">Features</h2>
+        <p class="section-subtitle">Everything you need, nothing you don't.</p>
+
+        <div class="features-grid">
+            <div class="feature">
+                <h3>10 themes</h3>
+                <p>5 light, 5 dark. From warm Paper to OLED-friendly Abyss. Press <kbd>T</kbd> to choose.</p>
+            </div>
+            <div class="feature">
+                <h3>Text selection</h3>
+                <p>Click and drag to select. <kbd>Ctrl</kbd>+<kbd>C</kbd> to copy. It just works.</p>
+            </div>
+            <div class="feature">
+                <h3>Zoom</h3>
+                <p><kbd>Ctrl</kbd>+scroll to zoom in and out. Your preference is remembered.</p>
+            </div>
+            <div class="feature">
+                <h3>Drag & drop</h3>
+                <p>Drop any .md file onto the window. No file dialogs needed.</p>
+            </div>
+            <div class="feature">
+                <h3>Persistent settings</h3>
+                <p>Theme, zoom, window position. Everything saved to %APPDATA%.</p>
+            </div>
+            <div class="feature">
+                <h3>Keyboard-driven</h3>
+                <p>Vim-style <kbd>j</kbd>/<kbd>k</kbd> scrolling. <kbd>Q</kbd> or <kbd>ESC</kbd> to quit.</p>
+            </div>
+        </div>
+
+        <div class="themes-showcase">
+            <div class="theme-preview" style="background: #f5f1e8; color: #3d3229; border: 1px solid #d4c4a8;">
+                <span>Paper</span>
+            </div>
+            <div class="theme-preview" style="background: #fff5f5; color: #4a3035; border: 1px solid #e8c4c4;">
+                <span>Sakura</span>
+            </div>
+            <div class="theme-preview" style="background: #f0f7ff; color: #2a3a4a; border: 1px solid #c4d4e8;">
+                <span>Arctic</span>
+            </div>
+            <div class="theme-preview" style="background: #f5fff5; color: #2a3a2a; border: 1px solid #c4e8c4;">
+                <span>Meadow</span>
+            </div>
+            <div class="theme-preview" style="background: #f5f3f0; color: #3a3835; border: 1px solid #d4d0c8;">
+                <span>Dusk</span>
+            </div>
+            <div class="theme-preview" style="background: #1a1a2e; color: #e0e0e0; border: 1px solid #2d2d44;">
+                <span>Midnight</span>
+            </div>
+            <div class="theme-preview" style="background: #282a36; color: #f8f8f2; border: 1px solid #44475a;">
+                <span>Dracula</span>
+            </div>
+            <div class="theme-preview" style="background: #1a2a1a; color: #c0d0c0; border: 1px solid #2a3a2a;">
+                <span>Forest</span>
+            </div>
+            <div class="theme-preview" style="background: #2a2420; color: #d4c4b0; border: 1px solid #3a3430;">
+                <span>Ember</span>
+            </div>
+            <div class="theme-preview" style="background: #0a0a0a; color: #c0c0c0; border: 1px solid #1a1a1a;">
+                <span>Abyss</span>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2 class="section-title">Usage</h2>
+
+        <div class="code-block">
+<span class="comment"># Open a markdown file</span>
+<span class="command">tinta.exe</span> <span class="string">README.md</span>
+
+<span class="comment"># Force light theme</span>
+<span class="command">tinta.exe</span> -l <span class="string">document.md</span>
+
+<span class="comment"># Show stats overlay on startup</span>
+<span class="command">tinta.exe</span> -s <span class="string">notes.md</span>
+        </div>
+
+        <p style="opacity: 0.6; font-size: 0.95rem;">Or just drag and drop a file onto the window. Or associate .md files with Tinta in Windows.</p>
+    </section>
+
+    <section class="download-section" id="download">
+        <div class="download-content">
+            <h2 class="section-title">Download</h2>
+            <p class="download-note">Free and open source. MIT licensed.</p>
+
+            <a href="https://github.com/oipoistar/tinta/releases" class="btn btn-primary btn-large">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Download from GitHub
+            </a>
+        </div>
+    </section>
+
+    <footer>
+        <div class="footer-links">
+            <a href="https://github.com/oipoistar/tinta">GitHub</a>
+            <a href="https://github.com/oipoistar/tinta/releases">Releases</a>
+            <a href="https://github.com/oipoistar/tinta/issues">Issues</a>
+        </div>
+        <p>Made with care. MIT License.</p>
+        <p class="croatian-note">
+            <svg class="croatian-flag" viewBox="0 0 1200 600" width="20" height="10">
+                <rect width="1200" height="200" fill="#FF0000"/>
+                <rect y="200" width="1200" height="200" fill="#FFFFFF"/>
+                <rect y="400" width="1200" height="200" fill="#171796"/>
+            </svg>
+            Tinta means "ink" in Croatian
+        </p>
+    </footer>
+
+    <script>
+        // Animate speed bars on scroll
+        const speedSection = document.querySelector('.speed-section');
+        const speedBars = document.querySelectorAll('.speed-bar-fill');
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    speedBars.forEach(bar => {
+                        bar.style.width = bar.parentElement.parentElement.querySelector('.speed-bar-fill').style.width;
+                    });
+                }
+            });
+        }, { threshold: 0.5 });
+
+        if (speedSection) {
+            observer.observe(speedSection);
+        }
+
+        // Smooth reveal on scroll
+        const revealElements = document.querySelectorAll('.tech-card, .feature');
+
+        const revealObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, { threshold: 0.1 });
+
+        revealElements.forEach(el => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateY(20px)';
+            el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+            revealObserver.observe(el);
+        });
+
+        // Stagger animation delays
+        document.querySelectorAll('.tech-grid .tech-card').forEach((card, i) => {
+            card.style.transitionDelay = `${i * 0.1}s`;
+        });
+
+        document.querySelectorAll('.features-grid .feature').forEach((feature, i) => {
+            feature.style.transitionDelay = `${i * 0.05}s`;
+        });
+    </script>
+</body>
+</html>
