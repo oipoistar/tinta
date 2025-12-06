@@ -1,8 +1,20 @@
-# Tinta
+<div align="center">
+  <img src="resources/tinta.ico" width="80">
+  <h1>Tinta</h1>
+  <p><em>Markdown, distilled.</em></p>
+  <p>A fast, lightweight markdown reader for Windows</p>
 
-**Markdown, distilled.**
+  <a href="https://github.com/oipoistar/tinta/releases/latest">
+    <img src="https://img.shields.io/github/v/release/oipoistar/tinta?label=Download&style=for-the-badge&color=1a1a2e" alt="Download">
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT License">
+  </a>
+</div>
 
-Tinta is a fast, lightweight markdown reader for Windows built with Direct2D and DirectWrite for hardware-accelerated rendering.
+<br>
+
+Built with Direct2D and DirectWrite for hardware-accelerated rendering. ~270KB binary, ~200ms startup.
 
 ## Features
 
