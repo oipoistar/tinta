@@ -496,35 +496,111 @@
         }
 
         /* Themes showcase */
-        .themes-showcase {
-            display: flex;
+        .themes-section-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.1rem;
+            font-weight: 400;
+            opacity: 0.5;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-top: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .themes-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
             gap: 1rem;
-            overflow-x: auto;
-            padding: 1rem 0;
-            margin-top: 2rem;
         }
 
-        .theme-preview {
-            flex-shrink: 0;
-            width: 120px;
-            height: 80px;
-            border-radius: 4px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.7rem;
-            transition: transform 0.3s ease;
-            cursor: default;
+        @media (max-width: 900px) {
+            .themes-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
         }
 
-        .theme-preview:hover {
-            transform: scale(1.05);
+        @media (max-width: 550px) {
+            .themes-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
 
-        .theme-preview span {
+        .theme-card {
+            position: relative;
+            aspect-ratio: 4 / 3;
+            border-radius: 6px;
+            overflow: hidden;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+
+        .theme-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.5) 0%, transparent 50%);
+            z-index: 1;
             opacity: 0.7;
+            transition: opacity 0.3s ease;
+        }
+
+        .theme-card:hover {
+            transform: translateY(-6px) scale(1.02);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+        }
+
+        .theme-card:hover::before {
+            opacity: 0.9;
+        }
+
+        .theme-card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+
+        .theme-card:hover img {
+            transform: scale(1.08);
+        }
+
+        .theme-card-label {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 0.75rem;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .theme-card-name {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .theme-card-type {
+            font-family: 'Source Serif 4', serif;
+            font-size: 0.65rem;
+            font-style: italic;
+            color: rgba(255,255,255,0.6);
+        }
+
+        .theme-card.light-theme .theme-card-type::before {
+            content: '☀';
+            margin-right: 0.25rem;
+        }
+
+        .theme-card.dark-theme .theme-card-type::before {
+            content: '☾';
+            margin-right: 0.25rem;
         }
 
         /* Footer */
@@ -816,36 +892,81 @@
             </div>
         </div>
 
-        <div class="themes-showcase">
-            <div class="theme-preview" style="background: #f5f1e8; color: #3d3229; border: 1px solid #d4c4a8;">
-                <span>Paper</span>
+        <h3 class="themes-section-title">Light Themes</h3>
+        <div class="themes-grid">
+            <div class="theme-card light-theme">
+                <img src="img/screenshots/paper.png" alt="Paper theme" loading="lazy">
+                <div class="theme-card-label">
+                    <span class="theme-card-name">Paper</span>
+                    <span class="theme-card-type">Light</span>
+                </div>
             </div>
-            <div class="theme-preview" style="background: #fff5f5; color: #4a3035; border: 1px solid #e8c4c4;">
-                <span>Sakura</span>
+            <div class="theme-card light-theme">
+                <img src="img/screenshots/sakura.png" alt="Sakura theme" loading="lazy">
+                <div class="theme-card-label">
+                    <span class="theme-card-name">Sakura</span>
+                    <span class="theme-card-type">Light</span>
+                </div>
             </div>
-            <div class="theme-preview" style="background: #f0f7ff; color: #2a3a4a; border: 1px solid #c4d4e8;">
-                <span>Arctic</span>
+            <div class="theme-card light-theme">
+                <img src="img/screenshots/arctic.png" alt="Arctic theme" loading="lazy">
+                <div class="theme-card-label">
+                    <span class="theme-card-name">Arctic</span>
+                    <span class="theme-card-type">Light</span>
+                </div>
             </div>
-            <div class="theme-preview" style="background: #f5fff5; color: #2a3a2a; border: 1px solid #c4e8c4;">
-                <span>Meadow</span>
+            <div class="theme-card light-theme">
+                <img src="img/screenshots/meadow.png" alt="Meadow theme" loading="lazy">
+                <div class="theme-card-label">
+                    <span class="theme-card-name">Meadow</span>
+                    <span class="theme-card-type">Light</span>
+                </div>
             </div>
-            <div class="theme-preview" style="background: #f5f3f0; color: #3a3835; border: 1px solid #d4d0c8;">
-                <span>Dusk</span>
+            <div class="theme-card light-theme">
+                <img src="img/screenshots/dusk.png" alt="Dusk theme" loading="lazy">
+                <div class="theme-card-label">
+                    <span class="theme-card-name">Dusk</span>
+                    <span class="theme-card-type">Light</span>
+                </div>
             </div>
-            <div class="theme-preview" style="background: #1a1a2e; color: #e0e0e0; border: 1px solid #2d2d44;">
-                <span>Midnight</span>
+        </div>
+
+        <h3 class="themes-section-title">Dark Themes</h3>
+        <div class="themes-grid">
+            <div class="theme-card dark-theme">
+                <img src="img/screenshots/midnight.png" alt="Midnight theme" loading="lazy">
+                <div class="theme-card-label">
+                    <span class="theme-card-name">Midnight</span>
+                    <span class="theme-card-type">Dark</span>
+                </div>
             </div>
-            <div class="theme-preview" style="background: #282a36; color: #f8f8f2; border: 1px solid #44475a;">
-                <span>Dracula</span>
+            <div class="theme-card dark-theme">
+                <img src="img/screenshots/dracula.png" alt="Dracula theme" loading="lazy">
+                <div class="theme-card-label">
+                    <span class="theme-card-name">Dracula</span>
+                    <span class="theme-card-type">Dark</span>
+                </div>
             </div>
-            <div class="theme-preview" style="background: #1a2a1a; color: #c0d0c0; border: 1px solid #2a3a2a;">
-                <span>Forest</span>
+            <div class="theme-card dark-theme">
+                <img src="img/screenshots/forest.png" alt="Forest theme" loading="lazy">
+                <div class="theme-card-label">
+                    <span class="theme-card-name">Forest</span>
+                    <span class="theme-card-type">Dark</span>
+                </div>
             </div>
-            <div class="theme-preview" style="background: #2a2420; color: #d4c4b0; border: 1px solid #3a3430;">
-                <span>Ember</span>
+            <div class="theme-card dark-theme">
+                <img src="img/screenshots/ember.png" alt="Ember theme" loading="lazy">
+                <div class="theme-card-label">
+                    <span class="theme-card-name">Ember</span>
+                    <span class="theme-card-type">Dark</span>
+                </div>
             </div>
-            <div class="theme-preview" style="background: #0a0a0a; color: #c0c0c0; border: 1px solid #1a1a1a;">
-                <span>Abyss</span>
+            <div class="theme-card dark-theme">
+                <img src="img/screenshots/abyss.png" alt="Abyss theme" loading="lazy">
+                <div class="theme-card-label">
+                    <span class="theme-card-name">Abyss</span>
+                    <span class="theme-card-type">Dark</span>
+                </div>
             </div>
         </div>
     </section>
@@ -920,7 +1041,7 @@
         }
 
         // Smooth reveal on scroll
-        const revealElements = document.querySelectorAll('.tech-card, .feature');
+        const revealElements = document.querySelectorAll('.tech-card, .feature, .theme-card');
 
         const revealObserver = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
@@ -945,6 +1066,10 @@
 
         document.querySelectorAll('.features-grid .feature').forEach((feature, i) => {
             feature.style.transitionDelay = `${i * 0.05}s`;
+        });
+
+        document.querySelectorAll('.themes-grid .theme-card').forEach((card, i) => {
+            card.style.transitionDelay = `${i * 0.08}s`;
         });
     </script>
 </body>
