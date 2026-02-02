@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <functional>
+#include <unordered_set>
 
 #include "markdown.h"
 
@@ -48,6 +49,9 @@ struct StartupMetrics {
     int64_t totalStartupUs = 0;
 };
 
+// Syntax highlighting token types
+enum class SyntaxTokenType { Plain, Keyword, String, Comment, Number, Function, TypeName, Operator };
+
 // Theme colors
 struct D2DTheme {
     const wchar_t* name;
@@ -62,6 +66,13 @@ struct D2DTheme {
     D2D1_COLOR_F codeBackground;
     D2D1_COLOR_F blockquoteBorder;
     D2D1_COLOR_F accent;             // For UI elements
+    // Syntax highlighting colors
+    D2D1_COLOR_F syntaxKeyword;
+    D2D1_COLOR_F syntaxString;
+    D2D1_COLOR_F syntaxComment;
+    D2D1_COLOR_F syntaxNumber;
+    D2D1_COLOR_F syntaxFunction;
+    D2D1_COLOR_F syntaxType;
 };
 
 // Helper to create color from hex
@@ -90,7 +101,14 @@ static const D2DTheme THEMES[] = {
         hexColor(0x6B5344),    // code - brown
         hexColor(0xEDE6DA),    // codeBackground - parchment
         hexColor(0xC4B8A8),    // blockquoteBorder
-        hexColor(0xB85A3C)     // accent
+        hexColor(0xB85A3C),    // accent
+        // Syntax colors
+        hexColor(0x8B4513),    // syntaxKeyword - saddle brown
+        hexColor(0x2E8B57),    // syntaxString - sea green
+        hexColor(0x808080),    // syntaxComment - gray
+        hexColor(0xB8860B),    // syntaxNumber - dark goldenrod
+        hexColor(0x4169E1),    // syntaxFunction - royal blue
+        hexColor(0x9932CC)     // syntaxType - dark orchid
     },
 
     // 2. Sakura - Japanese cherry blossom, soft pink elegance
@@ -103,7 +121,14 @@ static const D2DTheme THEMES[] = {
         hexColor(0x8B5570),    // code - plum
         hexColor(0xF8ECF0),    // codeBackground - blush
         hexColor(0xE8B4C0),    // blockquoteBorder
-        hexColor(0xC44569)     // accent
+        hexColor(0xC44569),    // accent
+        // Syntax colors
+        hexColor(0xC44569),    // syntaxKeyword - rose
+        hexColor(0x2E8B57),    // syntaxString - sea green
+        hexColor(0x999999),    // syntaxComment - gray
+        hexColor(0xE8749A),    // syntaxNumber - coral pink
+        hexColor(0x6A5ACD),    // syntaxFunction - slate blue
+        hexColor(0x8B5570)     // syntaxType - plum
     },
 
     // 3. Arctic - Nordic ice blues, crisp and clean
@@ -116,7 +141,14 @@ static const D2DTheme THEMES[] = {
         hexColor(0x285E61),    // code - teal
         hexColor(0xEBF8FF),    // codeBackground - light blue
         hexColor(0xA0C4E8),    // blockquoteBorder
-        hexColor(0x3182CE)     // accent
+        hexColor(0x3182CE),    // accent
+        // Syntax colors
+        hexColor(0x0066CC),    // syntaxKeyword - blue
+        hexColor(0x2E8B57),    // syntaxString - sea green
+        hexColor(0x708090),    // syntaxComment - slate gray
+        hexColor(0xD2691E),    // syntaxNumber - chocolate
+        hexColor(0x1A365D),    // syntaxFunction - navy
+        hexColor(0x6B5B95)     // syntaxType - purple
     },
 
     // 4. Meadow - Fresh organic greens, nature-inspired
@@ -129,7 +161,14 @@ static const D2DTheme THEMES[] = {
         hexColor(0x4A5568),    // code - slate
         hexColor(0xE6FFED),    // codeBackground - mint
         hexColor(0x9AE6B4),    // blockquoteBorder
-        hexColor(0x38A169)     // accent
+        hexColor(0x38A169),    // accent
+        // Syntax colors
+        hexColor(0x1C4532),    // syntaxKeyword - deep green
+        hexColor(0x8B4513),    // syntaxString - saddle brown
+        hexColor(0x708090),    // syntaxComment - slate gray
+        hexColor(0xD2691E),    // syntaxNumber - chocolate
+        hexColor(0x38A169),    // syntaxFunction - fresh green
+        hexColor(0x6B5B95)     // syntaxType - purple
     },
 
     // 5. Dusk - Golden hour warmth, sunset tones
@@ -142,7 +181,14 @@ static const D2DTheme THEMES[] = {
         hexColor(0x5F5030),    // code - olive
         hexColor(0xFEF5E7),    // codeBackground - cream
         hexColor(0xE8C48D),    // blockquoteBorder
-        hexColor(0xB7791F)     // accent
+        hexColor(0xB7791F),    // accent
+        // Syntax colors
+        hexColor(0x9C4221),    // syntaxKeyword - burnt orange
+        hexColor(0x2E8B57),    // syntaxString - sea green
+        hexColor(0x808080),    // syntaxComment - gray
+        hexColor(0xB7791F),    // syntaxNumber - gold
+        hexColor(0x4169E1),    // syntaxFunction - royal blue
+        hexColor(0x8B4513)     // syntaxType - saddle brown
     },
 
     // ═══════════════════════════════════════════════════════════
@@ -159,7 +205,14 @@ static const D2DTheme THEMES[] = {
         hexColor(0x90E0EF),    // code - cyan
         hexColor(0x1B263B),    // codeBackground - deep blue
         hexColor(0x415A77),    // blockquoteBorder
-        hexColor(0x00B4D8)     // accent
+        hexColor(0x00B4D8),    // accent
+        // Syntax colors
+        hexColor(0x00B4D8),    // syntaxKeyword - electric blue
+        hexColor(0x98FB98),    // syntaxString - pale green
+        hexColor(0x6C7A89),    // syntaxComment - gray-blue
+        hexColor(0xFFD700),    // syntaxNumber - gold
+        hexColor(0x90E0EF),    // syntaxFunction - cyan
+        hexColor(0xDDA0DD)     // syntaxType - plum
     },
 
     // 7. Dracula - Classic dark, purples and pinks
@@ -172,7 +225,14 @@ static const D2DTheme THEMES[] = {
         hexColor(0x50FA7B),    // code - green
         hexColor(0x21222C),    // codeBackground - darker
         hexColor(0x6272A4),    // blockquoteBorder
-        hexColor(0xBD93F9)     // accent - purple
+        hexColor(0xBD93F9),    // accent - purple
+        // Syntax colors (Dracula palette)
+        hexColor(0xFF79C6),    // syntaxKeyword - pink
+        hexColor(0xF1FA8C),    // syntaxString - yellow
+        hexColor(0x6272A4),    // syntaxComment - gray
+        hexColor(0xBD93F9),    // syntaxNumber - purple
+        hexColor(0x50FA7B),    // syntaxFunction - green
+        hexColor(0x8BE9FD)     // syntaxType - cyan
     },
 
     // 8. Forest - Deep mystical greens
@@ -185,7 +245,14 @@ static const D2DTheme THEMES[] = {
         hexColor(0x81E6D9),    // code - mint
         hexColor(0x1A2A23),    // codeBackground - dark green
         hexColor(0x4A6E5A),    // blockquoteBorder
-        hexColor(0x68D391)     // accent
+        hexColor(0x68D391),    // accent
+        // Syntax colors
+        hexColor(0x9AE6B4),    // syntaxKeyword - bright green
+        hexColor(0xF0E68C),    // syntaxString - khaki
+        hexColor(0x5F7A6A),    // syntaxComment - muted green
+        hexColor(0xFFB86C),    // syntaxNumber - orange
+        hexColor(0x68D391),    // syntaxFunction - lime
+        hexColor(0x81E6D9)     // syntaxType - mint
     },
 
     // 9. Ember - Warm charcoal with fire accents
@@ -198,7 +265,14 @@ static const D2DTheme THEMES[] = {
         hexColor(0xFC8181),    // code - coral
         hexColor(0x252019),    // codeBackground - dark warm
         hexColor(0x5C4A3A),    // blockquoteBorder
-        hexColor(0xED8936)     // accent
+        hexColor(0xED8936),    // accent
+        // Syntax colors
+        hexColor(0xF6AD55),    // syntaxKeyword - amber
+        hexColor(0x98FB98),    // syntaxString - pale green
+        hexColor(0x6B5B4F),    // syntaxComment - warm gray
+        hexColor(0xFC8181),    // syntaxNumber - coral
+        hexColor(0xED8936),    // syntaxFunction - orange
+        hexColor(0xDDA0DD)     // syntaxType - plum
     },
 
     // 10. Abyss - True black, neon accents (OLED-friendly)
@@ -211,7 +285,14 @@ static const D2DTheme THEMES[] = {
         hexColor(0xAAFF00),    // code - lime
         hexColor(0x0A0A0A),    // codeBackground - near black
         hexColor(0x333333),    // blockquoteBorder
-        hexColor(0x00FFE1)     // accent
+        hexColor(0x00FFE1),    // accent
+        // Syntax colors (neon)
+        hexColor(0xFF00FF),    // syntaxKeyword - magenta
+        hexColor(0xAAFF00),    // syntaxString - lime
+        hexColor(0x666666),    // syntaxComment - dark gray
+        hexColor(0xFF6600),    // syntaxNumber - orange
+        hexColor(0x00FFE1),    // syntaxFunction - cyan
+        hexColor(0xFFFF00)     // syntaxType - yellow
     }
 };
 
@@ -447,6 +528,10 @@ struct App {
     IDWriteTextFormat* boldFormat = nullptr;
     IDWriteTextFormat* italicFormat = nullptr;
 
+    // OpenType typography
+    IDWriteTypography* bodyTypography = nullptr;
+    IDWriteTypography* codeTypography = nullptr;
+
     // Markdown
     MarkdownParser parser;
     ElementPtr root;
@@ -501,6 +586,7 @@ struct App {
     struct TextRect {
         D2D1_RECT_F rect;
         std::wstring text;
+        size_t docStart = 0;  // Start position in docText
     };
     std::vector<TextRect> textRects;
 
@@ -529,8 +615,12 @@ struct App {
     // Anchor bounds for word/line selection (the original word/line that was clicked)
     float anchorLeft = 0, anchorRight = 0, anchorTop = 0, anchorBottom = 0;
 
-    // All text content for select-all
-    std::wstring allText;
+    // Document text built during render (used for search/mapping)
+    std::wstring docText;
+
+    // Search match layout mapping (document Y for each match)
+    std::vector<float> searchMatchYs;
+    size_t searchMatchCursor = 0;
 
     // Copied notification (fades out over 2 seconds)
     bool showCopiedNotification = false;
@@ -559,6 +649,8 @@ struct App {
         if (codeFormat) { codeFormat->Release(); codeFormat = nullptr; }
         if (boldFormat) { boldFormat->Release(); boldFormat = nullptr; }
         if (italicFormat) { italicFormat->Release(); italicFormat = nullptr; }
+        if (bodyTypography) { bodyTypography->Release(); bodyTypography = nullptr; }
+        if (codeTypography) { codeTypography->Release(); codeTypography = nullptr; }
         if (dwriteFactory) { dwriteFactory->Release(); dwriteFactory = nullptr; }
         if (d2dFactory) { d2dFactory->Release(); d2dFactory = nullptr; }
     }
@@ -571,8 +663,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void render(App& app);
 void openUrl(const std::string& url);
 void updateTextFormats(App& app);
+void createTypography(App& app);
 void applyTheme(App& app, int themeIndex);
 void extractText(const ElementPtr& elem, std::wstring& out);
+void recordSearchMatchPositions(App& app, size_t segStart, size_t segEnd, float lineY);
 
 // Helper: Check if character is a word boundary
 inline bool isWordBoundary(wchar_t c) {
@@ -730,6 +824,27 @@ void updateTextFormats(App& app) {
     if (app.italicFormat) app.italicFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
 }
 
+void createTypography(App& app) {
+    // Release existing typography objects
+    if (app.bodyTypography) { app.bodyTypography->Release(); app.bodyTypography = nullptr; }
+    if (app.codeTypography) { app.codeTypography->Release(); app.codeTypography = nullptr; }
+
+    // Body typography - standard ligatures, kerning, contextual alternates
+    app.dwriteFactory->CreateTypography(&app.bodyTypography);
+    if (app.bodyTypography) {
+        app.bodyTypography->AddFontFeature({DWRITE_FONT_FEATURE_TAG_STANDARD_LIGATURES, 1});
+        app.bodyTypography->AddFontFeature({DWRITE_FONT_FEATURE_TAG_KERNING, 1});
+        app.bodyTypography->AddFontFeature({DWRITE_FONT_FEATURE_TAG_CONTEXTUAL_ALTERNATES, 1});
+    }
+
+    // Code typography - programming ligatures (for fonts like Cascadia Code, Fira Code)
+    app.dwriteFactory->CreateTypography(&app.codeTypography);
+    if (app.codeTypography) {
+        app.codeTypography->AddFontFeature({DWRITE_FONT_FEATURE_TAG_STANDARD_LIGATURES, 1});
+        app.codeTypography->AddFontFeature({DWRITE_FONT_FEATURE_TAG_DISCRETIONARY_LIGATURES, 1});
+    }
+}
+
 bool createRenderTarget(App& app) {
     if (app.renderTarget) {
         app.renderTarget->Release();
@@ -762,6 +877,28 @@ bool createRenderTarget(App& app) {
 
     // Enable high-quality text
     app.renderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+
+    // Create custom rendering params for improved text quality
+    IDWriteRenderingParams* defaultParams = nullptr;
+    IDWriteRenderingParams* customParams = nullptr;
+
+    app.dwriteFactory->CreateRenderingParams(&defaultParams);
+    if (defaultParams) {
+        app.dwriteFactory->CreateCustomRenderingParams(
+            defaultParams->GetGamma(),
+            defaultParams->GetEnhancedContrast(),
+            1.0f,  // ClearType level
+            defaultParams->GetPixelGeometry(),
+            DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
+            &customParams
+        );
+        defaultParams->Release();
+
+        if (customParams) {
+            app.renderTarget->SetTextRenderingParams(customParams);
+            customParams->Release();
+        }
+    }
 
     return true;
 }
@@ -850,6 +987,8 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
                     }
                 }
 
+                size_t codeDocStart = app.docText.size();
+
                 // Draw background
                 float textWidth = measureText(app, text, format);
                 if (x + textWidth > maxX && x > startX) {
@@ -864,11 +1003,36 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
                     app.brush);
                 app.drawCalls++;
 
-                // Track text bounds
+                // Draw text vertically centered in the box
                 if (renderY > -lineHeight && renderY < app.height + lineHeight) {
-                    app.textRects.push_back({D2D1::RectF(x, renderY, x + textWidth, renderY + lineHeight), text});
+                    float codeFontHeight = format->GetFontSize() * 1.2f;  // Approximate line height for code font
+                    float verticalOffset = (lineHeight - codeFontHeight) / 2.0f;
+
+                    app.brush->SetColor(color);
+                    IDWriteTextLayout* layout = nullptr;
+                    app.dwriteFactory->CreateTextLayout(text.c_str(), (UINT32)text.length(),
+                        format, textWidth + 50, lineHeight, &layout);
+                    if (layout) {
+                        if (app.codeTypography) {
+                            layout->SetTypography(app.codeTypography, {0, (UINT32)text.length()});
+                        }
+                        app.renderTarget->DrawTextLayout(D2D1::Point2F(x, renderY + verticalOffset), layout, app.brush);
+                        layout->Release();
+                    } else {
+                        app.renderTarget->DrawText(text.c_str(), (UINT32)text.length(), format,
+                            D2D1::RectF(x, renderY + verticalOffset, x + textWidth + 50, renderY + lineHeight),
+                            app.brush);
+                    }
+                    app.drawCalls++;
+
+                    // Track text bounds
+                    app.textRects.push_back({D2D1::RectF(x, renderY, x + textWidth, renderY + lineHeight), text, codeDocStart});
                 }
-                break;
+
+                recordSearchMatchPositions(app, codeDocStart, codeDocStart + text.length(), y);
+                app.docText += text;
+                x += textWidth + spaceWidth;
+                continue;  // Skip common text drawing code
             }
 
             case ElementType::Link:
@@ -887,7 +1051,7 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
                 break;
 
             case ElementType::HardBreak:
-                app.allText += L"\n";
+                app.docText += L"\n";
                 x = startX;
                 y += lineHeight;
                 continue;
@@ -899,8 +1063,7 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
 
         if (text.empty()) continue;
 
-        // Add to all text for selection
-        app.allText += text;
+        size_t textDocStart = app.docText.size();
 
         // For links, track start position for continuous underline
         float linkLineStartX = x;
@@ -912,7 +1075,19 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
             size_t spacePos = text.find(L' ', pos);
             if (spacePos == std::wstring::npos) spacePos = text.length();
 
-            std::wstring word = text.substr(pos, spacePos - pos);
+            size_t wordStart = pos;
+            std::wstring word = text.substr(wordStart, spacePos - wordStart);
+            if (word.empty()) {
+                if (spacePos < text.length()) {
+                    x += spaceWidth;
+                    pos = spacePos + 1;
+                } else {
+                    pos = spacePos;
+                }
+                continue;
+            }
+
+            size_t wordDocStart = textDocStart + wordStart;
             float wordWidth = measureText(app, word, format);
 
             // Check if need to wrap
@@ -943,16 +1118,33 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
                 linkLineY = y;
             }
 
-            // Draw word
+            recordSearchMatchPositions(app, wordDocStart, wordDocStart + word.length(), y);
+
+            // Draw word with typography
             float renderY = y - app.scrollY;
             if (renderY > -lineHeight && renderY < app.height + lineHeight) {
                 app.brush->SetColor(color);
-                app.renderTarget->DrawText(word.c_str(), (UINT32)word.length(), format,
-                    D2D1::RectF(x, renderY, x + wordWidth + 100, renderY + lineHeight), app.brush);
+
+                // Use TextLayout for typography support
+                IDWriteTextLayout* layout = nullptr;
+                app.dwriteFactory->CreateTextLayout(word.c_str(), (UINT32)word.length(),
+                    format, wordWidth + 100, lineHeight, &layout);
+                if (layout) {
+                    // Apply typography (body typography for regular text)
+                    if (app.bodyTypography) {
+                        layout->SetTypography(app.bodyTypography, {0, (UINT32)word.length()});
+                    }
+                    app.renderTarget->DrawTextLayout(D2D1::Point2F(x, renderY), layout, app.brush);
+                    layout->Release();
+                } else {
+                    // Fallback to DrawText if layout creation fails
+                    app.renderTarget->DrawText(word.c_str(), (UINT32)word.length(), format,
+                        D2D1::RectF(x, renderY, x + wordWidth + 100, renderY + lineHeight), app.brush);
+                }
                 app.drawCalls++;
 
                 // Track text bounds for cursor and selection (add small buffer for selection highlight)
-                app.textRects.push_back({D2D1::RectF(x, renderY, x + wordWidth + 2, renderY + lineHeight), word});
+                app.textRects.push_back({D2D1::RectF(x, renderY, x + wordWidth + 2, renderY + lineHeight), word, wordDocStart});
             }
 
             x += wordWidth;
@@ -965,6 +1157,8 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
                 pos = spacePos;
             }
         }
+
+        app.docText += text;
 
         // Draw final underline segment for link
         if (isLink && x > linkLineStartX) {
@@ -999,6 +1193,7 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
 
 void renderParagraph(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     renderInlineContent(app, elem->children, indent, y, maxWidth, app.textFormat, app.theme.text);
+    app.docText += L"\n\n";
     float scale = app.contentScale * app.zoomFactor;
     y += 14 * scale;  // Increased paragraph spacing
 }
@@ -1036,8 +1231,254 @@ void renderHeading(App& app, const ElementPtr& elem, float& y, float indent, flo
         app.drawCalls++;
     }
 
+    app.docText += L"\n\n";
     format->Release();
     y += 12 * scale;  // Bottom margin after heading
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SYNTAX HIGHLIGHTING
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Language keyword sets
+static const std::unordered_set<std::wstring> CPP_KEYWORDS = {
+    L"if", L"else", L"for", L"while", L"do", L"switch", L"case", L"break", L"continue",
+    L"return", L"goto", L"default", L"void", L"int", L"char", L"float", L"double", L"bool",
+    L"long", L"short", L"unsigned", L"signed", L"const", L"static", L"extern", L"volatile",
+    L"class", L"struct", L"union", L"enum", L"typedef", L"template", L"typename", L"namespace",
+    L"public", L"private", L"protected", L"virtual", L"override", L"final", L"explicit",
+    L"inline", L"constexpr", L"consteval", L"constinit", L"auto", L"register", L"mutable",
+    L"new", L"delete", L"this", L"nullptr", L"true", L"false", L"throw", L"try", L"catch",
+    L"using", L"operator", L"sizeof", L"alignof", L"decltype", L"noexcept", L"static_assert",
+    L"friend", L"concept", L"requires", L"co_await", L"co_return", L"co_yield",
+    L"#include", L"#define", L"#ifdef", L"#ifndef", L"#endif", L"#if", L"#else", L"#pragma"
+};
+
+static const std::unordered_set<std::wstring> CPP_TYPES = {
+    L"size_t", L"int8_t", L"int16_t", L"int32_t", L"int64_t",
+    L"uint8_t", L"uint16_t", L"uint32_t", L"uint64_t",
+    L"string", L"wstring", L"vector", L"map", L"set", L"unordered_map", L"unordered_set",
+    L"shared_ptr", L"unique_ptr", L"weak_ptr", L"optional", L"variant", L"any",
+    L"HRESULT", L"HWND", L"HINSTANCE", L"LPARAM", L"WPARAM", L"LRESULT", L"BOOL",
+    L"DWORD", L"WORD", L"BYTE", L"UINT", L"INT", L"LONG", L"ULONG", L"FLOAT",
+    L"IDWriteFactory", L"ID2D1Factory", L"ID2D1RenderTarget", L"IDWriteTextFormat"
+};
+
+static const std::unordered_set<std::wstring> PYTHON_KEYWORDS = {
+    L"if", L"elif", L"else", L"for", L"while", L"break", L"continue", L"pass", L"return",
+    L"def", L"class", L"import", L"from", L"as", L"try", L"except", L"finally", L"raise",
+    L"with", L"yield", L"lambda", L"global", L"nonlocal", L"assert", L"del", L"in", L"is",
+    L"not", L"and", L"or", L"True", L"False", L"None", L"async", L"await", L"match", L"case"
+};
+
+static const std::unordered_set<std::wstring> JS_KEYWORDS = {
+    L"if", L"else", L"for", L"while", L"do", L"switch", L"case", L"break", L"continue",
+    L"return", L"function", L"var", L"let", L"const", L"class", L"extends", L"new", L"this",
+    L"super", L"try", L"catch", L"finally", L"throw", L"async", L"await", L"yield",
+    L"import", L"export", L"default", L"from", L"as", L"of", L"in", L"typeof", L"instanceof",
+    L"true", L"false", L"null", L"undefined", L"NaN", L"Infinity", L"void", L"delete",
+    L"debugger", L"with", L"static", L"get", L"set", L"=>"
+};
+
+static const std::unordered_set<std::wstring> RUST_KEYWORDS = {
+    L"if", L"else", L"match", L"for", L"while", L"loop", L"break", L"continue", L"return",
+    L"fn", L"let", L"mut", L"const", L"static", L"struct", L"enum", L"trait", L"impl",
+    L"pub", L"mod", L"use", L"crate", L"super", L"self", L"Self", L"where", L"as", L"in",
+    L"type", L"unsafe", L"async", L"await", L"move", L"ref", L"dyn", L"box", L"extern",
+    L"true", L"false", L"Some", L"None", L"Ok", L"Err"
+};
+
+static const std::unordered_set<std::wstring> GO_KEYWORDS = {
+    L"if", L"else", L"for", L"range", L"switch", L"case", L"break", L"continue", L"return",
+    L"func", L"var", L"const", L"type", L"struct", L"interface", L"map", L"chan",
+    L"package", L"import", L"go", L"defer", L"select", L"default", L"fallthrough", L"goto",
+    L"true", L"false", L"nil", L"iota", L"make", L"new", L"append", L"len", L"cap", L"copy"
+};
+
+// Token for syntax highlighting
+struct SyntaxToken {
+    std::wstring text;
+    SyntaxTokenType tokenType;
+};
+
+// Detect language from code fence language hint
+static int detectLanguage(const std::wstring& lang) {
+    std::wstring lower = lang;
+    for (auto& c : lower) c = towlower(c);
+    if (lower == L"cpp" || lower == L"c++" || lower == L"c" || lower == L"h" || lower == L"hpp" || lower == L"cxx")
+        return 1;  // C/C++
+    if (lower == L"python" || lower == L"py")
+        return 2;  // Python
+    if (lower == L"javascript" || lower == L"js" || lower == L"jsx" || lower == L"ts" || lower == L"typescript" || lower == L"tsx")
+        return 3;  // JavaScript/TypeScript
+    if (lower == L"rust" || lower == L"rs")
+        return 4;  // Rust
+    if (lower == L"go" || lower == L"golang")
+        return 5;  // Go
+    return 0;  // Unknown
+}
+
+// Get keywords set for language
+static const std::unordered_set<std::wstring>* getKeywordsForLanguage(int lang) {
+    switch (lang) {
+        case 1: return &CPP_KEYWORDS;
+        case 2: return &PYTHON_KEYWORDS;
+        case 3: return &JS_KEYWORDS;
+        case 4: return &RUST_KEYWORDS;
+        case 5: return &GO_KEYWORDS;
+        default: return nullptr;
+    }
+}
+
+// Tokenize a line of code for syntax highlighting
+static std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bool& inBlockComment) {
+    std::vector<SyntaxToken> tokens;
+    const std::unordered_set<std::wstring>* keywords = getKeywordsForLanguage(language);
+
+    size_t i = 0;
+    while (i < line.length()) {
+        // Handle block comment continuation
+        if (inBlockComment) {
+            size_t endComment = line.find(L"*/", i);
+            if (endComment != std::wstring::npos) {
+                tokens.push_back({line.substr(i, endComment + 2 - i), SyntaxTokenType::Comment});
+                i = endComment + 2;
+                inBlockComment = false;
+            } else {
+                tokens.push_back({line.substr(i), SyntaxTokenType::Comment});
+                return tokens;
+            }
+            continue;
+        }
+
+        wchar_t c = line[i];
+
+        // Skip whitespace
+        if (iswspace(c)) {
+            size_t start = i;
+            while (i < line.length() && iswspace(line[i])) i++;
+            tokens.push_back({line.substr(start, i - start), SyntaxTokenType::Plain});
+            continue;
+        }
+
+        // Line comments
+        if (i + 1 < line.length()) {
+            if ((line[i] == L'/' && line[i+1] == L'/') ||  // C/C++/JS/Rust/Go
+                (language == 2 && line[i] == L'#')) {       // Python
+                tokens.push_back({line.substr(i), SyntaxTokenType::Comment});
+                return tokens;
+            }
+            // Block comment start
+            if (line[i] == L'/' && line[i+1] == L'*') {
+                size_t endComment = line.find(L"*/", i + 2);
+                if (endComment != std::wstring::npos) {
+                    tokens.push_back({line.substr(i, endComment + 2 - i), SyntaxTokenType::Comment});
+                    i = endComment + 2;
+                } else {
+                    tokens.push_back({line.substr(i), SyntaxTokenType::Comment});
+                    inBlockComment = true;
+                    return tokens;
+                }
+                continue;
+            }
+        }
+        // Python single # comment
+        if (language == 2 && c == L'#') {
+            tokens.push_back({line.substr(i), SyntaxTokenType::Comment});
+            return tokens;
+        }
+
+        // Strings
+        if (c == L'"' || c == L'\'') {
+            size_t start = i;
+            wchar_t quote = c;
+            i++;
+            while (i < line.length()) {
+                if (line[i] == L'\\' && i + 1 < line.length()) {
+                    i += 2;  // Skip escaped char
+                } else if (line[i] == quote) {
+                    i++;
+                    break;
+                } else {
+                    i++;
+                }
+            }
+            tokens.push_back({line.substr(start, i - start), SyntaxTokenType::String});
+            continue;
+        }
+
+        // Numbers (including hex)
+        if (iswdigit(c) || (c == L'.' && i + 1 < line.length() && iswdigit(line[i+1]))) {
+            size_t start = i;
+            if (c == L'0' && i + 1 < line.length() && (line[i+1] == L'x' || line[i+1] == L'X')) {
+                i += 2;
+                while (i < line.length() && iswxdigit(line[i])) i++;
+            } else {
+                while (i < line.length() && (iswdigit(line[i]) || line[i] == L'.' ||
+                       line[i] == L'e' || line[i] == L'E' || line[i] == L'f' || line[i] == L'L')) i++;
+            }
+            tokens.push_back({line.substr(start, i - start), SyntaxTokenType::Number});
+            continue;
+        }
+
+        // Identifiers and keywords
+        if (iswalpha(c) || c == L'_') {
+            size_t start = i;
+            while (i < line.length() && (iswalnum(line[i]) || line[i] == L'_')) i++;
+            std::wstring word = line.substr(start, i - start);
+
+            // Check if it's a function call (followed by parenthesis)
+            size_t next = i;
+            while (next < line.length() && iswspace(line[next])) next++;
+            bool isFunction = (next < line.length() && line[next] == L'(');
+
+            // Check if keyword
+            if (keywords && keywords->count(word)) {
+                tokens.push_back({word, SyntaxTokenType::Keyword});
+            } else if (language == 1 && CPP_TYPES.count(word)) {
+                tokens.push_back({word, SyntaxTokenType::TypeName});
+            } else if (isFunction) {
+                tokens.push_back({word, SyntaxTokenType::Function});
+            } else {
+                tokens.push_back({word, SyntaxTokenType::Plain});
+            }
+            continue;
+        }
+
+        // Preprocessor directives (C/C++)
+        if (language == 1 && c == L'#') {
+            size_t start = i;
+            i++;
+            while (i < line.length() && (iswalnum(line[i]) || line[i] == L'_')) i++;
+            std::wstring directive = line.substr(start, i - start);
+            if (keywords && keywords->count(directive)) {
+                tokens.push_back({directive, SyntaxTokenType::Keyword});
+            } else {
+                tokens.push_back({directive, SyntaxTokenType::Plain});
+            }
+            continue;
+        }
+
+        // Operators and punctuation
+        tokens.push_back({std::wstring(1, c), SyntaxTokenType::Operator});
+        i++;
+    }
+
+    return tokens;
+}
+
+// Get color for token type
+static D2D1_COLOR_F getTokenColor(const D2DTheme& theme, SyntaxTokenType ttype) {
+    switch (ttype) {
+        case SyntaxTokenType::Keyword:  return theme.syntaxKeyword;
+        case SyntaxTokenType::String:   return theme.syntaxString;
+        case SyntaxTokenType::Comment:  return theme.syntaxComment;
+        case SyntaxTokenType::Number:   return theme.syntaxNumber;
+        case SyntaxTokenType::Function: return theme.syntaxFunction;
+        case SyntaxTokenType::TypeName:     return theme.syntaxType;
+        case SyntaxTokenType::Operator: return theme.code;
+        default:                  return theme.code;
+    }
 }
 
 void renderCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
@@ -1048,6 +1489,10 @@ void renderCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, f
         }
     }
 
+    // Get language from element
+    std::wstring langHint = toWide(elem->language);
+    int language = detectLanguage(langHint);
+
     float scale = app.contentScale * app.zoomFactor;
     float lineHeight = 20.0f * scale;
     float padding = 12.0f * scale;
@@ -1055,6 +1500,8 @@ void renderCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, f
     // Count lines
     int lineCount = 1;
     for (char c : code) if (c == '\n') lineCount++;
+
+    app.docText += L"\n";
 
     float blockHeight = lineCount * lineHeight + padding * 2;
 
@@ -1066,35 +1513,82 @@ void renderCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, f
         app.brush);
     app.drawCalls++;
 
-    // Render lines
-    app.brush->SetColor(app.theme.code);
-    std::istringstream stream(code);
-    std::string line;
+    // Render lines with syntax highlighting
+    std::wstring wcode = toWide(code);
     float textY = y + padding;
+    bool inBlockComment = false;
+    size_t codeDocStart = app.docText.size();
+    size_t lineStart = 0;
 
-    while (std::getline(stream, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        std::wstring wline = toWide(line);
+    while (lineStart <= wcode.length()) {
+        size_t lineEnd = wcode.find(L'\n', lineStart);
+        if (lineEnd == std::wstring::npos) lineEnd = wcode.length();
+
+        std::wstring wline = wcode.substr(lineStart, lineEnd - lineStart);
+        if (!wline.empty() && wline.back() == L'\r') wline.pop_back();
+
+        size_t lineDocStart = codeDocStart + lineStart;
+        recordSearchMatchPositions(app, lineDocStart, lineDocStart + wline.length(), textY);
 
         float lineRenderY = textY - app.scrollY;
         if (lineRenderY > -lineHeight && lineRenderY < app.height + lineHeight) {
             float textWidth = measureText(app, wline, app.codeFormat);
-            app.renderTarget->DrawText(wline.c_str(), (UINT32)wline.length(), app.codeFormat,
-                D2D1::RectF(indent + padding, lineRenderY, indent + maxWidth - padding, lineRenderY + lineHeight),
-                app.brush);
-            app.drawCalls++;
+
+            // Apply syntax highlighting if language is known
+            if (language > 0) {
+                std::vector<SyntaxToken> tokens = tokenizeLine(wline, language, inBlockComment);
+                float tokenX = indent + padding;
+
+                for (const auto& token : tokens) {
+                    if (token.text.empty()) continue;
+
+                    D2D1_COLOR_F tokenColor = getTokenColor(app.theme, token.tokenType);
+                    app.brush->SetColor(tokenColor);
+
+                    float tokenWidth = measureText(app, token.text, app.codeFormat);
+
+                    // Use TextLayout for code typography
+                    IDWriteTextLayout* layout = nullptr;
+                    app.dwriteFactory->CreateTextLayout(token.text.c_str(), (UINT32)token.text.length(),
+                        app.codeFormat, tokenWidth + 50, lineHeight, &layout);
+                    if (layout) {
+                        if (app.codeTypography) {
+                            layout->SetTypography(app.codeTypography, {0, (UINT32)token.text.length()});
+                        }
+                        app.renderTarget->DrawTextLayout(D2D1::Point2F(tokenX, lineRenderY), layout, app.brush);
+                        layout->Release();
+                    } else {
+                        app.renderTarget->DrawText(token.text.c_str(), (UINT32)token.text.length(), app.codeFormat,
+                            D2D1::RectF(tokenX, lineRenderY, tokenX + tokenWidth + 50, lineRenderY + lineHeight),
+                            app.brush);
+                    }
+                    app.drawCalls++;
+                    tokenX += tokenWidth;
+                }
+            } else {
+                // No syntax highlighting - just render plain text
+                app.brush->SetColor(app.theme.code);
+                app.renderTarget->DrawText(wline.c_str(), (UINT32)wline.length(), app.codeFormat,
+                    D2D1::RectF(indent + padding, lineRenderY, indent + maxWidth - padding, lineRenderY + lineHeight),
+                    app.brush);
+                app.drawCalls++;
+            }
 
             // Track text bounds for selection
             if (!wline.empty()) {
                 app.textRects.push_back({D2D1::RectF(indent + padding, lineRenderY,
-                    indent + padding + textWidth, lineRenderY + lineHeight), wline});
+                    indent + padding + textWidth, lineRenderY + lineHeight), wline, lineDocStart});
             }
         }
 
-        // Add to all text
-        app.allText += wline + L"\n";
         textY += lineHeight;
+
+        if (lineEnd == wcode.length()) break;
+        lineStart = lineEnd + 1;
     }
+
+    app.docText += wcode;
+    app.docText += L"\n\n";
 
     y += blockHeight + 14 * scale;  // Increased spacing after code blocks
 }
@@ -1176,6 +1670,8 @@ void renderList(App& app, const ElementPtr& elem, float& y, float indent, float 
                 maxWidth - listIndent, app.textFormat, app.theme.text);
         }
 
+        app.docText += L"\n\n";
+
         if (y < itemStartY + 28 * scale) {
             y = itemStartY + 28 * scale;  // Slightly more space per list item
         }
@@ -1248,15 +1744,39 @@ std::wstring toLower(const std::wstring& str) {
     return result;
 }
 
+inline void recordSearchMatchPositions(App& app, size_t segStart, size_t segEnd, float lineY) {
+    if (segEnd <= segStart) return;
+    if (app.searchMatchCursor >= app.searchMatches.size()) return;
+    if (app.searchMatchYs.size() != app.searchMatches.size()) return;
+
+    while (app.searchMatchCursor < app.searchMatches.size()) {
+        const auto& match = app.searchMatches[app.searchMatchCursor];
+        if (match.startPos < segStart) {
+            app.searchMatchCursor++;
+            continue;
+        }
+        if (match.startPos >= segEnd) {
+            break;
+        }
+        if (app.searchMatchYs[app.searchMatchCursor] < 0.0f) {
+            app.searchMatchYs[app.searchMatchCursor] = lineY;
+        }
+        app.searchMatchCursor++;
+    }
+}
+
 void performSearch(App& app) {
     app.searchMatches.clear();
     app.searchCurrentIndex = 0;
 
     if (app.searchQuery.empty() || !app.root) return;
 
-    // Extract full document text to count all matches
-    std::wstring fullText;
-    extractText(app.root, fullText);
+    // Use render-built document text when available
+    std::wstring fullText = app.docText;
+    if (fullText.empty()) {
+        extractText(app.root, fullText);
+        app.docText = fullText;
+    }
 
     std::wstring queryLower = toLower(app.searchQuery);
     std::wstring textLower = toLower(fullText);
@@ -1272,6 +1792,8 @@ void performSearch(App& app) {
         app.searchMatches.push_back(match);
         pos += app.searchQuery.length();
     }
+
+    app.searchMatchYs.assign(app.searchMatches.size(), -1.0f);
 }
 
 void scrollToCurrentMatch(App& app) {
@@ -1280,18 +1802,28 @@ void scrollToCurrentMatch(App& app) {
 
     const auto& match = app.searchMatches[app.searchCurrentIndex];
 
-    // Get full document text to calculate position ratio based on character offset
-    std::wstring fullText;
-    extractText(app.root, fullText);
-    if (fullText.empty()) return;
+    float estimatedY = -1.0f;
 
-    // Use character position ratio - this maps more accurately since
-    // character position correlates with document position
-    float positionRatio = (float)match.startPos / (float)fullText.length();
+    // Prefer exact line Y recorded during render
+    if (app.searchCurrentIndex >= 0 &&
+        app.searchCurrentIndex < (int)app.searchMatchYs.size()) {
+        float matchY = app.searchMatchYs[app.searchCurrentIndex];
+        if (matchY >= 0.0f) {
+            estimatedY = matchY;
+        }
+    }
 
-    // Apply a slight correction - text density varies, so use sqrt to compress the range
-    // This helps when matches are clustered in one area
-    float estimatedY = positionRatio * app.contentHeight;
+    // Fallback: estimate based on character ratio
+    if (estimatedY < 0.0f) {
+        std::wstring fullText = app.docText;
+        if (fullText.empty()) {
+            extractText(app.root, fullText);
+        }
+        if (fullText.empty()) return;
+
+        float positionRatio = (float)match.startPos / (float)fullText.length();
+        estimatedY = positionRatio * app.contentHeight;
+    }
 
     // Center this position in viewport (account for search bar)
     float searchBarHeight = 60.0f;
@@ -1312,7 +1844,18 @@ void render(App& app) {
     // Clear tracking for this frame
     app.linkRects.clear();
     app.textRects.clear();
-    app.allText.clear();
+    app.docText.clear();
+
+    if (!app.searchMatches.empty()) {
+        if (app.searchMatchYs.size() != app.searchMatches.size()) {
+            app.searchMatchYs.resize(app.searchMatches.size(), -1.0f);
+        } else {
+            std::fill(app.searchMatchYs.begin(), app.searchMatchYs.end(), -1.0f);
+        }
+        app.searchMatchCursor = 0;
+    } else {
+        app.searchMatchYs.clear();
+    }
 
     // Clear background
     app.renderTarget->Clear(app.theme.background);
@@ -1350,6 +1893,9 @@ void render(App& app) {
     bool needsHScroll = app.contentWidth > app.width;
     float scrollbarSize = 14.0f;
 
+    // Scrollbar color: dark on light themes, light on dark themes
+    float sbColorValue = app.theme.isDark ? 1.0f : 0.0f;
+
     // Draw vertical scrollbar
     if (needsVScroll) {
         float maxScrollY = std::max(0.0f, app.contentHeight - app.height);
@@ -1361,7 +1907,7 @@ void render(App& app) {
         float sbWidth = (app.scrollbarHovered || app.scrollbarDragging) ? 10.0f : 6.0f;
         float sbAlpha = (app.scrollbarHovered || app.scrollbarDragging) ? 0.5f : 0.3f;
 
-        app.brush->SetColor(D2D1::ColorF(1, 1, 1, sbAlpha));
+        app.brush->SetColor(D2D1::ColorF(sbColorValue, sbColorValue, sbColorValue, sbAlpha));
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(D2D1::RectF(app.width - sbWidth - 4, sbY,
                                           app.width - 4, sbY + sbHeight), 3, 3),
@@ -1380,7 +1926,7 @@ void render(App& app) {
         float sbHeight = (app.hScrollbarHovered || app.hScrollbarDragging) ? 10.0f : 6.0f;
         float sbAlpha = (app.hScrollbarHovered || app.hScrollbarDragging) ? 0.5f : 0.3f;
 
-        app.brush->SetColor(D2D1::ColorF(1, 1, 1, sbAlpha));
+        app.brush->SetColor(D2D1::ColorF(sbColorValue, sbColorValue, sbColorValue, sbAlpha));
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(D2D1::RectF(sbX, app.height - sbHeight - 4,
                                           sbX + sbWidth, app.height - 4), 3, 3),
@@ -1505,63 +2051,71 @@ void render(App& app) {
 
     // Draw search match highlights (search live through visible textRects)
     if (app.showSearch && !app.searchQuery.empty() && !app.textRects.empty() && !app.searchMatches.empty()) {
-        std::wstring queryLower = toLower(app.searchQuery);
-
-        // The current match should be near viewport center (since we scroll to center it)
-        float viewportCenterY = app.height / 2.0f;
-
+        // Collect visible match rects by intersecting search matches with text rects
         struct VisibleMatch {
             D2D1_RECT_F rect;
-            float screenCenterY;  // Center Y in screen coordinates
+            size_t matchIndex;
         };
         std::vector<VisibleMatch> visibleMatches;
 
+        size_t matchIndex = 0;
         for (const auto& tr : app.textRects) {
-            std::wstring textLower = toLower(tr.text);
-            size_t pos = 0;
+            size_t textLen = tr.text.length();
+            if (textLen == 0) continue;
 
-            while ((pos = textLower.find(queryLower, pos)) != std::wstring::npos) {
-                // Calculate highlight position using proportional width
-                // This is approximate but works reasonably for most fonts
-                float totalWidth = tr.rect.right - tr.rect.left;
-                size_t textLen = tr.text.length();
+            size_t rectStart = tr.docStart;
+            size_t rectEnd = rectStart + textLen;
 
-                if (textLen == 0) {
-                    pos += app.searchQuery.length();
+            // Advance to first match that could overlap this rect
+            while (matchIndex < app.searchMatches.size()) {
+                const auto& m = app.searchMatches[matchIndex];
+                size_t mEnd = m.startPos + m.length;
+                if (mEnd <= rectStart) {
+                    matchIndex++;
                     continue;
                 }
-
-                float charWidth = totalWidth / (float)textLen;
-                float startX = tr.rect.left + pos * charWidth;
-                float matchWidth = app.searchQuery.length() * charWidth;
-
-                // Extend highlight slightly for better visibility
-                D2D1_RECT_F highlightRect = D2D1::RectF(
-                    startX - 1, tr.rect.top,
-                    startX + matchWidth + 1, tr.rect.bottom
-                );
-
-                float screenCenterY = (highlightRect.top + highlightRect.bottom) / 2.0f;
-                visibleMatches.push_back({highlightRect, screenCenterY});
-
-                pos += app.searchQuery.length();
+                break;
             }
+
+            size_t mi = matchIndex;
+            while (mi < app.searchMatches.size()) {
+                const auto& m = app.searchMatches[mi];
+                if (m.startPos >= rectEnd) break;
+
+                size_t mStart = m.startPos;
+                size_t mEnd = m.startPos + m.length;
+                size_t overlapStart = std::max(rectStart, mStart);
+                size_t overlapEnd = std::min(rectEnd, mEnd);
+
+                if (overlapStart < overlapEnd) {
+                    float totalWidth = tr.rect.right - tr.rect.left;
+                    float charWidth = totalWidth / (float)textLen;
+                    float startX = tr.rect.left + (overlapStart - rectStart) * charWidth;
+                    float matchWidth = (overlapEnd - overlapStart) * charWidth;
+
+                    // Extend highlight slightly for better visibility
+                    D2D1_RECT_F highlightRect = D2D1::RectF(
+                        startX - 1, tr.rect.top,
+                        startX + matchWidth + 1, tr.rect.bottom
+                    );
+
+                    visibleMatches.push_back({highlightRect, mi});
+                }
+
+                if (mEnd <= rectEnd) {
+                    mi++;
+                } else {
+                    break;  // Match spans beyond this rect; continue on next rect
+                }
+            }
+
+            matchIndex = mi;
         }
 
-        // Find the match closest to viewport center (that's the one we scrolled to)
-        int closestIndex = -1;
-        float closestDist = 999999.0f;
-        for (size_t i = 0; i < visibleMatches.size(); i++) {
-            float dist = std::abs(visibleMatches[i].screenCenterY - viewportCenterY);
-            if (dist < closestDist) {
-                closestDist = dist;
-                closestIndex = (int)i;
-            }
-        }
-
-        // Draw all matches
-        for (size_t i = 0; i < visibleMatches.size(); i++) {
-            bool isCurrent = ((int)i == closestIndex);
+        // Draw all matches - orange if it's the current match, yellow otherwise
+        for (const auto& vm : visibleMatches) {
+            bool isCurrent = (app.searchCurrentIndex >= 0 &&
+                              vm.matchIndex == (size_t)app.searchCurrentIndex);
 
             if (isCurrent) {
                 app.brush->SetColor(D2D1::ColorF(1.0f, 0.6f, 0.0f, 0.5f));  // Orange
@@ -1569,7 +2123,7 @@ void render(App& app) {
                 app.brush->SetColor(D2D1::ColorF(1.0f, 0.9f, 0.0f, 0.3f));  // Yellow
             }
 
-            app.renderTarget->FillRectangle(visibleMatches[i].rect, app.brush);
+            app.renderTarget->FillRectangle(vm.rect, app.brush);
             app.drawCalls++;
         }
     }
@@ -2047,6 +2601,26 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app && app->d2dFactory) {
                 app->width = LOWORD(lParam);
                 app->height = HIWORD(lParam);
+                createRenderTarget(*app);
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
+
+        case WM_DPICHANGED:
+            if (app) {
+                UINT dpi = HIWORD(wParam);
+                app->contentScale = dpi / 96.0f;
+
+                // Resize window to suggested new size
+                RECT* newRect = (RECT*)lParam;
+                SetWindowPos(hwnd, nullptr,
+                    newRect->left, newRect->top,
+                    newRect->right - newRect->left,
+                    newRect->bottom - newRect->top,
+                    SWP_NOZORDER | SWP_NOACTIVATE);
+
+                // Recreate text formats and render target for new DPI
+                updateTextFormats(*app);
                 createRenderTarget(*app);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
@@ -2765,6 +3339,9 @@ int main() {
 )";
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow) {
+    // Enable per-monitor DPI V2 awareness
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
     auto startupStart = Clock::now();
 
     App app;
@@ -2855,10 +3432,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     app.metrics.windowInitUs = usElapsed(t0);
 
-    // Get DPI
-    HDC hdc = GetDC(app.hwnd);
-    app.contentScale = GetDeviceCaps(hdc, LOGPIXELSX) / 96.0f;
-    ReleaseDC(app.hwnd, hdc);
+    // Get DPI using per-monitor aware API
+    app.contentScale = GetDpiForWindow(app.hwnd) / 96.0f;
 
     // Initialize D2D
     if (!initD2D(app)) {
@@ -2866,8 +3441,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         return 1;
     }
 
-    // Create text formats
+    // Create text formats and typography
     updateTextFormats(app);
+    createTypography(app);
 
     // Get window size
     RECT rc;
