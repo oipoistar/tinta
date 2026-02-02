@@ -82,7 +82,7 @@ static const D2DTheme THEMES[] = {
 
     // 1. Paper - Warm sepia, literary manuscript feel
     {
-        L"Paper", L"Georgia", L"Consolas", false,
+        L"Paper", L"Segoe UI", L"Consolas", false,
         hexColor(0xF5F1E8),    // background - warm cream
         hexColor(0x3D3329),    // text - deep brown
         hexColor(0x2A1F16),    // heading - dark brown
@@ -95,7 +95,7 @@ static const D2DTheme THEMES[] = {
 
     // 2. Sakura - Japanese cherry blossom, soft pink elegance
     {
-        L"Sakura", L"Yu Gothic UI", L"Consolas", false,
+        L"Sakura", L"Segoe UI", L"Consolas", false,
         hexColor(0xFDF8F8),    // background - soft blush white
         hexColor(0x404040),    // text - soft charcoal
         hexColor(0xC44569),    // heading - deep rose
@@ -121,7 +121,7 @@ static const D2DTheme THEMES[] = {
 
     // 4. Meadow - Fresh organic greens, nature-inspired
     {
-        L"Meadow", L"Calibri", L"Consolas", false,
+        L"Meadow", L"Segoe UI", L"Consolas", false,
         hexColor(0xF7FAF7),    // background - soft white-green
         hexColor(0x1A2F1A),    // text - forest
         hexColor(0x1C4532),    // heading - deep green
@@ -134,7 +134,7 @@ static const D2DTheme THEMES[] = {
 
     // 5. Dusk - Golden hour warmth, sunset tones
     {
-        L"Dusk", L"Cambria", L"Consolas", false,
+        L"Dusk", L"Segoe UI", L"Consolas", false,
         hexColor(0xFFFBF5),    // background - warm white
         hexColor(0x553C10),    // text - deep amber
         hexColor(0x9C4221),    // heading - burnt orange
@@ -177,7 +177,7 @@ static const D2DTheme THEMES[] = {
 
     // 8. Forest - Deep mystical greens
     {
-        L"Forest", L"Trebuchet MS", L"Consolas", true,
+        L"Forest", L"Segoe UI", L"Consolas", true,
         hexColor(0x0D1512),    // background - deep green-black
         hexColor(0xB8C5B2),    // text - sage
         hexColor(0x9AE6B4),    // heading - bright green
@@ -190,7 +190,7 @@ static const D2DTheme THEMES[] = {
 
     // 9. Ember - Warm charcoal with fire accents
     {
-        L"Ember", L"Georgia", L"Consolas", true,
+        L"Ember", L"Segoe UI", L"Consolas", true,
         hexColor(0x1A1614),    // background - warm black
         hexColor(0xD4C5B9),    // text - warm gray
         hexColor(0xF6AD55),    // heading - amber
@@ -521,6 +521,14 @@ struct App {
     bool hasSelection = false;
     std::wstring selectedText;
 
+    // Multi-click selection (double/triple click)
+    std::chrono::steady_clock::time_point lastClickTime;
+    int clickCount = 0;
+    int lastClickX = 0, lastClickY = 0;
+    enum class SelectionMode { Normal, Word, Line } selectionMode = SelectionMode::Normal;
+    // Anchor bounds for word/line selection (the original word/line that was clicked)
+    float anchorLeft = 0, anchorRight = 0, anchorTop = 0, anchorBottom = 0;
+
     // All text content for select-all
     std::wstring allText;
 
@@ -565,6 +573,83 @@ void openUrl(const std::string& url);
 void updateTextFormats(App& app);
 void applyTheme(App& app, int themeIndex);
 void extractText(const ElementPtr& elem, std::wstring& out);
+
+// Helper: Check if character is a word boundary
+inline bool isWordBoundary(wchar_t c) {
+    return c == L' ' || c == L'\t' || c == L'\n' || c == L'\r' ||
+           c == L'.' || c == L',' || c == L';' || c == L':' ||
+           c == L'!' || c == L'?' || c == L'"' || c == L'\'' ||
+           c == L'(' || c == L')' || c == L'[' || c == L']' ||
+           c == L'{' || c == L'}' || c == L'<' || c == L'>' ||
+           c == L'/' || c == L'\\' || c == L'-' || c == L'=' ||
+           c == L'+' || c == L'*' || c == L'&' || c == L'|';
+}
+
+// Find the TextRect at a given screen position
+const App::TextRect* findTextRectAt(const App& app, int x, int y) {
+    for (const auto& tr : app.textRects) {
+        if (x >= tr.rect.left && x <= tr.rect.right &&
+            y >= tr.rect.top && y <= tr.rect.bottom) {
+            return &tr;
+        }
+    }
+    return nullptr;
+}
+
+// Find word boundaries in a TextRect at screen position x
+// Returns the word's left and right X positions
+bool findWordBoundsAt(const App& app, const App::TextRect& tr, int x,
+                      float& wordLeft, float& wordRight) {
+    if (tr.text.empty()) return false;
+
+    float totalWidth = tr.rect.right - tr.rect.left;
+    float charWidth = totalWidth / (float)tr.text.length();
+
+    // Find which character was clicked
+    int charIndex = (int)((x - tr.rect.left) / charWidth);
+    charIndex = std::max(0, std::min(charIndex, (int)tr.text.length() - 1));
+
+    // Find word start (scan left)
+    int wordStart = charIndex;
+    while (wordStart > 0 && !isWordBoundary(tr.text[wordStart - 1])) {
+        wordStart--;
+    }
+
+    // Find word end (scan right)
+    int wordEnd = charIndex;
+    while (wordEnd < (int)tr.text.length() - 1 && !isWordBoundary(tr.text[wordEnd + 1])) {
+        wordEnd++;
+    }
+
+    wordLeft = tr.rect.left + wordStart * charWidth;
+    wordRight = tr.rect.left + (wordEnd + 1) * charWidth;
+    return true;
+}
+
+// Find all TextRects on the same line (similar Y position)
+void findLineRects(const App& app, float y, float& lineLeft, float& lineRight,
+                   float& lineTop, float& lineBottom) {
+    lineLeft = 99999.0f;
+    lineRight = 0.0f;
+    lineTop = 0.0f;
+    lineBottom = 0.0f;
+    bool found = false;
+
+    for (const auto& tr : app.textRects) {
+        float centerY = (tr.rect.top + tr.rect.bottom) / 2.0f;
+        if (std::abs(centerY - y) < 20) {  // Same line if within 20px
+            if (!found) {
+                lineTop = tr.rect.top;
+                lineBottom = tr.rect.bottom;
+                found = true;
+            }
+            lineLeft = std::min(lineLeft, tr.rect.left);
+            lineRight = std::max(lineRight, tr.rect.right);
+            lineTop = std::min(lineTop, tr.rect.top);
+            lineBottom = std::max(lineBottom, tr.rect.bottom);
+        }
+    }
+}
 
 bool initD2D(App& app) {
     auto t0 = Clock::now();
@@ -636,6 +721,13 @@ void updateTextFormats(App& app) {
     app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
         fontSize, L"en-us", &app.italicFormat);
+
+    // Set consistent baseline alignment for all formats
+    if (app.textFormat) app.textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    if (app.headingFormat) app.headingFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    if (app.codeFormat) app.codeFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    if (app.boldFormat) app.boldFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    if (app.italicFormat) app.italicFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
 }
 
 bool createRenderTarget(App& app) {
@@ -713,7 +805,8 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
     float x = startX;
     float scale = app.contentScale * app.zoomFactor;
     // Use custom line height if provided, otherwise calculate from font size
-    float lineHeight = customLineHeight > 0 ? customLineHeight : baseFormat->GetFontSize() * 1.5f;
+    // Use 1.7x multiplier to accommodate scripts with stacking diacritics (Vietnamese, etc.)
+    float lineHeight = customLineHeight > 0 ? customLineHeight : baseFormat->GetFontSize() * 1.7f;
     float maxX = startX + maxWidth;
     float spaceWidth = measureText(app, L" ", baseFormat);
 
@@ -858,8 +951,8 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
                     D2D1::RectF(x, renderY, x + wordWidth + 100, renderY + lineHeight), app.brush);
                 app.drawCalls++;
 
-                // Track text bounds for cursor and selection
-                app.textRects.push_back({D2D1::RectF(x, renderY, x + wordWidth, renderY + lineHeight), word});
+                // Track text bounds for cursor and selection (add small buffer for selection highlight)
+                app.textRects.push_back({D2D1::RectF(x, renderY, x + wordWidth + 2, renderY + lineHeight), word});
             }
 
             x += wordWidth;
@@ -1298,10 +1391,11 @@ void render(App& app) {
     // Draw selection highlights
     if ((app.selecting || app.hasSelection) && !app.textRects.empty()) {
         // Calculate selection bounds (normalized so start is always before end)
+        // Selection is stored in document coordinates, convert to screen coordinates
         float selStartX = (float)app.selStartX;
-        float selStartY = (float)app.selStartY;
+        float selStartY = (float)app.selStartY - app.scrollY;
         float selEndX = (float)app.selEndX;
-        float selEndY = (float)app.selEndY;
+        float selEndY = (float)app.selEndY - app.scrollY;
 
         // Swap if selection was made bottom-to-top
         if (selStartY > selEndY || (selStartY == selEndY && selStartX > selEndX)) {
@@ -1360,7 +1454,7 @@ void render(App& app) {
                 lineInSelection = true;
             } else if (lineCenterY >= selStartY - 10 && lineCenterY <= selEndY + 10) {
                 float lineHeight = line.bottom - line.top;
-                bool isSingleLine = (selEndY - selStartY) < lineHeight;
+                bool isSingleLine = (selEndY - selStartY) <= lineHeight;
 
                 if (isSingleLine) {
                     // Single line selection
@@ -2009,8 +2103,39 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
                 // Text selection dragging
                 if (app->selecting) {
-                    app->selEndX = app->mouseX;
-                    app->selEndY = app->mouseY;
+                    if (app->selectionMode == App::SelectionMode::Word) {
+                        // Extend selection by words - merge anchor with current word
+                        const App::TextRect* tr = findTextRectAt(*app, app->mouseX, app->mouseY);
+                        if (tr) {
+                            float wordLeft, wordRight;
+                            if (findWordBoundsAt(*app, *tr, app->mouseX, wordLeft, wordRight)) {
+                                // Selection spans from min(anchor, current) to max(anchor, current)
+                                // Store in document coordinates (add scrollY)
+                                app->selStartX = (int)std::min(app->anchorLeft, wordLeft);
+                                app->selEndX = (int)std::max(app->anchorRight, wordRight);
+                                app->selStartY = (int)(std::min(app->anchorTop, tr->rect.top) + app->scrollY);
+                                app->selEndY = (int)(std::max(app->anchorBottom, tr->rect.bottom) + app->scrollY);
+                                app->hasSelection = true;
+                            }
+                        }
+                    } else if (app->selectionMode == App::SelectionMode::Line) {
+                        // Extend selection by lines - merge anchor with current line
+                        float lineLeft, lineRight, lineTop, lineBottom;
+                        findLineRects(*app, (float)app->mouseY, lineLeft, lineRight, lineTop, lineBottom);
+                        if (lineRight > lineLeft) {
+                            // Selection spans from min(anchor, current) to max(anchor, current)
+                            // Store in document coordinates (add scrollY)
+                            app->selStartX = (int)std::min(app->anchorLeft, lineLeft);
+                            app->selEndX = (int)std::max(app->anchorRight, lineRight);
+                            app->selStartY = (int)(std::min(app->anchorTop, lineTop) + app->scrollY);
+                            app->selEndY = (int)(std::max(app->anchorBottom, lineBottom) + app->scrollY);
+                            app->hasSelection = true;
+                        }
+                    } else {
+                        // Normal selection - store in document coordinates
+                        app->selEndX = app->mouseX;
+                        app->selEndY = (int)(app->mouseY + app->scrollY);
+                    }
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return 0;
                 }
@@ -2173,14 +2298,78 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     }
                     InvalidateRect(hwnd, nullptr, FALSE);
                 } else {
-                    // Start text selection
-                    app->selecting = true;
-                    app->selStartX = app->mouseX;
-                    app->selStartY = app->mouseY;
-                    app->selEndX = app->mouseX;
-                    app->selEndY = app->mouseY;
-                    app->hasSelection = false;
-                    app->selectedText.clear();
+                    // Detect double/triple clicks
+                    auto now = std::chrono::steady_clock::now();
+                    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now - app->lastClickTime).count();
+
+                    // Check if this is a repeated click (within 500ms and 5px of last click)
+                    bool isRepeatedClick = (elapsed < 500 &&
+                        std::abs(app->mouseX - app->lastClickX) < 5 &&
+                        std::abs(app->mouseY - app->lastClickY) < 5);
+
+                    if (isRepeatedClick) {
+                        app->clickCount = std::min(app->clickCount + 1, 3);
+                    } else {
+                        app->clickCount = 1;
+                    }
+
+                    app->lastClickTime = now;
+                    app->lastClickX = app->mouseX;
+                    app->lastClickY = app->mouseY;
+
+                    // Handle based on click count
+                    if (app->clickCount == 2) {
+                        // Double-click: select word
+                        const App::TextRect* tr = findTextRectAt(*app, app->mouseX, app->mouseY);
+                        if (tr) {
+                            float wordLeft, wordRight;
+                            if (findWordBoundsAt(*app, *tr, app->mouseX, wordLeft, wordRight)) {
+                                app->selectionMode = App::SelectionMode::Word;
+                                // Store anchor (the original word bounds) in screen coords for drag extension
+                                app->anchorLeft = wordLeft;
+                                app->anchorRight = wordRight;
+                                app->anchorTop = tr->rect.top;
+                                app->anchorBottom = tr->rect.bottom;
+                                // Set selection to the word (document coordinates - add scrollY)
+                                app->selStartX = (int)wordLeft;
+                                app->selEndX = (int)wordRight;
+                                app->selStartY = (int)(tr->rect.top + app->scrollY);
+                                app->selEndY = (int)(tr->rect.bottom + app->scrollY);
+                                app->selecting = true;
+                                app->hasSelection = true;
+                            }
+                        }
+                    } else if (app->clickCount == 3) {
+                        // Triple-click: select line
+                        float lineLeft, lineRight, lineTop, lineBottom;
+                        findLineRects(*app, (float)app->mouseY, lineLeft, lineRight, lineTop, lineBottom);
+                        if (lineRight > lineLeft) {
+                            app->selectionMode = App::SelectionMode::Line;
+                            // Store anchor (the original line bounds) in screen coords for drag extension
+                            app->anchorLeft = lineLeft;
+                            app->anchorRight = lineRight;
+                            app->anchorTop = lineTop;
+                            app->anchorBottom = lineBottom;
+                            // Set selection to the line (document coordinates - add scrollY)
+                            app->selStartX = (int)lineLeft;
+                            app->selEndX = (int)lineRight;
+                            app->selStartY = (int)(lineTop + app->scrollY);
+                            app->selEndY = (int)(lineBottom + app->scrollY);
+                            app->selecting = true;
+                            app->hasSelection = true;
+                        }
+                    } else {
+                        // Single click: start normal selection (document coordinates)
+                        app->selectionMode = App::SelectionMode::Normal;
+                        app->selecting = true;
+                        app->selStartX = app->mouseX;
+                        app->selStartY = (int)(app->mouseY + app->scrollY);
+                        app->selEndX = app->mouseX;
+                        app->selEndY = (int)(app->mouseY + app->scrollY);
+                        app->hasSelection = false;
+                        app->selectedText.clear();
+                    }
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
             }
@@ -2246,21 +2435,29 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     app->hScrollbarDragging = false;
                     InvalidateRect(hwnd, nullptr, FALSE);
                 } else if (app->selecting) {
-                    // Finalize selection
-                    app->selEndX = app->mouseX;
-                    app->selEndY = app->mouseY;
-
-                    // Check if this was a meaningful drag (not just a click)
-                    int dx = abs(app->selEndX - app->selStartX);
-                    int dy = abs(app->selEndY - app->selStartY);
-                    if (dx > 5 || dy > 5) {
-                        app->hasSelection = true;
-                    } else if (!app->hoveredLink.empty()) {
-                        // It was just a click on a link
-                        openUrl(app->hoveredLink);
-                        app->hasSelection = false;
+                    // Finalize selection based on mode
+                    if (app->selectionMode == App::SelectionMode::Word ||
+                        app->selectionMode == App::SelectionMode::Line) {
+                        // Word/Line selection: keep the bounds set during mouse down/move
+                        // hasSelection was already set to true in WM_LBUTTONDOWN
                     } else {
-                        app->hasSelection = false;
+                        // Normal selection: finalize with current mouse position (document coordinates)
+                        app->selEndX = app->mouseX;
+                        app->selEndY = (int)(app->mouseY + app->scrollY);
+
+                        // Check if this was a meaningful drag (not just a click)
+                        // Use screen coordinates stored from mouse down
+                        int dx = abs(app->mouseX - app->lastClickX);
+                        int dy = abs(app->mouseY - app->lastClickY);
+                        if (dx > 5 || dy > 5) {
+                            app->hasSelection = true;
+                        } else if (!app->hoveredLink.empty()) {
+                            // It was just a click on a link
+                            openUrl(app->hoveredLink);
+                            app->hasSelection = false;
+                        } else {
+                            app->hasSelection = false;
+                        }
                     }
                     InvalidateRect(hwnd, nullptr, FALSE);
                 } else if (!app->hoveredLink.empty()) {
