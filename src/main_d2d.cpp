@@ -503,6 +503,15 @@ struct App {
         std::wstring text;
     };
     std::vector<TextRect> textRects;
+
+    // Search match info
+    struct SearchMatch {
+        size_t textRectIndex;       // Index into textRects
+        size_t startPos;            // Character offset in text
+        size_t length;              // Match length
+        D2D1_RECT_F highlightRect;  // Computed highlight bounds
+    };
+    std::vector<SearchMatch> searchMatches;
     bool overText = false;
 
     // Text selection
@@ -519,6 +528,14 @@ struct App {
     bool showCopiedNotification = false;
     float copiedNotificationAlpha = 0.0f;
     std::chrono::steady_clock::time_point copiedNotificationStart;
+
+    // Search overlay
+    bool showSearch = false;
+    float searchAnimation = 0.0f;
+    std::wstring searchQuery;
+    int searchCurrentIndex = 0;
+    bool searchActive = false;
+    bool searchJustOpened = false;  // Skip WM_CHAR after opening with F key
 
     // Metrics
     StartupMetrics metrics;
@@ -547,6 +564,7 @@ void render(App& app);
 void openUrl(const std::string& url);
 void updateTextFormats(App& app);
 void applyTheme(App& app, int themeIndex);
+void extractText(const ElementPtr& elem, std::wstring& out);
 
 bool initD2D(App& app) {
     auto t0 = Clock::now();
@@ -1125,6 +1143,73 @@ void renderElement(App& app, const ElementPtr& elem, float& y, float indent, flo
 
 // Content height is calculated during render pass
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SEARCH FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+std::wstring toLower(const std::wstring& str) {
+    std::wstring result = str;
+    for (auto& c : result) {
+        c = towlower(c);
+    }
+    return result;
+}
+
+void performSearch(App& app) {
+    app.searchMatches.clear();
+    app.searchCurrentIndex = 0;
+
+    if (app.searchQuery.empty() || !app.root) return;
+
+    // Extract full document text to count all matches
+    std::wstring fullText;
+    extractText(app.root, fullText);
+
+    std::wstring queryLower = toLower(app.searchQuery);
+    std::wstring textLower = toLower(fullText);
+
+    // Count all matches in full document
+    size_t pos = 0;
+    while ((pos = textLower.find(queryLower, pos)) != std::wstring::npos) {
+        App::SearchMatch match;
+        match.textRectIndex = 0;  // Not used anymore
+        match.startPos = pos;
+        match.length = app.searchQuery.length();
+        match.highlightRect = D2D1::RectF(0, 0, 0, 0);  // Not used anymore
+        app.searchMatches.push_back(match);
+        pos += app.searchQuery.length();
+    }
+}
+
+void scrollToCurrentMatch(App& app) {
+    if (app.searchMatches.empty() || app.searchCurrentIndex < 0 ||
+        app.searchCurrentIndex >= (int)app.searchMatches.size()) return;
+
+    const auto& match = app.searchMatches[app.searchCurrentIndex];
+
+    // Get full document text to calculate position ratio based on character offset
+    std::wstring fullText;
+    extractText(app.root, fullText);
+    if (fullText.empty()) return;
+
+    // Use character position ratio - this maps more accurately since
+    // character position correlates with document position
+    float positionRatio = (float)match.startPos / (float)fullText.length();
+
+    // Apply a slight correction - text density varies, so use sqrt to compress the range
+    // This helps when matches are clustered in one area
+    float estimatedY = positionRatio * app.contentHeight;
+
+    // Center this position in viewport (account for search bar)
+    float searchBarHeight = 60.0f;
+    app.targetScrollY = estimatedY - (app.height - searchBarHeight) / 2.0f;
+
+    // Clamp scroll
+    float maxScroll = std::max(0.0f, app.contentHeight - app.height);
+    app.targetScrollY = std::max(0.0f, std::min(app.targetScrollY, maxScroll));
+    app.scrollY = app.targetScrollY;
+}
+
 void render(App& app) {
     if (!app.renderTarget) return;
 
@@ -1324,6 +1409,77 @@ void render(App& app) {
         }
     }
 
+    // Draw search match highlights (search live through visible textRects)
+    if (app.showSearch && !app.searchQuery.empty() && !app.textRects.empty() && !app.searchMatches.empty()) {
+        std::wstring queryLower = toLower(app.searchQuery);
+
+        // The current match should be near viewport center (since we scroll to center it)
+        float viewportCenterY = app.height / 2.0f;
+
+        struct VisibleMatch {
+            D2D1_RECT_F rect;
+            float screenCenterY;  // Center Y in screen coordinates
+        };
+        std::vector<VisibleMatch> visibleMatches;
+
+        for (const auto& tr : app.textRects) {
+            std::wstring textLower = toLower(tr.text);
+            size_t pos = 0;
+
+            while ((pos = textLower.find(queryLower, pos)) != std::wstring::npos) {
+                // Calculate highlight position using proportional width
+                // This is approximate but works reasonably for most fonts
+                float totalWidth = tr.rect.right - tr.rect.left;
+                size_t textLen = tr.text.length();
+
+                if (textLen == 0) {
+                    pos += app.searchQuery.length();
+                    continue;
+                }
+
+                float charWidth = totalWidth / (float)textLen;
+                float startX = tr.rect.left + pos * charWidth;
+                float matchWidth = app.searchQuery.length() * charWidth;
+
+                // Extend highlight slightly for better visibility
+                D2D1_RECT_F highlightRect = D2D1::RectF(
+                    startX - 1, tr.rect.top,
+                    startX + matchWidth + 1, tr.rect.bottom
+                );
+
+                float screenCenterY = (highlightRect.top + highlightRect.bottom) / 2.0f;
+                visibleMatches.push_back({highlightRect, screenCenterY});
+
+                pos += app.searchQuery.length();
+            }
+        }
+
+        // Find the match closest to viewport center (that's the one we scrolled to)
+        int closestIndex = -1;
+        float closestDist = 999999.0f;
+        for (size_t i = 0; i < visibleMatches.size(); i++) {
+            float dist = std::abs(visibleMatches[i].screenCenterY - viewportCenterY);
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestIndex = (int)i;
+            }
+        }
+
+        // Draw all matches
+        for (size_t i = 0; i < visibleMatches.size(); i++) {
+            bool isCurrent = ((int)i == closestIndex);
+
+            if (isCurrent) {
+                app.brush->SetColor(D2D1::ColorF(1.0f, 0.6f, 0.0f, 0.5f));  // Orange
+            } else {
+                app.brush->SetColor(D2D1::ColorF(1.0f, 0.9f, 0.0f, 0.3f));  // Yellow
+            }
+
+            app.renderTarget->FillRectangle(visibleMatches[i].rect, app.brush);
+            app.drawCalls++;
+        }
+    }
+
     // "Copied!" notification with fade out
     if (app.showCopiedNotification) {
         auto now = std::chrono::steady_clock::now();
@@ -1391,6 +1547,125 @@ void render(App& app) {
             D2D1::RectF(app.width - statsWidth - 5, app.height - statsHeight - 5,
                        app.width - 15, app.height - 15),
             app.brush);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SEARCH OVERLAY
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (app.showSearch) {
+        // Animate in
+        if (app.searchAnimation < 1.0f) {
+            app.searchAnimation = std::min(1.0f, app.searchAnimation + 0.2f);
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+        }
+        float anim = app.searchAnimation;
+
+        // Search bar dimensions
+        float barWidth = std::min(500.0f, app.width - 40.0f);
+        float barHeight = 44.0f;
+        float barX = (app.width - barWidth) / 2;
+        float barY = 20.0f * anim - barHeight * (1.0f - anim);  // Slide down from top
+
+        // Background with rounded corners
+        D2D1_ROUNDED_RECT barRect = D2D1::RoundedRect(
+            D2D1::RectF(barX, barY, barX + barWidth, barY + barHeight),
+            8, 8);
+
+        // Semi-transparent background based on theme
+        if (app.theme.isDark) {
+            app.brush->SetColor(D2D1::ColorF(0.12f, 0.12f, 0.14f, 0.95f * anim));
+        } else {
+            app.brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.95f * anim));
+        }
+        app.renderTarget->FillRoundedRectangle(barRect, app.brush);
+
+        // Border
+        if (app.theme.isDark) {
+            app.brush->SetColor(D2D1::ColorF(0.3f, 0.3f, 0.35f, 0.8f * anim));
+        } else {
+            app.brush->SetColor(D2D1::ColorF(0.7f, 0.7f, 0.75f, 0.8f * anim));
+        }
+        app.renderTarget->DrawRoundedRectangle(barRect, app.brush, 1.0f);
+
+        // Search icon (simple circle for magnifying glass look)
+        {
+            D2D1_COLOR_F iconColor = app.theme.text;
+            iconColor.a = 0.5f * anim;
+            app.brush->SetColor(iconColor);
+            // Draw a simple magnifying glass shape
+            float iconX = barX + 22;
+            float iconY = barY + 22;
+            app.renderTarget->DrawEllipse(
+                D2D1::Ellipse(D2D1::Point2F(iconX, iconY - 2), 7, 7),
+                app.brush, 2.0f);
+            app.renderTarget->DrawLine(
+                D2D1::Point2F(iconX + 5, iconY + 3),
+                D2D1::Point2F(iconX + 9, iconY + 7),
+                app.brush, 2.0f);
+        }
+
+        // Search text
+        IDWriteTextFormat* searchTextFormat = nullptr;
+        app.dwriteFactory->CreateTextFormat(app.theme.fontFamily, nullptr,
+            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            16, L"en-us", &searchTextFormat);
+        if (searchTextFormat) {
+            float textX = barX + 42;
+            float textWidth = barWidth - 120;  // Leave room for count
+
+            if (app.searchQuery.empty()) {
+                // Placeholder text
+                D2D1_COLOR_F placeholderColor = app.theme.text;
+                placeholderColor.a = 0.4f * anim;
+                app.brush->SetColor(placeholderColor);
+                app.renderTarget->DrawText(L"Search...", 9, searchTextFormat,
+                    D2D1::RectF(textX, barY + 12, textX + textWidth, barY + barHeight), app.brush);
+            } else {
+                // Actual search query
+                D2D1_COLOR_F textColor = app.theme.text;
+                textColor.a = anim;
+                app.brush->SetColor(textColor);
+                app.renderTarget->DrawText(app.searchQuery.c_str(), (UINT32)app.searchQuery.length(),
+                    searchTextFormat,
+                    D2D1::RectF(textX, barY + 12, textX + textWidth, barY + barHeight), app.brush);
+
+                // Blinking cursor
+                auto now = std::chrono::steady_clock::now();
+                auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+                bool cursorVisible = (ms % 1000) < 500;
+                if (app.searchActive && cursorVisible) {
+                    float queryWidth = measureText(app, app.searchQuery, searchTextFormat);
+                    float cursorX = textX + queryWidth + 2;
+                    app.brush->SetColor(textColor);
+                    app.renderTarget->DrawLine(
+                        D2D1::Point2F(cursorX, barY + 12),
+                        D2D1::Point2F(cursorX, barY + 32),
+                        app.brush, 1.5f);
+                    // Keep animating cursor
+                    InvalidateRect(app.hwnd, nullptr, FALSE);
+                }
+            }
+
+            // Match count
+            float countX = barX + barWidth - 80;
+            if (!app.searchQuery.empty()) {
+                wchar_t countText[32];
+                if (app.searchMatches.empty()) {
+                    wcscpy_s(countText, L"No matches");
+                    // Red color for no matches
+                    app.brush->SetColor(D2D1::ColorF(0.9f, 0.3f, 0.3f, anim));
+                } else {
+                    swprintf_s(countText, L"%d of %zu", app.searchCurrentIndex + 1, app.searchMatches.size());
+                    D2D1_COLOR_F countColor = app.theme.text;
+                    countColor.a = 0.7f * anim;
+                    app.brush->SetColor(countColor);
+                }
+                app.renderTarget->DrawText(countText, (UINT32)wcslen(countText), searchTextFormat,
+                    D2D1::RectF(countX, barY + 12, barX + barWidth - 10, barY + barHeight), app.brush);
+            }
+
+            searchTextFormat->Release();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2011,6 +2286,40 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 float maxScroll = std::max(0.0f, app->contentHeight - app->height);
                 bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
 
+                // Handle search-specific keys when search is active
+                if (app->showSearch && app->searchActive) {
+                    switch (wParam) {
+                        case VK_ESCAPE:
+                            // Close search
+                            app->showSearch = false;
+                            app->searchActive = false;
+                            app->searchQuery.clear();
+                            app->searchMatches.clear();
+                            app->searchAnimation = 0;
+                            InvalidateRect(hwnd, nullptr, FALSE);
+                            return 0;
+                        case VK_RETURN:
+                            // Cycle to next match
+                            if (!app->searchMatches.empty()) {
+                                app->searchCurrentIndex = (app->searchCurrentIndex + 1) % (int)app->searchMatches.size();
+                                scrollToCurrentMatch(*app);
+                                InvalidateRect(hwnd, nullptr, FALSE);
+                            }
+                            return 0;
+                        case VK_BACK:
+                            // Delete last character
+                            if (!app->searchQuery.empty()) {
+                                app->searchQuery.pop_back();
+                                performSearch(*app);
+                                if (!app->searchMatches.empty()) {
+                                    scrollToCurrentMatch(*app);
+                                }
+                                InvalidateRect(hwnd, nullptr, FALSE);
+                            }
+                            return 0;
+                    }
+                }
+
                 if (ctrl) {
                     switch (wParam) {
                         case 'A': {
@@ -2046,11 +2355,31 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                             }
                             break;
                         }
+                        case 'F':
+                            // Ctrl+F to open search
+                            if (!app->showSearch) {
+                                app->showSearch = true;
+                                app->searchActive = true;
+                                app->searchAnimation = 0;
+                                app->searchQuery.clear();
+                                app->searchMatches.clear();
+                                app->searchCurrentIndex = 0;
+                                app->searchJustOpened = true;
+                            }
+                            InvalidateRect(hwnd, nullptr, FALSE);
+                            break;
                     }
                 } else {
                     switch (wParam) {
                         case VK_ESCAPE:
-                            if (app->showThemeChooser) {
+                            // Priority: Search > Theme chooser > Quit
+                            if (app->showSearch) {
+                                app->showSearch = false;
+                                app->searchActive = false;
+                                app->searchQuery.clear();
+                                app->searchMatches.clear();
+                                app->searchAnimation = 0;
+                            } else if (app->showThemeChooser) {
                                 app->showThemeChooser = false;
                                 app->themeChooserAnimation = 0;
                             } else {
@@ -2058,31 +2387,52 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                             }
                             break;
                         case 'Q':
-                            if (!app->showThemeChooser) {
+                            if (!app->showThemeChooser && !app->showSearch) {
                                 PostQuitMessage(0);
                             }
                             break;
                         case 'T':
-                            app->showThemeChooser = !app->showThemeChooser;
-                            if (app->showThemeChooser) {
-                                app->themeChooserAnimation = 0;
+                            if (!app->showSearch) {
+                                app->showThemeChooser = !app->showThemeChooser;
+                                if (app->showThemeChooser) {
+                                    app->themeChooserAnimation = 0;
+                                }
                             }
                             InvalidateRect(hwnd, nullptr, FALSE);
                             break;
+                        case 'F':
+                            // F to open search (when not in search mode)
+                            if (!app->showSearch && !app->showThemeChooser) {
+                                app->showSearch = true;
+                                app->searchActive = true;
+                                app->searchAnimation = 0;
+                                app->searchQuery.clear();
+                                app->searchMatches.clear();
+                                app->searchCurrentIndex = 0;
+                                app->searchJustOpened = true;
+                                InvalidateRect(hwnd, nullptr, FALSE);
+                            }
+                            break;
                         case VK_UP:
                         case 'K':
-                            app->targetScrollY -= 50;
+                            if (!app->showSearch) {
+                                app->targetScrollY -= 50;
+                            }
                             break;
                         case VK_DOWN:
                         case 'J':
-                            app->targetScrollY += 50;
+                            if (!app->showSearch) {
+                                app->targetScrollY += 50;
+                            }
                             break;
                         case VK_PRIOR: // Page Up
                             app->targetScrollY -= pageSize;
                             break;
                         case VK_NEXT: // Page Down
                         case VK_SPACE:
-                            app->targetScrollY += pageSize;
+                            if (!app->showSearch) {
+                                app->targetScrollY += pageSize;
+                            }
                             break;
                         case VK_HOME:
                             app->targetScrollY = 0;
@@ -2091,7 +2441,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                             app->targetScrollY = maxScroll;
                             break;
                         case 'S':
-                            app->showStats = !app->showStats;
+                            if (!app->showSearch) {
+                                app->showStats = !app->showStats;
+                            }
                             break;
                     }
                 }
@@ -2099,6 +2451,27 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 app->targetScrollY = std::max(0.0f, std::min(app->targetScrollY, maxScroll));
                 app->scrollY = app->targetScrollY;
                 InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
+
+        case WM_CHAR:
+            if (app && app->showSearch && app->searchActive) {
+                // Skip the character that opened search (F key)
+                if (app->searchJustOpened) {
+                    app->searchJustOpened = false;
+                    return 0;
+                }
+                wchar_t ch = (wchar_t)wParam;
+                // Only handle printable characters (not control chars)
+                if (ch >= 32 && ch != 127) {
+                    app->searchQuery += ch;
+                    performSearch(*app);
+                    if (!app->searchMatches.empty()) {
+                        app->searchCurrentIndex = 0;
+                        scrollToCurrentMatch(*app);
+                    }
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
             }
             return 0;
 
@@ -2186,6 +2559,7 @@ int main() {
 
 ## Keyboard Shortcuts
 
+- **F** or **Ctrl+F** - Open search
 - **T** - Open theme chooser
 - **S** - Toggle stats overlay
 - **Ctrl+C** - Copy text

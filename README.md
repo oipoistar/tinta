@@ -21,6 +21,7 @@ Built with Direct2D and DirectWrite for hardware-accelerated rendering. ~270KB b
 - **Lightning-fast startup** - Direct2D rendering, no web engine overhead
 - **10 beautiful themes** - 5 light and 5 dark themes to choose from
 - **Hardware-accelerated** - Smooth text rendering via DirectWrite
+- **Search** - Find text with F or Ctrl+F, cycle through matches with Enter
 - **Persistent settings** - Remembers your theme, zoom level, and window position
 - **Text selection & copy** - Select text and copy to clipboard
 - **Zoom support** - Ctrl+scroll to zoom in/out
@@ -31,6 +32,9 @@ Built with Direct2D and DirectWrite for hardware-accelerated rendering. ~270KB b
 
 | Key | Action |
 |-----|--------|
+| `F` / `Ctrl+F` | Open search |
+| `Enter` | Next search match |
+| `ESC` | Close search / Quit |
 | `T` | Open theme chooser |
 | `S` | Toggle stats overlay |
 | `Ctrl+C` | Copy selected text (or all if none selected) |
@@ -39,7 +43,7 @@ Built with Direct2D and DirectWrite for hardware-accelerated rendering. ~270KB b
 | `Arrow keys` / `J/K` | Scroll |
 | `Page Up/Down` | Page scroll |
 | `Home/End` | Jump to start/end |
-| `Q` / `ESC` | Quit |
+| `Q` | Quit |
 
 ## Building
 

@@ -21,6 +21,7 @@ cmake-build-*/
 *.log
 .DS_Store
 Thumbs.db
+CLAUDE.md
 
 # Website (separate repo)
 web/
