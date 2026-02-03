@@ -1,0 +1,239 @@
+#ifndef TINTA_APP_H
+#define TINTA_APP_H
+
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <d2d1.h>
+#include <dwrite.h>
+
+#include <string>
+#include <vector>
+#include <chrono>
+
+#include "markdown.h"
+
+using namespace qmd;
+
+// Timing helpers
+using Clock = std::chrono::high_resolution_clock;
+inline int64_t usElapsed(Clock::time_point start) {
+    return std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count();
+}
+
+// Startup metrics
+struct StartupMetrics {
+    int64_t windowInitUs = 0;
+    int64_t d2dInitUs = 0;
+    int64_t dwriteInitUs = 0;
+    int64_t renderTargetUs = 0;
+    int64_t fileLoadUs = 0;
+    int64_t showWindowUs = 0;
+    int64_t consoleInitUs = 0;
+    int64_t totalStartupUs = 0;
+};
+
+// Syntax highlighting token types
+enum class SyntaxTokenType { Plain, Keyword, String, Comment, Number, Function, TypeName, Operator };
+
+// Theme colors
+struct D2DTheme {
+    const wchar_t* name;
+    const wchar_t* fontFamily;       // Main font
+    const wchar_t* codeFontFamily;   // Monospace font
+    bool isDark;
+    D2D1_COLOR_F background;
+    D2D1_COLOR_F text;
+    D2D1_COLOR_F heading;
+    D2D1_COLOR_F link;
+    D2D1_COLOR_F code;
+    D2D1_COLOR_F codeBackground;
+    D2D1_COLOR_F blockquoteBorder;
+    D2D1_COLOR_F accent;             // For UI elements
+    // Syntax highlighting colors
+    D2D1_COLOR_F syntaxKeyword;
+    D2D1_COLOR_F syntaxString;
+    D2D1_COLOR_F syntaxComment;
+    D2D1_COLOR_F syntaxNumber;
+    D2D1_COLOR_F syntaxFunction;
+    D2D1_COLOR_F syntaxType;
+};
+
+// Helper to create color from hex
+inline D2D1_COLOR_F hexColor(uint32_t hex, float alpha = 1.0f) {
+    return D2D1::ColorF(
+        ((hex >> 16) & 0xFF) / 255.0f,
+        ((hex >> 8) & 0xFF) / 255.0f,
+        (hex & 0xFF) / 255.0f,
+        alpha
+    );
+}
+
+// Themes array (defined in themes.cpp)
+extern const D2DTheme THEMES[];
+extern const int THEME_COUNT;
+
+// Persistent settings
+struct Settings {
+    int themeIndex = 5;          // Default to Midnight
+    float zoomFactor = 1.0f;
+    int windowX = CW_USEDEFAULT;
+    int windowY = CW_USEDEFAULT;
+    int windowWidth = 1024;
+    int windowHeight = 768;
+    bool windowMaximized = false;
+    bool hasAskedFileAssociation = false;
+};
+
+// Application state
+struct App {
+    // Win32
+    HWND hwnd = nullptr;
+    int width = 1024;
+    int height = 768;
+    bool running = true;
+
+    // Direct2D
+    ID2D1Factory* d2dFactory = nullptr;
+    ID2D1HwndRenderTarget* renderTarget = nullptr;
+    ID2D1SolidColorBrush* brush = nullptr;
+
+    // DirectWrite
+    IDWriteFactory* dwriteFactory = nullptr;
+    IDWriteTextFormat* textFormat = nullptr;
+    IDWriteTextFormat* headingFormat = nullptr;
+    IDWriteTextFormat* codeFormat = nullptr;
+    IDWriteTextFormat* boldFormat = nullptr;
+    IDWriteTextFormat* italicFormat = nullptr;
+
+    // OpenType typography
+    IDWriteTypography* bodyTypography = nullptr;
+    IDWriteTypography* codeTypography = nullptr;
+
+    // Markdown
+    MarkdownParser parser;
+    ElementPtr root;
+    std::string currentFile;
+    size_t parseTimeUs = 0;
+    float contentHeight = 0;
+    float contentWidth = 0;
+
+    // State
+    float scrollY = 0;
+    float scrollX = 0;
+    float targetScrollY = 0;
+    float targetScrollX = 0;
+    float contentScale = 1.0f;  // DPI scale
+    float zoomFactor = 1.0f;    // User zoom (Ctrl+scroll)
+    bool darkMode = true;
+    bool showStats = false;
+    int currentThemeIndex = 5;  // Default to "Midnight" (first dark theme)
+    D2DTheme theme = THEMES[5];
+
+    // Theme chooser overlay
+    bool showThemeChooser = false;
+    int hoveredThemeIndex = -1;
+    float themeChooserAnimation = 0.0f;  // 0 to 1 for fade in
+
+    // Mouse
+    bool mouseDown = false;
+    int mouseX = 0;
+    int mouseY = 0;
+
+    // Vertical scrollbar
+    bool scrollbarHovered = false;
+    bool scrollbarDragging = false;
+    float scrollbarDragStartY = 0;
+    float scrollbarDragStartScroll = 0;
+
+    // Horizontal scrollbar
+    bool hScrollbarHovered = false;
+    bool hScrollbarDragging = false;
+    float hScrollbarDragStartX = 0;
+    float hScrollbarDragStartScroll = 0;
+
+    // Links - tracked during render for click detection
+    struct LinkRect {
+        D2D1_RECT_F bounds;
+        std::string url;
+    };
+    std::vector<LinkRect> linkRects;
+    std::string hoveredLink;
+
+    // Text bounds - tracked for cursor changes and selection
+    struct TextRect {
+        D2D1_RECT_F rect;
+        std::wstring text;
+        size_t docStart = 0;  // Start position in docText
+    };
+    std::vector<TextRect> textRects;
+
+    // Search match info
+    struct SearchMatch {
+        size_t textRectIndex;       // Index into textRects
+        size_t startPos;            // Character offset in text
+        size_t length;              // Match length
+        D2D1_RECT_F highlightRect;  // Computed highlight bounds
+    };
+    std::vector<SearchMatch> searchMatches;
+    bool overText = false;
+
+    // Text selection
+    bool selecting = false;
+    int selStartX = 0, selStartY = 0;
+    int selEndX = 0, selEndY = 0;
+    bool hasSelection = false;
+    std::wstring selectedText;
+
+    // Multi-click selection (double/triple click)
+    std::chrono::steady_clock::time_point lastClickTime;
+    int clickCount = 0;
+    int lastClickX = 0, lastClickY = 0;
+    enum class SelectionMode { Normal, Word, Line } selectionMode = SelectionMode::Normal;
+    // Anchor bounds for word/line selection (the original word/line that was clicked)
+    float anchorLeft = 0, anchorRight = 0, anchorTop = 0, anchorBottom = 0;
+
+    // Document text built during render (used for search/mapping)
+    std::wstring docText;
+
+    // Search match layout mapping (document Y for each match)
+    std::vector<float> searchMatchYs;
+    size_t searchMatchCursor = 0;
+
+    // Copied notification (fades out over 2 seconds)
+    bool showCopiedNotification = false;
+    float copiedNotificationAlpha = 0.0f;
+    std::chrono::steady_clock::time_point copiedNotificationStart;
+
+    // Search overlay
+    bool showSearch = false;
+    float searchAnimation = 0.0f;
+    std::wstring searchQuery;
+    int searchCurrentIndex = 0;
+    bool searchActive = false;
+    bool searchJustOpened = false;  // Skip WM_CHAR after opening with F key
+
+    // Metrics
+    StartupMetrics metrics;
+    size_t drawCalls = 0;
+
+    ~App() { shutdown(); }
+
+    void shutdown() {
+        if (brush) { brush->Release(); brush = nullptr; }
+        if (renderTarget) { renderTarget->Release(); renderTarget = nullptr; }
+        if (textFormat) { textFormat->Release(); textFormat = nullptr; }
+        if (headingFormat) { headingFormat->Release(); headingFormat = nullptr; }
+        if (codeFormat) { codeFormat->Release(); codeFormat = nullptr; }
+        if (boldFormat) { boldFormat->Release(); boldFormat = nullptr; }
+        if (italicFormat) { italicFormat->Release(); italicFormat = nullptr; }
+        if (bodyTypography) { bodyTypography->Release(); bodyTypography = nullptr; }
+        if (codeTypography) { codeTypography->Release(); codeTypography = nullptr; }
+        if (dwriteFactory) { dwriteFactory->Release(); dwriteFactory = nullptr; }
+        if (d2dFactory) { d2dFactory->Release(); d2dFactory = nullptr; }
+    }
+};
+
+#endif // TINTA_APP_H

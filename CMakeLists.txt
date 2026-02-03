@@ -30,11 +30,25 @@ FetchContent_MakeAvailable(md4c)
 set(SOURCES
     src/main_d2d.cpp
     src/markdown.cpp
+    src/themes.cpp
+    src/settings.cpp
+    src/d2d_init.cpp
+    src/syntax.cpp
+    src/utils.cpp
+    src/search.cpp
+    src/render.cpp
 )
 
 set(HEADERS
     include/markdown.h
     include/types.h
+    include/app.h
+    include/settings.h
+    include/d2d_init.h
+    include/syntax.h
+    include/utils.h
+    include/search.h
+    include/render.h
 )
 
 # Windows resource file (icon)
