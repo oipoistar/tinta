@@ -1,42 +1,24 @@
 #include "search.h"
 #include "utils.h"
 
-void recordSearchMatchPositions(App& app, size_t segStart, size_t segEnd, float lineY) {
-    if (segEnd <= segStart) return;
-    if (app.searchMatchCursor >= app.searchMatches.size()) return;
-    if (app.searchMatchYs.size() != app.searchMatches.size()) return;
-
-    while (app.searchMatchCursor < app.searchMatches.size()) {
-        const auto& match = app.searchMatches[app.searchMatchCursor];
-        if (match.startPos < segStart) {
-            app.searchMatchCursor++;
-            continue;
-        }
-        if (match.startPos >= segEnd) {
-            break;
-        }
-        if (app.searchMatchYs[app.searchMatchCursor] < 0.0f) {
-            app.searchMatchYs[app.searchMatchCursor] = lineY;
-        }
-        app.searchMatchCursor++;
-    }
-}
-
 void performSearch(App& app) {
     app.searchMatches.clear();
     app.searchCurrentIndex = 0;
+    app.searchMatchCursor = 0;
 
     if (app.searchQuery.empty() || !app.root) return;
 
-    // Use render-built document text when available
-    std::wstring fullText = app.docText;
-    if (fullText.empty()) {
-        extractText(app.root, fullText);
-        app.docText = fullText;
+    // Use layout-built document text when available
+    if (app.docText.empty()) {
+        extractText(app.root, app.docText);
+    }
+    if (app.docText.empty()) return;
+    if (app.docTextLower.empty()) {
+        app.docTextLower = toLower(app.docText);
     }
 
     std::wstring queryLower = toLower(app.searchQuery);
-    std::wstring textLower = toLower(fullText);
+    const std::wstring& textLower = app.docTextLower;
 
     // Count all matches in full document
     size_t pos = 0;
@@ -51,6 +33,49 @@ void performSearch(App& app) {
     }
 
     app.searchMatchYs.assign(app.searchMatches.size(), -1.0f);
+    mapSearchMatchesToLayout(app);
+}
+
+void mapSearchMatchesToLayout(App& app) {
+    if (app.searchMatches.empty()) {
+        app.searchMatchYs.clear();
+        return;
+    }
+    if (app.textRects.empty()) return;
+    if (app.searchMatchYs.size() != app.searchMatches.size()) {
+        app.searchMatchYs.assign(app.searchMatches.size(), -1.0f);
+    }
+
+    size_t matchIndex = 0;
+    for (const auto& tr : app.textRects) {
+        size_t rectStart = tr.docStart;
+        size_t rectEnd = rectStart + tr.docLength;
+        if (rectEnd <= rectStart) continue;
+
+        while (matchIndex < app.searchMatches.size()) {
+            const auto& m = app.searchMatches[matchIndex];
+            size_t mEnd = m.startPos + m.length;
+            if (mEnd <= rectStart) {
+                matchIndex++;
+                continue;
+            }
+            break;
+        }
+
+        size_t mi = matchIndex;
+        while (mi < app.searchMatches.size()) {
+            const auto& m = app.searchMatches[mi];
+            if (m.startPos >= rectEnd) break;
+
+            if (app.searchMatchYs[mi] < 0.0f) {
+                // Use line top as match Y (document coordinates)
+                app.searchMatchYs[mi] = tr.rect.top;
+            }
+            mi++;
+        }
+
+        matchIndex = mi;
+    }
 }
 
 void scrollToCurrentMatch(App& app) {
@@ -72,13 +97,8 @@ void scrollToCurrentMatch(App& app) {
 
     // Fallback: estimate based on character ratio
     if (estimatedY < 0.0f) {
-        std::wstring fullText = app.docText;
-        if (fullText.empty()) {
-            extractText(app.root, fullText);
-        }
-        if (fullText.empty()) return;
-
-        float positionRatio = (float)match.startPos / (float)fullText.length();
+        if (app.docText.empty()) return;
+        float positionRatio = (float)match.startPos / (float)app.docText.length();
         estimatedY = positionRatio * app.contentHeight;
     }
 

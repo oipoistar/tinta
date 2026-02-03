@@ -3,6 +3,7 @@
 
 #include "app.h"
 #include <string>
+#include <string_view>
 
 // Simple inline element rendering
 struct InlineSpan {
@@ -16,6 +17,7 @@ struct InlineSpan {
 std::wstring toWide(const std::string& str);
 float measureText(App& app, const std::wstring& text, IDWriteTextFormat* format);
 std::wstring toLower(const std::wstring& str);
+std::wstring_view textViewForRect(const App& app, const App::TextRect& tr);
 
 // Word/line boundary helpers
 bool isWordBoundary(wchar_t c);

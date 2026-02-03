@@ -91,11 +91,13 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
         if (inBlockComment) {
             size_t endComment = line.find(L"*/", i);
             if (endComment != std::wstring::npos) {
-                tokens.push_back({line.substr(i, endComment + 2 - i), SyntaxTokenType::Comment});
+                tokens.push_back({std::wstring_view(line.data() + i, endComment + 2 - i),
+                                  SyntaxTokenType::Comment});
                 i = endComment + 2;
                 inBlockComment = false;
             } else {
-                tokens.push_back({line.substr(i), SyntaxTokenType::Comment});
+                tokens.push_back({std::wstring_view(line.data() + i, line.length() - i),
+                                  SyntaxTokenType::Comment});
                 return tokens;
             }
             continue;
@@ -107,7 +109,8 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
         if (iswspace(c)) {
             size_t start = i;
             while (i < line.length() && iswspace(line[i])) i++;
-            tokens.push_back({line.substr(start, i - start), SyntaxTokenType::Plain});
+            tokens.push_back({std::wstring_view(line.data() + start, i - start),
+                              SyntaxTokenType::Plain});
             continue;
         }
 
@@ -115,17 +118,20 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
         if (i + 1 < line.length()) {
             if ((line[i] == L'/' && line[i+1] == L'/') ||  // C/C++/JS/Rust/Go
                 (language == 2 && line[i] == L'#')) {       // Python
-                tokens.push_back({line.substr(i), SyntaxTokenType::Comment});
+                tokens.push_back({std::wstring_view(line.data() + i, line.length() - i),
+                                  SyntaxTokenType::Comment});
                 return tokens;
             }
             // Block comment start
             if (line[i] == L'/' && line[i+1] == L'*') {
                 size_t endComment = line.find(L"*/", i + 2);
                 if (endComment != std::wstring::npos) {
-                    tokens.push_back({line.substr(i, endComment + 2 - i), SyntaxTokenType::Comment});
+                    tokens.push_back({std::wstring_view(line.data() + i, endComment + 2 - i),
+                                      SyntaxTokenType::Comment});
                     i = endComment + 2;
                 } else {
-                    tokens.push_back({line.substr(i), SyntaxTokenType::Comment});
+                    tokens.push_back({std::wstring_view(line.data() + i, line.length() - i),
+                                      SyntaxTokenType::Comment});
                     inBlockComment = true;
                     return tokens;
                 }
@@ -134,7 +140,8 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
         }
         // Python single # comment
         if (language == 2 && c == L'#') {
-            tokens.push_back({line.substr(i), SyntaxTokenType::Comment});
+            tokens.push_back({std::wstring_view(line.data() + i, line.length() - i),
+                              SyntaxTokenType::Comment});
             return tokens;
         }
 
@@ -153,7 +160,8 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
                     i++;
                 }
             }
-            tokens.push_back({line.substr(start, i - start), SyntaxTokenType::String});
+            tokens.push_back({std::wstring_view(line.data() + start, i - start),
+                              SyntaxTokenType::String});
             continue;
         }
 
@@ -167,7 +175,8 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
                 while (i < line.length() && (iswdigit(line[i]) || line[i] == L'.' ||
                        line[i] == L'e' || line[i] == L'E' || line[i] == L'f' || line[i] == L'L')) i++;
             }
-            tokens.push_back({line.substr(start, i - start), SyntaxTokenType::Number});
+            tokens.push_back({std::wstring_view(line.data() + start, i - start),
+                              SyntaxTokenType::Number});
             continue;
         }
 
@@ -176,6 +185,7 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
             size_t start = i;
             while (i < line.length() && (iswalnum(line[i]) || line[i] == L'_')) i++;
             std::wstring word = line.substr(start, i - start);
+            std::wstring_view view(line.data() + start, i - start);
 
             // Check if it's a function call (followed by parenthesis)
             size_t next = i;
@@ -184,13 +194,13 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
 
             // Check if keyword
             if (keywords && keywords->count(word)) {
-                tokens.push_back({word, SyntaxTokenType::Keyword});
+                tokens.push_back({view, SyntaxTokenType::Keyword});
             } else if (language == 1 && CPP_TYPES.count(word)) {
-                tokens.push_back({word, SyntaxTokenType::TypeName});
+                tokens.push_back({view, SyntaxTokenType::TypeName});
             } else if (isFunction) {
-                tokens.push_back({word, SyntaxTokenType::Function});
+                tokens.push_back({view, SyntaxTokenType::Function});
             } else {
-                tokens.push_back({word, SyntaxTokenType::Plain});
+                tokens.push_back({view, SyntaxTokenType::Plain});
             }
             continue;
         }
@@ -201,16 +211,17 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
             i++;
             while (i < line.length() && (iswalnum(line[i]) || line[i] == L'_')) i++;
             std::wstring directive = line.substr(start, i - start);
+            std::wstring_view view(line.data() + start, i - start);
             if (keywords && keywords->count(directive)) {
-                tokens.push_back({directive, SyntaxTokenType::Keyword});
+                tokens.push_back({view, SyntaxTokenType::Keyword});
             } else {
-                tokens.push_back({directive, SyntaxTokenType::Plain});
+                tokens.push_back({view, SyntaxTokenType::Plain});
             }
             continue;
         }
 
         // Operators and punctuation
-        tokens.push_back({std::wstring(1, c), SyntaxTokenType::Operator});
+        tokens.push_back({std::wstring_view(line.data() + i, 1), SyntaxTokenType::Operator});
         i++;
     }
 

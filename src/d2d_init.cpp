@@ -1,4 +1,5 @@
 #include "d2d_init.h"
+#include "utils.h"
 
 bool initD2D(App& app) {
     auto t0 = Clock::now();
@@ -41,11 +42,13 @@ void updateTextFormats(App& app) {
     if (app.codeFormat) { app.codeFormat->Release(); app.codeFormat = nullptr; }
     if (app.boldFormat) { app.boldFormat->Release(); app.boldFormat = nullptr; }
     if (app.italicFormat) { app.italicFormat->Release(); app.italicFormat = nullptr; }
+    for (auto& fmt : app.headingFormats) {
+        if (fmt) { fmt->Release(); fmt = nullptr; }
+    }
 
     // Create text formats with current zoom and theme fonts
     float scale = app.contentScale * app.zoomFactor;
     float fontSize = 16.0f * scale;
-    float headingSize = 28.0f * scale;
     float codeSize = 14.0f * scale;
 
     const wchar_t* fontFamily = app.theme.fontFamily;
@@ -57,7 +60,7 @@ void updateTextFormats(App& app) {
 
     app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        headingSize, L"en-us", &app.headingFormat);
+        28.0f * scale, L"en-us", &app.headingFormat);
 
     app.dwriteFactory->CreateTextFormat(codeFont, nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
@@ -71,12 +74,67 @@ void updateTextFormats(App& app) {
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
         fontSize, L"en-us", &app.italicFormat);
 
+    // Heading formats by level (use Segoe UI to match previous behavior)
+    const wchar_t* headingFont = L"Segoe UI";
+    float headingSizes[] = {32, 26, 22, 18, 16, 14};
+    for (int i = 0; i < 6; i++) {
+        app.dwriteFactory->CreateTextFormat(headingFont, nullptr,
+            DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            headingSizes[i] * scale, L"en-us", &app.headingFormats[i]);
+    }
+
     // Set consistent baseline alignment for all formats
     if (app.textFormat) app.textFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     if (app.headingFormat) app.headingFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     if (app.codeFormat) app.codeFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     if (app.boldFormat) app.boldFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     if (app.italicFormat) app.italicFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    for (auto* fmt : app.headingFormats) {
+        if (fmt) fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    }
+
+    // Cache space widths
+    if (app.textFormat) app.spaceWidthText = measureText(app, L" ", app.textFormat);
+    if (app.boldFormat) app.spaceWidthBold = measureText(app, L" ", app.boldFormat);
+    if (app.italicFormat) app.spaceWidthItalic = measureText(app, L" ", app.italicFormat);
+    if (app.codeFormat) app.spaceWidthCode = measureText(app, L" ", app.codeFormat);
+
+    updateOverlayFormats(app);
+    app.layoutDirty = true;
+}
+
+void updateOverlayFormats(App& app) {
+    app.releaseOverlayFormats();
+
+    float scale = app.contentScale;
+
+    // Search overlay format
+    app.dwriteFactory->CreateTextFormat(app.theme.fontFamily, nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        16.0f * scale, L"en-us", &app.searchTextFormat);
+
+    // Theme chooser formats
+    app.dwriteFactory->CreateTextFormat(L"Segoe UI Light", nullptr,
+        DWRITE_FONT_WEIGHT_LIGHT, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        28.0f * scale, L"en-us", &app.themeTitleFormat);
+
+    app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        11.0f * scale, L"en-us", &app.themeHeaderFormat);
+
+    app.themePreviewFormats.resize(THEME_COUNT);
+    for (int i = 0; i < THEME_COUNT; i++) {
+        const D2DTheme& t = THEMES[i];
+        app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            14.0f * scale, L"en-us", &app.themePreviewFormats[i].name);
+        app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
+            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            11.0f * scale, L"en-us", &app.themePreviewFormats[i].preview);
+        app.dwriteFactory->CreateTextFormat(t.codeFontFamily, nullptr,
+            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            10.0f * scale, L"en-us", &app.themePreviewFormats[i].code);
+    }
 }
 
 void createTypography(App& app) {

@@ -107,6 +107,19 @@ struct App {
     IDWriteTextFormat* codeFormat = nullptr;
     IDWriteTextFormat* boldFormat = nullptr;
     IDWriteTextFormat* italicFormat = nullptr;
+    IDWriteTextFormat* headingFormats[6] = {};
+
+    // Overlay text formats (cached)
+    IDWriteTextFormat* searchTextFormat = nullptr;
+    IDWriteTextFormat* themeTitleFormat = nullptr;
+    IDWriteTextFormat* themeHeaderFormat = nullptr;
+
+    struct ThemePreviewFormats {
+        IDWriteTextFormat* name = nullptr;
+        IDWriteTextFormat* preview = nullptr;
+        IDWriteTextFormat* code = nullptr;
+    };
+    std::vector<ThemePreviewFormats> themePreviewFormats;
 
     // OpenType typography
     IDWriteTypography* bodyTypography = nullptr;
@@ -162,13 +175,23 @@ struct App {
     std::vector<LinkRect> linkRects;
     std::string hoveredLink;
 
-    // Text bounds - tracked for cursor changes and selection
+    // Text bounds - tracked for cursor changes and selection (document coordinates)
     struct TextRect {
         D2D1_RECT_F rect;
-        std::wstring text;
-        size_t docStart = 0;  // Start position in docText
+        size_t docStart = 0;   // Start position in docText
+        size_t docLength = 0;  // Length in docText
     };
     std::vector<TextRect> textRects;
+
+    // Line buckets for fast hit-testing/selection
+    struct LineBucket {
+        float top = 0;
+        float bottom = 0;
+        float minX = 0;
+        float maxX = 0;
+        std::vector<size_t> textRectIndices;
+    };
+    std::vector<LineBucket> lineBuckets;
 
     // Search match info
     struct SearchMatch {
@@ -197,6 +220,38 @@ struct App {
 
     // Document text built during render (used for search/mapping)
     std::wstring docText;
+    std::wstring docTextLower;
+
+    // Cached space widths for common formats
+    float spaceWidthText = 0.0f;
+    float spaceWidthBold = 0.0f;
+    float spaceWidthItalic = 0.0f;
+    float spaceWidthCode = 0.0f;
+
+    // Layout cache (document coordinates)
+    struct LayoutTextRun {
+        IDWriteTextLayout* layout = nullptr;
+        D2D1_POINT_2F pos{};
+        D2D1_RECT_F bounds{};
+        D2D1_COLOR_F color{};
+        size_t docStart = 0;
+        size_t docLength = 0;
+        bool selectable = false;
+    };
+    struct LayoutRect {
+        D2D1_RECT_F rect{};
+        D2D1_COLOR_F color{};
+    };
+    struct LayoutLine {
+        D2D1_POINT_2F p1{};
+        D2D1_POINT_2F p2{};
+        D2D1_COLOR_F color{};
+        float stroke = 1.0f;
+    };
+    std::vector<LayoutTextRun> layoutTextRuns;
+    std::vector<LayoutRect> layoutRects;
+    std::vector<LayoutLine> layoutLines;
+    bool layoutDirty = true;
 
     // Search match layout mapping (document Y for each match)
     std::vector<float> searchMatchYs;
@@ -221,7 +276,37 @@ struct App {
 
     ~App() { shutdown(); }
 
+    void clearLayoutCache() {
+        for (auto& run : layoutTextRuns) {
+            if (run.layout) {
+                run.layout->Release();
+            }
+        }
+        layoutTextRuns.clear();
+        layoutRects.clear();
+        layoutLines.clear();
+        linkRects.clear();
+        textRects.clear();
+        lineBuckets.clear();
+        docText.clear();
+        docTextLower.clear();
+    }
+
+    void releaseOverlayFormats() {
+        if (searchTextFormat) { searchTextFormat->Release(); searchTextFormat = nullptr; }
+        if (themeTitleFormat) { themeTitleFormat->Release(); themeTitleFormat = nullptr; }
+        if (themeHeaderFormat) { themeHeaderFormat->Release(); themeHeaderFormat = nullptr; }
+        for (auto& fmt : themePreviewFormats) {
+            if (fmt.name) { fmt.name->Release(); fmt.name = nullptr; }
+            if (fmt.preview) { fmt.preview->Release(); fmt.preview = nullptr; }
+            if (fmt.code) { fmt.code->Release(); fmt.code = nullptr; }
+        }
+        themePreviewFormats.clear();
+    }
+
     void shutdown() {
+        clearLayoutCache();
+        releaseOverlayFormats();
         if (brush) { brush->Release(); brush = nullptr; }
         if (renderTarget) { renderTarget->Release(); renderTarget = nullptr; }
         if (textFormat) { textFormat->Release(); textFormat = nullptr; }
@@ -229,6 +314,9 @@ struct App {
         if (codeFormat) { codeFormat->Release(); codeFormat = nullptr; }
         if (boldFormat) { boldFormat->Release(); boldFormat = nullptr; }
         if (italicFormat) { italicFormat->Release(); italicFormat = nullptr; }
+        for (auto& fmt : headingFormats) {
+            if (fmt) { fmt->Release(); fmt = nullptr; }
+        }
         if (bodyTypography) { bodyTypography->Release(); bodyTypography = nullptr; }
         if (codeTypography) { codeTypography->Release(); codeTypography = nullptr; }
         if (dwriteFactory) { dwriteFactory->Release(); dwriteFactory = nullptr; }

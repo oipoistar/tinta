@@ -42,8 +42,42 @@ bool isWordBoundary(wchar_t c) {
            c == L'+' || c == L'*' || c == L'&' || c == L'|';
 }
 
+static const App::LineBucket* findLineBucketAt(const App& app, float y) {
+    if (app.lineBuckets.empty()) return nullptr;
+
+    int lo = 0;
+    int hi = (int)app.lineBuckets.size() - 1;
+    const float tolerance = 5.0f;
+
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        const auto& line = app.lineBuckets[mid];
+        if (y < line.top - tolerance) {
+            hi = mid - 1;
+        } else if (y > line.bottom + tolerance) {
+            lo = mid + 1;
+        } else {
+            return &line;
+        }
+    }
+    return nullptr;
+}
+
+std::wstring_view textViewForRect(const App& app, const App::TextRect& tr) {
+    if (tr.docStart >= app.docText.size()) return {};
+    size_t len = tr.docLength;
+    if (tr.docStart + len > app.docText.size()) {
+        len = app.docText.size() - tr.docStart;
+    }
+    return std::wstring_view(app.docText.data() + tr.docStart, len);
+}
+
 const App::TextRect* findTextRectAt(const App& app, int x, int y) {
-    for (const auto& tr : app.textRects) {
+    const auto* line = findLineBucketAt(app, (float)y);
+    if (!line) return nullptr;
+
+    for (size_t idx : line->textRectIndices) {
+        const auto& tr = app.textRects[idx];
         if (x >= tr.rect.left && x <= tr.rect.right &&
             y >= tr.rect.top && y <= tr.rect.bottom) {
             return &tr;
@@ -54,25 +88,25 @@ const App::TextRect* findTextRectAt(const App& app, int x, int y) {
 
 bool findWordBoundsAt(const App& app, const App::TextRect& tr, int x,
                       float& wordLeft, float& wordRight) {
-    (void)app;
-    if (tr.text.empty()) return false;
+    std::wstring_view text = textViewForRect(app, tr);
+    if (text.empty()) return false;
 
     float totalWidth = tr.rect.right - tr.rect.left;
-    float charWidth = totalWidth / (float)tr.text.length();
+    float charWidth = totalWidth / (float)text.length();
 
     // Find which character was clicked
     int charIndex = (int)((x - tr.rect.left) / charWidth);
-    charIndex = std::max(0, std::min(charIndex, (int)tr.text.length() - 1));
+    charIndex = std::max(0, std::min(charIndex, (int)text.length() - 1));
 
     // Find word start (scan left)
     int wordStart = charIndex;
-    while (wordStart > 0 && !isWordBoundary(tr.text[wordStart - 1])) {
+    while (wordStart > 0 && !isWordBoundary(text[wordStart - 1])) {
         wordStart--;
     }
 
     // Find word end (scan right)
     int wordEnd = charIndex;
-    while (wordEnd < (int)tr.text.length() - 1 && !isWordBoundary(tr.text[wordEnd + 1])) {
+    while (wordEnd < (int)text.length() - 1 && !isWordBoundary(text[wordEnd + 1])) {
         wordEnd++;
     }
 
@@ -87,22 +121,13 @@ void findLineRects(const App& app, float y, float& lineLeft, float& lineRight,
     lineRight = 0.0f;
     lineTop = 0.0f;
     lineBottom = 0.0f;
-    bool found = false;
+    const auto* line = findLineBucketAt(app, y);
+    if (!line) return;
 
-    for (const auto& tr : app.textRects) {
-        float centerY = (tr.rect.top + tr.rect.bottom) / 2.0f;
-        if (std::abs(centerY - y) < 20) {  // Same line if within 20px
-            if (!found) {
-                lineTop = tr.rect.top;
-                lineBottom = tr.rect.bottom;
-                found = true;
-            }
-            lineLeft = std::min(lineLeft, tr.rect.left);
-            lineRight = std::max(lineRight, tr.rect.right);
-            lineTop = std::min(lineTop, tr.rect.top);
-            lineBottom = std::max(lineBottom, tr.rect.bottom);
-        }
-    }
+    lineLeft = line->minX;
+    lineRight = line->maxX;
+    lineTop = line->top;
+    lineBottom = line->bottom;
 }
 
 void openUrl(const std::string& url) {

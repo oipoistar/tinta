@@ -5,10 +5,11 @@
 #include <vector>
 #include <string>
 #include <unordered_set>
+#include <string_view>
 
 // Token for syntax highlighting
 struct SyntaxToken {
-    std::wstring text;
+    std::wstring_view text;
     SyntaxTokenType tokenType;
 };
 

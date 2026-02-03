@@ -32,51 +32,72 @@ void render(App& app) {
     app.renderTarget->BeginDraw();
     app.drawCalls = 0;
 
-    // Clear tracking for this frame
-    app.linkRects.clear();
-    app.textRects.clear();
-    app.docText.clear();
-
-    if (!app.searchMatches.empty()) {
-        if (app.searchMatchYs.size() != app.searchMatches.size()) {
-            app.searchMatchYs.resize(app.searchMatches.size(), -1.0f);
-        } else {
-            std::fill(app.searchMatchYs.begin(), app.searchMatchYs.end(), -1.0f);
-        }
-        app.searchMatchCursor = 0;
-    } else {
-        app.searchMatchYs.clear();
+    if (app.layoutDirty) {
+        layoutDocument(app);
     }
 
     // Clear background
     app.renderTarget->Clear(app.theme.background);
     app.drawCalls++;
 
-    // Render document
-    if (app.root) {
-        float scale = app.contentScale * app.zoomFactor;
-        float y = 20.0f * scale;
-        float indent = 40.0f * scale;
+    // Clamp scroll values
+    float maxScrollX = std::max(0.0f, app.contentWidth - app.width);
+    float maxScrollY = std::max(0.0f, app.contentHeight - app.height);
+    app.scrollX = std::max(0.0f, std::min(app.scrollX, maxScrollX));
+    app.scrollY = std::max(0.0f, std::min(app.scrollY, maxScrollY));
 
-        // Text flows within window width minus margins
-        // As zoom increases, indent grows, leaving less room for text (more wrapping)
-        float maxWidth = app.width - indent * 2;
+    // Render cached layout (document coordinates -> screen)
+    const float viewportTop = app.scrollY;
+    const float viewportBottom = app.scrollY + app.height;
+    const float viewportLeft = app.scrollX;
+    const float viewportRight = app.scrollX + app.width;
+    const float cullMargin = 100.0f;
 
-        // Content width matches window (text wraps to fit)
-        app.contentWidth = app.width;
-
-        for (const auto& child : app.root->children) {
-            renderElement(app, child, y, indent - app.scrollX, maxWidth);
+    for (const auto& rect : app.layoutRects) {
+        if (rect.rect.bottom < viewportTop - cullMargin ||
+            rect.rect.top > viewportBottom + cullMargin) {
+            continue;
         }
+        if (rect.rect.right < viewportLeft - cullMargin ||
+            rect.rect.left > viewportRight + cullMargin) {
+            continue;
+        }
+        app.brush->SetColor(rect.color);
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(rect.rect.left - app.scrollX, rect.rect.top - app.scrollY,
+                       rect.rect.right - app.scrollX, rect.rect.bottom - app.scrollY),
+            app.brush);
+        app.drawCalls++;
+    }
 
-        // Update content height (track the final y position)
-        app.contentHeight = y + 40.0f * scale;
+    for (const auto& run : app.layoutTextRuns) {
+        if (run.bounds.bottom < viewportTop - cullMargin ||
+            run.bounds.top > viewportBottom + cullMargin) {
+            continue;
+        }
+        if (run.bounds.right < viewportLeft - cullMargin ||
+            run.bounds.left > viewportRight + cullMargin) {
+            continue;
+        }
+        app.brush->SetColor(run.color);
+        app.renderTarget->DrawTextLayout(
+            D2D1::Point2F(run.pos.x - app.scrollX, run.pos.y - app.scrollY),
+            run.layout, app.brush);
+        app.drawCalls++;
+    }
 
-        // Clamp scroll values
-        float maxScrollX = std::max(0.0f, app.contentWidth - app.width);
-        float maxScrollY = std::max(0.0f, app.contentHeight - app.height);
-        app.scrollX = std::min(app.scrollX, maxScrollX);
-        app.scrollY = std::min(app.scrollY, maxScrollY);
+    for (const auto& line : app.layoutLines) {
+        float minY = std::min(line.p1.y, line.p2.y);
+        float maxY = std::max(line.p1.y, line.p2.y);
+        if (maxY < viewportTop - cullMargin || minY > viewportBottom + cullMargin) {
+            continue;
+        }
+        app.brush->SetColor(line.color);
+        app.renderTarget->DrawLine(
+            D2D1::Point2F(line.p1.x - app.scrollX, line.p1.y - app.scrollY),
+            D2D1::Point2F(line.p2.x - app.scrollX, line.p2.y - app.scrollY),
+            app.brush, line.stroke);
+        app.drawCalls++;
     }
 
     // Determine scrollbar visibility
@@ -128,11 +149,11 @@ void render(App& app) {
     // Draw selection highlights
     if ((app.selecting || app.hasSelection) && !app.textRects.empty()) {
         // Calculate selection bounds (normalized so start is always before end)
-        // Selection is stored in document coordinates, convert to screen coordinates
+        // Selection is stored in document coordinates
         float selStartX = (float)app.selStartX;
-        float selStartY = (float)app.selStartY - app.scrollY;
+        float selStartY = (float)app.selStartY;
         float selEndX = (float)app.selEndX;
-        float selEndY = (float)app.selEndY - app.scrollY;
+        float selEndY = (float)app.selEndY;
 
         // Swap if selection was made bottom-to-top
         if (selStartY > selEndY || (selStartY == selEndY && selStartX > selEndX)) {
@@ -146,35 +167,7 @@ void render(App& app) {
 
         app.brush->SetColor(D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f));
 
-        // Group text rects by line (Y position)
-        struct LineInfo {
-            float top, bottom;
-            float minX, maxX;
-            std::vector<const App::TextRect*> rects;
-        };
-        std::vector<LineInfo> lines;
-
-        for (const auto& tr : app.textRects) {
-            const D2D1_RECT_F& rect = tr.rect;
-            bool foundLine = false;
-            for (auto& line : lines) {
-                if (std::abs(rect.top - line.top) < 5) {
-                    line.minX = std::min(line.minX, rect.left);
-                    line.maxX = std::max(line.maxX, rect.right);
-                    line.rects.push_back(&tr);
-                    foundLine = true;
-                    break;
-                }
-            }
-            if (!foundLine) {
-                lines.push_back({rect.top, rect.bottom, rect.left, rect.right, {&tr}});
-            }
-        }
-
-        // Sort lines by Y position
-        std::sort(lines.begin(), lines.end(), [](const LineInfo& a, const LineInfo& b) {
-            return a.top < b.top;
-        });
+        const auto& lines = app.lineBuckets;
 
         std::wstring collectedText;
         size_t selectedCount = 0;
@@ -215,19 +208,22 @@ void render(App& app) {
             if (lineInSelection) {
                 // Draw continuous selection bar for this line
                 app.renderTarget->FillRectangle(
-                    D2D1::RectF(drawLeft, line.top, drawRight, line.bottom),
+                    D2D1::RectF(drawLeft - app.scrollX, line.top - app.scrollY,
+                                drawRight - app.scrollX, line.bottom - app.scrollY),
                     app.brush);
                 selectedCount++;
 
                 // Collect text from rects in this line that fall within selection
                 if (!collectedText.empty()) collectedText += L"\n";
-                for (const auto* tr : line.rects) {
-                    const D2D1_RECT_F& rect = tr->rect;
+                for (size_t idx : line.textRectIndices) {
+                    const auto& tr = app.textRects[idx];
+                    const D2D1_RECT_F& rect = tr.rect;
                     if (rect.left < drawRight && rect.right > drawLeft) {
                         if (!collectedText.empty() && collectedText.back() != L'\n') {
                             collectedText += L" ";
                         }
-                        collectedText += tr->text;
+                        std::wstring_view slice = textViewForRect(app, tr);
+                        collectedText.append(slice.data(), slice.size());
                     }
                 }
             }
@@ -251,7 +247,7 @@ void render(App& app) {
 
         size_t matchIndex = 0;
         for (const auto& tr : app.textRects) {
-            size_t textLen = tr.text.length();
+            size_t textLen = tr.docLength;
             if (textLen == 0) continue;
 
             size_t rectStart = tr.docStart;
@@ -314,7 +310,10 @@ void render(App& app) {
                 app.brush->SetColor(D2D1::ColorF(1.0f, 0.9f, 0.0f, 0.3f));  // Yellow
             }
 
-            app.renderTarget->FillRectangle(vm.rect, app.brush);
+            app.renderTarget->FillRectangle(
+                D2D1::RectF(vm.rect.left - app.scrollX, vm.rect.top - app.scrollY,
+                            vm.rect.right - app.scrollX, vm.rect.bottom - app.scrollY),
+                app.brush);
             app.drawCalls++;
         }
     }
@@ -444,10 +443,7 @@ void render(App& app) {
         }
 
         // Search text
-        IDWriteTextFormat* searchTextFormat = nullptr;
-        app.dwriteFactory->CreateTextFormat(app.theme.fontFamily, nullptr,
-            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            16, L"en-us", &searchTextFormat);
+        IDWriteTextFormat* searchTextFormat = app.searchTextFormat;
         if (searchTextFormat) {
             float textX = barX + 42;
             float textWidth = barWidth - 120;  // Leave room for count
@@ -503,7 +499,6 @@ void render(App& app) {
                     D2D1::RectF(countX, barY + 12, barX + barWidth - 10, barY + barHeight), app.brush);
             }
 
-            searchTextFormat->Release();
         }
     }
 
@@ -543,16 +538,12 @@ void render(App& app) {
         app.renderTarget->DrawRoundedRectangle(panelRect, app.brush, 1.0f);
 
         // Title
-        IDWriteTextFormat* titleFormat = nullptr;
-        app.dwriteFactory->CreateTextFormat(L"Segoe UI Light", nullptr,
-            DWRITE_FONT_WEIGHT_LIGHT, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            28, L"en-us", &titleFormat);
+        IDWriteTextFormat* titleFormat = app.themeTitleFormat;
         if (titleFormat) {
             titleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
             app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
             app.renderTarget->DrawText(L"Choose Theme", 12, titleFormat,
                 D2D1::RectF(panelX, panelY + 15, panelX + panelWidth, panelY + 55), app.brush);
-            titleFormat->Release();
         }
 
         // Theme grid - 2 columns, 5 rows
@@ -609,24 +600,19 @@ void render(App& app) {
             app.renderTarget->FillRoundedRectangle(cardRect, app.brush);
 
             // Theme name
-            IDWriteTextFormat* nameFormat = nullptr;
-            app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
-                DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                14, L"en-us", &nameFormat);
+            IDWriteTextFormat* nameFormat = (i < (int)app.themePreviewFormats.size()) ?
+                app.themePreviewFormats[i].name : nullptr;
             if (nameFormat) {
                 D2D1_COLOR_F nameColor = t.heading;
                 nameColor.a = anim;
                 app.brush->SetColor(nameColor);
                 app.renderTarget->DrawText(t.name, (UINT32)wcslen(t.name), nameFormat,
                     D2D1::RectF(innerX + 12, innerY + 8, innerX + innerW - 10, innerY + 28), app.brush);
-                nameFormat->Release();
             }
 
             // Preview text samples
-            IDWriteTextFormat* previewFormat = nullptr;
-            app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
-                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                11, L"en-us", &previewFormat);
+            IDWriteTextFormat* previewFormat = (i < (int)app.themePreviewFormats.size()) ?
+                app.themePreviewFormats[i].preview : nullptr;
             if (previewFormat) {
                 // Sample text
                 D2D1_COLOR_F textColor = t.text;
@@ -651,20 +637,15 @@ void render(App& app) {
                     app.brush);
 
                 // Code text
-                IDWriteTextFormat* codePreviewFormat = nullptr;
-                app.dwriteFactory->CreateTextFormat(t.codeFontFamily, nullptr,
-                    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                    10, L"en-us", &codePreviewFormat);
+                IDWriteTextFormat* codePreviewFormat = (i < (int)app.themePreviewFormats.size()) ?
+                    app.themePreviewFormats[i].code : nullptr;
                 if (codePreviewFormat) {
                     D2D1_COLOR_F codeColor = t.code;
                     codeColor.a = anim;
                     app.brush->SetColor(codeColor);
                     app.renderTarget->DrawText(L"code()", 6, codePreviewFormat,
                         D2D1::RectF(innerX + 78, innerY + 45, innerX + 138, innerY + 58), app.brush);
-                    codePreviewFormat->Release();
                 }
-
-                previewFormat->Release();
             }
 
             // Checkmark for selected theme
@@ -695,10 +676,7 @@ void render(App& app) {
         }
 
         // Column headers
-        IDWriteTextFormat* headerFormat = nullptr;
-        app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            11, L"en-us", &headerFormat);
+        IDWriteTextFormat* headerFormat = app.themeHeaderFormat;
         if (headerFormat) {
             headerFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
             app.brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, anim));
@@ -710,8 +688,6 @@ void render(App& app) {
             // Dark themes header
             app.renderTarget->DrawText(L"DARK THEMES", 11, headerFormat,
                 D2D1::RectF(panelX + 40 + cardWidth, gridStartY - 20, panelX + 40 + cardWidth * 2, gridStartY - 5), app.brush);
-
-            headerFormat->Release();
         }
     }
 
@@ -727,6 +703,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 app->width = LOWORD(lParam);
                 app->height = HIWORD(lParam);
                 createRenderTarget(*app);
+                app->layoutDirty = true;
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -799,41 +776,41 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) {
                 app->mouseX = GET_X_LPARAM(lParam);
                 app->mouseY = GET_Y_LPARAM(lParam);
+                float docX = app->mouseX + app->scrollX;
+                float docY = app->mouseY + app->scrollY;
 
                 // Text selection dragging
                 if (app->selecting) {
                     if (app->selectionMode == App::SelectionMode::Word) {
                         // Extend selection by words - merge anchor with current word
-                        const App::TextRect* tr = findTextRectAt(*app, app->mouseX, app->mouseY);
+                        const App::TextRect* tr = findTextRectAt(*app, (int)docX, (int)docY);
                         if (tr) {
                             float wordLeft, wordRight;
-                            if (findWordBoundsAt(*app, *tr, app->mouseX, wordLeft, wordRight)) {
+                            if (findWordBoundsAt(*app, *tr, (int)docX, wordLeft, wordRight)) {
                                 // Selection spans from min(anchor, current) to max(anchor, current)
-                                // Store in document coordinates (add scrollY)
                                 app->selStartX = (int)std::min(app->anchorLeft, wordLeft);
                                 app->selEndX = (int)std::max(app->anchorRight, wordRight);
-                                app->selStartY = (int)(std::min(app->anchorTop, tr->rect.top) + app->scrollY);
-                                app->selEndY = (int)(std::max(app->anchorBottom, tr->rect.bottom) + app->scrollY);
+                                app->selStartY = (int)(std::min(app->anchorTop, tr->rect.top));
+                                app->selEndY = (int)(std::max(app->anchorBottom, tr->rect.bottom));
                                 app->hasSelection = true;
                             }
                         }
                     } else if (app->selectionMode == App::SelectionMode::Line) {
                         // Extend selection by lines - merge anchor with current line
                         float lineLeft, lineRight, lineTop, lineBottom;
-                        findLineRects(*app, (float)app->mouseY, lineLeft, lineRight, lineTop, lineBottom);
+                        findLineRects(*app, docY, lineLeft, lineRight, lineTop, lineBottom);
                         if (lineRight > lineLeft) {
                             // Selection spans from min(anchor, current) to max(anchor, current)
-                            // Store in document coordinates (add scrollY)
                             app->selStartX = (int)std::min(app->anchorLeft, lineLeft);
                             app->selEndX = (int)std::max(app->anchorRight, lineRight);
-                            app->selStartY = (int)(std::min(app->anchorTop, lineTop) + app->scrollY);
-                            app->selEndY = (int)(std::max(app->anchorBottom, lineBottom) + app->scrollY);
+                            app->selStartY = (int)(std::min(app->anchorTop, lineTop));
+                            app->selEndY = (int)(std::max(app->anchorBottom, lineBottom));
                             app->hasSelection = true;
                         }
                     } else {
                         // Normal selection - store in document coordinates
-                        app->selEndX = app->mouseX;
-                        app->selEndY = (int)(app->mouseY + app->scrollY);
+                        app->selEndX = (int)docX;
+                        app->selEndY = (int)docY;
                     }
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return 0;
@@ -899,8 +876,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 std::string prevHoveredLink = app->hoveredLink;
                 app->hoveredLink.clear();
                 for (const auto& lr : app->linkRects) {
-                    if (app->mouseX >= lr.bounds.left && app->mouseX <= lr.bounds.right &&
-                        app->mouseY >= lr.bounds.top && app->mouseY <= lr.bounds.bottom) {
+                    if (docX >= lr.bounds.left && docX <= lr.bounds.right &&
+                        docY >= lr.bounds.top && docY <= lr.bounds.bottom) {
                         app->hoveredLink = lr.url;
                         break;
                     }
@@ -908,14 +885,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
                 // Check if over text
                 bool wasOverText = app->overText;
-                app->overText = false;
-                for (const auto& tr : app->textRects) {
-                    if (app->mouseX >= tr.rect.left && app->mouseX <= tr.rect.right &&
-                        app->mouseY >= tr.rect.top && app->mouseY <= tr.rect.bottom) {
-                        app->overText = true;
-                        break;
-                    }
-                }
+                app->overText = (findTextRectAt(*app, (int)docX, (int)docY) != nullptr);
 
                 // Update cursor
                 if (app->scrollbarHovered || app->scrollbarDragging ||
@@ -948,6 +918,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 app->mouseX = GET_X_LPARAM(lParam);
                 app->mouseY = GET_Y_LPARAM(lParam);
                 SetCapture(hwnd);
+                float docX = app->mouseX + app->scrollX;
+                float docY = app->mouseY + app->scrollY;
 
                 // Check if clicking vertical scrollbar
                 if (app->scrollbarHovered && app->contentHeight > app->height) {
@@ -1020,21 +992,21 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     // Handle based on click count
                     if (app->clickCount == 2) {
                         // Double-click: select word
-                        const App::TextRect* tr = findTextRectAt(*app, app->mouseX, app->mouseY);
+                        const App::TextRect* tr = findTextRectAt(*app, (int)docX, (int)docY);
                         if (tr) {
                             float wordLeft, wordRight;
-                            if (findWordBoundsAt(*app, *tr, app->mouseX, wordLeft, wordRight)) {
+                            if (findWordBoundsAt(*app, *tr, (int)docX, wordLeft, wordRight)) {
                                 app->selectionMode = App::SelectionMode::Word;
-                                // Store anchor (the original word bounds) in screen coords for drag extension
+                                // Store anchor (the original word bounds) in document coords for drag extension
                                 app->anchorLeft = wordLeft;
                                 app->anchorRight = wordRight;
                                 app->anchorTop = tr->rect.top;
                                 app->anchorBottom = tr->rect.bottom;
-                                // Set selection to the word (document coordinates - add scrollY)
+                                // Set selection to the word (document coordinates)
                                 app->selStartX = (int)wordLeft;
                                 app->selEndX = (int)wordRight;
-                                app->selStartY = (int)(tr->rect.top + app->scrollY);
-                                app->selEndY = (int)(tr->rect.bottom + app->scrollY);
+                                app->selStartY = (int)tr->rect.top;
+                                app->selEndY = (int)tr->rect.bottom;
                                 app->selecting = true;
                                 app->hasSelection = true;
                             }
@@ -1042,19 +1014,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     } else if (app->clickCount == 3) {
                         // Triple-click: select line
                         float lineLeft, lineRight, lineTop, lineBottom;
-                        findLineRects(*app, (float)app->mouseY, lineLeft, lineRight, lineTop, lineBottom);
+                        findLineRects(*app, docY, lineLeft, lineRight, lineTop, lineBottom);
                         if (lineRight > lineLeft) {
                             app->selectionMode = App::SelectionMode::Line;
-                            // Store anchor (the original line bounds) in screen coords for drag extension
+                            // Store anchor (the original line bounds) in document coords for drag extension
                             app->anchorLeft = lineLeft;
                             app->anchorRight = lineRight;
                             app->anchorTop = lineTop;
                             app->anchorBottom = lineBottom;
-                            // Set selection to the line (document coordinates - add scrollY)
+                            // Set selection to the line (document coordinates)
                             app->selStartX = (int)lineLeft;
                             app->selEndX = (int)lineRight;
-                            app->selStartY = (int)(lineTop + app->scrollY);
-                            app->selEndY = (int)(lineBottom + app->scrollY);
+                            app->selStartY = (int)lineTop;
+                            app->selEndY = (int)lineBottom;
                             app->selecting = true;
                             app->hasSelection = true;
                         }
@@ -1062,10 +1034,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                         // Single click: start normal selection (document coordinates)
                         app->selectionMode = App::SelectionMode::Normal;
                         app->selecting = true;
-                        app->selStartX = app->mouseX;
-                        app->selStartY = (int)(app->mouseY + app->scrollY);
-                        app->selEndX = app->mouseX;
-                        app->selEndY = (int)(app->mouseY + app->scrollY);
+                        app->selStartX = (int)docX;
+                        app->selStartY = (int)docY;
+                        app->selEndX = (int)docX;
+                        app->selEndY = (int)docY;
                         app->hasSelection = false;
                         app->selectedText.clear();
                     }
@@ -1141,8 +1113,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                         // hasSelection was already set to true in WM_LBUTTONDOWN
                     } else {
                         // Normal selection: finalize with current mouse position (document coordinates)
-                        app->selEndX = app->mouseX;
-                        app->selEndY = (int)(app->mouseY + app->scrollY);
+                        float docX = app->mouseX + app->scrollX;
+                        float docY = app->mouseY + app->scrollY;
+                        app->selEndX = (int)docX;
+                        app->selEndY = (int)docY;
 
                         // Check if this was a meaningful drag (not just a click)
                         // Use screen coordinates stored from mouse down
@@ -1395,6 +1369,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                     app->scrollY = 0;
                                     app->targetScrollY = 0;
                                     app->contentHeight = 0;
+                                    app->docText.clear();
+                                    app->docTextLower.clear();
+                                    app->searchMatches.clear();
+                                    app->searchMatchYs.clear();
+                                    app->layoutDirty = true;
                                 }
                             }
                             InvalidateRect(hwnd, nullptr, FALSE);

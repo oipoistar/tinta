@@ -4,17 +4,110 @@
 #include "search.h"
 
 #include <algorithm>
+#include <cmath>
+#include <string_view>
 
-void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
-                         float startX, float& y, float maxWidth,
-                         IDWriteTextFormat* baseFormat, D2D1_COLOR_F baseColor,
-                         const std::string& baseLinkUrl, float customLineHeight) {
+namespace {
+constexpr float kHugeWidth = 100000.0f;
+constexpr float kLineBucketTolerance = 5.0f;
+
+struct LayoutInfo {
+    IDWriteTextLayout* layout = nullptr;
+    float width = 0.0f;
+};
+
+static LayoutInfo createLayout(App& app, std::wstring_view text, IDWriteTextFormat* format,
+                               float lineHeight, IDWriteTypography* typography) {
+    LayoutInfo info;
+    if (!format || text.empty()) return info;
+
+    app.dwriteFactory->CreateTextLayout(text.data(), (UINT32)text.length(),
+        format, kHugeWidth, lineHeight, &info.layout);
+    if (info.layout) {
+        if (typography) {
+            info.layout->SetTypography(typography, {0, (UINT32)text.length()});
+        }
+        DWRITE_TEXT_METRICS metrics{};
+        info.layout->GetMetrics(&metrics);
+        info.width = metrics.widthIncludingTrailingWhitespace;
+    }
+    return info;
+}
+
+static void addTextRect(App& app, const D2D1_RECT_F& rect, size_t docStart, size_t docLength) {
+    size_t idx = app.textRects.size();
+    app.textRects.push_back({rect, docStart, docLength});
+
+    if (app.lineBuckets.empty() ||
+        std::abs(rect.top - app.lineBuckets.back().top) > kLineBucketTolerance) {
+        App::LineBucket bucket;
+        bucket.top = rect.top;
+        bucket.bottom = rect.bottom;
+        bucket.minX = rect.left;
+        bucket.maxX = rect.right;
+        bucket.textRectIndices.push_back(idx);
+        app.lineBuckets.push_back(std::move(bucket));
+        return;
+    }
+
+    auto& bucket = app.lineBuckets.back();
+    bucket.bottom = std::max(bucket.bottom, rect.bottom);
+    bucket.minX = std::min(bucket.minX, rect.left);
+    bucket.maxX = std::max(bucket.maxX, rect.right);
+    bucket.textRectIndices.push_back(idx);
+}
+
+static void addTextRun(App& app, LayoutInfo&& info, const D2D1_POINT_2F& pos,
+                       const D2D1_RECT_F& bounds, D2D1_COLOR_F color,
+                       size_t docStart, size_t docLength, bool selectable) {
+    if (!info.layout) return;
+
+    App::LayoutTextRun run;
+    run.layout = info.layout;
+    run.pos = pos;
+    run.bounds = bounds;
+    run.color = color;
+    run.docStart = docStart;
+    run.docLength = docLength;
+    run.selectable = selectable;
+    app.layoutTextRuns.push_back(run);
+
+    if (selectable) {
+        addTextRect(app, bounds, docStart, docLength);
+    }
+}
+
+static float getSpaceWidth(App& app, IDWriteTextFormat* format) {
+    if (format == app.textFormat) return app.spaceWidthText;
+    if (format == app.boldFormat) return app.spaceWidthBold;
+    if (format == app.italicFormat) return app.spaceWidthItalic;
+    if (format == app.codeFormat) return app.spaceWidthCode;
+    return measureText(app, L" ", format);
+}
+
+static void layoutElement(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth);
+
+static void layoutInlineContent(App& app, const std::vector<ElementPtr>& elements,
+                                float startX, float& y, float maxWidth,
+                                IDWriteTextFormat* baseFormat, D2D1_COLOR_F baseColor,
+                                const std::string& baseLinkUrl = {}, float customLineHeight = 0.0f) {
     float x = startX;
-    // Use custom line height if provided, otherwise calculate from font size
-    // Use 1.7x multiplier to accommodate scripts with stacking diacritics (Vietnamese, etc.)
     float lineHeight = customLineHeight > 0 ? customLineHeight : baseFormat->GetFontSize() * 1.7f;
     float maxX = startX + maxWidth;
-    float spaceWidth = measureText(app, L" ", baseFormat);
+    float spaceWidth = getSpaceWidth(app, baseFormat);
+
+    auto addLinkSegment = [&](float lineStartX, float lineEndX, float lineY,
+                              const std::string& linkUrl, D2D1_COLOR_F color) {
+        if (lineEndX <= lineStartX) return;
+        float underlineY = lineY + lineHeight - 2;
+        app.layoutLines.push_back({D2D1::Point2F(lineStartX, underlineY),
+                                   D2D1::Point2F(lineEndX, underlineY),
+                                   color, 1.0f});
+        App::LinkRect lr;
+        lr.bounds = D2D1::RectF(lineStartX, lineY, lineEndX, lineY + lineHeight);
+        lr.url = linkUrl;
+        app.linkRects.push_back(lr);
+    };
 
     for (const auto& elem : elements) {
         IDWriteTextFormat* format = baseFormat;
@@ -57,51 +150,27 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
                 }
 
                 size_t codeDocStart = app.docText.size();
+                LayoutInfo info = createLayout(app, text, format, lineHeight, app.codeTypography);
+                float textWidth = info.width;
 
-                // Draw background
-                float textWidth = measureText(app, text, format);
                 if (x + textWidth > maxX && x > startX) {
                     x = startX;
                     y += lineHeight;
                 }
 
-                float renderY = y - app.scrollY;
-                app.brush->SetColor(app.theme.codeBackground);
-                app.renderTarget->FillRectangle(
-                    D2D1::RectF(x - 2, renderY, x + textWidth + 4, renderY + lineHeight),
-                    app.brush);
-                app.drawCalls++;
+                app.layoutRects.push_back({D2D1::RectF(x - 2, y, x + textWidth + 4, y + lineHeight),
+                                           app.theme.codeBackground});
 
-                // Draw text vertically centered in the box
-                if (renderY > -lineHeight && renderY < app.height + lineHeight) {
-                    float codeFontHeight = format->GetFontSize() * 1.2f;  // Approximate line height for code font
-                    float verticalOffset = (lineHeight - codeFontHeight) / 2.0f;
+                float codeFontHeight = format->GetFontSize() * 1.2f;
+                float verticalOffset = (lineHeight - codeFontHeight) / 2.0f;
+                D2D1_POINT_2F pos = D2D1::Point2F(x, y + verticalOffset);
+                D2D1_RECT_F bounds = D2D1::RectF(x, y, x + textWidth, y + lineHeight);
+                addTextRun(app, std::move(info), pos, bounds, color,
+                           codeDocStart, text.length(), true);
 
-                    app.brush->SetColor(color);
-                    IDWriteTextLayout* layout = nullptr;
-                    app.dwriteFactory->CreateTextLayout(text.c_str(), (UINT32)text.length(),
-                        format, textWidth + 50, lineHeight, &layout);
-                    if (layout) {
-                        if (app.codeTypography) {
-                            layout->SetTypography(app.codeTypography, {0, (UINT32)text.length()});
-                        }
-                        app.renderTarget->DrawTextLayout(D2D1::Point2F(x, renderY + verticalOffset), layout, app.brush);
-                        layout->Release();
-                    } else {
-                        app.renderTarget->DrawText(text.c_str(), (UINT32)text.length(), format,
-                            D2D1::RectF(x, renderY + verticalOffset, x + textWidth + 50, renderY + lineHeight),
-                            app.brush);
-                    }
-                    app.drawCalls++;
-
-                    // Track text bounds
-                    app.textRects.push_back({D2D1::RectF(x, renderY, x + textWidth, renderY + lineHeight), text, codeDocStart});
-                }
-
-                recordSearchMatchPositions(app, codeDocStart, codeDocStart + text.length(), y);
                 app.docText += text;
                 x += textWidth + spaceWidth;
-                continue;  // Skip common text drawing code
+                continue;
             }
 
             case ElementType::Link:
@@ -126,19 +195,17 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
                 continue;
 
             default:
-                renderInlineContent(app, elem->children, x, y, maxWidth - (x - startX), format, color, linkUrl);
+                layoutInlineContent(app, elem->children, x, y,
+                                    maxWidth - (x - startX), format, color, linkUrl);
                 continue;
         }
 
         if (text.empty()) continue;
 
         size_t textDocStart = app.docText.size();
-
-        // For links, track start position for continuous underline
         float linkLineStartX = x;
         float linkLineY = y;
 
-        // Word wrap
         size_t pos = 0;
         while (pos < text.length()) {
             size_t spacePos = text.find(L' ', pos);
@@ -157,68 +224,26 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
             }
 
             size_t wordDocStart = textDocStart + wordStart;
-            float wordWidth = measureText(app, word, format);
+            LayoutInfo info = createLayout(app, word, format, lineHeight, app.bodyTypography);
+            float wordWidth = info.width;
 
-            // Check if need to wrap
             if (x + wordWidth > maxX && x > startX) {
-                // Draw underline for link segment before wrapping
                 if (isLink && x > linkLineStartX) {
-                    float renderY = linkLineY - app.scrollY;
-                    if (renderY > -lineHeight && renderY < app.height + lineHeight) {
-                        float underlineY = renderY + lineHeight - 2;
-                        app.brush->SetColor(color);
-                        app.renderTarget->DrawLine(
-                            D2D1::Point2F(linkLineStartX, underlineY),
-                            D2D1::Point2F(x, underlineY),
-                            app.brush, 1.0f);
-                        app.drawCalls++;
-
-                        // Track link bounds for this line segment
-                        App::LinkRect lr;
-                        lr.bounds = D2D1::RectF(linkLineStartX, renderY, x, renderY + lineHeight);
-                        lr.url = linkUrl;
-                        app.linkRects.push_back(lr);
-                    }
+                    addLinkSegment(linkLineStartX, x, linkLineY, linkUrl, color);
                 }
-
                 x = startX;
                 y += lineHeight;
                 linkLineStartX = x;
                 linkLineY = y;
             }
 
-            recordSearchMatchPositions(app, wordDocStart, wordDocStart + word.length(), y);
-
-            // Draw word with typography
-            float renderY = y - app.scrollY;
-            if (renderY > -lineHeight && renderY < app.height + lineHeight) {
-                app.brush->SetColor(color);
-
-                // Use TextLayout for typography support
-                IDWriteTextLayout* layout = nullptr;
-                app.dwriteFactory->CreateTextLayout(word.c_str(), (UINT32)word.length(),
-                    format, wordWidth + 100, lineHeight, &layout);
-                if (layout) {
-                    // Apply typography (body typography for regular text)
-                    if (app.bodyTypography) {
-                        layout->SetTypography(app.bodyTypography, {0, (UINT32)word.length()});
-                    }
-                    app.renderTarget->DrawTextLayout(D2D1::Point2F(x, renderY), layout, app.brush);
-                    layout->Release();
-                } else {
-                    // Fallback to DrawText if layout creation fails
-                    app.renderTarget->DrawText(word.c_str(), (UINT32)word.length(), format,
-                        D2D1::RectF(x, renderY, x + wordWidth + 100, renderY + lineHeight), app.brush);
-                }
-                app.drawCalls++;
-
-                // Track text bounds for cursor and selection (add small buffer for selection highlight)
-                app.textRects.push_back({D2D1::RectF(x, renderY, x + wordWidth + 2, renderY + lineHeight), word, wordDocStart});
-            }
+            D2D1_POINT_2F posPoint = D2D1::Point2F(x, y);
+            D2D1_RECT_F bounds = D2D1::RectF(x, y, x + wordWidth, y + lineHeight);
+            addTextRun(app, std::move(info), posPoint, bounds, color,
+                       wordDocStart, word.length(), true);
 
             x += wordWidth;
 
-            // Add space (include in link extent)
             if (spacePos < text.length()) {
                 x += spaceWidth;
                 pos = spacePos + 1;
@@ -229,83 +254,54 @@ void renderInlineContent(App& app, const std::vector<ElementPtr>& elements,
 
         app.docText += text;
 
-        // Draw final underline segment for link
         if (isLink && x > linkLineStartX) {
-            float renderY = linkLineY - app.scrollY;
-            if (renderY > -lineHeight && renderY < app.height + lineHeight) {
-                float underlineY = renderY + lineHeight - 2;
-                // Trim trailing space from underline
-                float underlineEndX = x;
-                if (text.length() > 0 && text.back() != L' ') {
-                    underlineEndX = x;
-                } else {
-                    underlineEndX = x - spaceWidth;
-                }
-                app.brush->SetColor(color);
-                app.renderTarget->DrawLine(
-                    D2D1::Point2F(linkLineStartX, underlineY),
-                    D2D1::Point2F(underlineEndX, underlineY),
-                    app.brush, 1.0f);
-                app.drawCalls++;
-
-                // Track link bounds
-                App::LinkRect lr;
-                lr.bounds = D2D1::RectF(linkLineStartX, renderY, underlineEndX, renderY + lineHeight);
-                lr.url = linkUrl;
-                app.linkRects.push_back(lr);
+            float underlineEndX = x;
+            if (!text.empty() && text.back() == L' ') {
+                underlineEndX = x - spaceWidth;
             }
+            addLinkSegment(linkLineStartX, underlineEndX, linkLineY, linkUrl, color);
         }
     }
 
     y += lineHeight;
 }
 
-void renderParagraph(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
-    renderInlineContent(app, elem->children, indent, y, maxWidth, app.textFormat, app.theme.text);
+static void layoutParagraph(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+    layoutInlineContent(app, elem->children, indent, y, maxWidth, app.textFormat, app.theme.text);
     app.docText += L"\n\n";
     float scale = app.contentScale * app.zoomFactor;
-    y += 14 * scale;  // Increased paragraph spacing
+    y += 14 * scale;
 }
 
-void renderHeading(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+static void layoutHeading(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     float scale = app.contentScale * app.zoomFactor;
-    float sizes[] = {32, 26, 22, 18, 16, 14};
-    float size = sizes[std::min(elem->level - 1, 5)] * scale;
+    int levelIndex = std::min(elem->level - 1, 5);
+    IDWriteTextFormat* format = app.headingFormats[levelIndex] ? app.headingFormats[levelIndex] : app.textFormat;
 
-    IDWriteTextFormat* format = nullptr;
-    app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
-        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        size, L"en-us", &format);
-
-    // Add top margin for headings (more for H1)
     if (elem->level == 1) {
         y += 16 * scale;
     } else {
         y += 20 * scale;
     }
 
-    renderInlineContent(app, elem->children, indent, y, maxWidth, format, app.theme.heading);
+    layoutInlineContent(app, elem->children, indent, y, maxWidth, format, app.theme.heading);
 
-    // Underline for H1/H2 - add gap before the line
     if (elem->level <= 2) {
-        y += 6 * scale;  // Gap between text and underline
-        float renderY = y - app.scrollY;
-        app.brush->SetColor(D2D1::ColorF(app.theme.heading.r, app.theme.heading.g, app.theme.heading.b, 0.3f));
+        y += 6 * scale;
+        D2D1_COLOR_F lineColor = app.theme.heading;
+        lineColor.a = 0.3f;
         float lineWidth = (elem->level == 1) ? 2.0f * scale : 1.0f * scale;
-        app.renderTarget->DrawLine(
-            D2D1::Point2F(indent, renderY),
-            D2D1::Point2F(indent + maxWidth, renderY),
-            app.brush, lineWidth);
+        app.layoutLines.push_back({D2D1::Point2F(indent, y),
+                                   D2D1::Point2F(indent + maxWidth, y),
+                                   lineColor, lineWidth});
         y += lineWidth;
-        app.drawCalls++;
     }
 
     app.docText += L"\n\n";
-    format->Release();
-    y += 12 * scale;  // Bottom margin after heading
+    y += 12 * scale;
 }
 
-void renderCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     std::string code;
     for (const auto& child : elem->children) {
         if (child->type == ElementType::Text) {
@@ -313,7 +309,6 @@ void renderCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, f
         }
     }
 
-    // Get language from element
     std::wstring langHint = toWide(elem->language);
     int language = detectLanguage(langHint);
 
@@ -321,23 +316,15 @@ void renderCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, f
     float lineHeight = 20.0f * scale;
     float padding = 12.0f * scale;
 
-    // Count lines
     int lineCount = 1;
     for (char c : code) if (c == '\n') lineCount++;
 
     app.docText += L"\n";
 
     float blockHeight = lineCount * lineHeight + padding * 2;
+    app.layoutRects.push_back({D2D1::RectF(indent, y, indent + maxWidth, y + blockHeight),
+                               app.theme.codeBackground});
 
-    // Background
-    float renderY = y - app.scrollY;
-    app.brush->SetColor(app.theme.codeBackground);
-    app.renderTarget->FillRectangle(
-        D2D1::RectF(indent, renderY, indent + maxWidth, renderY + blockHeight),
-        app.brush);
-    app.drawCalls++;
-
-    // Render lines with syntax highlighting
     std::wstring wcode = toWide(code);
     float textY = y + padding;
     bool inBlockComment = false;
@@ -352,89 +339,67 @@ void renderCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, f
         if (!wline.empty() && wline.back() == L'\r') wline.pop_back();
 
         size_t lineDocStart = codeDocStart + lineStart;
-        recordSearchMatchPositions(app, lineDocStart, lineDocStart + wline.length(), textY);
+        float lineWidth = 0.0f;
 
-        float lineRenderY = textY - app.scrollY;
-        if (lineRenderY > -lineHeight && lineRenderY < app.height + lineHeight) {
-            float textWidth = measureText(app, wline, app.codeFormat);
+        if (language > 0) {
+            std::vector<SyntaxToken> tokens = tokenizeLine(wline, language, inBlockComment);
+            float tokenX = indent + padding;
 
-            // Apply syntax highlighting if language is known
-            if (language > 0) {
-                std::vector<SyntaxToken> tokens = tokenizeLine(wline, language, inBlockComment);
-                float tokenX = indent + padding;
+            for (const auto& token : tokens) {
+                if (token.text.empty()) continue;
 
-                for (const auto& token : tokens) {
-                    if (token.text.empty()) continue;
+                D2D1_COLOR_F tokenColor = getTokenColor(app.theme, token.tokenType);
+                LayoutInfo info = createLayout(app, token.text, app.codeFormat, lineHeight, app.codeTypography);
+                float tokenWidth = info.width;
 
-                    D2D1_COLOR_F tokenColor = getTokenColor(app.theme, token.tokenType);
-                    app.brush->SetColor(tokenColor);
+                D2D1_POINT_2F pos = D2D1::Point2F(tokenX, textY);
+                D2D1_RECT_F bounds = D2D1::RectF(tokenX, textY, tokenX + tokenWidth, textY + lineHeight);
+                addTextRun(app, std::move(info), pos, bounds, tokenColor,
+                           lineDocStart, 0, false);
 
-                    float tokenWidth = measureText(app, token.text, app.codeFormat);
-
-                    // Use TextLayout for code typography
-                    IDWriteTextLayout* layout = nullptr;
-                    app.dwriteFactory->CreateTextLayout(token.text.c_str(), (UINT32)token.text.length(),
-                        app.codeFormat, tokenWidth + 50, lineHeight, &layout);
-                    if (layout) {
-                        if (app.codeTypography) {
-                            layout->SetTypography(app.codeTypography, {0, (UINT32)token.text.length()});
-                        }
-                        app.renderTarget->DrawTextLayout(D2D1::Point2F(tokenX, lineRenderY), layout, app.brush);
-                        layout->Release();
-                    } else {
-                        app.renderTarget->DrawText(token.text.c_str(), (UINT32)token.text.length(), app.codeFormat,
-                            D2D1::RectF(tokenX, lineRenderY, tokenX + tokenWidth + 50, lineRenderY + lineHeight),
-                            app.brush);
-                    }
-                    app.drawCalls++;
-                    tokenX += tokenWidth;
-                }
-            } else {
-                // No syntax highlighting - just render plain text
-                app.brush->SetColor(app.theme.code);
-                app.renderTarget->DrawText(wline.c_str(), (UINT32)wline.length(), app.codeFormat,
-                    D2D1::RectF(indent + padding, lineRenderY, indent + maxWidth - padding, lineRenderY + lineHeight),
-                    app.brush);
-                app.drawCalls++;
+                tokenX += tokenWidth;
+                lineWidth += tokenWidth;
             }
+        } else {
+            LayoutInfo info = createLayout(app, wline, app.codeFormat, lineHeight, app.codeTypography);
+            lineWidth = info.width;
+            D2D1_POINT_2F pos = D2D1::Point2F(indent + padding, textY);
+            D2D1_RECT_F bounds = D2D1::RectF(indent + padding, textY,
+                                             indent + padding + lineWidth, textY + lineHeight);
+            addTextRun(app, std::move(info), pos, bounds, app.theme.code,
+                       lineDocStart, wline.length(), false);
+        }
 
-            // Track text bounds for selection
-            if (!wline.empty()) {
-                app.textRects.push_back({D2D1::RectF(indent + padding, lineRenderY,
-                    indent + padding + textWidth, lineRenderY + lineHeight), wline, lineDocStart});
-            }
+        if (!wline.empty()) {
+            D2D1_RECT_F lineBounds = D2D1::RectF(indent + padding, textY,
+                indent + padding + lineWidth, textY + lineHeight);
+            addTextRect(app, lineBounds, lineDocStart, wline.length());
         }
 
         textY += lineHeight;
-
         if (lineEnd == wcode.length()) break;
         lineStart = lineEnd + 1;
     }
 
     app.docText += wcode;
     app.docText += L"\n\n";
-
-    y += blockHeight + 14 * scale;  // Increased spacing after code blocks
+    y += blockHeight + 14 * scale;
 }
 
-void renderBlockquote(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+static void layoutBlockquote(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     float scale = app.contentScale * app.zoomFactor;
     float quoteIndent = 20.0f * scale;
     float startY = y;
 
     for (const auto& child : elem->children) {
-        renderElement(app, child, y, indent + quoteIndent, maxWidth - quoteIndent);
+        layoutElement(app, child, y, indent + quoteIndent, maxWidth - quoteIndent);
     }
 
-    // Border
-    app.brush->SetColor(app.theme.blockquoteBorder);
-    app.renderTarget->FillRectangle(
-        D2D1::RectF(indent, startY - app.scrollY, indent + 4, y - app.scrollY),
-        app.brush);
-    app.drawCalls++;
+    app.layoutRects.push_back({D2D1::RectF(indent, startY, indent + 4, y),
+                               app.theme.blockquoteBorder});
 }
 
-void renderList(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+static void layoutList(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     float scale = app.contentScale * app.zoomFactor;
     float listIndent = 24.0f * scale;
     int itemNum = elem->start;
@@ -442,20 +407,14 @@ void renderList(App& app, const ElementPtr& elem, float& y, float indent, float 
     for (const auto& child : elem->children) {
         if (child->type != ElementType::ListItem) continue;
 
-        // Draw bullet/number
         std::wstring marker = elem->ordered ?
             std::to_wstring(itemNum++) + L"." : L"\x2022";
 
-        float renderY = y - app.scrollY;
-        if (renderY > -30 && renderY < app.height + 30) {
-            app.brush->SetColor(app.theme.text);
-            app.renderTarget->DrawText(marker.c_str(), (UINT32)marker.length(), app.textFormat,
-                D2D1::RectF(indent, renderY, indent + listIndent, renderY + 24),
-                app.brush);
-            app.drawCalls++;
-        }
+        LayoutInfo info = createLayout(app, marker, app.textFormat, 24.0f, app.bodyTypography);
+        D2D1_POINT_2F pos = D2D1::Point2F(indent, y);
+        D2D1_RECT_F bounds = D2D1::RectF(indent, y, indent + listIndent, y + 24);
+        addTextRun(app, std::move(info), pos, bounds, app.theme.text, 0, 0, false);
 
-        // Check for block vs inline content
         bool hasBlockChildren = false;
         for (const auto& itemChild : child->children) {
             if (itemChild->type == ElementType::Paragraph ||
@@ -482,74 +441,96 @@ void renderList(App& app, const ElementPtr& elem, float& y, float indent, float 
             }
 
             if (!inlineElements.empty()) {
-                renderInlineContent(app, inlineElements, indent + listIndent, y,
+                layoutInlineContent(app, inlineElements, indent + listIndent, y,
                     maxWidth - listIndent, app.textFormat, app.theme.text);
             }
 
             for (const auto& blockChild : blockElements) {
-                renderElement(app, blockChild, y, indent + listIndent, maxWidth - listIndent);
+                layoutElement(app, blockChild, y, indent + listIndent, maxWidth - listIndent);
             }
         } else {
-            renderInlineContent(app, child->children, indent + listIndent, y,
+            layoutInlineContent(app, child->children, indent + listIndent, y,
                 maxWidth - listIndent, app.textFormat, app.theme.text);
         }
 
         app.docText += L"\n\n";
 
         if (y < itemStartY + 28 * scale) {
-            y = itemStartY + 28 * scale;  // Slightly more space per list item
+            y = itemStartY + 28 * scale;
         }
     }
-    y += 8 * scale;  // Extra spacing after list
+    y += 8 * scale;
 }
 
-void renderHorizontalRule(App& app, float& y, float indent, float maxWidth) {
+static void layoutHorizontalRule(App& app, float& y, float indent, float maxWidth) {
     float scale = app.contentScale * app.zoomFactor;
-    y += 16 * scale;  // Increased spacing before rule
-    float renderY = y - app.scrollY;
-
-    app.brush->SetColor(app.theme.blockquoteBorder);
-    app.renderTarget->DrawLine(
-        D2D1::Point2F(indent, renderY),
-        D2D1::Point2F(indent + maxWidth, renderY),
-        app.brush, scale);
-    app.drawCalls++;
-
-    y += 16 * scale;  // Increased spacing after rule
+    y += 16 * scale;
+    app.layoutLines.push_back({D2D1::Point2F(indent, y),
+                               D2D1::Point2F(indent + maxWidth, y),
+                               app.theme.blockquoteBorder, scale});
+    y += 16 * scale;
 }
 
-void renderElement(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+static void layoutElement(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     if (!elem) return;
 
     switch (elem->type) {
         case ElementType::Paragraph:
-            renderParagraph(app, elem, y, indent, maxWidth);
+            layoutParagraph(app, elem, y, indent, maxWidth);
             break;
         case ElementType::Heading:
-            renderHeading(app, elem, y, indent, maxWidth);
+            layoutHeading(app, elem, y, indent, maxWidth);
             break;
         case ElementType::CodeBlock:
-            renderCodeBlock(app, elem, y, indent, maxWidth);
+            layoutCodeBlock(app, elem, y, indent, maxWidth);
             break;
         case ElementType::BlockQuote:
-            renderBlockquote(app, elem, y, indent, maxWidth);
+            layoutBlockquote(app, elem, y, indent, maxWidth);
             break;
         case ElementType::List:
-            renderList(app, elem, y, indent, maxWidth);
+            layoutList(app, elem, y, indent, maxWidth);
             break;
         case ElementType::HorizontalRule:
-            renderHorizontalRule(app, y, indent, maxWidth);
+            layoutHorizontalRule(app, y, indent, maxWidth);
             break;
         case ElementType::HtmlBlock:
-            // HTML blocks are parsed into child elements, render them
             for (const auto& child : elem->children) {
-                renderElement(app, child, y, indent, maxWidth);
+                layoutElement(app, child, y, indent, maxWidth);
             }
             break;
         default:
             for (const auto& child : elem->children) {
-                renderElement(app, child, y, indent, maxWidth);
+                layoutElement(app, child, y, indent, maxWidth);
             }
             break;
     }
+}
+
+} // namespace
+
+void layoutDocument(App& app) {
+    app.clearLayoutCache();
+
+    if (!app.root) {
+        app.contentHeight = 0;
+        app.contentWidth = app.width;
+        app.layoutDirty = false;
+        return;
+    }
+
+    float scale = app.contentScale * app.zoomFactor;
+    float y = 20.0f * scale;
+    float indent = 40.0f * scale;
+    float maxWidth = app.width - indent * 2;
+
+    app.contentWidth = app.width;
+
+    for (const auto& child : app.root->children) {
+        layoutElement(app, child, y, indent, maxWidth);
+    }
+
+    app.contentHeight = y + 40.0f * scale;
+    app.docTextLower = toLower(app.docText);
+    mapSearchMatchesToLayout(app);
+    app.layoutDirty = false;
 }
