@@ -26,6 +26,104 @@ static App* g_app = nullptr;
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void render(App& app);
 
+// Check if a path is a root directory (e.g., "C:\")
+static bool isRootPath(const std::wstring& path) {
+    if (path.length() == 3 && path[1] == L':' && (path[2] == L'\\' || path[2] == L'/')) {
+        return true;
+    }
+    return false;
+}
+
+// Get parent directory of a path
+static std::wstring getParentPath(const std::wstring& path) {
+    if (path.empty()) return path;
+    // Remove trailing slash if present
+    std::wstring p = path;
+    while (!p.empty() && (p.back() == L'\\' || p.back() == L'/')) {
+        p.pop_back();
+    }
+    // Find last separator
+    size_t pos = p.find_last_of(L"\\/");
+    if (pos == std::wstring::npos) return p;
+    // Handle root case (C:\ -> C:\)
+    if (pos == 2 && p[1] == L':') return p.substr(0, 3);
+    return p.substr(0, pos);
+}
+
+// Get directory from a file path
+static std::wstring getDirectoryFromFile(const std::string& filePath) {
+    std::wstring wide = toWide(filePath);
+    size_t pos = wide.find_last_of(L"\\/");
+    if (pos == std::wstring::npos) return L".";
+    return wide.substr(0, pos);
+}
+
+// Populate folder items from current browser path
+static void populateFolderItems(App& app) {
+    app.folderItems.clear();
+    app.hoveredFolderIndex = -1;
+    app.folderBrowserScroll = 0.0f;
+
+    if (app.folderBrowserPath.empty()) return;
+
+    // Add ".." entry if not at root
+    if (!isRootPath(app.folderBrowserPath)) {
+        app.folderItems.push_back({L"..", true});
+    }
+
+    // Build search pattern
+    std::wstring searchPath = app.folderBrowserPath;
+    if (searchPath.back() != L'\\' && searchPath.back() != L'/') {
+        searchPath += L'\\';
+    }
+    searchPath += L"*";
+
+    WIN32_FIND_DATAW findData;
+    HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findData);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    std::vector<App::FolderItem> folders;
+    std::vector<App::FolderItem> files;
+
+    do {
+        std::wstring name = findData.cFileName;
+
+        // Skip . and ..
+        if (name == L"." || name == L"..") continue;
+
+        // Skip hidden files
+        if (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue;
+
+        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            folders.push_back({name, true});
+        } else {
+            // Check file extension
+            size_t dotPos = name.rfind(L'.');
+            if (dotPos != std::wstring::npos) {
+                std::wstring ext = name.substr(dotPos);
+                // Convert to lowercase for comparison
+                for (auto& c : ext) c = towlower(c);
+                if (ext == L".md" || ext == L".markdown") {
+                    files.push_back({name, false});
+                }
+            }
+        }
+    } while (FindNextFileW(hFind, &findData));
+
+    FindClose(hFind);
+
+    // Sort alphabetically (case-insensitive)
+    auto cmpFunc = [](const App::FolderItem& a, const App::FolderItem& b) {
+        return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
+    };
+    std::sort(folders.begin(), folders.end(), cmpFunc);
+    std::sort(files.begin(), files.end(), cmpFunc);
+
+    // Add folders first, then files
+    for (auto& f : folders) app.folderItems.push_back(std::move(f));
+    for (auto& f : files) app.folderItems.push_back(std::move(f));
+}
+
 void render(App& app) {
     if (!app.renderTarget) return;
 
@@ -508,6 +606,173 @@ void render(App& app) {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // FOLDER BROWSER OVERLAY
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (app.showFolderBrowser) {
+        // Animate in (slide from left)
+        if (app.folderBrowserAnimation < 1.0f) {
+            app.folderBrowserAnimation = std::min(1.0f, app.folderBrowserAnimation + 0.15f);
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+        }
+        float anim = app.folderBrowserAnimation;
+
+        // Panel dimensions
+        float panelWidth = std::min(300.0f, std::max(250.0f, app.width * 0.2f));
+        float panelX = -panelWidth * (1.0f - anim);  // Slide in from left
+        float panelY = 0;
+        float panelHeight = (float)app.height;
+
+        // Semi-transparent backdrop (only on the panel area)
+        D2D1_COLOR_F panelBg = app.theme.isDark ? hexColor(0x1E1E1E, 0.95f) : hexColor(0xF5F5F5, 0.95f);
+        app.brush->SetColor(panelBg);
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(panelX, panelY, panelX + panelWidth, panelY + panelHeight), app.brush);
+
+        // Border on the right edge
+        D2D1_COLOR_F borderColor = app.theme.isDark ? hexColor(0x3A3A40, 0.8f) : hexColor(0xD0D0D0, 0.8f);
+        app.brush->SetColor(borderColor);
+        app.renderTarget->DrawLine(
+            D2D1::Point2F(panelX + panelWidth, panelY),
+            D2D1::Point2F(panelX + panelWidth, panelY + panelHeight),
+            app.brush, 1.0f);
+
+        IDWriteTextFormat* browserFormat = app.folderBrowserFormat;
+        if (browserFormat) {
+            float padding = 12.0f;
+            float itemHeight = 28.0f;
+            float headerHeight = 40.0f;
+
+            // Current path header
+            float headerY = panelY + padding;
+            D2D1_COLOR_F headerColor = app.theme.heading;
+            headerColor.a = anim;
+            app.brush->SetColor(headerColor);
+
+            // Truncate path if too long
+            std::wstring displayPath = app.folderBrowserPath;
+            float maxPathWidth = panelWidth - padding * 2;
+
+            // Simple truncation: show last portion of path
+            if (!displayPath.empty()) {
+                float pathWidth = measureText(app, displayPath, browserFormat);
+                while (pathWidth > maxPathWidth && displayPath.length() > 20) {
+                    // Remove characters from the start
+                    size_t sepPos = displayPath.find(L'\\', 4);
+                    if (sepPos != std::wstring::npos) {
+                        displayPath = L"..." + displayPath.substr(sepPos);
+                    } else {
+                        displayPath = L"..." + displayPath.substr(displayPath.length() - 20);
+                    }
+                    pathWidth = measureText(app, displayPath, browserFormat);
+                }
+            }
+
+            app.renderTarget->DrawText(displayPath.c_str(), (UINT32)displayPath.length(), browserFormat,
+                D2D1::RectF(panelX + padding, headerY, panelX + panelWidth - padding, headerY + headerHeight),
+                app.brush);
+
+            // Divider line
+            float dividerY = headerY + headerHeight;
+            app.brush->SetColor(borderColor);
+            app.renderTarget->DrawLine(
+                D2D1::Point2F(panelX + padding, dividerY),
+                D2D1::Point2F(panelX + panelWidth - padding, dividerY),
+                app.brush, 1.0f);
+
+            // Items list (with scrolling)
+            float listStartY = dividerY + 8.0f;
+            float listHeight = panelHeight - listStartY - padding;
+            float totalItemsHeight = app.folderItems.size() * itemHeight;
+
+            // Clamp scroll
+            float maxScroll = std::max(0.0f, totalItemsHeight - listHeight);
+            app.folderBrowserScroll = std::max(0.0f, std::min(app.folderBrowserScroll, maxScroll));
+
+            app.hoveredFolderIndex = -1;
+
+            for (size_t i = 0; i < app.folderItems.size(); i++) {
+                float itemY = listStartY + i * itemHeight - app.folderBrowserScroll;
+
+                // Skip items outside visible area
+                if (itemY + itemHeight < listStartY || itemY > panelHeight - padding) continue;
+
+                const auto& item = app.folderItems[i];
+                float itemX = panelX + padding;
+                float itemW = panelWidth - padding * 2;
+
+                // Check hover
+                bool isHovered = (app.mouseX >= itemX && app.mouseX <= itemX + itemW &&
+                                  app.mouseY >= itemY && app.mouseY <= itemY + itemHeight &&
+                                  app.mouseY >= listStartY && app.mouseY <= panelHeight - padding);
+
+                if (isHovered) {
+                    app.hoveredFolderIndex = (int)i;
+
+                    // Hover highlight
+                    D2D1_COLOR_F hoverColor = app.theme.accent;
+                    hoverColor.a = 0.15f * anim;
+                    app.brush->SetColor(hoverColor);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(D2D1::RectF(itemX - 4, itemY, itemX + itemW + 4, itemY + itemHeight), 4, 4),
+                        app.brush);
+                }
+
+                // Icon and text
+                float iconX = itemX + 4;
+                float textX = itemX + 26;
+
+                // Simple folder/file indicator
+                if (item.isDirectory) {
+                    // Folder icon (simple filled rectangle with tab)
+                    D2D1_COLOR_F folderColor = app.theme.isDark ? hexColor(0xE8A848) : hexColor(0xD4941A);
+                    folderColor.a = anim;
+                    app.brush->SetColor(folderColor);
+                    // Main body
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(D2D1::RectF(iconX, itemY + 10, iconX + 16, itemY + 22), 2, 2),
+                        app.brush);
+                    // Tab
+                    app.renderTarget->FillRectangle(
+                        D2D1::RectF(iconX, itemY + 8, iconX + 8, itemY + 11),
+                        app.brush);
+                } else {
+                    // File icon (simple document shape)
+                    D2D1_COLOR_F fileColor = app.theme.text;
+                    fileColor.a = 0.6f * anim;
+                    app.brush->SetColor(fileColor);
+                    app.renderTarget->DrawRoundedRectangle(
+                        D2D1::RoundedRect(D2D1::RectF(iconX + 2, itemY + 6, iconX + 14, itemY + 22), 1, 1),
+                        app.brush, 1.0f);
+                }
+
+                // Item name
+                D2D1_COLOR_F textColor = item.isDirectory ? app.theme.heading : app.theme.text;
+                textColor.a = anim;
+                app.brush->SetColor(textColor);
+
+                app.renderTarget->DrawText(item.name.c_str(), (UINT32)item.name.length(), browserFormat,
+                    D2D1::RectF(textX, itemY + 4, panelX + panelWidth - padding, itemY + itemHeight),
+                    app.brush);
+            }
+
+            // Scrollbar if needed
+            if (totalItemsHeight > listHeight) {
+                float sbHeight = listHeight / totalItemsHeight * listHeight;
+                sbHeight = std::max(sbHeight, 20.0f);
+                float sbY = listStartY + (maxScroll > 0 ? (app.folderBrowserScroll / maxScroll * (listHeight - sbHeight)) : 0);
+
+                D2D1_COLOR_F sbColor = app.theme.text;
+                sbColor.a = 0.3f * anim;
+                app.brush->SetColor(sbColor);
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(panelX + panelWidth - 8, sbY,
+                                                  panelX + panelWidth - 4, sbY + sbHeight), 2, 2),
+                    app.brush);
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // THEME CHOOSER OVERLAY
     // ═══════════════════════════════════════════════════════════════════════════
     if (app.showThemeChooser) {
@@ -746,6 +1011,24 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
                 float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
 
+                // Handle folder browser scroll
+                if (app->showFolderBrowser) {
+                    float panelWidth = std::min(300.0f, std::max(250.0f, app->width * 0.2f));
+                    float panelX = -panelWidth * (1.0f - app->folderBrowserAnimation);
+                    if (app->mouseX >= panelX && app->mouseX <= panelX + panelWidth) {
+                        // Scroll folder list
+                        app->folderBrowserScroll -= delta * 60.0f;
+                        float itemHeight = 28.0f;
+                        float headerHeight = 48.0f;
+                        float listHeight = app->height - headerHeight - 20.0f;
+                        float totalItemsHeight = app->folderItems.size() * itemHeight;
+                        float maxScroll = std::max(0.0f, totalItemsHeight - listHeight);
+                        app->folderBrowserScroll = std::max(0.0f, std::min(app->folderBrowserScroll, maxScroll));
+                        InvalidateRect(hwnd, nullptr, FALSE);
+                        return 0;
+                    }
+                }
+
                 if (ctrl) {
                     // Zoom in/out
                     float zoomDelta = delta * 0.1f;
@@ -893,7 +1176,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 app->overText = (findTextRectAt(*app, (int)docX, (int)docY) != nullptr);
 
                 // Update cursor
-                if (app->scrollbarHovered || app->scrollbarDragging ||
+                if (app->showFolderBrowser) {
+                    // Use hand cursor over folder items, arrow elsewhere
+                    float panelWidth = std::min(300.0f, std::max(250.0f, app->width * 0.2f));
+                    float panelX = -panelWidth * (1.0f - app->folderBrowserAnimation);
+                    if (app->mouseX >= panelX && app->mouseX <= panelX + panelWidth && app->hoveredFolderIndex >= 0) {
+                        SetCursor(LoadCursor(nullptr, IDC_HAND));
+                    } else {
+                        SetCursor(LoadCursor(nullptr, IDC_ARROW));
+                    }
+                    // Always invalidate when folder browser is open to track hover
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                } else if (app->scrollbarHovered || app->scrollbarDragging ||
                     app->hScrollbarHovered || app->hScrollbarDragging) {
                     SetCursor(LoadCursor(nullptr, IDC_ARROW));
                 } else if (!app->hoveredLink.empty()) {
@@ -914,8 +1208,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_LBUTTONDOWN:
             if (app) {
-                // If theme chooser is open, don't start selection - just record for click handling
-                if (app->showThemeChooser) {
+                // If theme chooser or folder browser is open, don't start selection - just record for click handling
+                if (app->showThemeChooser || app->showFolderBrowser) {
                     return 0;
                 }
 
@@ -1054,6 +1348,81 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_LBUTTONUP:
             if (app) {
                 ReleaseCapture();
+
+                // Folder browser click handling
+                if (app->showFolderBrowser) {
+                    int clickX = GET_X_LPARAM(lParam);
+                    int clickY = GET_Y_LPARAM(lParam);
+
+                    // Calculate panel bounds (must match render code)
+                    float panelWidth = std::min(300.0f, std::max(250.0f, app->width * 0.2f));
+                    float panelX = -panelWidth * (1.0f - app->folderBrowserAnimation);
+
+                    // Check if click is inside panel
+                    if (clickX >= panelX && clickX <= panelX + panelWidth) {
+                        // Hit-test items
+                        if (app->hoveredFolderIndex >= 0 && app->hoveredFolderIndex < (int)app->folderItems.size()) {
+                            const auto& item = app->folderItems[app->hoveredFolderIndex];
+
+                            if (item.isDirectory) {
+                                // Navigate into folder
+                                if (item.name == L"..") {
+                                    // Go up to parent
+                                    app->folderBrowserPath = getParentPath(app->folderBrowserPath);
+                                } else {
+                                    // Enter subdirectory
+                                    if (app->folderBrowserPath.back() != L'\\' && app->folderBrowserPath.back() != L'/') {
+                                        app->folderBrowserPath += L'\\';
+                                    }
+                                    app->folderBrowserPath += item.name;
+                                }
+                                populateFolderItems(*app);
+                            } else {
+                                // Open .md file
+                                std::wstring fullPath = app->folderBrowserPath;
+                                if (fullPath.back() != L'\\' && fullPath.back() != L'/') {
+                                    fullPath += L'\\';
+                                }
+                                fullPath += item.name;
+
+                                // Load the file
+                                std::ifstream file(fullPath);
+                                if (file) {
+                                    std::stringstream buffer;
+                                    buffer << file.rdbuf();
+                                    auto result = app->parser.parse(buffer.str());
+                                    if (result.success) {
+                                        app->root = result.root;
+                                        app->parseTimeUs = result.parseTimeUs;
+                                        // Convert wide path to UTF-8 for currentFile
+                                        int utf8Len = WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
+                                        app->currentFile.resize(utf8Len - 1);
+                                        WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, &app->currentFile[0], utf8Len, nullptr, nullptr);
+                                        app->scrollY = 0;
+                                        app->targetScrollY = 0;
+                                        app->contentHeight = 0;
+                                        app->docText.clear();
+                                        app->docTextLower.clear();
+                                        app->searchMatches.clear();
+                                        app->searchMatchYs.clear();
+                                        app->layoutDirty = true;
+
+                                        // Close folder browser after opening file
+                                        app->showFolderBrowser = false;
+                                        app->folderBrowserAnimation = 0;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Click outside panel = close browser
+                        app->showFolderBrowser = false;
+                        app->folderBrowserAnimation = 0;
+                    }
+
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
 
                 // Theme chooser click handling
                 if (app->showThemeChooser) {
@@ -1247,13 +1616,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 } else {
                     switch (wParam) {
                         case VK_ESCAPE:
-                            // Priority: Search > Theme chooser > Quit
+                            // Priority: Search > FolderBrowser > Theme chooser > Quit
                             if (app->showSearch) {
                                 app->showSearch = false;
                                 app->searchActive = false;
                                 app->searchQuery.clear();
                                 app->searchMatches.clear();
                                 app->searchAnimation = 0;
+                            } else if (app->showFolderBrowser) {
+                                app->showFolderBrowser = false;
+                                app->folderBrowserAnimation = 0;
                             } else if (app->showThemeChooser) {
                                 app->showThemeChooser = false;
                                 app->themeChooserAnimation = 0;
@@ -1262,8 +1634,28 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                             }
                             break;
                         case 'Q':
-                            if (!app->showThemeChooser && !app->showSearch) {
+                            if (!app->showThemeChooser && !app->showSearch && !app->showFolderBrowser) {
                                 PostQuitMessage(0);
+                            }
+                            break;
+                        case 'B':
+                            // B to toggle folder browser
+                            if (!app->showSearch && !app->showThemeChooser) {
+                                app->showFolderBrowser = !app->showFolderBrowser;
+                                if (app->showFolderBrowser) {
+                                    app->folderBrowserAnimation = 0;
+                                    // Initialize to directory of current file, or working directory
+                                    if (!app->currentFile.empty()) {
+                                        app->folderBrowserPath = getDirectoryFromFile(app->currentFile);
+                                    } else {
+                                        wchar_t cwd[MAX_PATH];
+                                        if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
+                                            app->folderBrowserPath = cwd;
+                                        }
+                                    }
+                                    populateFolderItems(*app);
+                                }
+                                InvalidateRect(hwnd, nullptr, FALSE);
                             }
                             break;
                         case 'T':

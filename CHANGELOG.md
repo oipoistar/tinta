@@ -1,5 +1,15 @@
 # Changelog
 
+## [v1.6.0] - 2026-02-05
+
+### Added
+- Folder browser panel (press B to toggle)
+  - Slides in from the left side
+  - Navigate directories with single-click
+  - Open .md/.markdown files directly
+  - Scrollable file list with mouse wheel
+  - Theme-aware colors (light/dark)
+
 ## [v1.5.1] - 2026-02-04
 
 ### Fixed

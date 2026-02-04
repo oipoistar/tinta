@@ -169,6 +169,11 @@ void updateOverlayFormats(App& app) {
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             10.0f * scale, L"en-us", &app.themePreviewFormats[i].code);
     }
+
+    // Folder browser format
+    app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        13.0f * scale, L"en-us", &app.folderBrowserFormat);
 }
 
 void createTypography(App& app) {

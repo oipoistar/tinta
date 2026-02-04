@@ -129,6 +129,9 @@ struct App {
     IDWriteTypography* bodyTypography = nullptr;
     IDWriteTypography* codeTypography = nullptr;
 
+    // Folder browser text format
+    IDWriteTextFormat* folderBrowserFormat = nullptr;
+
     // Markdown
     MarkdownParser parser;
     ElementPtr root;
@@ -153,6 +156,18 @@ struct App {
     bool showThemeChooser = false;
     int hoveredThemeIndex = -1;
     float themeChooserAnimation = 0.0f;  // 0 to 1 for fade in
+
+    // Folder browser overlay
+    bool showFolderBrowser = false;
+    float folderBrowserAnimation = 0.0f;  // 0 to 1 for slide-in from left
+    std::wstring folderBrowserPath;       // Current directory being browsed
+    struct FolderItem {
+        std::wstring name;
+        bool isDirectory;
+    };
+    std::vector<FolderItem> folderItems;
+    int hoveredFolderIndex = -1;
+    float folderBrowserScroll = 0.0f;     // Scroll offset for folder list
 
     // Mouse
     bool mouseDown = false;
@@ -300,6 +315,7 @@ struct App {
         if (searchTextFormat) { searchTextFormat->Release(); searchTextFormat = nullptr; }
         if (themeTitleFormat) { themeTitleFormat->Release(); themeTitleFormat = nullptr; }
         if (themeHeaderFormat) { themeHeaderFormat->Release(); themeHeaderFormat = nullptr; }
+        if (folderBrowserFormat) { folderBrowserFormat->Release(); folderBrowserFormat = nullptr; }
         for (auto& fmt : themePreviewFormats) {
             if (fmt.name) { fmt.name->Release(); fmt.name = nullptr; }
             if (fmt.preview) { fmt.preview->Release(); fmt.preview = nullptr; }
