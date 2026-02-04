@@ -386,6 +386,8 @@ std::string elementTypeToString(ElementType type) {
         case ElementType::Image: return "Image";
         case ElementType::SoftBreak: return "SoftBreak";
         case ElementType::HardBreak: return "HardBreak";
+        case ElementType::Ruby: return "Ruby";
+        case ElementType::RubyText: return "RubyText";
         default: return "Unknown";
     }
 }
@@ -655,6 +657,44 @@ void parseHtmlIntoElements(const std::string& html, Element* parent) {
                 elementStack.push(elem.get());
             } else if (elementStack.size() > 1) {
                 flushText();
+                elementStack.pop();
+            }
+        }
+        else if (tag.name == "ruby") {
+            if (!tag.isClosing) {
+                flushText();
+                auto elem = std::make_shared<Element>(ElementType::Ruby);
+                elem->parent = elementStack.top();
+                elementStack.top()->children.push_back(elem);
+                elementStack.push(elem.get());
+            } else if (elementStack.size() > 1) {
+                flushText();
+                elementStack.pop();
+            }
+        }
+        else if (tag.name == "rt") {
+            if (!tag.isClosing) {
+                flushText();
+                auto elem = std::make_shared<Element>(ElementType::RubyText);
+                elem->parent = elementStack.top();
+                elementStack.top()->children.push_back(elem);
+                elementStack.push(elem.get());
+            } else if (elementStack.size() > 1) {
+                flushText();
+                elementStack.pop();
+            }
+        }
+        else if (tag.name == "rp") {
+            // Discard <rp> content (fallback parens for non-ruby renderers)
+            if (!tag.isClosing) {
+                flushText();
+                // Push a dummy element whose text we'll discard
+                auto elem = std::make_shared<Element>(ElementType::Text);
+                elem->parent = elementStack.top();
+                // Don't add to parent - just push to consume content
+                elementStack.push(elem.get());
+            } else if (elementStack.size() > 1) {
+                textBuffer.clear(); // Discard any rp content
                 elementStack.pop();
             }
         }

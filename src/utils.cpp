@@ -187,6 +187,14 @@ void extractText(const ElementPtr& elem, std::wstring& out) {
             out += L"\n\n";
             break;
         }
+        case ElementType::Ruby:
+            // Include base text but skip RubyText (annotation)
+            for (const auto& child : elem->children) {
+                if (child->type != ElementType::RubyText) {
+                    extractText(child, out);
+                }
+            }
+            break;
         default:
             for (const auto& child : elem->children) {
                 extractText(child, out);

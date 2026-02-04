@@ -7,7 +7,9 @@
 #endif
 #include <windows.h>
 #include <d2d1.h>
+#include <d2d1_1.h>
 #include <dwrite.h>
+#include <dwrite_2.h>
 
 #include <string>
 #include <vector>
@@ -99,9 +101,11 @@ struct App {
     ID2D1Factory* d2dFactory = nullptr;
     ID2D1HwndRenderTarget* renderTarget = nullptr;
     ID2D1SolidColorBrush* brush = nullptr;
+    ID2D1DeviceContext* deviceContext = nullptr;  // For color emoji rendering
 
     // DirectWrite
     IDWriteFactory* dwriteFactory = nullptr;
+    IDWriteFontFallback* fontFallback = nullptr;  // For emoji font fallback
     IDWriteTextFormat* textFormat = nullptr;
     IDWriteTextFormat* headingFormat = nullptr;
     IDWriteTextFormat* codeFormat = nullptr;
@@ -308,7 +312,9 @@ struct App {
         clearLayoutCache();
         releaseOverlayFormats();
         if (brush) { brush->Release(); brush = nullptr; }
+        if (deviceContext) { deviceContext->Release(); deviceContext = nullptr; }
         if (renderTarget) { renderTarget->Release(); renderTarget = nullptr; }
+        if (fontFallback) { fontFallback->Release(); fontFallback = nullptr; }
         if (textFormat) { textFormat->Release(); textFormat = nullptr; }
         if (headingFormat) { headingFormat->Release(); headingFormat = nullptr; }
         if (codeFormat) { codeFormat->Release(); codeFormat = nullptr; }

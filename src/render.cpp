@@ -27,6 +27,15 @@ static LayoutInfo createLayout(App& app, std::wstring_view text, IDWriteTextForm
         if (typography) {
             info.layout->SetTypography(typography, {0, (UINT32)text.length()});
         }
+        // Apply font fallback for emoji support
+        if (app.fontFallback) {
+            IDWriteTextLayout2* layout2 = nullptr;
+            if (SUCCEEDED(info.layout->QueryInterface(__uuidof(IDWriteTextLayout2),
+                    reinterpret_cast<void**>(&layout2)))) {
+                layout2->SetFontFallback(app.fontFallback);
+                layout2->Release();
+            }
+        }
         DWRITE_TEXT_METRICS metrics{};
         info.layout->GetMetrics(&metrics);
         info.width = metrics.widthIncludingTrailingWhitespace;
@@ -193,6 +202,87 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 x = startX;
                 y += lineHeight;
                 continue;
+
+            case ElementType::Ruby: {
+                // Collect base text and ruby annotation text
+                std::wstring baseText, rubyText;
+                for (const auto& child : elem->children) {
+                    if (child->type == ElementType::RubyText) {
+                        for (const auto& rtChild : child->children) {
+                            if (rtChild->type == ElementType::Text) {
+                                rubyText += toWide(rtChild->text);
+                            }
+                        }
+                    } else if (child->type == ElementType::Text) {
+                        baseText += toWide(child->text);
+                    }
+                }
+                if (baseText.empty()) continue;
+
+                float rubyFontSize = baseFormat->GetFontSize() * 0.5f;
+                float rubyLineHeight = rubyFontSize * 1.4f;
+
+                // Measure base text
+                size_t rubyDocStart = app.docText.size();
+                LayoutInfo baseInfo = createLayout(app, baseText, baseFormat, lineHeight, app.bodyTypography);
+                float baseWidth = baseInfo.width;
+
+                // Measure ruby text
+                LayoutInfo rubyInfo = {nullptr, 0.0f};
+                float rubyWidth = 0.0f;
+                if (!rubyText.empty()) {
+                    rubyInfo = createLayout(app, rubyText, baseFormat, rubyLineHeight, app.bodyTypography);
+                    if (rubyInfo.layout) {
+                        // Set smaller font size on the ruby layout
+                        DWRITE_TEXT_RANGE range = {0, (UINT32)rubyText.length()};
+                        rubyInfo.layout->SetFontSize(rubyFontSize, range);
+                        DWRITE_TEXT_METRICS metrics{};
+                        rubyInfo.layout->GetMetrics(&metrics);
+                        rubyWidth = metrics.widthIncludingTrailingWhitespace;
+                    }
+                }
+
+                float totalWidth = std::max(baseWidth, rubyWidth);
+
+                // Word-wrap: treat ruby as atomic
+                if (x + totalWidth > maxX && x > startX) {
+                    x = startX;
+                    y += lineHeight;
+                }
+
+                // We need extra space above for the ruby text
+                float rubyAboveOffset = rubyLineHeight;
+                // If we're at the start of a line, push y down to make room for annotation
+                // For simplicity, always reserve space above
+                float baseY = y + rubyAboveOffset;
+
+                // Center the narrower one under the wider one
+                float basePosX = x + (totalWidth - baseWidth) / 2.0f;
+                float rubyPosX = x + (totalWidth - rubyWidth) / 2.0f;
+
+                // Draw ruby annotation (above base text, not selectable)
+                if (rubyInfo.layout) {
+                    D2D1_COLOR_F rubyColor = baseColor;
+                    rubyColor.a *= 0.7f;
+                    D2D1_POINT_2F rubyPos = D2D1::Point2F(rubyPosX, y);
+                    D2D1_RECT_F rubyBounds = D2D1::RectF(rubyPosX, y, rubyPosX + rubyWidth, y + rubyLineHeight);
+                    addTextRun(app, std::move(rubyInfo), rubyPos, rubyBounds, rubyColor, 0, 0, false);
+                }
+
+                // Draw base text (selectable)
+                D2D1_POINT_2F basePos = D2D1::Point2F(basePosX, baseY);
+                D2D1_RECT_F baseBounds = D2D1::RectF(basePosX, baseY, basePosX + baseWidth, baseY + lineHeight);
+                addTextRun(app, std::move(baseInfo), basePos, baseBounds, baseColor,
+                           rubyDocStart, baseText.length(), true);
+
+                app.docText += baseText;
+                x += totalWidth + spaceWidth;
+
+                // Adjust y to account for the extra ruby height on the next line wrap
+                // The total height is rubyAboveOffset + lineHeight but we only advance by lineHeight
+                // at the end of the line, so we need to make sure the ruby doesn't overlap
+                continue;
+            }
 
             default:
                 layoutInlineContent(app, elem->children, x, y,

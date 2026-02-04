@@ -80,9 +80,13 @@ void render(App& app) {
             continue;
         }
         app.brush->SetColor(run.color);
-        app.renderTarget->DrawTextLayout(
-            D2D1::Point2F(run.pos.x - app.scrollX, run.pos.y - app.scrollY),
-            run.layout, app.brush);
+        D2D1_POINT_2F drawPos = D2D1::Point2F(run.pos.x - app.scrollX, run.pos.y - app.scrollY);
+        if (app.deviceContext) {
+            app.deviceContext->DrawTextLayout(drawPos, run.layout, app.brush,
+                D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+        } else {
+            app.renderTarget->DrawTextLayout(drawPos, run.layout, app.brush);
+        }
         app.drawCalls++;
     }
 
@@ -482,7 +486,6 @@ void render(App& app) {
             }
 
             // Match count
-            float countX = barX + barWidth - 80;
             if (!app.searchQuery.empty()) {
                 wchar_t countText[32];
                 if (app.searchMatches.empty()) {
@@ -495,6 +498,8 @@ void render(App& app) {
                     countColor.a = 0.7f * anim;
                     app.brush->SetColor(countColor);
                 }
+                float countTextWidth = measureText(app, countText, searchTextFormat);
+                float countX = barX + barWidth - countTextWidth - 14;
                 app.renderTarget->DrawText(countText, (UINT32)wcslen(countText), searchTextFormat,
                     D2D1::RectF(countX, barY + 12, barX + barWidth - 10, barY + barHeight), app.brush);
             }
@@ -1348,16 +1353,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_DROPFILES:
             if (app) {
                 HDROP hDrop = (HDROP)wParam;
-                char path[MAX_PATH];
-                if (DragQueryFileA(hDrop, 0, path, MAX_PATH)) {
-                    std::string filepath = path;
+                wchar_t wpath[MAX_PATH];
+                if (DragQueryFileW(hDrop, 0, wpath, MAX_PATH)) {
+                    // Convert wide path to UTF-8 for std::string usage
+                    int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wpath, -1, nullptr, 0, nullptr, nullptr);
+                    std::string filepath(utf8Len - 1, '\0');
+                    WideCharToMultiByte(CP_UTF8, 0, wpath, -1, &filepath[0], utf8Len, nullptr, nullptr);
                     size_t dotPos = filepath.rfind('.');
                     if (dotPos != std::string::npos) {
                         std::string ext = filepath.substr(dotPos);
                         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
                         if (ext == ".md" || ext == ".markdown" || ext == ".txt") {
-                            // Load file
-                            std::ifstream file(filepath);
+                            // Load file - use wide path for non-ASCII support
+                            std::ifstream file(wpath);
                             if (file) {
                                 std::stringstream buffer;
                                 buffer << file.rdbuf();
@@ -1575,7 +1583,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     };
 
     auto loadFile = [&](const std::string& path) -> bool {
-        std::ifstream file(path);
+        // Use wide string path for ifstream to support non-ASCII paths (MSVC extension)
+        std::wstring widePath = toWide(path);
+        std::ifstream file(widePath);
         if (!file) return false;
         std::stringstream buffer;
         buffer << file.rdbuf();

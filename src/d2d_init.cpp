@@ -99,6 +99,40 @@ void updateTextFormats(App& app) {
     if (app.italicFormat) app.spaceWidthItalic = measureText(app, L" ", app.italicFormat);
     if (app.codeFormat) app.spaceWidthCode = measureText(app, L" ", app.codeFormat);
 
+    // Build font fallback chain for emoji and CJK support
+    if (!app.fontFallback) {
+        IDWriteFactory2* factory2 = nullptr;
+        if (SUCCEEDED(app.dwriteFactory->QueryInterface(__uuidof(IDWriteFactory2),
+                reinterpret_cast<void**>(&factory2)))) {
+            IDWriteFontFallbackBuilder* builder = nullptr;
+            if (SUCCEEDED(factory2->CreateFontFallbackBuilder(&builder))) {
+                // CJK fonts for Japanese/Chinese/Korean characters
+                const wchar_t* cjkFamilies[] = {
+                    L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI", L"Malgun Gothic"
+                };
+                DWRITE_UNICODE_RANGE cjkRanges[] = {
+                    { 0x2E80, 0x9FFF },    // CJK radicals, kana, ideographs
+                    { 0xAC00, 0xD7AF },    // Hangul syllables
+                    { 0xF900, 0xFAFF },    // CJK compatibility ideographs
+                    { 0xFE30, 0xFE4F },    // CJK compatibility forms
+                    { 0x20000, 0x2FA1F },  // CJK extensions B-F
+                };
+                builder->AddMapping(cjkRanges, 5, cjkFamilies, 4);
+
+                // Emoji/symbol fallback for everything else
+                const wchar_t* emojiFamilies[] = {
+                    L"Segoe UI Emoji", L"Segoe UI Symbol"
+                };
+                DWRITE_UNICODE_RANGE fullRange = { 0x0000, 0x10FFFF };
+                builder->AddMapping(&fullRange, 1, emojiFamilies, 2);
+
+                builder->CreateFontFallback(&app.fontFallback);
+                builder->Release();
+            }
+            factory2->Release();
+        }
+    }
+
     updateOverlayFormats(app);
     app.layoutDirty = true;
 }
@@ -187,6 +221,11 @@ bool createRenderTarget(App& app) {
 
     hr = app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1), &app.brush);
     if (FAILED(hr)) return false;
+
+    // Cache device context for color emoji rendering
+    if (app.deviceContext) { app.deviceContext->Release(); app.deviceContext = nullptr; }
+    app.renderTarget->QueryInterface(__uuidof(ID2D1DeviceContext),
+        reinterpret_cast<void**>(&app.deviceContext));
 
     // Enable high-quality text
     app.renderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);

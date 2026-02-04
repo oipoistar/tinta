@@ -33,6 +33,8 @@ enum class ElementType {
     Image,
     SoftBreak,
     HardBreak,
+    Ruby,
+    RubyText,
 };
 
 // Forward declaration
