@@ -687,15 +687,9 @@ void parseHtmlIntoElements(const std::string& html, Element* parent) {
         else if (tag.name == "rp") {
             // Discard <rp> content (fallback parens for non-ruby renderers)
             if (!tag.isClosing) {
-                flushText();
-                // Push a dummy element whose text we'll discard
-                auto elem = std::make_shared<Element>(ElementType::Text);
-                elem->parent = elementStack.top();
-                // Don't add to parent - just push to consume content
-                elementStack.push(elem.get());
-            } else if (elementStack.size() > 1) {
-                textBuffer.clear(); // Discard any rp content
-                elementStack.pop();
+                flushText(); // Flush any preceding text before discarding
+            } else {
+                textBuffer.clear(); // Discard rp content (e.g. parentheses)
             }
         }
         // Ignore div, span, and other container tags but process their content

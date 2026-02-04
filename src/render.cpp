@@ -583,11 +583,40 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
         case ElementType::HorizontalRule:
             layoutHorizontalRule(app, y, indent, maxWidth);
             break;
-        case ElementType::HtmlBlock:
+        case ElementType::HtmlBlock: {
+            // HtmlBlock can contain both block elements (Paragraph, List, etc.)
+            // and inline elements (Text, Ruby, Link, etc.). Collect consecutive
+            // inline children and render them through layoutInlineContent.
+            std::vector<ElementPtr> inlineBuffer;
+            auto flushInline = [&]() {
+                if (!inlineBuffer.empty()) {
+                    layoutInlineContent(app, inlineBuffer, indent, y, maxWidth,
+                                        app.textFormat, app.theme.text);
+                    app.docText += L"\n\n";
+                    float s = app.contentScale * app.zoomFactor;
+                    y += 14 * s;
+                    inlineBuffer.clear();
+                }
+            };
             for (const auto& child : elem->children) {
-                layoutElement(app, child, y, indent, maxWidth);
+                bool isBlock = (child->type == ElementType::Paragraph ||
+                                child->type == ElementType::Heading ||
+                                child->type == ElementType::CodeBlock ||
+                                child->type == ElementType::BlockQuote ||
+                                child->type == ElementType::List ||
+                                child->type == ElementType::HorizontalRule ||
+                                child->type == ElementType::HtmlBlock ||
+                                child->type == ElementType::Table);
+                if (isBlock) {
+                    flushInline();
+                    layoutElement(app, child, y, indent, maxWidth);
+                } else {
+                    inlineBuffer.push_back(child);
+                }
             }
+            flushInline();
             break;
+        }
         default:
             for (const auto& child : elem->children) {
                 layoutElement(app, child, y, indent, maxWidth);
