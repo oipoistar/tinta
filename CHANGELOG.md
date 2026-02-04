@@ -17,10 +17,14 @@
 ### Fixed
 - Unicode file path support for drag & drop and command line (e.g. Japanese folder names)
 - Search bar "No matches" text positioning using dynamic measurement
-- Cached layout pipeline and rendering improvements
+
+## [v1.4.0] - 2026-02-03
 
 ### Changed
 - Refactored main_d2d.cpp into logical modules
+
+### Improved
+- Cached layout pipeline and rendering performance
 
 ## [v1.3.0] - 2026-02-03
 
