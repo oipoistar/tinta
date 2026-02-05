@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <string_view>
 
 namespace {
@@ -372,6 +373,18 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
         y += 16 * scale;
     } else {
         y += 20 * scale;
+    }
+
+    // Record heading for TOC (h1-h3 only)
+    if (elem->level <= 3) {
+        std::wstring headingText;
+        std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
+            if (!e) return;
+            if (e->type == ElementType::Text) headingText += toWide(e->text);
+            else for (const auto& c : e->children) extract(c);
+        };
+        for (const auto& child : elem->children) extract(child);
+        app.headings.push_back({headingText, elem->level, y});
     }
 
     layoutInlineContent(app, elem->children, indent, y, maxWidth, format, app.theme.heading);

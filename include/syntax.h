@@ -20,6 +20,7 @@ extern const std::unordered_set<std::wstring> PYTHON_KEYWORDS;
 extern const std::unordered_set<std::wstring> JS_KEYWORDS;
 extern const std::unordered_set<std::wstring> RUST_KEYWORDS;
 extern const std::unordered_set<std::wstring> GO_KEYWORDS;
+extern const std::unordered_set<std::wstring> BASH_KEYWORDS;
 
 int detectLanguage(const std::wstring& lang);
 const std::unordered_set<std::wstring>* getKeywordsForLanguage(int lang);

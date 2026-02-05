@@ -284,7 +284,7 @@ void render(App& app) {
 
             if (isSelectAll) {
                 lineInSelection = true;
-            } else if (lineCenterY >= selStartY - 10 && lineCenterY <= selEndY + 10) {
+            } else if (lineCenterY >= selStartY - 3 && lineCenterY <= selEndY + 3) {
                 float lineHeight = line.bottom - line.top;
                 bool isSingleLine = (selEndY - selStartY) <= lineHeight;
 
@@ -445,11 +445,19 @@ void render(App& app) {
                 D2D1::RoundedRect(D2D1::RectF(pillX, pillY, pillX + copyWidth, pillY + copyHeight), 13, 13),
                 app.brush);
 
-            // Text
+            // Text (centered via text layout)
             app.brush->SetColor(D2D1::ColorF(1, 1, 1, alpha));
-            app.renderTarget->DrawText(copyText, (UINT32)wcslen(copyText), app.textFormat,
-                D2D1::RectF(pillX + 10, pillY + 3, pillX + copyWidth - 10, pillY + copyHeight),
-                app.brush);
+            IDWriteTextLayout* copyLayout = nullptr;
+            app.dwriteFactory->CreateTextLayout(copyText, (UINT32)wcslen(copyText),
+                app.textFormat, copyWidth, copyHeight, &copyLayout);
+            if (copyLayout) {
+                DWRITE_TEXT_METRICS copyMetrics;
+                copyLayout->GetMetrics(&copyMetrics);
+                float textX = pillX + (copyWidth - copyMetrics.width) / 2;
+                float textY = pillY + (copyHeight - copyMetrics.height) / 2;
+                app.renderTarget->DrawTextLayout(D2D1::Point2F(textX, textY), copyLayout, app.brush);
+                copyLayout->Release();
+            }
             app.drawCalls++;
 
             // Keep animating
@@ -773,6 +781,149 @@ void render(App& app) {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // TABLE OF CONTENTS OVERLAY
+    // ═══════════════════════════════════════════════════════════════════════════
+    if (app.showToc) {
+        // Animate in (slide from right)
+        if (app.tocAnimation < 1.0f) {
+            app.tocAnimation = std::min(1.0f, app.tocAnimation + 0.15f);
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+        }
+        float anim = app.tocAnimation;
+
+        // Panel dimensions
+        float panelWidth = std::min(280.0f, std::max(220.0f, app.width * 0.2f));
+        float panelX = app.width - panelWidth * anim;  // Slide in from right
+        float panelY = 0;
+        float panelHeight = (float)app.height;
+
+        // Background
+        D2D1_COLOR_F panelBg = app.theme.isDark ? hexColor(0x1E1E1E, 0.95f) : hexColor(0xF5F5F5, 0.95f);
+        app.brush->SetColor(panelBg);
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(panelX, panelY, panelX + panelWidth, panelY + panelHeight), app.brush);
+
+        // Left border
+        D2D1_COLOR_F borderColor = app.theme.isDark ? hexColor(0x3A3A40, 0.8f) : hexColor(0xD0D0D0, 0.8f);
+        app.brush->SetColor(borderColor);
+        app.renderTarget->DrawLine(
+            D2D1::Point2F(panelX, panelY),
+            D2D1::Point2F(panelX, panelY + panelHeight),
+            app.brush, 1.0f);
+
+        IDWriteTextFormat* tocBold = app.tocFormatBold;
+        IDWriteTextFormat* tocNormal = app.tocFormat;
+        if (tocBold && tocNormal) {
+            float padding = 12.0f;
+            float itemHeight = 28.0f;
+            float headerHeight = 40.0f;
+
+            // Header: "Contents"
+            float headerY = panelY + padding;
+            D2D1_COLOR_F headerColor = app.theme.heading;
+            headerColor.a = anim;
+            app.brush->SetColor(headerColor);
+            app.renderTarget->DrawText(L"Contents", 8, tocBold,
+                D2D1::RectF(panelX + padding, headerY, panelX + panelWidth - padding, headerY + headerHeight),
+                app.brush);
+
+            // Divider
+            float dividerY = headerY + headerHeight;
+            app.brush->SetColor(borderColor);
+            app.renderTarget->DrawLine(
+                D2D1::Point2F(panelX + padding, dividerY),
+                D2D1::Point2F(panelX + panelWidth - padding, dividerY),
+                app.brush, 1.0f);
+
+            // Items list
+            float listStartY = dividerY + 8.0f;
+            float listHeight = panelHeight - listStartY - padding;
+
+            if (app.headings.empty()) {
+                // "No headings" message
+                D2D1_COLOR_F dimColor = app.theme.text;
+                dimColor.a = 0.5f * anim;
+                app.brush->SetColor(dimColor);
+                app.renderTarget->DrawText(L"No headings", 11, tocNormal,
+                    D2D1::RectF(panelX + padding, listStartY + 8, panelX + panelWidth - padding, listStartY + 40),
+                    app.brush);
+            } else {
+                float totalItemsHeight = app.headings.size() * itemHeight;
+
+                // Clamp scroll
+                float maxScroll = std::max(0.0f, totalItemsHeight - listHeight);
+                app.tocScroll = std::max(0.0f, std::min(app.tocScroll, maxScroll));
+
+                app.hoveredTocIndex = -1;
+
+                for (size_t i = 0; i < app.headings.size(); i++) {
+                    float itemY = listStartY + i * itemHeight - app.tocScroll;
+
+                    // Skip items outside visible area
+                    if (itemY + itemHeight < listStartY || itemY > panelHeight - padding) continue;
+
+                    const auto& heading = app.headings[i];
+                    float indent = (heading.level - 1) * 16.0f;
+                    float itemX = panelX + padding + indent;
+
+                    // Check hover (use full item width for hit area)
+                    float hitX = panelX + padding;
+                    float hitW = panelWidth - padding * 2;
+                    bool isHovered = (app.mouseX >= hitX && app.mouseX <= hitX + hitW &&
+                                      app.mouseY >= itemY && app.mouseY <= itemY + itemHeight &&
+                                      app.mouseY >= listStartY && app.mouseY <= panelHeight - padding);
+
+                    if (isHovered) {
+                        app.hoveredTocIndex = (int)i;
+
+                        // Hover highlight
+                        D2D1_COLOR_F hoverColor = app.theme.accent;
+                        hoverColor.a = 0.15f * anim;
+                        app.brush->SetColor(hoverColor);
+                        app.renderTarget->FillRoundedRectangle(
+                            D2D1::RoundedRect(D2D1::RectF(panelX + padding - 4, itemY,
+                                panelX + panelWidth - padding + 4, itemY + itemHeight), 4, 4),
+                            app.brush);
+                    }
+
+                    // Text color and format based on heading level
+                    IDWriteTextFormat* fmt = (heading.level == 1) ? tocBold : tocNormal;
+                    D2D1_COLOR_F textColor;
+                    if (heading.level == 1) {
+                        textColor = app.theme.heading;
+                    } else if (heading.level == 3) {
+                        textColor = app.theme.text;
+                        textColor.a = 0.7f * anim;
+                    } else {
+                        textColor = app.theme.text;
+                        textColor.a = anim;
+                    }
+                    app.brush->SetColor(textColor);
+
+                    app.renderTarget->DrawText(heading.text.c_str(), (UINT32)heading.text.length(), fmt,
+                        D2D1::RectF(itemX, itemY + 4, panelX + panelWidth - padding, itemY + itemHeight),
+                        app.brush);
+                }
+
+                // Scrollbar if needed
+                if (totalItemsHeight > listHeight) {
+                    float sbHeight = listHeight / totalItemsHeight * listHeight;
+                    sbHeight = std::max(sbHeight, 20.0f);
+                    float sbY = listStartY + (maxScroll > 0 ? (app.tocScroll / maxScroll * (listHeight - sbHeight)) : 0);
+
+                    D2D1_COLOR_F sbColor = app.theme.text;
+                    sbColor.a = 0.3f * anim;
+                    app.brush->SetColor(sbColor);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(D2D1::RectF(panelX + 4, sbY,
+                                                      panelX + 8, sbY + sbHeight), 2, 2),
+                        app.brush);
+                }
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // THEME CHOOSER OVERLAY
     // ═══════════════════════════════════════════════════════════════════════════
     if (app.showThemeChooser) {
@@ -1029,6 +1180,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     }
                 }
 
+                // Handle TOC scroll
+                if (app->showToc) {
+                    float panelWidth = std::min(280.0f, std::max(220.0f, app->width * 0.2f));
+                    float panelX = app->width - panelWidth * app->tocAnimation;
+                    if (app->mouseX >= panelX && app->mouseX <= panelX + panelWidth) {
+                        app->tocScroll -= delta * 60.0f;
+                        float itemHeight = 28.0f;
+                        float headerHeight = 48.0f;
+                        float listHeight = app->height - headerHeight - 20.0f;
+                        float totalItemsHeight = app->headings.size() * itemHeight;
+                        float maxScroll = std::max(0.0f, totalItemsHeight - listHeight);
+                        app->tocScroll = std::max(0.0f, std::min(app->tocScroll, maxScroll));
+                        InvalidateRect(hwnd, nullptr, FALSE);
+                        return 0;
+                    }
+                }
+
                 if (ctrl) {
                     // Zoom in/out
                     float zoomDelta = delta * 0.1f;
@@ -1187,6 +1355,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     }
                     // Always invalidate when folder browser is open to track hover
                     InvalidateRect(hwnd, nullptr, FALSE);
+                } else if (app->showToc) {
+                    float panelWidth = std::min(280.0f, std::max(220.0f, app->width * 0.2f));
+                    float panelX = app->width - panelWidth * app->tocAnimation;
+                    if (app->mouseX >= panelX && app->mouseX <= panelX + panelWidth && app->hoveredTocIndex >= 0) {
+                        SetCursor(LoadCursor(nullptr, IDC_HAND));
+                    } else {
+                        SetCursor(LoadCursor(nullptr, IDC_ARROW));
+                    }
+                    InvalidateRect(hwnd, nullptr, FALSE);
                 } else if (app->scrollbarHovered || app->scrollbarDragging ||
                     app->hScrollbarHovered || app->hScrollbarDragging) {
                     SetCursor(LoadCursor(nullptr, IDC_ARROW));
@@ -1208,8 +1385,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_LBUTTONDOWN:
             if (app) {
-                // If theme chooser or folder browser is open, don't start selection - just record for click handling
-                if (app->showThemeChooser || app->showFolderBrowser) {
+                // If theme chooser, folder browser, or TOC is open, don't start selection - just record for click handling
+                if (app->showThemeChooser || app->showFolderBrowser || app->showToc) {
                     return 0;
                 }
 
@@ -1348,6 +1525,36 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_LBUTTONUP:
             if (app) {
                 ReleaseCapture();
+
+                // TOC click handling
+                if (app->showToc) {
+                    int clickX = GET_X_LPARAM(lParam);
+
+                    float panelWidth = std::min(280.0f, std::max(220.0f, app->width * 0.2f));
+                    float panelX = app->width - panelWidth * app->tocAnimation;
+
+                    if (clickX >= panelX && (float)clickX <= panelX + panelWidth) {
+                        // Click inside panel
+                        if (app->hoveredTocIndex >= 0 && app->hoveredTocIndex < (int)app->headings.size()) {
+                            // Scroll document to heading
+                            float headingY = app->headings[app->hoveredTocIndex].y - 20.0f;
+                            float maxScroll = std::max(0.0f, app->contentHeight - app->height);
+                            app->scrollY = std::max(0.0f, std::min(headingY, maxScroll));
+                            app->targetScrollY = app->scrollY;
+
+                            // Close TOC
+                            app->showToc = false;
+                            app->tocAnimation = 0;
+                        }
+                    } else {
+                        // Click outside panel = close TOC
+                        app->showToc = false;
+                        app->tocAnimation = 0;
+                    }
+
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
 
                 // Folder browser click handling
                 if (app->showFolderBrowser) {
@@ -1616,7 +1823,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 } else {
                     switch (wParam) {
                         case VK_ESCAPE:
-                            // Priority: Search > FolderBrowser > Theme chooser > Quit
+                            // Priority: Search > FolderBrowser > TOC > Theme chooser > Quit
                             if (app->showSearch) {
                                 app->showSearch = false;
                                 app->searchActive = false;
@@ -1626,6 +1833,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                             } else if (app->showFolderBrowser) {
                                 app->showFolderBrowser = false;
                                 app->folderBrowserAnimation = 0;
+                            } else if (app->showToc) {
+                                app->showToc = false;
+                                app->tocAnimation = 0;
                             } else if (app->showThemeChooser) {
                                 app->showThemeChooser = false;
                                 app->themeChooserAnimation = 0;
@@ -1634,13 +1844,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                             }
                             break;
                         case 'Q':
-                            if (!app->showThemeChooser && !app->showSearch && !app->showFolderBrowser) {
+                            if (!app->showThemeChooser && !app->showSearch && !app->showFolderBrowser && !app->showToc) {
                                 PostQuitMessage(0);
                             }
                             break;
                         case 'B':
                             // B to toggle folder browser
-                            if (!app->showSearch && !app->showThemeChooser) {
+                            if (!app->showSearch && !app->showThemeChooser && !app->showToc) {
                                 app->showFolderBrowser = !app->showFolderBrowser;
                                 if (app->showFolderBrowser) {
                                     app->folderBrowserAnimation = 0;
@@ -1654,6 +1864,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                         }
                                     }
                                     populateFolderItems(*app);
+                                }
+                                InvalidateRect(hwnd, nullptr, FALSE);
+                            }
+                            break;
+                        case VK_TAB:
+                            if (!app->showSearch && !app->showThemeChooser && !app->showFolderBrowser) {
+                                app->showToc = !app->showToc;
+                                if (app->showToc) {
+                                    app->tocAnimation = 0;
+                                    app->tocScroll = 0;
+                                    app->hoveredTocIndex = -1;
                                 }
                                 InvalidateRect(hwnd, nullptr, FALSE);
                             }

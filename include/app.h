@@ -132,6 +132,10 @@ struct App {
     // Folder browser text format
     IDWriteTextFormat* folderBrowserFormat = nullptr;
 
+    // TOC text formats
+    IDWriteTextFormat* tocFormat = nullptr;
+    IDWriteTextFormat* tocFormatBold = nullptr;
+
     // Markdown
     MarkdownParser parser;
     ElementPtr root;
@@ -168,6 +172,18 @@ struct App {
     std::vector<FolderItem> folderItems;
     int hoveredFolderIndex = -1;
     float folderBrowserScroll = 0.0f;     // Scroll offset for folder list
+
+    // Table of contents overlay
+    bool showToc = false;
+    float tocAnimation = 0.0f;  // 0 to 1 for slide-in from right
+    struct HeadingInfo {
+        std::wstring text;
+        int level;       // 1-6
+        float y;         // document Y coordinate
+    };
+    std::vector<HeadingInfo> headings;
+    int hoveredTocIndex = -1;
+    float tocScroll = 0.0f;
 
     // Mouse
     bool mouseDown = false;
@@ -309,6 +325,7 @@ struct App {
         lineBuckets.clear();
         docText.clear();
         docTextLower.clear();
+        headings.clear();
     }
 
     void releaseOverlayFormats() {
@@ -316,6 +333,8 @@ struct App {
         if (themeTitleFormat) { themeTitleFormat->Release(); themeTitleFormat = nullptr; }
         if (themeHeaderFormat) { themeHeaderFormat->Release(); themeHeaderFormat = nullptr; }
         if (folderBrowserFormat) { folderBrowserFormat->Release(); folderBrowserFormat = nullptr; }
+        if (tocFormat) { tocFormat->Release(); tocFormat = nullptr; }
+        if (tocFormatBold) { tocFormatBold->Release(); tocFormatBold = nullptr; }
         for (auto& fmt : themePreviewFormats) {
             if (fmt.name) { fmt.name->Release(); fmt.name = nullptr; }
             if (fmt.preview) { fmt.preview->Release(); fmt.preview = nullptr; }

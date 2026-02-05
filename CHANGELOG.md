@@ -1,5 +1,16 @@
 # Changelog
 
+## [v1.6.5] - 2026-02-05
+
+### Added
+- Table of contents side panel (press Tab to toggle)
+  - Slides in from the right side
+  - Shows H1, H2, H3 headings with indentation
+  - Click a heading to jump to that section
+  - Scrollable list with mouse wheel
+  - Theme-aware colors (light/dark)
+  - "No headings" message for files without headings
+
 ## [v1.6.0] - 2026-02-05
 
 ### Added

@@ -54,6 +54,15 @@ const std::unordered_set<std::wstring> GO_KEYWORDS = {
     L"true", L"false", L"nil", L"iota", L"make", L"new", L"append", L"len", L"cap", L"copy"
 };
 
+const std::unordered_set<std::wstring> BASH_KEYWORDS = {
+    L"if", L"then", L"else", L"elif", L"fi", L"for", L"in", L"do", L"done",
+    L"while", L"until", L"case", L"esac", L"function", L"return", L"local",
+    L"export", L"source", L"alias", L"unalias", L"set", L"unset",
+    L"readonly", L"shift", L"exit", L"break", L"continue",
+    L"echo", L"printf", L"read", L"eval", L"exec", L"trap",
+    L"cd", L"pwd", L"test", L"true", L"false"
+};
+
 int detectLanguage(const std::wstring& lang) {
     std::wstring lower = lang;
     for (auto& c : lower) c = towlower(c);
@@ -67,6 +76,8 @@ int detectLanguage(const std::wstring& lang) {
         return 4;  // Rust
     if (lower == L"go" || lower == L"golang")
         return 5;  // Go
+    if (lower == L"bash" || lower == L"shell" || lower == L"sh" || lower == L"zsh")
+        return 6;  // Bash/Shell
     return 0;  // Unknown
 }
 
@@ -77,6 +88,7 @@ const std::unordered_set<std::wstring>* getKeywordsForLanguage(int lang) {
         case 3: return &JS_KEYWORDS;
         case 4: return &RUST_KEYWORDS;
         case 5: return &GO_KEYWORDS;
+        case 6: return &BASH_KEYWORDS;
         default: return nullptr;
     }
 }
@@ -117,7 +129,7 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
         // Line comments
         if (i + 1 < line.length()) {
             if ((line[i] == L'/' && line[i+1] == L'/') ||  // C/C++/JS/Rust/Go
-                (language == 2 && line[i] == L'#')) {       // Python
+                ((language == 2 || language == 6) && line[i] == L'#')) {  // Python + Bash
                 tokens.push_back({std::wstring_view(line.data() + i, line.length() - i),
                                   SyntaxTokenType::Comment});
                 return tokens;
@@ -138,8 +150,8 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
                 continue;
             }
         }
-        // Python single # comment
-        if (language == 2 && c == L'#') {
+        // Python/Bash single # comment
+        if ((language == 2 || language == 6) && c == L'#') {
             tokens.push_back({std::wstring_view(line.data() + i, line.length() - i),
                               SyntaxTokenType::Comment});
             return tokens;

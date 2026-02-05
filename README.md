@@ -22,6 +22,7 @@ Built with Direct2D and DirectWrite for hardware-accelerated rendering. ~270KB b
 - **10 beautiful themes** - 5 light and 5 dark themes to choose from
 - **Hardware-accelerated** - Smooth text rendering via DirectWrite
 - **Folder browser** - Press B to browse and open markdown files
+- **Table of contents** - Press Tab to see document headings, click to jump
 - **Search** - Find text with F or Ctrl+F, cycle through matches with Enter
 - **Persistent settings** - Remembers your theme, zoom level, and window position
 - **Text selection & copy** - Select text and copy to clipboard
@@ -34,6 +35,7 @@ Built with Direct2D and DirectWrite for hardware-accelerated rendering. ~270KB b
 | Key | Action |
 |-----|--------|
 | `B` | Toggle folder browser |
+| `Tab` | Toggle table of contents |
 | `F` / `Ctrl+F` | Open search |
 | `Enter` | Next search match |
 | `ESC` | Close overlay / Quit |
