@@ -404,9 +404,15 @@
 
         /* Technical details */
         .tech-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
             gap: 2rem;
+        }
+
+        .tech-card {
+            flex: 1 1 300px;
+            max-width: calc(50% - 1rem);
         }
 
         .tech-card {
@@ -439,9 +445,15 @@
 
         /* Features */
         .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
             gap: 1.5rem;
+        }
+
+        .feature {
+            flex: 1 1 250px;
+            max-width: calc(33.333% - 1rem);
         }
 
         .feature {
@@ -662,6 +674,19 @@
                 padding: 4rem 1.5rem;
             }
 
+            .feature {
+                max-width: 100%;
+            }
+
+            .tech-card {
+                max-width: 100%;
+            }
+
+            .code-block {
+                white-space: pre-wrap;
+                font-size: 0.8rem;
+            }
+
             .pricing-cards {
                 grid-template-columns: 1fr;
             }
@@ -677,6 +702,8 @@
             font-size: 0.9rem;
             overflow-x: auto;
             margin: 2rem 0;
+            white-space: pre;
+            line-height: 1.6;
         }
 
         .code-block .comment {
