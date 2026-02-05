@@ -145,11 +145,100 @@
             text-align: center;
             padding: 6rem 2rem 4rem;
             position: relative;
+            overflow: hidden;
+        }
+
+        /* Screenshot collage background */
+        .hero-collage {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            overflow: hidden;
+        }
+
+        .hero-collage-img {
+            position: absolute;
+            width: 320px;
+            border-radius: 6px;
+            box-shadow: 0 8px 40px rgba(26, 26, 46, 0.08), 0 1px 3px rgba(26, 26, 46, 0.04);
+            opacity: 0;
+            animation: collageReveal 1.8s ease-out forwards;
+            /* Sepia-tinted desaturation to blend with paper background */
+            filter: saturate(0.35) sepia(0.25) brightness(1.02);
+            transition: filter 0.6s ease, opacity 0.6s ease, transform 0.6s ease;
+        }
+
+        .hero-collage-img:hover {
+            filter: saturate(0.8) sepia(0.1) brightness(1.0);
+            opacity: 0.25 !important;
+            transform: scale(1.03);
+            z-index: 2;
+        }
+
+        /* Position each screenshot as scattered manuscript pages */
+        .hero-collage-img:nth-child(1) {
+            top: 4%;
+            left: 2%;
+            transform: rotate(-8deg);
+            animation-delay: 0.2s;
+        }
+        .hero-collage-img:nth-child(2) {
+            top: 8%;
+            right: 2%;
+            transform: rotate(6deg);
+            animation-delay: 0.5s;
+        }
+        .hero-collage-img:nth-child(3) {
+            bottom: 14%;
+            left: 3%;
+            transform: rotate(4deg);
+            animation-delay: 0.35s;
+        }
+        .hero-collage-img:nth-child(4) {
+            bottom: 6%;
+            right: 2%;
+            transform: rotate(-5deg);
+            animation-delay: 0.65s;
+        }
+        .hero-collage-img:nth-child(5) {
+            top: 48%;
+            right: 42%;
+            transform: rotate(-2deg) translateY(-50%);
+            animation-delay: 0.8s;
+            width: 280px;
+        }
+
+        @keyframes collageReveal {
+            from {
+                opacity: 0;
+                filter: saturate(0) sepia(0.4) brightness(1.1) blur(2px);
+            }
+            to {
+                opacity: 0.4;
+                filter: saturate(0.35) sepia(0.25) brightness(1.02) blur(0px);
+            }
+        }
+
+        /* Vignette over collage to keep center clean for text */
+        .hero-collage::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(
+                ellipse 70% 60% at 50% 48%,
+                var(--paper) 0%,
+                rgba(247, 243, 235, 0.92) 35%,
+                rgba(247, 243, 235, 0.5) 65%,
+                transparent 100%
+            );
+            pointer-events: none;
         }
 
         .hero-content {
             max-width: 800px;
             animation: fadeUp 1s ease-out;
+            position: relative;
+            z-index: 3;
         }
 
         @keyframes fadeUp {
@@ -160,6 +249,18 @@
             to {
                 opacity: 1;
                 transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .hero-collage-img {
+                width: 200px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .hero-collage-img {
+                display: none;
             }
         }
 
@@ -267,6 +368,7 @@
             gap: 0.5rem;
             opacity: 0.4;
             animation: bounce 2s ease-in-out infinite;
+            z-index: 3;
         }
 
         .scroll-hint span {
@@ -749,6 +851,13 @@
     </nav>
 
     <section class="hero">
+        <div class="hero-collage">
+            <img class="hero-collage-img" src="img/screenshots/paper.png" alt="" loading="eager">
+            <img class="hero-collage-img" src="img/screenshots/sakura.png" alt="" loading="eager">
+            <img class="hero-collage-img" src="img/screenshots/meadow.png" alt="" loading="eager">
+            <img class="hero-collage-img" src="img/screenshots/dusk.png" alt="" loading="eager">
+            <img class="hero-collage-img" src="img/screenshots/arctic.png" alt="" loading="eager">
+        </div>
         <div class="hero-content">
             <h1 class="tagline">Markdown, <em>distilled.</em></h1>
             <p class="subtitle">A fast, lightweight reader for Windows</p>
