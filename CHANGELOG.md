@@ -1,5 +1,23 @@
 # Changelog
 
+## [v1.8.0] - 2026-02-06
+
+### Added
+- Edit mode with live preview (press `:` to enter, double-ESC to exit)
+  - Split view: editor on left, rendered preview on right
+  - Draggable separator between panes
+  - Syntax-aware monospace editor with line numbers
+  - Undo/redo, clipboard, word/line selection
+  - Scroll sync between editor and preview
+  - Save with Ctrl+S, auto-reparse on edits
+- Editor search (Ctrl+F in edit mode)
+  - Search operates on raw editor text with highlights in the editor pane
+  - Search bar centered over editor pane
+  - Yellow highlights for all matches, orange for current match
+  - Enter to cycle through matches, ESC to close
+- Performance optimizations (cached cursors, regex patterns, vector pre-allocation)
+- Extracted input/overlays/file_utils into separate modules
+
 ## [v1.7.0] - 2026-02-05
 
 ### Added

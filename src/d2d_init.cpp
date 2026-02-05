@@ -192,6 +192,26 @@ void updateOverlayFormats(App& app) {
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         12.0f * scale, L"en-us", &app.tocFormat);
+
+    // Editor text format (monospace, same size as body)
+    float editorScale = app.contentScale * app.zoomFactor;
+    float editorFontSize = 14.0f * editorScale;
+    app.dwriteFactory->CreateTextFormat(app.theme.codeFontFamily, nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        editorFontSize, L"en-us", &app.editorTextFormat);
+    if (app.editorTextFormat) {
+        app.editorTextFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        // Measure actual monospace character width
+        IDWriteTextLayout* measureLayout = nullptr;
+        app.dwriteFactory->CreateTextLayout(L"M", 1, app.editorTextFormat,
+            10000.0f, 100.0f, &measureLayout);
+        if (measureLayout) {
+            DWRITE_TEXT_METRICS metrics{};
+            measureLayout->GetMetrics(&metrics);
+            app.editorCharWidth = metrics.widthIncludingTrailingWhitespace;
+            measureLayout->Release();
+        }
+    }
 }
 
 void createTypography(App& app) {

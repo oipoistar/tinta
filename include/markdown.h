@@ -54,6 +54,8 @@ struct Element {
     int align = 0;            // for table cells (0=default, 1=left, 2=center, 3=right)
     int col_count = 0;        // for tables (number of columns)
 
+    size_t sourceOffset = SIZE_MAX; // byte offset in original markdown source
+
     std::vector<ElementPtr> children;
     Element* parent = nullptr;
 

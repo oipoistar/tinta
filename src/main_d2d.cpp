@@ -22,6 +22,7 @@
 #include "file_utils.h"
 #include "overlays.h"
 #include "input.h"
+#include "editor.h"
 
 static App* g_app = nullptr;
 
@@ -39,9 +40,87 @@ void render(App& app) {
         layoutDocument(app);
     }
 
+    // Sync preview scroll to editor scroll position using source-offset anchors
+    if (app.editMode && !app.scrollAnchors.empty() && !app.editorLineByteOffsets.empty()) {
+        // Find the editor's top visible line
+        float lineHeight = app.editorTextFormat ? app.editorTextFormat->GetFontSize() * 1.5f : 20.0f;
+        int topLine = (int)(app.editorScrollY / lineHeight);
+        topLine = std::max(0, std::min(topLine, (int)app.editorLineByteOffsets.size() - 1));
+        size_t topByteOffset = app.editorLineByteOffsets[topLine];
+
+        // Binary search for the anchor just before this byte offset
+        size_t lo = 0, hi = app.scrollAnchors.size();
+        while (lo + 1 < hi) {
+            size_t mid = (lo + hi) / 2;
+            if (app.scrollAnchors[mid].sourceOffset <= topByteOffset) lo = mid;
+            else hi = mid;
+        }
+
+        // Interpolate between anchor[lo] and anchor[lo+1]
+        float targetY;
+        if (lo + 1 < app.scrollAnchors.size() &&
+            app.scrollAnchors[lo + 1].sourceOffset > app.scrollAnchors[lo].sourceOffset) {
+            float t = (float)(topByteOffset - app.scrollAnchors[lo].sourceOffset) /
+                      (float)(app.scrollAnchors[lo + 1].sourceOffset - app.scrollAnchors[lo].sourceOffset);
+            t = std::max(0.0f, std::min(t, 1.0f));
+            targetY = app.scrollAnchors[lo].renderedY +
+                       t * (app.scrollAnchors[lo + 1].renderedY - app.scrollAnchors[lo].renderedY);
+        } else {
+            // Last anchor or single anchor — use ratio for remaining content
+            targetY = app.scrollAnchors[lo].renderedY;
+            if (app.contentHeight > app.scrollAnchors[lo].renderedY) {
+                size_t lastOffset = app.scrollAnchors[lo].sourceOffset;
+                size_t totalBytes = app.editorLineByteOffsets.back();
+                if (totalBytes > lastOffset) {
+                    float t = (float)(topByteOffset - lastOffset) / (float)(totalBytes - lastOffset);
+                    t = std::max(0.0f, std::min(t, 1.0f));
+                    targetY += t * (app.contentHeight - app.scrollAnchors[lo].renderedY);
+                }
+            }
+        }
+
+        float previewMaxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
+        app.scrollY = std::max(0.0f, std::min(targetY, previewMaxScroll));
+        app.targetScrollY = app.scrollY;
+    }
+
+    // Edit mode: split view rendering
+    if (app.editMode) {
+        app.renderTarget->Clear(app.theme.background);
+
+        float editorWidth = app.width * app.editorSplitRatio - 3;
+        float previewX = app.width * app.editorSplitRatio + 3;
+        float previewWidth = app.width - previewX;
+
+        // Render editor (left pane)
+        renderEditor(app, editorWidth);
+
+        // Render separator
+        renderSeparator(app);
+
+        // Render preview (right pane) using clip + transform
+        app.renderTarget->PushAxisAlignedClip(
+            D2D1::RectF(previewX, 0, (float)app.width, (float)app.height),
+            D2D1_ANTIALIAS_MODE_ALIASED);
+
+        D2D1_MATRIX_3X2_F originalTransform;
+        app.renderTarget->GetTransform(&originalTransform);
+        app.renderTarget->SetTransform(
+            D2D1::Matrix3x2F::Translation(previewX, 0) * originalTransform);
+
+        // Clear preview background
+        app.brush->SetColor(app.theme.background);
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(0, 0, previewWidth, (float)app.height), app.brush);
+
+        goto render_document;
+    }
+
     // Clear background
     app.renderTarget->Clear(app.theme.background);
     app.drawCalls++;
+
+render_document:
 
     // Clamp scroll values
     float maxScrollX = std::max(0.0f, app.contentWidth - app.width);
@@ -418,11 +497,26 @@ void render(App& app) {
             app.brush);
     }
 
-    // Render overlays
-    if (app.showSearch) renderSearchOverlay(app);
+    // Render overlays (search overlay handled separately for edit mode)
+    if (app.showSearch && !app.editMode) renderSearchOverlay(app);
     if (app.showFolderBrowser) renderFolderBrowser(app);
     if (app.showToc) renderToc(app);
     if (app.showThemeChooser) renderThemeChooser(app);
+
+    // Close edit mode split view clipping
+    if (app.editMode) {
+        D2D1_MATRIX_3X2_F identity = D2D1::Matrix3x2F::Identity();
+        app.renderTarget->SetTransform(identity);
+        app.renderTarget->PopAxisAlignedClip();
+
+        // Render search overlay in screen coordinates (over editor pane)
+        if (app.showSearch) renderSearchOverlay(app);
+
+        // Render edit mode notification (on top of everything)
+        renderEditModeNotification(app);
+    }
+
+    // "Saved!" notification (reuses "Copied!" infrastructure)
 
     app.renderTarget->EndDraw();
 }
@@ -510,10 +604,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_TIMER:
             if (wParam == TIMER_FILE_WATCH && app) handleFileWatchTimer(*app, hwnd);
+            if (wParam == 2 && app) editorReparse(*app); // TIMER_EDITOR_REPARSE
             return 0;
 
         case WM_DESTROY:
             KillTimer(hwnd, TIMER_FILE_WATCH);
+            KillTimer(hwnd, 2); // TIMER_EDITOR_REPARSE
             {
                 // Load existing settings to preserve values like hasAskedFileAssociation
                 Settings settings = loadSettings();

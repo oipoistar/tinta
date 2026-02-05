@@ -17,7 +17,14 @@ void renderSearchOverlay(App& app) {
     // Search bar dimensions
     float barWidth = std::min(500.0f, app.width - 40.0f);
     float barHeight = 44.0f;
-    float barX = (app.width - barWidth) / 2;
+    float barCenterWidth = (float)app.width;
+    if (app.editMode) {
+        // Center over editor pane (left side)
+        float paneWidth = app.width * app.editorSplitRatio - 3;
+        barWidth = std::min(barWidth, paneWidth - 40.0f);
+        barCenterWidth = paneWidth;
+    }
+    float barX = (barCenterWidth - barWidth) / 2;
     float barY = 20.0f * anim - barHeight * (1.0f - anim);  // Slide down from top
 
     // Background with rounded corners
@@ -100,12 +107,14 @@ void renderSearchOverlay(App& app) {
         // Match count
         if (!app.searchQuery.empty()) {
             wchar_t countText[32];
-            if (app.searchMatches.empty()) {
+            size_t matchCount = app.editMode ? app.editorSearchMatches.size() : app.searchMatches.size();
+            int currentIdx = app.editMode ? app.editorSearchCurrentIndex : app.searchCurrentIndex;
+            if (matchCount == 0) {
                 wcscpy_s(countText, L"No matches");
                 // Red color for no matches
                 app.brush->SetColor(D2D1::ColorF(0.9f, 0.3f, 0.3f, anim));
             } else {
-                swprintf_s(countText, L"%d of %zu", app.searchCurrentIndex + 1, app.searchMatches.size());
+                swprintf_s(countText, L"%d of %zu", currentIdx + 1, matchCount);
                 D2D1_COLOR_F countColor = app.theme.text;
                 countColor.a = 0.7f * anim;
                 app.brush->SetColor(countColor);

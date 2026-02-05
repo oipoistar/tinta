@@ -17,6 +17,7 @@ struct ParserContext {
     ElementPtr root;
     std::stack<Element*> elementStack;
     std::string currentText;
+    const char* inputStart = nullptr;  // start of markdown source for offset tracking
 
     ParserContext() {
         root = std::make_shared<Element>(ElementType::Document);
@@ -254,6 +255,11 @@ static int leaveSpanCallback(MD_SPANTYPE type, void* /*detail*/, void* userdata)
 static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata) {
     auto* ctx = static_cast<ParserContext*>(userdata);
 
+    // Track source offset: set on the current element if not already set
+    if (ctx->inputStart && ctx->current() && ctx->current()->sourceOffset == SIZE_MAX) {
+        ctx->current()->sourceOffset = (size_t)(text - ctx->inputStart);
+    }
+
     switch (type) {
         case MD_TEXT_NORMAL:
         case MD_TEXT_CODE:
@@ -318,6 +324,7 @@ ParseResult MarkdownParser::parse(const std::string& markdown) {
     auto startTime = std::chrono::high_resolution_clock::now();
 
     ParserContext ctx;
+    ctx.inputStart = markdown.c_str();
 
     MD_PARSER parser = {
         0, // abi_version

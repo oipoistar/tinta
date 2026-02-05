@@ -40,6 +40,7 @@ set(SOURCES
     src/file_utils.cpp
     src/overlays.cpp
     src/input.cpp
+    src/editor.cpp
 )
 
 set(HEADERS
@@ -55,6 +56,7 @@ set(HEADERS
     include/file_utils.h
     include/overlays.h
     include/input.h
+    include/editor.h
 )
 
 # Windows resource file (icon)

@@ -1058,6 +1058,17 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
     }
 }
 
+// Find first valid sourceOffset in an element subtree
+static size_t findFirstSourceOffset(const ElementPtr& elem) {
+    if (!elem) return SIZE_MAX;
+    if (elem->sourceOffset != SIZE_MAX) return elem->sourceOffset;
+    for (const auto& child : elem->children) {
+        size_t off = findFirstSourceOffset(child);
+        if (off != SIZE_MAX) return off;
+    }
+    return SIZE_MAX;
+}
+
 // Count total elements in AST for vector pre-allocation
 static size_t countElements(const ElementPtr& elem) {
     if (!elem) return 0;
@@ -1093,11 +1104,23 @@ void layoutDocument(App& app) {
     float scale = app.contentScale * app.zoomFactor;
     float y = 20.0f * scale;
     float indent = 40.0f * scale;
-    float maxWidth = app.width - indent * 2;
 
-    app.contentWidth = app.width;
+    // In edit mode, use preview pane width instead of full window
+    float layoutWidth = app.width;
+    if (app.editMode) {
+        layoutWidth = app.width * (1.0f - app.editorSplitRatio) - 6;
+    }
+    float maxWidth = layoutWidth - indent * 2;
 
+    app.contentWidth = layoutWidth;
+
+    app.scrollAnchors.clear();
     for (const auto& child : app.root->children) {
+        // Record scroll anchor from source offset
+        size_t offset = findFirstSourceOffset(child);
+        if (offset != SIZE_MAX) {
+            app.scrollAnchors.push_back({offset, y});
+        }
         layoutElement(app, child, y, indent, maxWidth);
     }
 

@@ -309,6 +309,14 @@ struct App {
     std::vector<LayoutLine> layoutLines;
     bool layoutDirty = true;
 
+    // Scroll sync anchors: source byte offset → rendered Y position
+    struct ScrollAnchor {
+        size_t sourceOffset;
+        float renderedY;
+    };
+    std::vector<ScrollAnchor> scrollAnchors;
+    std::vector<size_t> editorLineByteOffsets;  // UTF-8 byte offset per editor line
+
     // Search match layout mapping (document Y for each match)
     std::vector<float> searchMatchYs;
     size_t searchMatchCursor = 0;
@@ -329,6 +337,63 @@ struct App {
     // File watching (auto-reload)
     FILETIME lastFileWriteTime = {};
     bool fileWatchEnabled = true;
+
+    // Edit mode
+    bool editMode = false;
+    float editorSplitRatio = 0.5f;
+    bool draggingSeparator = false;
+    float separatorDragStartX = 0;
+    float separatorDragStartRatio = 0;
+
+    // Double-ESC detection
+    std::chrono::steady_clock::time_point lastEscTime;
+    bool escPressedOnce = false;
+
+    // Editor notification
+    bool showEditModeNotification = false;
+    float editModeNotificationAlpha = 0;
+    std::chrono::steady_clock::time_point editModeNotificationStart;
+    std::wstring editorNotificationMsg;
+
+    // Editor document
+    std::wstring editorText;
+    bool editorDirty = false;
+    std::vector<size_t> editorLineStarts;
+
+    // Editor cursor & selection
+    size_t editorCursorPos = 0;
+    int editorDesiredCol = -1;
+    bool editorSelecting = false;
+    size_t editorSelStart = 0;
+    size_t editorSelEnd = 0;
+    bool editorHasSelection = false;
+
+    // Editor scroll
+    float editorScrollY = 0;
+    float editorContentHeight = 0;
+
+    // Editor search
+    struct EditorSearchMatch {
+        size_t startPos;
+        size_t length;
+    };
+    std::vector<EditorSearchMatch> editorSearchMatches;
+    int editorSearchCurrentIndex = 0;
+
+    // Undo/redo
+    struct EditAction {
+        enum Type { Insert, Delete };
+        Type type;
+        size_t position;
+        std::wstring text;
+        size_t cursorBefore, cursorAfter;
+    };
+    std::vector<EditAction> undoStack;
+    std::vector<EditAction> redoStack;
+
+    // Editor text format (monospace)
+    IDWriteTextFormat* editorTextFormat = nullptr;
+    float editorCharWidth = 0.0f; // Measured monospace char width
 
     // Metrics
     StartupMetrics metrics;
@@ -361,6 +426,7 @@ struct App {
         if (folderBrowserFormat) { folderBrowserFormat->Release(); folderBrowserFormat = nullptr; }
         if (tocFormat) { tocFormat->Release(); tocFormat = nullptr; }
         if (tocFormatBold) { tocFormatBold->Release(); tocFormatBold = nullptr; }
+        if (editorTextFormat) { editorTextFormat->Release(); editorTextFormat = nullptr; }
         for (auto& fmt : themePreviewFormats) {
             if (fmt.name) { fmt.name->Release(); fmt.name = nullptr; }
             if (fmt.preview) { fmt.preview->Release(); fmt.preview = nullptr; }

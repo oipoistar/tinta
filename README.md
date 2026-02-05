@@ -14,7 +14,7 @@
 
 <br>
 
-Built with Direct2D and DirectWrite for hardware-accelerated rendering. ~270KB binary, ~200ms startup.
+Built with Direct2D and DirectWrite for hardware-accelerated rendering. <1MB binary, ~200ms startup.
 
 ## Features
 
@@ -24,6 +24,7 @@ Built with Direct2D and DirectWrite for hardware-accelerated rendering. ~270KB b
 - **Rich tables** - Tables with bold, italic, code, and clickable links in cells
 - **Folder browser** - Press B to browse and open markdown files
 - **Table of contents** - Press Tab to see document headings, click to jump
+- **Edit mode** - Press `:` to edit markdown with live preview, search works in editor too
 - **Search** - Find text with F or Ctrl+F, cycle through matches with Enter
 - **Persistent settings** - Remembers your theme, zoom level, and window position
 - **Text selection & copy** - Select text and copy to clipboard
@@ -48,6 +49,9 @@ Built with Direct2D and DirectWrite for hardware-accelerated rendering. ~270KB b
 | `Arrow keys` / `J/K` | Scroll |
 | `Page Up/Down` | Page scroll |
 | `Home/End` | Jump to start/end |
+| `:` | Enter edit mode |
+| `ESC` `ESC` | Exit edit mode |
+| `Ctrl+S` | Save (in edit mode) |
 | `Q` | Quit |
 
 ## Building

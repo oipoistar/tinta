@@ -1,4 +1,5 @@
 #include "input.h"
+#include "editor.h"
 #include "file_utils.h"
 #include "utils.h"
 #include "search.h"
@@ -20,6 +21,22 @@ static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+
+    // Edit mode: route scroll to editor or preview based on mouse X
+    if (app.editMode) {
+        float sepX = app.width * app.editorSplitRatio;
+        if (app.mouseX < sepX) {
+            if (ctrl) {
+                float zoomDelta = delta * 0.1f;
+                app.zoomFactor = std::max(0.5f, std::min(3.0f, app.zoomFactor + zoomDelta));
+                updateTextFormats(app);
+            } else {
+                handleEditorMouseWheel(app, hwnd, delta);
+            }
+            return;
+        }
+        // Fall through to normal scroll for preview pane
+    }
 
     // Handle folder browser scroll
     if (app.showFolderBrowser) {
@@ -87,6 +104,17 @@ void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
+
+    // Edit mode: handle separator drag, editor selection, cursor shape
+    if (app.editMode) {
+        handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
+        // If mouse is in the preview pane and not dragging separator, fall through for link hover etc.
+        float sepX = app.width * app.editorSplitRatio;
+        if (app.mouseX < sepX || app.draggingSeparator || app.editorSelecting) return;
+        // For preview pane, adjust mouseX to be relative to preview offset
+        // but we leave the existing code to work with document coordinates
+    }
+
     float docX = app.mouseX + app.scrollX;
     float docY = app.mouseY + app.scrollY;
 
@@ -242,6 +270,18 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
 }
 
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Edit mode: route to editor or preview
+    if (app.editMode) {
+        int x = GET_X_LPARAM(lParam);
+        int y = GET_Y_LPARAM(lParam);
+        float sepX = app.width * app.editorSplitRatio;
+        if (x < sepX + 6) {
+            handleEditorMouseDown(app, hwnd, x, y);
+            return;
+        }
+        // Fall through for preview pane clicks
+    }
+
     // If theme chooser, folder browser, or TOC is open, don't start selection - just record for click handling
     if (app.showThemeChooser || app.showFolderBrowser || app.showToc) {
         return;
@@ -379,6 +419,14 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 }
 
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Edit mode: route to editor
+    if (app.editMode && (app.draggingSeparator || app.editorSelecting)) {
+        int x = GET_X_LPARAM(lParam);
+        int y = GET_Y_LPARAM(lParam);
+        handleEditorMouseUp(app, hwnd, x, y);
+        return;
+    }
+
     ReleaseCapture();
 
     // TOC click handling
@@ -583,6 +631,12 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     float pageSize = app.height * 0.8f;
     float maxScroll = std::max(0.0f, app.contentHeight - app.height);
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+
+    // Edit mode: route all keys to editor handler
+    if (app.editMode) {
+        handleEditorKeyDown(app, hwnd, wParam);
+        return;
+    }
 
     // Handle search-specific keys when search is active
     if (app.showSearch && app.searchActive) {
@@ -789,6 +843,21 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 }
 
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
+    // Edit mode: ':' enters edit mode, otherwise route to editor
+    if (app.editMode) {
+        handleEditorCharInput(app, hwnd, wParam);
+        return;
+    }
+
+    // ':' to enter edit mode when no overlay is active
+    if (!app.showSearch && !app.showFolderBrowser && !app.showToc && !app.showThemeChooser) {
+        wchar_t ch = (wchar_t)wParam;
+        if (ch == L':') {
+            enterEditMode(app);
+            return;
+        }
+    }
+
     if (app.showSearch && app.searchActive) {
         // Skip the character that opened search (F key)
         if (app.searchJustOpened) {
@@ -851,7 +920,7 @@ void handleDropFiles(App& app, HWND hwnd, WPARAM wParam) {
 }
 
 void handleFileWatchTimer(App& app, HWND hwnd) {
-    if (app.currentFile.empty() || !app.fileWatchEnabled) return;
+    if (app.currentFile.empty() || !app.fileWatchEnabled || app.editMode) return;
 
     std::wstring widePath = toWide(app.currentFile);
     HANDLE h = CreateFileW(widePath.c_str(), GENERIC_READ,
