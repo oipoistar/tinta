@@ -6,6 +6,7 @@
 #include <cstring>
 #include <stack>
 #include <regex>
+#include <unordered_map>
 #include <algorithm>
 #include <cctype>
 
@@ -445,10 +446,15 @@ static std::string trim(const std::string& s) {
 }
 
 static std::string extractAttribute(const std::string& tag, const std::string& attr) {
-    std::string pattern = attr + "\\s*=\\s*[\"']([^\"']*)[\"']";
-    std::regex re(pattern, std::regex::icase);
+    // Cache compiled regexes - regex compilation is very expensive
+    static std::unordered_map<std::string, std::regex> regexCache;
+    auto it = regexCache.find(attr);
+    if (it == regexCache.end()) {
+        std::string pattern = attr + "\\s*=\\s*[\"']([^\"']*)[\"']";
+        it = regexCache.emplace(attr, std::regex(pattern, std::regex::icase)).first;
+    }
     std::smatch match;
-    if (std::regex_search(tag, match, re) && match.size() > 1) {
+    if (std::regex_search(tag, match, it->second) && match.size() > 1) {
         return match[1].str();
     }
     return "";

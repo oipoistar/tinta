@@ -383,7 +383,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
             if (spacePos == std::wstring::npos) spacePos = text.length();
 
             size_t wordStart = pos;
-            std::wstring word = text.substr(wordStart, spacePos - wordStart);
+            std::wstring_view word(text.data() + wordStart, spacePos - wordStart);
             if (word.empty()) {
                 if (spacePos < text.length()) {
                     x += spaceWidth;
@@ -1058,6 +1058,16 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
     }
 }
 
+// Count total elements in AST for vector pre-allocation
+static size_t countElements(const ElementPtr& elem) {
+    if (!elem) return 0;
+    size_t count = 1;
+    for (const auto& child : elem->children) {
+        count += countElements(child);
+    }
+    return count;
+}
+
 } // namespace
 
 void layoutDocument(App& app) {
@@ -1069,6 +1079,16 @@ void layoutDocument(App& app) {
         app.layoutDirty = false;
         return;
     }
+
+    // Pre-allocate vectors based on estimated element count
+    size_t elemCount = countElements(app.root);
+    app.layoutTextRuns.reserve(elemCount * 2);
+    app.layoutRects.reserve(elemCount);
+    app.layoutLines.reserve(elemCount);
+    app.linkRects.reserve(elemCount / 4);
+    app.textRects.reserve(elemCount * 2);
+    app.lineBuckets.reserve(elemCount);
+    app.docText.reserve(elemCount * 20);  // ~20 chars per element average
 
     float scale = app.contentScale * app.zoomFactor;
     float y = 20.0f * scale;
@@ -1082,7 +1102,8 @@ void layoutDocument(App& app) {
     }
 
     app.contentHeight = y + 40.0f * scale;
-    app.docTextLower = toLower(app.docText);
+    // Defer toLower to when search actually needs it (lazy rebuild)
+    app.docTextLower.clear();
     mapSearchMatchesToLayout(app);
     app.layoutDirty = false;
 }

@@ -20,14 +20,16 @@ void performSearch(App& app) {
     std::wstring queryLower = toLower(app.searchQuery);
     const std::wstring& textLower = app.docTextLower;
 
-    // Count all matches in full document
+    // Estimate match count to avoid repeated vector reallocation
+    app.searchMatches.reserve(64);
+
     size_t pos = 0;
     while ((pos = textLower.find(queryLower, pos)) != std::wstring::npos) {
         App::SearchMatch match;
-        match.textRectIndex = 0;  // Not used anymore
+        match.textRectIndex = 0;
         match.startPos = pos;
         match.length = app.searchQuery.length();
-        match.highlightRect = D2D1::RectF(0, 0, 0, 0);  // Not used anymore
+        match.highlightRect = D2D1::RectF(0, 0, 0, 0);
         app.searchMatches.push_back(match);
         pos += app.searchQuery.length();
     }

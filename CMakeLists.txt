@@ -37,6 +37,9 @@ set(SOURCES
     src/utils.cpp
     src/search.cpp
     src/render.cpp
+    src/file_utils.cpp
+    src/overlays.cpp
+    src/input.cpp
 )
 
 set(HEADERS
@@ -49,6 +52,9 @@ set(HEADERS
     include/utils.h
     include/search.h
     include/render.h
+    include/file_utils.h
+    include/overlays.h
+    include/input.h
 )
 
 # Windows resource file (icon)
