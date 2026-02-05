@@ -21,6 +21,7 @@ Built with Direct2D and DirectWrite for hardware-accelerated rendering. ~270KB b
 - **Lightning-fast startup** - Direct2D rendering, no web engine overhead
 - **10 beautiful themes** - 5 light and 5 dark themes to choose from
 - **Hardware-accelerated** - Smooth text rendering via DirectWrite
+- **Rich tables** - Tables with bold, italic, code, and clickable links in cells
 - **Folder browser** - Press B to browse and open markdown files
 - **Table of contents** - Press Tab to see document headings, click to jump
 - **Search** - Find text with F or Ctrl+F, cycle through matches with Enter

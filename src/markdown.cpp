@@ -116,9 +116,12 @@ static int enterBlockCallback(MD_BLOCKTYPE type, void* detail, void* userdata) {
             elem = std::make_shared<Element>(ElementType::HorizontalRule);
             break;
 
-        case MD_BLOCK_TABLE:
+        case MD_BLOCK_TABLE: {
             elem = std::make_shared<Element>(ElementType::Table);
+            auto* table = static_cast<MD_BLOCK_TABLE_DETAIL*>(detail);
+            elem->col_count = (int)table->col_count;
             break;
+        }
 
         case MD_BLOCK_THEAD:
         case MD_BLOCK_TBODY:
@@ -130,9 +133,12 @@ static int enterBlockCallback(MD_BLOCKTYPE type, void* detail, void* userdata) {
             break;
 
         case MD_BLOCK_TH:
-        case MD_BLOCK_TD:
+        case MD_BLOCK_TD: {
             elem = std::make_shared<Element>(ElementType::TableCell);
+            auto* td = static_cast<MD_BLOCK_TD_DETAIL*>(detail);
+            elem->align = (int)td->align;
             break;
+        }
 
         case MD_BLOCK_HTML:
             elem = std::make_shared<Element>(ElementType::HtmlBlock);

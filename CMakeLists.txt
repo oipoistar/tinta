@@ -69,6 +69,9 @@ target_link_libraries(tinta PRIVATE
     d2d1
     dwrite
     shell32
+    windowscodecs
+    urlmon
+    ole32
 )
 
 target_compile_definitions(tinta PRIVATE UNICODE _UNICODE)

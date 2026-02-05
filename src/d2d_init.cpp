@@ -1,8 +1,13 @@
 #include "d2d_init.h"
 #include "utils.h"
 
+#include <objbase.h>
+
 bool initD2D(App& app) {
     auto t0 = Clock::now();
+
+    // Initialize COM (required for WIC image loading)
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &app.d2dFactory);
     if (FAILED(hr)) return false;
@@ -15,6 +20,11 @@ bool initD2D(App& app) {
     if (FAILED(hr)) return false;
 
     app.metrics.dwriteInitUs = usElapsed(t0);
+
+    // Initialize WIC for image loading
+    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&app.wicFactory));
+    // WIC failure is non-fatal (images just won't render)
 
     return true;
 }
@@ -213,6 +223,12 @@ bool createRenderTarget(App& app) {
     if (app.brush) {
         app.brush->Release();
         app.brush = nullptr;
+    }
+
+    // D2D bitmaps are tied to the render target, so invalidate cached images
+    for (auto& [key, entry] : app.imageCache) {
+        if (entry.bitmap) { entry.bitmap->Release(); entry.bitmap = nullptr; }
+        entry.failed = false;  // retry on next layout
     }
 
     RECT rc;

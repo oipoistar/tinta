@@ -7,6 +7,9 @@
 #include <cmath>
 #include <functional>
 #include <string_view>
+#include <filesystem>
+#include <urlmon.h>
+#pragma comment(lib, "urlmon.lib")
 
 namespace {
 constexpr float kHugeWidth = 100000.0f;
@@ -87,6 +90,72 @@ static void addTextRun(App& app, LayoutInfo&& info, const D2D1_POINT_2F& pos,
     }
 }
 
+struct LayoutSnapshot {
+    size_t textRuns, rects, lines, links, textRects, lineBuckets, docTextLen;
+};
+
+static LayoutSnapshot takeSnapshot(App& app) {
+    return {
+        app.layoutTextRuns.size(),
+        app.layoutRects.size(),
+        app.layoutLines.size(),
+        app.linkRects.size(),
+        app.textRects.size(),
+        app.lineBuckets.size(),
+        app.docText.size()
+    };
+}
+
+static void rollbackTo(App& app, const LayoutSnapshot& s) {
+    for (size_t i = s.textRuns; i < app.layoutTextRuns.size(); i++) {
+        if (app.layoutTextRuns[i].layout) {
+            app.layoutTextRuns[i].layout->Release();
+        }
+    }
+    app.layoutTextRuns.resize(s.textRuns);
+    app.layoutRects.resize(s.rects);
+    app.layoutLines.resize(s.lines);
+    app.linkRects.resize(s.links);
+    app.textRects.resize(s.textRects);
+    app.lineBuckets.resize(s.lineBuckets);
+    app.docText.resize(s.docTextLen);
+}
+
+static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
+    if (dx == 0.0f) return;
+    for (size_t i = from.textRuns; i < app.layoutTextRuns.size(); i++) {
+        auto& r = app.layoutTextRuns[i];
+        r.pos.x += dx;
+        r.bounds.left += dx;
+        r.bounds.right += dx;
+    }
+    for (size_t i = from.rects; i < app.layoutRects.size(); i++) {
+        auto& r = app.layoutRects[i];
+        r.rect.left += dx;
+        r.rect.right += dx;
+    }
+    for (size_t i = from.lines; i < app.layoutLines.size(); i++) {
+        auto& r = app.layoutLines[i];
+        r.p1.x += dx;
+        r.p2.x += dx;
+    }
+    for (size_t i = from.links; i < app.linkRects.size(); i++) {
+        auto& r = app.linkRects[i];
+        r.bounds.left += dx;
+        r.bounds.right += dx;
+    }
+    for (size_t i = from.textRects; i < app.textRects.size(); i++) {
+        auto& r = app.textRects[i];
+        r.rect.left += dx;
+        r.rect.right += dx;
+    }
+    for (size_t i = from.lineBuckets; i < app.lineBuckets.size(); i++) {
+        auto& b = app.lineBuckets[i];
+        b.minX += dx;
+        b.maxX += dx;
+    }
+}
+
 static float getSpaceWidth(App& app, IDWriteTextFormat* format) {
     if (format == app.textFormat) return app.spaceWidthText;
     if (format == app.boldFormat) return app.spaceWidthBold;
@@ -96,6 +165,7 @@ static float getSpaceWidth(App& app, IDWriteTextFormat* format) {
 }
 
 static void layoutElement(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth);
+static void layoutImage(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth);
 
 static void layoutInlineContent(App& app, const std::vector<ElementPtr>& elements,
                                 float startX, float& y, float maxWidth,
@@ -203,6 +273,16 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 x = startX;
                 y += lineHeight;
                 continue;
+
+            case ElementType::Image: {
+                // Break out of inline flow, render image as block
+                if (x > startX) {
+                    y += lineHeight;  // end current line
+                    x = startX;
+                }
+                layoutImage(app, elem, y, startX, maxWidth);
+                continue;
+            }
 
             case ElementType::Ruby: {
                 // Collect base text and ruby annotation text
@@ -565,6 +645,343 @@ static void layoutList(App& app, const ElementPtr& elem, float& y, float indent,
     y += 8 * scale;
 }
 
+static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
+    auto it = app.imageCache.find(src);
+    if (it != app.imageCache.end()) return it->second;
+
+    App::ImageEntry entry;
+    entry.failed = true;  // assume failure
+
+    if (!app.wicFactory || !app.renderTarget) {
+        app.imageCache[src] = entry;
+        return app.imageCache[src];
+    }
+
+    std::wstring widePath;
+
+    // Check if URL
+    bool isUrl = (src.rfind("http://", 0) == 0 || src.rfind("https://", 0) == 0);
+    if (isUrl) {
+        // Download to temp file
+        wchar_t tempPath[MAX_PATH] = {};
+        std::wstring wideSrc = toWide(src);
+        HRESULT hr = URLDownloadToCacheFileW(nullptr, wideSrc.c_str(), tempPath, MAX_PATH, 0, nullptr);
+        if (FAILED(hr)) {
+            app.imageCache[src] = entry;
+            return app.imageCache[src];
+        }
+        widePath = tempPath;
+    } else {
+        // Resolve relative to current file's directory
+        std::wstring wsrc = toWide(src);
+        if (!app.currentFile.empty()) {
+            std::filesystem::path basePath(app.currentFile);
+            std::filesystem::path imgPath = basePath.parent_path() / src;
+            widePath = imgPath.wstring();
+        } else {
+            widePath = wsrc;
+        }
+    }
+
+    // Load via WIC
+    IWICBitmapDecoder* decoder = nullptr;
+    HRESULT hr = app.wicFactory->CreateDecoderFromFilename(widePath.c_str(), nullptr,
+        GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder);
+    if (FAILED(hr) || !decoder) {
+        app.imageCache[src] = entry;
+        return app.imageCache[src];
+    }
+
+    IWICBitmapFrameDecode* frame = nullptr;
+    hr = decoder->GetFrame(0, &frame);
+    if (FAILED(hr) || !frame) {
+        decoder->Release();
+        app.imageCache[src] = entry;
+        return app.imageCache[src];
+    }
+
+    IWICFormatConverter* converter = nullptr;
+    hr = app.wicFactory->CreateFormatConverter(&converter);
+    if (FAILED(hr) || !converter) {
+        frame->Release();
+        decoder->Release();
+        app.imageCache[src] = entry;
+        return app.imageCache[src];
+    }
+
+    hr = converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA,
+        WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
+    if (FAILED(hr)) {
+        converter->Release();
+        frame->Release();
+        decoder->Release();
+        app.imageCache[src] = entry;
+        return app.imageCache[src];
+    }
+
+    ID2D1Bitmap* bitmap = nullptr;
+    hr = app.renderTarget->CreateBitmapFromWicBitmap(converter, nullptr, &bitmap);
+    converter->Release();
+    frame->Release();
+    decoder->Release();
+
+    if (SUCCEEDED(hr) && bitmap) {
+        D2D1_SIZE_F size = bitmap->GetSize();
+        entry.bitmap = bitmap;
+        entry.width = (int)size.width;
+        entry.height = (int)size.height;
+        entry.failed = false;
+    }
+
+    app.imageCache[src] = entry;
+    return app.imageCache[src];
+}
+
+static void layoutImage(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+    auto& entry = getOrLoadImage(app, elem->url);
+
+    if (entry.failed || !entry.bitmap) {
+        // Render alt text as placeholder
+        std::wstring altText = L"[image";
+        std::wstring alt;
+        std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
+            if (!e) return;
+            if (e->type == ElementType::Text) alt += toWide(e->text);
+            else for (const auto& c : e->children) extract(c);
+        };
+        for (const auto& c : elem->children) extract(c);
+        if (!alt.empty()) {
+            altText += L": " + alt;
+        }
+        altText += L"]";
+
+        float lineHeight = app.italicFormat->GetFontSize() * 1.7f;
+        size_t docStart = app.docText.size();
+        LayoutInfo info = createLayout(app, altText, app.italicFormat, lineHeight, app.bodyTypography);
+
+        D2D1_COLOR_F color = app.theme.text;
+        color.a = 0.6f;
+        D2D1_POINT_2F pos = D2D1::Point2F(indent, y);
+        D2D1_RECT_F bounds = D2D1::RectF(indent, y, indent + info.width, y + lineHeight);
+        addTextRun(app, std::move(info), pos, bounds, color, docStart, altText.length(), false);
+        app.docText += altText;
+        y += lineHeight;
+        return;
+    }
+
+    float scale = app.contentScale * app.zoomFactor;
+    float imgW = (float)entry.width;
+    float imgH = (float)entry.height;
+
+    // Scale to fit within maxWidth, never upscale
+    float displayScale = std::min(1.0f, maxWidth / imgW);
+    float displayW = imgW * displayScale;
+    float displayH = imgH * displayScale;
+
+    // Cap max height
+    float maxH = 600.0f * scale;
+    if (displayH > maxH) {
+        displayH = maxH;
+        displayW = displayH * (imgW / imgH);
+    }
+
+    app.layoutBitmaps.push_back({entry.bitmap,
+        D2D1::RectF(indent, y, indent + displayW, y + displayH)});
+
+    y += displayH + 12 * scale;
+}
+
+static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+    float scale = app.contentScale * app.zoomFactor;
+    float cellPadding = 8.0f * scale;
+    float fontSize = app.textFormat->GetFontSize();
+    float lineHeight = fontSize * 1.7f;
+    float minColWidth = 40.0f * scale;
+
+    // Collect rows
+    std::vector<Element*> rows;
+    for (const auto& child : elem->children) {
+        if (child->type == ElementType::TableRow) {
+            rows.push_back(child.get());
+        }
+    }
+    if (rows.empty()) return;
+
+    // Determine column count
+    int colCount = elem->col_count;
+    if (colCount <= 0 && !rows.empty()) {
+        colCount = (int)rows[0]->children.size();
+    }
+    if (colCount <= 0) return;
+
+    // Pass 1: Measure natural widths using plain text extraction (cheap, approximate)
+    std::vector<float> colWidths(colCount, minColWidth);
+    std::vector<float> rowHeights(rows.size(), lineHeight + cellPadding * 2);
+    std::vector<std::vector<int>> cellAligns(rows.size(), std::vector<int>(colCount, 0));
+
+    for (size_t r = 0; r < rows.size(); r++) {
+        const auto& row = rows[r];
+        for (size_t c = 0; c < row->children.size() && c < (size_t)colCount; c++) {
+            const auto& cell = row->children[c];
+            cellAligns[r][c] = cell->align;
+
+            // Extract plain text for width estimation
+            std::wstring text;
+            std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
+                if (!e) return;
+                if (e->type == ElementType::Text) text += toWide(e->text);
+                else for (const auto& ch : e->children) extract(ch);
+            };
+            for (const auto& ch : cell->children) extract(ch);
+
+            // Measure natural width
+            bool isHeader = (r == 0);
+            IDWriteTextFormat* fmt = isHeader ? app.boldFormat : app.textFormat;
+            float textWidth = 0;
+            if (!text.empty() && fmt) {
+                IDWriteTextLayout* layout = nullptr;
+                app.dwriteFactory->CreateTextLayout(text.data(), (UINT32)text.length(),
+                    fmt, kHugeWidth, lineHeight, &layout);
+                if (layout) {
+                    DWRITE_TEXT_METRICS metrics{};
+                    layout->GetMetrics(&metrics);
+                    textWidth = metrics.widthIncludingTrailingWhitespace;
+                    layout->Release();
+                }
+            }
+            float needed = textWidth + cellPadding * 2 + 6.0f * scale;
+            if (needed > colWidths[c]) colWidths[c] = needed;
+        }
+    }
+
+    // Distribute widths: if total exceeds maxWidth, scale proportionally
+    float totalWidth = 0;
+    for (int c = 0; c < colCount; c++) totalWidth += colWidths[c];
+
+    if (totalWidth > maxWidth) {
+        float ratio = maxWidth / totalWidth;
+        for (int c = 0; c < colCount; c++) {
+            colWidths[c] = std::max(minColWidth, colWidths[c] * ratio);
+        }
+        totalWidth = 0;
+        for (int c = 0; c < colCount; c++) totalWidth += colWidths[c];
+    }
+
+    // Pass 1b: Measure row heights via layoutInlineContent with snapshot-rollback
+    for (size_t r = 0; r < rows.size(); r++) {
+        float maxRowH = lineHeight + cellPadding * 2;
+        bool isHeader = (r == 0);
+        IDWriteTextFormat* fmt = isHeader ? app.boldFormat : app.textFormat;
+        D2D1_COLOR_F textColor = isHeader ? app.theme.heading : app.theme.text;
+        const auto& row = rows[r];
+
+        for (size_t c = 0; c < row->children.size() && c < (size_t)colCount; c++) {
+            const auto& cell = row->children[c];
+            if (cell->children.empty()) continue;
+
+            float cellW = colWidths[c] - cellPadding * 2;
+            LayoutSnapshot snap = takeSnapshot(app);
+            float cellY = 0.0f;
+            layoutInlineContent(app, cell->children, 0.0f, cellY, cellW,
+                                fmt, textColor, {}, lineHeight);
+            rollbackTo(app, snap);
+
+            float h = cellY + cellPadding * 2;
+            if (h > maxRowH) maxRowH = h;
+        }
+        rowHeights[r] = maxRowH;
+    }
+
+    // Pass 2: Render cells via layoutInlineContent (produces real text runs, links, etc.)
+    float tableStartY = y;
+    D2D1_COLOR_F borderColor = app.theme.blockquoteBorder;
+    float borderStroke = 1.0f * scale;
+
+    for (size_t r = 0; r < rows.size(); r++) {
+        float cellX = indent;
+        bool isHeader = (r == 0);
+        const auto& row = rows[r];
+
+        // Header row background
+        if (isHeader) {
+            D2D1_COLOR_F headerBg = app.theme.codeBackground;
+            headerBg.a = 0.5f;
+            app.layoutRects.push_back({D2D1::RectF(indent, y, indent + totalWidth, y + rowHeights[r]), headerBg});
+        } else if (r % 2 == 0) {
+            // Subtle alternating row background
+            D2D1_COLOR_F altBg = app.theme.codeBackground;
+            altBg.a = 0.15f;
+            app.layoutRects.push_back({D2D1::RectF(indent, y, indent + totalWidth, y + rowHeights[r]), altBg});
+        }
+
+        for (size_t c = 0; c < row->children.size() && c < (size_t)colCount; c++) {
+            const auto& cell = row->children[c];
+            IDWriteTextFormat* fmt = isHeader ? app.boldFormat : app.textFormat;
+            D2D1_COLOR_F textColor = isHeader ? app.theme.heading : app.theme.text;
+
+            if (!cell->children.empty()) {
+                float cellW = colWidths[c] - cellPadding * 2;
+                float textX = cellX + cellPadding;
+                float textY = y + cellPadding;
+
+                int align = cellAligns[r][c];
+                LayoutSnapshot cellSnap = takeSnapshot(app);
+
+                layoutInlineContent(app, cell->children, textX, textY, cellW,
+                                    fmt, textColor, {}, lineHeight);
+
+                // Apply center/right alignment by shifting all new items
+                if (align == 2 || align == 3) {
+                    float maxRight = 0.0f;
+                    for (size_t i = cellSnap.textRuns; i < app.layoutTextRuns.size(); i++) {
+                        maxRight = std::max(maxRight, app.layoutTextRuns[i].bounds.right);
+                    }
+                    float contentW = maxRight - textX;
+                    float dx = 0.0f;
+                    if (align == 2) { // center
+                        dx = (cellW - contentW) / 2.0f;
+                    } else { // right
+                        dx = cellW - contentW;
+                    }
+                    if (dx > 0.0f) {
+                        shiftLayoutItems(app, cellSnap, dx);
+                    }
+                }
+            }
+
+            cellX += colWidths[c];
+        }
+        app.docText += L"\n";
+        y += rowHeights[r];
+    }
+
+    // Grid lines: horizontal
+    for (size_t r = 0; r <= rows.size(); r++) {
+        float lineY = tableStartY;
+        for (size_t i = 0; i < r; i++) lineY += rowHeights[i];
+        float stroke = (r == 1) ? borderStroke * 2 : borderStroke; // thicker after header
+        app.layoutLines.push_back({D2D1::Point2F(indent, lineY),
+                                   D2D1::Point2F(indent + totalWidth, lineY),
+                                   borderColor, stroke});
+    }
+
+    // Grid lines: vertical
+    {
+        float tableEndY = tableStartY;
+        for (size_t r = 0; r < rows.size(); r++) tableEndY += rowHeights[r];
+        float vx = indent;
+        for (int c = 0; c <= colCount; c++) {
+            app.layoutLines.push_back({D2D1::Point2F(vx, tableStartY),
+                                       D2D1::Point2F(vx, tableEndY),
+                                       borderColor, borderStroke});
+            if (c < colCount) vx += colWidths[c];
+        }
+    }
+
+    app.docText += L"\n";
+    y += 14 * scale;
+}
+
 static void layoutHorizontalRule(App& app, float& y, float indent, float maxWidth) {
     float scale = app.contentScale * app.zoomFactor;
     y += 16 * scale;
@@ -595,6 +1012,9 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
             break;
         case ElementType::HorizontalRule:
             layoutHorizontalRule(app, y, indent, maxWidth);
+            break;
+        case ElementType::Table:
+            layoutTable(app, elem, y, indent, maxWidth);
             break;
         case ElementType::HtmlBlock: {
             // HtmlBlock can contain both block elements (Paragraph, List, etc.)

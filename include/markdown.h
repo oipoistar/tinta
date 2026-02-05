@@ -51,6 +51,8 @@ struct Element {
     bool ordered = false;     // for lists
     int start = 1;            // for ordered lists
     std::string language;     // for code blocks
+    int align = 0;            // for table cells (0=default, 1=left, 2=center, 3=right)
+    int col_count = 0;        // for tables (number of columns)
 
     std::vector<ElementPtr> children;
     Element* parent = nullptr;

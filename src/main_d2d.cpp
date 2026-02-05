@@ -22,9 +22,22 @@
 
 static App* g_app = nullptr;
 
+#define TIMER_FILE_WATCH 1
+
 // Forward declarations
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void render(App& app);
+
+static void updateFileWriteTime(App& app) {
+    if (app.currentFile.empty()) return;
+    std::wstring widePath = toWide(app.currentFile);
+    HANDLE h = CreateFileW(widePath.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (h != INVALID_HANDLE_VALUE) {
+        GetFileTime(h, nullptr, nullptr, &app.lastFileWriteTime);
+        CloseHandle(h);
+    }
+}
 
 // Check if a path is a root directory (e.g., "C:\")
 static bool isRootPath(const std::wstring& path) {
@@ -165,6 +178,21 @@ void render(App& app) {
             D2D1::RectF(rect.rect.left - app.scrollX, rect.rect.top - app.scrollY,
                        rect.rect.right - app.scrollX, rect.rect.bottom - app.scrollY),
             app.brush);
+        app.drawCalls++;
+    }
+
+    // Render images (bitmaps)
+    for (const auto& bmp : app.layoutBitmaps) {
+        if (!bmp.bitmap) continue;
+        if (bmp.destRect.bottom < viewportTop - cullMargin ||
+            bmp.destRect.top > viewportBottom + cullMargin) continue;
+        if (bmp.destRect.right < viewportLeft - cullMargin ||
+            bmp.destRect.left > viewportRight + cullMargin) continue;
+        app.renderTarget->DrawBitmap(bmp.bitmap,
+            D2D1::RectF(bmp.destRect.left - app.scrollX,
+                         bmp.destRect.top - app.scrollY,
+                         bmp.destRect.right - app.scrollX,
+                         bmp.destRect.bottom - app.scrollY));
         app.drawCalls++;
     }
 
@@ -1613,6 +1641,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                         app->searchMatches.clear();
                                         app->searchMatchYs.clear();
                                         app->layoutDirty = true;
+                                        updateFileWriteTime(*app);
 
                                         // Close folder browser after opening file
                                         app->showFolderBrowser = false;
@@ -1995,6 +2024,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                     app->searchMatches.clear();
                                     app->searchMatchYs.clear();
                                     app->layoutDirty = true;
+                                    updateFileWriteTime(*app);
                                 }
                             }
                             InvalidateRect(hwnd, nullptr, FALSE);
@@ -2005,7 +2035,41 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             return 0;
 
+        case WM_TIMER:
+            if (wParam == TIMER_FILE_WATCH && app && !app->currentFile.empty() && app->fileWatchEnabled) {
+                std::wstring widePath = toWide(app->currentFile);
+                HANDLE h = CreateFileW(widePath.c_str(), GENERIC_READ,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+                if (h != INVALID_HANDLE_VALUE) {
+                    FILETIME ft;
+                    GetFileTime(h, nullptr, nullptr, &ft);
+                    CloseHandle(h);
+                    if (CompareFileTime(&ft, &app->lastFileWriteTime) != 0) {
+                        app->lastFileWriteTime = ft;
+                        // Reload file
+                        std::ifstream file(widePath);
+                        if (file) {
+                            std::stringstream buffer;
+                            buffer << file.rdbuf();
+                            auto result = app->parser.parse(buffer.str());
+                            if (result.success) {
+                                float savedScroll = app->scrollY;
+                                float savedTargetScroll = app->targetScrollY;
+                                app->root = result.root;
+                                app->parseTimeUs = result.parseTimeUs;
+                                app->layoutDirty = true;
+                                app->scrollY = savedScroll;
+                                app->targetScrollY = savedTargetScroll;
+                                InvalidateRect(hwnd, nullptr, FALSE);
+                            }
+                        }
+                    }
+                }
+            }
+            return 0;
+
         case WM_DESTROY:
+            KillTimer(hwnd, TIMER_FILE_WATCH);
             {
                 // Load existing settings to preserve values like hasAskedFileAssociation
                 Settings settings = loadSettings();
@@ -2219,6 +2283,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     }
 
     app.metrics.fileLoadUs = usElapsed(t0);
+
+    // Start file watch timer and record initial write time
+    updateFileWriteTime(app);
+    SetTimer(app.hwnd, TIMER_FILE_WATCH, 500, nullptr);
 
     // Show window (respect saved maximized state)
     t0 = Clock::now();

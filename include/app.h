@@ -10,9 +10,11 @@
 #include <d2d1_1.h>
 #include <dwrite.h>
 #include <dwrite_2.h>
+#include <wincodec.h>
 
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <chrono>
 
 #include "markdown.h"
@@ -102,6 +104,25 @@ struct App {
     ID2D1HwndRenderTarget* renderTarget = nullptr;
     ID2D1SolidColorBrush* brush = nullptr;
     ID2D1DeviceContext* deviceContext = nullptr;  // For color emoji rendering
+
+    // WIC (Windows Imaging Component) for image loading
+    IWICImagingFactory* wicFactory = nullptr;
+
+    // Image cache
+    struct ImageEntry {
+        ID2D1Bitmap* bitmap = nullptr;
+        int width = 0;
+        int height = 0;
+        bool failed = false;
+    };
+    std::unordered_map<std::string, ImageEntry> imageCache;
+
+    // Layout bitmaps (document coordinates)
+    struct LayoutBitmap {
+        ID2D1Bitmap* bitmap = nullptr;
+        D2D1_RECT_F destRect{};
+    };
+    std::vector<LayoutBitmap> layoutBitmaps;
 
     // DirectWrite
     IDWriteFactory* dwriteFactory = nullptr;
@@ -305,6 +326,10 @@ struct App {
     bool searchActive = false;
     bool searchJustOpened = false;  // Skip WM_CHAR after opening with F key
 
+    // File watching (auto-reload)
+    FILETIME lastFileWriteTime = {};
+    bool fileWatchEnabled = true;
+
     // Metrics
     StartupMetrics metrics;
     size_t drawCalls = 0;
@@ -320,6 +345,7 @@ struct App {
         layoutTextRuns.clear();
         layoutRects.clear();
         layoutLines.clear();
+        layoutBitmaps.clear();
         linkRects.clear();
         textRects.clear();
         lineBuckets.clear();
@@ -343,9 +369,18 @@ struct App {
         themePreviewFormats.clear();
     }
 
+    void releaseImageCache() {
+        for (auto& [key, entry] : imageCache) {
+            if (entry.bitmap) { entry.bitmap->Release(); entry.bitmap = nullptr; }
+        }
+        imageCache.clear();
+    }
+
     void shutdown() {
         clearLayoutCache();
         releaseOverlayFormats();
+        releaseImageCache();
+        if (wicFactory) { wicFactory->Release(); wicFactory = nullptr; }
         if (brush) { brush->Release(); brush = nullptr; }
         if (deviceContext) { deviceContext->Release(); deviceContext = nullptr; }
         if (renderTarget) { renderTarget->Release(); renderTarget = nullptr; }

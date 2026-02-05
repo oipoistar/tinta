@@ -1,5 +1,17 @@
 # Changelog
 
+## [v1.7.0] - 2026-02-05
+
+### Added
+- Rich inline formatting in table cells (bold, italic, code, links)
+  - Links render as clickable with underline and link color
+  - Bold, italic, and inline code render with proper styling
+  - Cell alignment (center, right) works with inline-formatted content
+
+### Fixed
+- Table cells no longer render links, bold, italic, and code as plain text
+- Table cell content no longer overflows cell boundaries
+
 ## [v1.6.5] - 2026-02-05
 
 ### Added
