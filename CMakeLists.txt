@@ -10,9 +10,10 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Compiler flags for performance
+# Compiler flags
 if(MSVC)
-    add_compile_options(/O2 /W4)
+    add_compile_options(/W4)
+    add_compile_options($<$<CONFIG:Release>:/O2>)
     add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)
 endif()
 
