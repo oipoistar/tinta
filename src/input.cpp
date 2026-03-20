@@ -22,6 +22,14 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
 
+    // Help overlay scroll
+    if (app.showHelp) {
+        app.helpScroll -= delta * dpi(app, 60.0f);
+        if (app.helpScroll < 0) app.helpScroll = 0;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Edit mode: route scroll to editor or preview based on mouse X
     if (app.editMode) {
         float sepX = app.width * app.editorSplitRatio;
@@ -113,6 +121,23 @@ void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
+
+    // Help overlay scrollbar dragging
+    if (app.helpScrollbarDragging) {
+        float maxScroll = std::max(0.0f, app.helpContentHeight - app.helpVisibleHeight);
+        if (maxScroll > 0) {
+            float sbHeight = app.helpVisibleHeight / app.helpContentHeight * app.helpVisibleHeight;
+            sbHeight = std::max(sbHeight, dpi(app, 20.0f));
+            float trackHeight = app.helpVisibleHeight - sbHeight;
+
+            float deltaY = (float)app.mouseY - app.helpScrollbarDragStartY;
+            float scrollDelta = (trackHeight > 0) ? (deltaY / trackHeight) * maxScroll : 0;
+            app.helpScroll = app.helpScrollbarDragStartScroll + scrollDelta;
+            app.helpScroll = std::max(0.0f, std::min(app.helpScroll, maxScroll));
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return;
+    }
 
     // Edit mode: handle separator drag, editor selection, cursor shape
     if (app.editMode) {
@@ -321,6 +346,41 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         // Fall through for preview pane clicks
     }
 
+    // Help overlay: check scrollbar click
+    if (app.showHelp) {
+        float maxScroll = std::max(0.0f, app.helpContentHeight - app.helpVisibleHeight);
+        if (maxScroll > 0) {
+            int clickX = GET_X_LPARAM(lParam);
+            int clickY = GET_Y_LPARAM(lParam);
+            // Scrollbar hit area: right edge of panel
+            float panelWidth = std::min(dpi(app, 520.0f), app.width - dpi(app, 40.0f));
+            float panelRight = (app.width + panelWidth) / 2;
+            float sbHitWidth = dpi(app, 16.0f);
+            if (clickX >= panelRight - sbHitWidth && clickX <= panelRight &&
+                clickY >= app.helpScrollbarTop && clickY <= app.helpScrollbarTop + app.helpVisibleHeight) {
+                app.helpScrollbarDragging = true;
+                app.helpScrollbarDragStartY = (float)clickY;
+                app.helpScrollbarDragStartScroll = app.helpScroll;
+                SetCapture(hwnd);
+
+                // Jump if clicked outside thumb
+                float sbHeight = app.helpVisibleHeight / app.helpContentHeight * app.helpVisibleHeight;
+                sbHeight = std::max(sbHeight, dpi(app, 20.0f));
+                float sbY = app.helpScrollbarTop + (app.helpScroll / maxScroll * (app.helpVisibleHeight - sbHeight));
+                if (clickY < sbY || clickY > sbY + sbHeight) {
+                    float trackHeight = app.helpVisibleHeight - sbHeight;
+                    float clickPos = (float)clickY - app.helpScrollbarTop - sbHeight / 2;
+                    clickPos = std::max(0.0f, std::min(clickPos, trackHeight));
+                    app.helpScroll = (trackHeight > 0) ? (clickPos / trackHeight) * maxScroll : 0;
+                    app.helpScrollbarDragStartScroll = app.helpScroll;
+                    app.helpScrollbarDragStartY = (float)clickY;
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+        }
+        return;
+    }
+
     // If theme chooser, folder browser, or TOC is open, don't start selection - just record for click handling
     if (app.showThemeChooser || app.showFolderBrowser || app.showToc) {
         return;
@@ -459,6 +519,14 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 }
 
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Help scrollbar release
+    if (app.helpScrollbarDragging) {
+        app.helpScrollbarDragging = false;
+        ReleaseCapture();
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Edit mode: route to editor
     if (app.editMode && (app.draggingSeparator || app.editorSelecting)) {
         int x = GET_X_LPARAM(lParam);
@@ -795,8 +863,11 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     } else {
         switch (wParam) {
             case VK_ESCAPE:
-                // Priority: Search > FolderBrowser > TOC > Theme chooser > Quit
-                if (app.showSearch) {
+                // Priority: Help > Search > FolderBrowser > TOC > Theme chooser > Quit
+                if (app.showHelp) {
+                    app.showHelp = false;
+                    app.helpAnimation = 0;
+                } else if (app.showSearch) {
                     app.showSearch = false;
                     app.searchActive = false;
                     app.searchQuery.clear();
@@ -920,11 +991,19 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
         return;
     }
 
-    // ':' to enter edit mode when no overlay is active
+    // ':' to enter edit mode, '?' to toggle help — when no overlay is active
     if (!app.showSearch && !app.showFolderBrowser && !app.showToc && !app.showThemeChooser) {
         wchar_t ch = (wchar_t)wParam;
-        if (ch == L':') {
+        if (ch == L':' && !app.showHelp) {
             enterEditMode(app);
+            return;
+        }
+        if (ch == L'?') {
+            app.showHelp = !app.showHelp;
+            if (app.showHelp) {
+                app.helpAnimation = 0;
+            }
+            InvalidateRect(app.hwnd, nullptr, FALSE);
             return;
         }
     }

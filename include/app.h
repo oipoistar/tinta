@@ -201,6 +201,17 @@ struct App {
     int hoveredFolderIndex = -1;
     float folderBrowserScroll = 0.0f;     // Scroll offset for folder list
 
+    // Help overlay
+    bool showHelp = false;
+    float helpAnimation = 0.0f;
+    float helpScroll = 0.0f;
+    float helpContentHeight = 0.0f;   // Total content height (set during render)
+    float helpVisibleHeight = 0.0f;   // Visible area height (set during render)
+    float helpScrollbarTop = 0.0f;    // Scrollbar track top Y (set during render)
+    bool helpScrollbarDragging = false;
+    float helpScrollbarDragStartY = 0;
+    float helpScrollbarDragStartScroll = 0;
+
     // Table of contents overlay
     bool showToc = false;
     float tocAnimation = 0.0f;  // 0 to 1 for slide-in from right
