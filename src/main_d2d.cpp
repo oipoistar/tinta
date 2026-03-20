@@ -543,6 +543,7 @@ render_document:
     if (app.showFolderBrowser) renderFolderBrowser(app);
     if (app.showToc) renderToc(app);
     if (app.showThemeChooser) renderThemeChooser(app);
+    if (app.showHelp) renderHelpOverlay(app);
 
     // Close edit mode split view clipping
     if (app.editMode) {
@@ -682,12 +683,21 @@ static const char* sampleMarkdown = R"(# Welcome to Tinta
 
 **Tinta** is a fast, lightweight markdown reader for Windows.
 
+## Getting Started
+
+- **Drag & drop** a `.md` file onto this window
+- Press **B** to browse and open files from a folder
+- Or run `tinta.exe readme.md` from the command line
+- Press **?** for all available keyboard shortcuts
+
 ## Features
 
-- Lightning-fast startup with Direct2D
-- Hardware-accelerated text rendering via DirectWrite
-- Minimal dependencies
-- Small binary size
+- 10 beautiful themes — press **T** to choose
+- Edit mode with live preview — press **:**
+- Search — press **F**
+- Table of contents — press **Tab**
+- Text selection and copy
+- Syntax highlighting in code blocks for C/C++, Python, JavaScript, Rust, Go, and Bash
 
 ## Code Example
 
@@ -700,12 +710,37 @@ int main() {
 
 ## Keyboard Shortcuts
 
-- **F** or **Ctrl+F** - Open search
-- **T** - Open theme chooser
-- **S** - Toggle stats overlay
-- **Ctrl+C** - Copy text
+Press **?** at any time to see all shortcuts.
+
+### Navigation
+
+- **J / K** - Scroll down / up
+- **Space / PgDn** - Page down
+- **PgUp** - Page up
+- **Home / End** - Jump to start / end
+- **Ctrl+Scroll** - Zoom in / out
+
+### View
+
+- **F** or **Ctrl+F** - Search
+- **Enter** - Next search match
+- **B** - Toggle folder browser
+- **Tab** - Toggle table of contents
+- **T** - Theme chooser
+- **S** - Toggle stats
+
+### Editing
+
+- **:** - Enter edit mode
+- **Ctrl+S** - Save (in edit mode)
+- **ESC ESC** - Exit edit mode
+
+### General
+
 - **Ctrl+A** - Select all
-- **Q** or **ESC** - Quit
+- **Ctrl+C** - Copy selection
+- **ESC** - Close overlay / Quit
+- **Q** - Quit
 )";
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow) {

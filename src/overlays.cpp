@@ -624,3 +624,181 @@ void renderThemeChooser(App& app) {
             D2D1::RectF(panelX + dpi(app, 40.0f) + cardWidth, gridStartY - dpi(app, 20.0f), panelX + dpi(app, 40.0f) + cardWidth * 2, gridStartY - dpi(app, 5.0f)), app.brush);
     }
 }
+
+void renderHelpOverlay(App& app) {
+    // Animate in
+    if (app.helpAnimation < 1.0f) {
+        float prev = app.helpAnimation;
+        app.helpAnimation = std::min(1.0f, app.helpAnimation + 0.15f);
+        if (app.helpAnimation != prev)
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+    float anim = app.helpAnimation;
+
+    // Semi-transparent backdrop
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.85f * anim));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
+
+    // Panel dimensions — fit to window
+    float panelWidth = std::min(dpi(app, 520.0f), app.width - dpi(app, 40.0f));
+    float panelHeight = std::min(dpi(app, 700.0f), app.height - dpi(app, 40.0f));
+    float panelX = (app.width - panelWidth) / 2;
+    float panelY = (app.height - panelHeight) / 2 + (1 - anim) * dpi(app, 50.0f);
+
+    // Panel background
+    D2D1_ROUNDED_RECT panelRect = D2D1::RoundedRect(
+        D2D1::RectF(panelX, panelY, panelX + panelWidth, panelY + panelHeight),
+        dpi(app, 16.0f), dpi(app, 16.0f));
+    app.brush->SetColor(hexColor(0x1A1A1E, 0.98f * anim));
+    app.renderTarget->FillRoundedRectangle(panelRect, app.brush);
+
+    // Border
+    app.brush->SetColor(hexColor(0x3A3A40, 0.6f * anim));
+    app.renderTarget->DrawRoundedRectangle(panelRect, app.brush, 1.0f);
+
+    // Title (fixed, not scrolled)
+    float titleBottomY = panelY + dpi(app, 55.0f);
+    IDWriteTextFormat* titleFormat = app.themeTitleFormat;
+    if (titleFormat) {
+        titleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
+        app.renderTarget->DrawText(L"Keyboard Shortcuts", 18, titleFormat,
+            D2D1::RectF(panelX, panelY + dpi(app, 15.0f), panelX + panelWidth, titleBottomY), app.brush);
+    }
+
+    IDWriteTextFormat* boldFmt = app.tocFormatBold;
+    IDWriteTextFormat* normalFmt = app.tocFormat;
+    if (!boldFmt || !normalFmt) return;
+
+    // Shortcut entries
+    struct HelpEntry {
+        const wchar_t* key;
+        const wchar_t* desc;
+    };
+
+    const HelpEntry navEntries[] = {
+        {L"J / \x2193",   L"Scroll down"},
+        {L"K / \x2191",   L"Scroll up"},
+        {L"Space / PgDn", L"Page down"},
+        {L"PgUp",         L"Page up"},
+        {L"Home / End",   L"Jump to start / end"},
+        {L"Ctrl+Scroll",  L"Zoom in / out"},
+    };
+
+    const HelpEntry overlayEntries[] = {
+        {L"F / Ctrl+F",   L"Search"},
+        {L"Enter",        L"Next search match"},
+        {L"B",            L"Toggle folder browser"},
+        {L"Tab",          L"Toggle table of contents"},
+        {L"T",            L"Theme chooser"},
+        {L"S",            L"Toggle stats"},
+        {L"?",            L"This help"},
+    };
+
+    const HelpEntry editEntries[] = {
+        {L":",             L"Enter edit mode"},
+        {L"Ctrl+S",       L"Save (in edit mode)"},
+        {L"ESC ESC",      L"Exit edit mode"},
+    };
+
+    const HelpEntry generalEntries[] = {
+        {L"Ctrl+A",       L"Select all text"},
+        {L"Ctrl+C",       L"Copy selection"},
+        {L"ESC",          L"Close overlay / Quit"},
+        {L"Q",            L"Quit"},
+    };
+
+    float padding = dpi(app, 20.0f);
+    float keyColWidth = dpi(app, 150.0f);
+    float leftX = panelX + padding;
+    float descX = leftX + keyColWidth;
+    float rightEdge = panelX + panelWidth - padding;
+    float lineH = dpi(app, 22.0f);
+    float sectionGap = dpi(app, 10.0f);
+    float sectionHeaderExtra = dpi(app, 4.0f);
+
+    // Calculate total content height
+    auto sectionHeight = [&](int entryCount) {
+        return lineH + sectionHeaderExtra + entryCount * lineH + sectionGap;
+    };
+    float footerH = dpi(app, 35.0f);
+    float totalContentHeight = sectionHeight(6) + sectionHeight(7) + sectionHeight(3) + sectionHeight(4) + footerH;
+
+    // Scrollable area
+    float contentTopY = titleBottomY + dpi(app, 10.0f);
+    float contentBottomY = panelY + panelHeight;
+    float visibleHeight = contentBottomY - contentTopY;
+
+    // Store dimensions for input handling (scrollbar drag)
+    app.helpContentHeight = totalContentHeight;
+    app.helpVisibleHeight = visibleHeight;
+    app.helpScrollbarTop = contentTopY;
+
+    // Clamp scroll
+    float maxScroll = std::max(0.0f, totalContentHeight - visibleHeight);
+    app.helpScroll = std::max(0.0f, std::min(app.helpScroll, maxScroll));
+
+    // Push clip so content doesn't draw outside panel
+    app.renderTarget->PushAxisAlignedClip(
+        D2D1::RectF(panelX, contentTopY, panelX + panelWidth, contentBottomY),
+        D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
+    float y = contentTopY - app.helpScroll;
+
+    auto drawSection = [&](const wchar_t* title, const HelpEntry* entries, int count) {
+        // Section header
+        boldFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        D2D1_COLOR_F headerColor = app.theme.accent;
+        headerColor.a = anim;
+        app.brush->SetColor(headerColor);
+        app.renderTarget->DrawText(title, (UINT32)wcslen(title), boldFmt,
+            D2D1::RectF(leftX, y, rightEdge, y + lineH), app.brush);
+        y += lineH + sectionHeaderExtra;
+
+        for (int i = 0; i < count; i++) {
+            // Key
+            boldFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            app.brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.9f * anim));
+            app.renderTarget->DrawText(entries[i].key, (UINT32)wcslen(entries[i].key), boldFmt,
+                D2D1::RectF(leftX + dpi(app, 8.0f), y, leftX + keyColWidth, y + lineH), app.brush);
+
+            // Description
+            normalFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            app.brush->SetColor(D2D1::ColorF(0.7f, 0.7f, 0.7f, 0.9f * anim));
+            app.renderTarget->DrawText(entries[i].desc, (UINT32)wcslen(entries[i].desc), normalFmt,
+                D2D1::RectF(descX, y, rightEdge, y + lineH), app.brush);
+
+            y += lineH;
+        }
+        y += sectionGap;
+    };
+
+    drawSection(L"NAVIGATION", navEntries, 6);
+    drawSection(L"VIEW", overlayEntries, 7);
+    drawSection(L"EDITING", editEntries, 3);
+    drawSection(L"GENERAL", generalEntries, 4);
+
+    // Footer hint
+    normalFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    app.brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, anim));
+    app.renderTarget->DrawText(L"Press ESC or ? to close", 23, normalFmt,
+        D2D1::RectF(panelX, y, panelX + panelWidth, y + lineH), app.brush);
+
+    app.renderTarget->PopAxisAlignedClip();
+
+    // Scrollbar if content overflows
+    if (maxScroll > 0) {
+        float sbHeight = visibleHeight / totalContentHeight * visibleHeight;
+        sbHeight = std::max(sbHeight, dpi(app, 20.0f));
+        float sbY = contentTopY + (app.helpScroll / maxScroll * (visibleHeight - sbHeight));
+
+        D2D1_COLOR_F sbColor = app.theme.text;
+        sbColor.a = 0.3f * anim;
+        app.brush->SetColor(sbColor);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(panelX + panelWidth - dpi(app, 12.0f), sbY,
+                                          panelX + panelWidth - dpi(app, 8.0f), sbY + sbHeight), 2, 2),
+            app.brush);
+    }
+}
