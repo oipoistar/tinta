@@ -40,7 +40,7 @@ struct StartupMetrics {
 };
 
 // Syntax highlighting token types
-enum class SyntaxTokenType { Plain, Keyword, String, Comment, Number, Function, TypeName, Operator };
+enum class SyntaxTokenType { Plain, Keyword, String, Comment, Number, Function, TypeName, Operator, ControlFlow };
 
 // Theme colors
 struct D2DTheme {
@@ -63,6 +63,7 @@ struct D2DTheme {
     D2D1_COLOR_F syntaxNumber;
     D2D1_COLOR_F syntaxFunction;
     D2D1_COLOR_F syntaxType;
+    D2D1_COLOR_F syntaxControlFlow;
 };
 
 // Helper to create color from hex

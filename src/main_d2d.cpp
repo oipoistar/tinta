@@ -697,7 +697,7 @@ static const char* sampleMarkdown = R"(# Welcome to Tinta
 - Search — press **F**
 - Table of contents — press **Tab**
 - Text selection and copy
-- Syntax highlighting in code blocks for C/C++, Python, JavaScript, Rust, Go, and Bash
+- Syntax highlighting in code blocks for C/C++, C#, Python, JavaScript, Rust, Go, and Bash
 
 ## Code Example
 

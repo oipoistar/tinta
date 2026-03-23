@@ -23,7 +23,8 @@ const D2DTheme THEMES[] = {
         hexColor(0x808080),    // syntaxComment - gray
         hexColor(0xB8860B),    // syntaxNumber - dark goldenrod
         hexColor(0x4169E1),    // syntaxFunction - royal blue
-        hexColor(0x9932CC)     // syntaxType - dark orchid
+        hexColor(0x9932CC),    // syntaxType - dark orchid
+        hexColor(0x8F08C4)     // syntaxControlFlow - VS purple
     },
 
     // 2. Sakura - Japanese cherry blossom, soft pink elegance
@@ -43,7 +44,8 @@ const D2DTheme THEMES[] = {
         hexColor(0x999999),    // syntaxComment - gray
         hexColor(0xE8749A),    // syntaxNumber - coral pink
         hexColor(0x6A5ACD),    // syntaxFunction - slate blue
-        hexColor(0x8B5570)     // syntaxType - plum
+        hexColor(0x8B5570),    // syntaxType - plum
+        hexColor(0x9B30FF)     // syntaxControlFlow - purple
     },
 
     // 3. Arctic - Nordic ice blues, crisp and clean
@@ -63,7 +65,8 @@ const D2DTheme THEMES[] = {
         hexColor(0x708090),    // syntaxComment - slate gray
         hexColor(0xD2691E),    // syntaxNumber - chocolate
         hexColor(0x1A365D),    // syntaxFunction - navy
-        hexColor(0x6B5B95)     // syntaxType - purple
+        hexColor(0x6B5B95),    // syntaxType - purple
+        hexColor(0x8B008B)     // syntaxControlFlow - dark magenta
     },
 
     // 4. Meadow - Fresh organic greens, nature-inspired
@@ -83,7 +86,8 @@ const D2DTheme THEMES[] = {
         hexColor(0x708090),    // syntaxComment - slate gray
         hexColor(0xD2691E),    // syntaxNumber - chocolate
         hexColor(0x38A169),    // syntaxFunction - fresh green
-        hexColor(0x6B5B95)     // syntaxType - purple
+        hexColor(0x6B5B95),    // syntaxType - purple
+        hexColor(0x8F08C4)     // syntaxControlFlow - purple
     },
 
     // 5. Dusk - Golden hour warmth, sunset tones
@@ -103,7 +107,8 @@ const D2DTheme THEMES[] = {
         hexColor(0x808080),    // syntaxComment - gray
         hexColor(0xB7791F),    // syntaxNumber - gold
         hexColor(0x4169E1),    // syntaxFunction - royal blue
-        hexColor(0x8B4513)     // syntaxType - saddle brown
+        hexColor(0x8B4513),    // syntaxType - saddle brown
+        hexColor(0x8B008B)     // syntaxControlFlow - dark magenta
     },
 
     // ═══════════════════════════════════════════════════════════
@@ -127,7 +132,8 @@ const D2DTheme THEMES[] = {
         hexColor(0x6C7A89),    // syntaxComment - gray-blue
         hexColor(0xFFD700),    // syntaxNumber - gold
         hexColor(0x90E0EF),    // syntaxFunction - cyan
-        hexColor(0xDDA0DD)     // syntaxType - plum
+        hexColor(0xDDA0DD),    // syntaxType - plum
+        hexColor(0xDA70D6)     // syntaxControlFlow - orchid
     },
 
     // 7. Dracula - Classic dark, purples and pinks
@@ -147,7 +153,8 @@ const D2DTheme THEMES[] = {
         hexColor(0x6272A4),    // syntaxComment - gray
         hexColor(0xBD93F9),    // syntaxNumber - purple
         hexColor(0x50FA7B),    // syntaxFunction - green
-        hexColor(0x8BE9FD)     // syntaxType - cyan
+        hexColor(0x8BE9FD),    // syntaxType - cyan
+        hexColor(0xBD93F9)     // syntaxControlFlow - purple
     },
 
     // 8. Forest - Deep mystical greens
@@ -167,7 +174,8 @@ const D2DTheme THEMES[] = {
         hexColor(0x5F7A6A),    // syntaxComment - muted green
         hexColor(0xFFB86C),    // syntaxNumber - orange
         hexColor(0x68D391),    // syntaxFunction - lime
-        hexColor(0x81E6D9)     // syntaxType - mint
+        hexColor(0x81E6D9),    // syntaxType - mint
+        hexColor(0xE6A0FF)     // syntaxControlFlow - lavender
     },
 
     // 9. Ember - Warm charcoal with fire accents
@@ -187,7 +195,8 @@ const D2DTheme THEMES[] = {
         hexColor(0x6B5B4F),    // syntaxComment - warm gray
         hexColor(0xFC8181),    // syntaxNumber - coral
         hexColor(0xED8936),    // syntaxFunction - orange
-        hexColor(0xDDA0DD)     // syntaxType - plum
+        hexColor(0xDDA0DD),    // syntaxType - plum
+        hexColor(0xFF69B4)     // syntaxControlFlow - hot pink
     },
 
     // 10. Abyss - True black, neon accents (OLED-friendly)
@@ -207,7 +216,8 @@ const D2DTheme THEMES[] = {
         hexColor(0x666666),    // syntaxComment - dark gray
         hexColor(0xFF6600),    // syntaxNumber - orange
         hexColor(0x00FFE1),    // syntaxFunction - cyan
-        hexColor(0xFFFF00)     // syntaxType - yellow
+        hexColor(0xFFFF00),    // syntaxType - yellow
+        hexColor(0xFF00FF)     // syntaxControlFlow - magenta
     }
 };
 

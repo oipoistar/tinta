@@ -63,6 +63,74 @@ const std::unordered_set<std::wstring> BASH_KEYWORDS = {
     L"cd", L"pwd", L"test", L"true", L"false"
 };
 
+const std::unordered_set<std::wstring> CSHARP_CONTROL_FLOW = {
+    L"if", L"else", L"for", L"foreach", L"while", L"do", L"switch", L"case", L"break",
+    L"continue", L"return", L"goto", L"default", L"throw", L"try", L"catch", L"finally",
+    L"yield", L"when"
+};
+
+const std::unordered_set<std::wstring> CSHARP_KEYWORDS = {
+    // Control flow
+    L"if", L"else", L"for", L"foreach", L"while", L"do", L"switch", L"case", L"break",
+    L"continue", L"return", L"goto", L"default", L"throw", L"try", L"catch", L"finally",
+    // Types & declarations
+    L"void", L"int", L"char", L"float", L"double", L"bool", L"long", L"short", L"byte",
+    L"sbyte", L"uint", L"ulong", L"ushort", L"decimal", L"string", L"object", L"dynamic",
+    L"var", L"nint", L"nuint",
+    // Modifiers
+    L"public", L"private", L"protected", L"internal", L"static", L"const", L"readonly",
+    L"volatile", L"abstract", L"virtual", L"override", L"sealed", L"extern", L"unsafe",
+    L"partial", L"async", L"required",
+    // OOP
+    L"class", L"struct", L"interface", L"enum", L"delegate", L"record", L"namespace",
+    L"new", L"this", L"base", L"operator", L"implicit", L"explicit", L"event",
+    // Other keywords
+    L"using", L"in", L"out", L"ref", L"params", L"is", L"as", L"typeof", L"sizeof",
+    L"nameof", L"stackalloc", L"checked", L"unchecked", L"fixed", L"lock", L"with",
+    L"await", L"yield", L"get", L"set", L"init", L"value", L"when", L"where",
+    L"global", L"managed", L"unmanaged",
+    // Literals
+    L"true", L"false", L"null",
+    // LINQ
+    L"from", L"select", L"orderby", L"ascending", L"descending",
+    L"group", L"by", L"into", L"join", L"on", L"equals", L"let",
+    // Preprocessor
+    L"#if", L"#else", L"#elif", L"#endif", L"#define", L"#undef",
+    L"#region", L"#endregion", L"#pragma", L"#nullable", L"#warning", L"#error"
+};
+
+const std::unordered_set<std::wstring> CSHARP_TYPES = {
+    // System types
+    L"String", L"Int32", L"Int64", L"Int16", L"Boolean", L"Double", L"Single",
+    L"Decimal", L"Object", L"Byte", L"SByte", L"Char", L"UInt32", L"UInt64",
+    L"UInt16", L"Guid", L"DateTime", L"DateTimeOffset", L"TimeSpan", L"Type",
+    // Collections
+    L"List", L"Dictionary", L"HashSet", L"Queue", L"Stack", L"LinkedList",
+    L"SortedDictionary", L"SortedSet", L"SortedList", L"ConcurrentDictionary",
+    L"ObservableCollection", L"ImmutableList", L"ImmutableArray",
+    // Interfaces
+    L"IEnumerable", L"IList", L"IDictionary", L"ICollection", L"IDisposable",
+    L"IAsyncDisposable", L"IComparable", L"IEquatable", L"ICloneable",
+    L"IReadOnlyList", L"IReadOnlyCollection", L"IReadOnlyDictionary",
+    // Async
+    L"Task", L"ValueTask", L"CancellationToken", L"CancellationTokenSource",
+    // Delegates
+    L"Action", L"Func", L"Predicate", L"EventHandler", L"Delegate",
+    // IO & Streams
+    L"StringBuilder", L"Stream", L"MemoryStream", L"FileStream", L"StreamReader",
+    L"StreamWriter", L"TextReader", L"TextWriter",
+    // Common classes
+    L"HttpClient", L"JsonSerializer", L"Regex", L"Exception", L"Attribute",
+    L"Console", L"Math", L"Convert", L"Enumerable", L"Environment",
+    // Memory
+    L"Span", L"Memory", L"ReadOnlySpan", L"ReadOnlyMemory",
+    // Nullable
+    L"Nullable",
+    // ASP.NET common
+    L"ILogger", L"IConfiguration", L"IServiceCollection", L"IApplicationBuilder",
+    L"IHostBuilder", L"IWebHostBuilder"
+};
+
 int detectLanguage(const std::wstring& lang) {
     std::wstring lower = lang;
     for (auto& c : lower) c = towlower(c);
@@ -78,6 +146,8 @@ int detectLanguage(const std::wstring& lang) {
         return 5;  // Go
     if (lower == L"bash" || lower == L"shell" || lower == L"sh" || lower == L"zsh")
         return 6;  // Bash/Shell
+    if (lower == L"csharp" || lower == L"cs" || lower == L"c#")
+        return 7;  // C#
     return 0;  // Unknown
 }
 
@@ -89,6 +159,7 @@ const std::unordered_set<std::wstring>* getKeywordsForLanguage(int lang) {
         case 4: return &RUST_KEYWORDS;
         case 5: return &GO_KEYWORDS;
         case 6: return &BASH_KEYWORDS;
+        case 7: return &CSHARP_KEYWORDS;
         default: return nullptr;
     }
 }
@@ -157,6 +228,50 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
             return tokens;
         }
 
+        // C# verbatim strings (@"...") and interpolated strings ($"...")
+        if (language == 7 && (c == L'@' || c == L'$')) {
+            size_t start = i;
+            size_t prefixEnd = i + 1;
+            // Handle @$ or $@ prefix combinations
+            if (prefixEnd < line.length() && (line[prefixEnd] == L'@' || line[prefixEnd] == L'$') && line[prefixEnd] != c) {
+                prefixEnd++;
+            }
+            if (prefixEnd < line.length() && line[prefixEnd] == L'"') {
+                bool isVerbatim = (c == L'@' || (prefixEnd > i + 1 && (line[i+1] == L'@')));
+                i = prefixEnd + 1; // skip past opening quote
+                if (isVerbatim) {
+                    // Verbatim string: "" is escape, no backslash escaping
+                    while (i < line.length()) {
+                        if (line[i] == L'"') {
+                            if (i + 1 < line.length() && line[i+1] == L'"') {
+                                i += 2; // escaped quote
+                            } else {
+                                i++; // closing quote
+                                break;
+                            }
+                        } else {
+                            i++;
+                        }
+                    }
+                } else {
+                    // Interpolated string: normal escaping
+                    while (i < line.length()) {
+                        if (line[i] == L'\\' && i + 1 < line.length()) {
+                            i += 2;
+                        } else if (line[i] == L'"') {
+                            i++;
+                            break;
+                        } else {
+                            i++;
+                        }
+                    }
+                }
+                tokens.push_back({std::wstring_view(line.data() + start, i - start),
+                                  SyntaxTokenType::String});
+                continue;
+            }
+        }
+
         // Strings
         if (c == L'"' || c == L'\'') {
             size_t start = i;
@@ -204,21 +319,28 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bo
             while (next < line.length() && iswspace(line[next])) next++;
             bool isFunction = (next < line.length() && line[next] == L'(');
 
-            // Check if keyword
-            if (keywords && keywords->count(word)) {
+            // Check if keyword (C# separates control flow from other keywords)
+            if (language == 7 && CSHARP_CONTROL_FLOW.count(word)) {
+                tokens.push_back({view, SyntaxTokenType::ControlFlow});
+            } else if (keywords && keywords->count(word)) {
                 tokens.push_back({view, SyntaxTokenType::Keyword});
             } else if (language == 1 && CPP_TYPES.count(word)) {
                 tokens.push_back({view, SyntaxTokenType::TypeName});
+            } else if (language == 7 && CSHARP_TYPES.count(word)) {
+                tokens.push_back({view, SyntaxTokenType::TypeName});
             } else if (isFunction) {
                 tokens.push_back({view, SyntaxTokenType::Function});
+            } else if (language == 7 && iswupper(word[0]) && word.length() > 1) {
+                // C# PascalCase heuristic: uppercase-starting identifiers are likely types
+                tokens.push_back({view, SyntaxTokenType::TypeName});
             } else {
                 tokens.push_back({view, SyntaxTokenType::Plain});
             }
             continue;
         }
 
-        // Preprocessor directives (C/C++)
-        if (language == 1 && c == L'#') {
+        // Preprocessor directives (C/C++/C#)
+        if ((language == 1 || language == 7) && c == L'#') {
             size_t start = i;
             i++;
             while (i < line.length() && (iswalnum(line[i]) || line[i] == L'_')) i++;
@@ -248,6 +370,7 @@ D2D1_COLOR_F getTokenColor(const D2DTheme& theme, SyntaxTokenType ttype) {
         case SyntaxTokenType::Number:   return theme.syntaxNumber;
         case SyntaxTokenType::Function: return theme.syntaxFunction;
         case SyntaxTokenType::TypeName:     return theme.syntaxType;
+        case SyntaxTokenType::ControlFlow:  return theme.syntaxControlFlow;
         case SyntaxTokenType::Operator: return theme.code;
         default:                  return theme.code;
     }
