@@ -21,6 +21,9 @@ extern const std::unordered_set<std::wstring> JS_KEYWORDS;
 extern const std::unordered_set<std::wstring> RUST_KEYWORDS;
 extern const std::unordered_set<std::wstring> GO_KEYWORDS;
 extern const std::unordered_set<std::wstring> BASH_KEYWORDS;
+extern const std::unordered_set<std::wstring> CSHARP_CONTROL_FLOW;
+extern const std::unordered_set<std::wstring> CSHARP_KEYWORDS;
+extern const std::unordered_set<std::wstring> CSHARP_TYPES;
 
 int detectLanguage(const std::wstring& lang);
 const std::unordered_set<std::wstring>* getKeywordsForLanguage(int lang);
