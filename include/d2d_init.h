@@ -7,6 +7,7 @@ bool initD2D(App& app);
 void applyTheme(App& app, int themeIndex);
 void updateTextFormats(App& app);
 void updateOverlayFormats(App& app);
+void ensureThemePreviewFormats(App& app);
 void createTypography(App& app);
 bool createRenderTarget(App& app);
 

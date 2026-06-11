@@ -27,6 +27,14 @@ inline int64_t usElapsed(Clock::time_point start) {
     return std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - start).count();
 }
 
+// Timer IDs (TIMER_FILE_WATCH=1 lives in file_utils.h, TIMER_EDITOR_REPARSE=2 in editor.cpp)
+#define TIMER_CURSOR_BLINK 3
+#define TIMER_NOTIFICATION 4
+#define TIMER_ZOOM_APPLY 5
+
+// Posted to continue an incomplete document layout in time-budgeted chunks
+#define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
+
 // Startup metrics
 struct StartupMetrics {
     int64_t windowInitUs = 0;
@@ -180,6 +188,8 @@ struct App {
     float targetScrollX = 0;
     float contentScale = 1.0f;  // DPI scale
     float zoomFactor = 1.0f;    // User zoom (Ctrl+scroll)
+    float appliedZoomFactor = 1.0f;  // zoomFactor last baked into text formats
+    bool zoomApplyPending = false;   // TIMER_ZOOM_APPLY armed to coalesce zoom ticks
     bool darkMode = true;
     bool showStats = false;
     int currentThemeIndex = 5;  // Default to "Midnight" (first dark theme)
@@ -336,6 +346,15 @@ struct App {
     std::vector<LayoutLine> layoutLines;
     bool layoutDirty = true;
 
+    // Incremental layout: the first paint lays out ~2 viewports, the rest
+    // continues in WM_APP_LAYOUT_CHUNK time slices (see render.cpp)
+    bool layoutComplete = true;
+    size_t layoutNextBlock = 0;   // next top-level block to lay out
+    float layoutCursorY = 0.0f;   // y where the next block starts
+    float layoutIndent = 0.0f;
+    float layoutMaxWidth = 0.0f;
+    size_t layoutTimeUs = 0;      // total layout time for the current cycle
+
     // Scroll sync anchors: source byte offset → rendered Y position
     struct ScrollAnchor {
         size_t sourceOffset;
@@ -352,6 +371,9 @@ struct App {
     bool showCopiedNotification = false;
     float copiedNotificationAlpha = 0.0f;
     std::chrono::steady_clock::time_point copiedNotificationStart;
+
+    // Cursor blink state, toggled by TIMER_CURSOR_BLINK (editor + search cursor)
+    bool cursorBlinkOn = true;
 
     // Search overlay
     bool showSearch = false;
@@ -497,6 +519,31 @@ struct App {
 
 inline float dpi(const App& app, float value) {
     return value * app.contentScale;
+}
+
+// Cursor blink runs on a timer instead of per-frame InvalidateRect so the
+// app is fully idle between blinks. Call after editMode/search state changes.
+inline void updateBlinkTimer(App& app) {
+    if (!app.hwnd) return;
+    if (app.editMode || (app.showSearch && app.searchActive)) {
+        app.cursorBlinkOn = true;
+        SetTimer(app.hwnd, TIMER_CURSOR_BLINK, 500, nullptr);
+    } else {
+        KillTimer(app.hwnd, TIMER_CURSOR_BLINK);
+        app.cursorBlinkOn = true;
+    }
+}
+
+// Restart the blink phase so the cursor stays visible while typing
+inline void resetCursorBlink(App& app) {
+    app.cursorBlinkOn = true;
+    if (app.hwnd) SetTimer(app.hwnd, TIMER_CURSOR_BLINK, 500, nullptr);
+}
+
+// Notification fades repaint on this timer; the WM_TIMER handler kills it
+// once no notification is active.
+inline void startNotificationTimer(App& app) {
+    if (app.hwnd) SetTimer(app.hwnd, TIMER_NOTIFICATION, 33, nullptr);
 }
 
 #endif // TINTA_APP_H

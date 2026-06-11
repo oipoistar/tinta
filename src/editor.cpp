@@ -320,12 +320,14 @@ static void scheduleReparse(App& app) {
         std::wstring title = L"Tinta - * " + fname;
         SetWindowTextW(app.hwnd, title.c_str());
     }
-    // Reparse immediately to update preview
-    editorReparse(app);
+    // Debounce: coalesce rapid typing into one reparse per pause. WM_TIMER
+    // calls editorReparse, which kills the timer.
+    SetTimer(app.hwnd, TIMER_EDITOR_REPARSE, 150, nullptr);
 }
 
 void editorReparse(App& app) {
     KillTimer(app.hwnd, TIMER_EDITOR_REPARSE);
+    if (!app.editMode) return;
     std::string utf8 = toUtf8(app.editorText);
 
     // Build line-to-byte-offset mapping for scroll sync
@@ -355,6 +357,7 @@ void enterEditMode(App& app) {
         app.showEditModeNotification = true;
         app.editModeNotificationAlpha = 1.0f;
         app.editModeNotificationStart = std::chrono::steady_clock::now();
+        startNotificationTimer(app);
         InvalidateRect(app.hwnd, nullptr, FALSE);
         return;
     }
@@ -404,6 +407,8 @@ void enterEditMode(App& app) {
     app.showEditModeNotification = true;
     app.editModeNotificationAlpha = 1.0f;
     app.editModeNotificationStart = std::chrono::steady_clock::now();
+    startNotificationTimer(app);
+    updateBlinkTimer(app);
 
     // Force layout at new width
     app.layoutDirty = true;
@@ -418,6 +423,7 @@ void exitEditMode(App& app) {
         app.showEditModeNotification = true;
         app.editModeNotificationAlpha = 1.0f;
         app.editModeNotificationStart = std::chrono::steady_clock::now();
+        startNotificationTimer(app);
         InvalidateRect(app.hwnd, nullptr, FALSE);
         return;
     }
@@ -437,6 +443,7 @@ void exitEditMode(App& app) {
         app.searchAnimation = 0;
     }
     KillTimer(app.hwnd, TIMER_EDITOR_REPARSE);
+    updateBlinkTimer(app);
 
     // Re-enable file watch
     updateFileWriteTime(app);
@@ -514,10 +521,20 @@ void saveEditorFile(App& app, HWND hwnd) {
         app.showEditModeNotification = true;
         app.editModeNotificationAlpha = 1.0f;
         app.editModeNotificationStart = std::chrono::steady_clock::now();
+        startNotificationTimer(app);
 
         // Update window title
         updateWindowTitle(app);
 
+        InvalidateRect(hwnd, nullptr, FALSE);
+    } else {
+        // Surface the failure — a silent no-op here leaves the document
+        // permanently dirty and traps the user in the exit-confirm prompt
+        app.editorNotificationMsg = L"Save failed — file may be locked or read-only";
+        app.showEditModeNotification = true;
+        app.editModeNotificationAlpha = 1.0f;
+        app.editModeNotificationStart = std::chrono::steady_clock::now();
+        startNotificationTimer(app);
         InvalidateRect(hwnd, nullptr, FALSE);
     }
 }
@@ -539,6 +556,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             app.editorSearchCurrentIndex = 0;
             app.searchCurrentIndex = 0;
             app.searchJustOpened = true;
+            updateBlinkTimer(app);
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
@@ -546,6 +564,11 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 
     // If search is open, route to search handling
     if (app.showSearch && app.searchActive) {
+        // Ctrl+S still saves while the search bar is open
+        if (ctrl && wParam == 'S') {
+            saveEditorFile(app, hwnd);
+            return;
+        }
         switch (wParam) {
             case VK_ESCAPE:
                 app.showSearch = false;
@@ -554,6 +577,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 app.editorSearchMatches.clear();
                 app.editorSearchCurrentIndex = 0;
                 app.searchAnimation = 0;
+                updateBlinkTimer(app);
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
             case VK_RETURN: {
@@ -579,25 +603,30 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return; // Let WM_CHAR handle text input for search
     }
 
-    // Handle confirm-exit prompt (Y/N/ESC)
+    // Handle confirm-exit prompt: only Y / N / ESC (and Ctrl+S as "save")
+    // respond. Other keys — including bare modifiers like the Ctrl of a
+    // Ctrl+S chord — must NOT silently dismiss the prompt.
     if (app.confirmExitPending) {
-        if (wParam == 'Y') {
+        if (wParam == 'Y' || (ctrl && wParam == 'S')) {
             app.confirmExitPending = false;
             saveEditorFile(app, hwnd);
-            // Now editorDirty is false, exitEditMode will proceed
-            exitEditMode(app);
+            if (!app.editorDirty) {
+                // Save succeeded — exit proceeds
+                exitEditMode(app);
+            }
+            // Save failed: saveEditorFile showed the error, stay in edit mode
         } else if (wParam == 'N') {
             app.confirmExitPending = false;
             app.editorDirty = false;  // Discard changes
             exitEditMode(app);
-        } else {
-            // Any other key (including ESC) cancels
+        } else if (wParam == VK_ESCAPE) {
             app.confirmExitPending = false;
             app.escPressedOnce = false;
             app.editorNotificationMsg = L"Exit cancelled";
             app.showEditModeNotification = true;
             app.editModeNotificationAlpha = 1.0f;
             app.editModeNotificationStart = std::chrono::steady_clock::now();
+            startNotificationTimer(app);
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
@@ -622,6 +651,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         app.showEditModeNotification = true;
         app.editModeNotificationAlpha = 1.0f;
         app.editModeNotificationStart = now;
+        startNotificationTimer(app);
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
@@ -861,6 +891,8 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
     // Swallow characters while confirm-exit prompt is active
     if (app.confirmExitPending) return;
+
+    resetCursorBlink(app);
 
     // If search is active, route characters there
     if (app.showSearch && app.searchActive) {
@@ -1214,11 +1246,8 @@ void renderEditor(App& app, float editorWidth) {
         }
     }
 
-    // Cursor (blinking)
-    auto now = std::chrono::steady_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    bool cursorVisible = (ms % 1000) < 500;
-    if (cursorVisible) {
+    // Cursor (blink state driven by TIMER_CURSOR_BLINK)
+    if (app.cursorBlinkOn) {
         size_t curLine = getLineFromPos(app, app.editorCursorPos);
         size_t curCol = getColFromPos(app, app.editorCursorPos);
         float curX = gutterWidth + padding + curCol * charWidth;
@@ -1228,8 +1257,6 @@ void renderEditor(App& app, float editorWidth) {
         app.renderTarget->FillRectangle(
             D2D1::RectF(curX, curY, curX + dpi(app, 2.0f), curY + lineHeight), app.brush);
     }
-    // Keep redrawing for cursor blink
-    InvalidateRect(app.hwnd, nullptr, FALSE);
 
     // Update content height for scrolling
     app.editorContentHeight = padding * 2 + app.editorLineStarts.size() * lineHeight;
@@ -1282,20 +1309,31 @@ void renderEditModeNotification(App& app) {
     auto now = std::chrono::steady_clock::now();
     float elapsed = std::chrono::duration<float>(now - app.editModeNotificationStart).count();
 
-    if (elapsed > 3.0f) {
-        app.showEditModeNotification = false;
-        return;
-    }
-
     float alpha = 1.0f;
-    if (elapsed > 1.5f) {
-        alpha = 1.0f - (elapsed - 1.5f) / 1.5f;
+    if (app.confirmExitPending) {
+        // The exit-confirm prompt stays fully visible until answered —
+        // fading it out while confirmExitPending is still armed leaves the
+        // app in an invisible modal state
+    } else {
+        if (elapsed > 3.0f) {
+            app.showEditModeNotification = false;
+            return;
+        }
+        if (elapsed > 1.5f) {
+            alpha = 1.0f - (elapsed - 1.5f) / 1.5f;
+        }
     }
 
     const wchar_t* msg = app.editorNotificationMsg.c_str();
     size_t msgLen = app.editorNotificationMsg.size();
 
-    float pillWidth = (msgLen <= 10) ? dpi(app, 120.0f) : dpi(app, 300.0f);
+    // Size the pill to the message so long prompts aren't clipped
+    IDWriteTextFormat* measureFmt = app.searchTextFormat ? app.searchTextFormat : app.textFormat;
+    float pillWidth = dpi(app, 120.0f);
+    if (measureFmt) {
+        float textWidth = measureText(app, app.editorNotificationMsg, measureFmt);
+        pillWidth = std::min(textWidth + dpi(app, 40.0f), (float)app.width - dpi(app, 20.0f));
+    }
     float pillHeight = dpi(app, 30.0f);
     float pillX = (float)(app.width - pillWidth) / 2.0f;
     float pillY = (float)app.height - dpi(app, 60.0f);
@@ -1317,6 +1355,4 @@ void renderEditModeNotification(App& app) {
         fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     }
-
-    InvalidateRect(app.hwnd, nullptr, FALSE);
 }

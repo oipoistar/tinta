@@ -37,7 +37,17 @@ void render(App& app) {
     app.drawCalls = 0;
 
     if (app.layoutDirty) {
-        layoutDocument(app);
+        if (app.editMode) {
+            // Edit mode needs complete scroll anchors for preview sync
+            layoutDocument(app);
+        } else {
+            // Lay out the visible region first so this frame presents
+            // immediately; the rest continues in WM_APP_LAYOUT_CHUNK slices
+            layoutDocumentViewportFirst(app);
+            if (!app.layoutComplete) {
+                PostMessage(app.hwnd, WM_APP_LAYOUT_CHUNK, 0, 0);
+            }
+        }
     }
 
     // Sync preview scroll to editor scroll position using source-offset anchors
@@ -502,7 +512,6 @@ render_document:
                     cachedCopyLayout, app.brush);
             }
             app.drawCalls++;
-            InvalidateRect(app.hwnd, nullptr, FALSE);
         } else {
             app.showCopiedNotification = false;
         }
@@ -512,9 +521,10 @@ render_document:
     if (app.showStats) {
         wchar_t stats[512];
         swprintf(stats, 512,
-            L"Parse: %zu us | Draw calls: %zu\n"
+            L"Parse: %zu us | Layout: %zu us | Draw calls: %zu\n"
             L"Startup: %.1fms (Win: %.1f | D2D: %.1f | DWrite: %.1f | File: %.1f)",
             app.parseTimeUs,
+            app.layoutTimeUs,
             app.drawCalls,
             app.metrics.totalStartupUs / 1000.0,
             app.metrics.windowInitUs / 1000.0,
@@ -647,11 +657,49 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_TIMER:
             if (wParam == TIMER_FILE_WATCH && app) handleFileWatchTimer(*app, hwnd);
             if (wParam == 2 && app) editorReparse(*app); // TIMER_EDITOR_REPARSE
+            if (wParam == TIMER_CURSOR_BLINK && app) {
+                app->cursorBlinkOn = !app->cursorBlinkOn;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            if (wParam == TIMER_NOTIFICATION && app) {
+                // Only fading notifications need repaints; the persistent
+                // exit-confirm prompt is static until answered
+                bool fading = app->showCopiedNotification ||
+                    (app->showEditModeNotification && !app->confirmExitPending);
+                if (fading) {
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                } else {
+                    KillTimer(hwnd, TIMER_NOTIFICATION);
+                }
+            }
+            if (wParam == TIMER_ZOOM_APPLY && app) {
+                if (app->zoomFactor != app->appliedZoomFactor) {
+                    // More zoom ticks arrived since the last apply
+                    updateTextFormats(*app);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                } else {
+                    KillTimer(hwnd, TIMER_ZOOM_APPLY);
+                    app->zoomApplyPending = false;
+                }
+            }
+            return 0;
+
+        case WM_APP_LAYOUT_CHUNK:
+            // Continue an incomplete document layout in ~10ms slices, yielding
+            // to input between slices
+            if (app && !app->layoutDirty && !app->layoutComplete) {
+                bool done = layoutDocumentContinue(*app, 10000);
+                InvalidateRect(hwnd, nullptr, FALSE);  // scrollbar grows as layout fills in
+                if (!done) PostMessage(hwnd, WM_APP_LAYOUT_CHUNK, 0, 0);
+            }
             return 0;
 
         case WM_DESTROY:
             KillTimer(hwnd, TIMER_FILE_WATCH);
             KillTimer(hwnd, 2); // TIMER_EDITOR_REPARSE
+            KillTimer(hwnd, TIMER_CURSOR_BLINK);
+            KillTimer(hwnd, TIMER_NOTIFICATION);
+            KillTimer(hwnd, TIMER_ZOOM_APPLY);
             {
                 // Load existing settings to preserve values like hasAskedFileAssociation
                 Settings settings = loadSettings();

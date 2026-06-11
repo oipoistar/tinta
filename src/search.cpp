@@ -1,5 +1,6 @@
 #include "search.h"
 #include "utils.h"
+#include "render.h"
 
 void performSearch(App& app) {
     app.searchMatches.clear();
@@ -7,6 +8,9 @@ void performSearch(App& app) {
     app.searchMatchCursor = 0;
 
     if (app.searchQuery.empty() || !app.root) return;
+
+    // docText and textRects must cover the whole document before searching
+    ensureLayoutComplete(app);
 
     // Use layout-built document text when available
     if (app.docText.empty()) {

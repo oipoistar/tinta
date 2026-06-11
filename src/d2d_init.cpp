@@ -32,12 +32,24 @@ bool initD2D(App& app) {
 void applyTheme(App& app, int themeIndex) {
     if (themeIndex < 0 || themeIndex >= THEME_COUNT) return;
 
-    app.currentThemeIndex = themeIndex;
-    app.theme = THEMES[themeIndex];
-    app.darkMode = app.theme.isDark;
+    const D2DTheme& newTheme = THEMES[themeIndex];
 
-    // Update fonts for the new theme
-    updateTextFormats(app);
+    // If the fonts are unchanged the existing text formats are identical —
+    // skip recreating ~47 IDWriteTextFormat objects. Colors are baked into
+    // the cached layout runs, so a relayout is still needed.
+    bool sameFonts = app.textFormat &&
+        wcscmp(app.theme.fontFamily, newTheme.fontFamily) == 0 &&
+        wcscmp(app.theme.codeFontFamily, newTheme.codeFontFamily) == 0;
+
+    app.currentThemeIndex = themeIndex;
+    app.theme = newTheme;
+    app.darkMode = newTheme.isDark;
+
+    if (sameFonts) {
+        app.layoutDirty = true;
+    } else {
+        updateTextFormats(app);
+    }
 
     // Force a redraw
     if (app.hwnd) {
@@ -124,10 +136,12 @@ void updateTextFormats(App& app) {
                     { 0x2E80, 0x9FFF },    // CJK radicals, kana, ideographs
                     { 0xAC00, 0xD7AF },    // Hangul syllables
                     { 0xF900, 0xFAFF },    // CJK compatibility ideographs
+                    { 0xFE10, 0xFE1F },    // Vertical forms (CJK punctuation)
                     { 0xFE30, 0xFE4F },    // CJK compatibility forms
+                    { 0xFF00, 0xFFEF },    // Halfwidth/fullwidth forms (（）：！etc.)
                     { 0x20000, 0x2FA1F },  // CJK extensions B-F
                 };
-                builder->AddMapping(cjkRanges, 5, cjkFamilies, 4);
+                builder->AddMapping(cjkRanges, 7, cjkFamilies, 4);
 
                 // Emoji/symbol fallback for everything else
                 const wchar_t* emojiFamilies[] = {
@@ -135,6 +149,14 @@ void updateTextFormats(App& app) {
                 };
                 DWRITE_UNICODE_RANGE fullRange = { 0x0000, 0x10FFFF };
                 builder->AddMapping(&fullRange, 1, emojiFamilies, 2);
+
+                // Chain the system fallback so scripts not covered above
+                // (Arabic, Thai, ...) still resolve instead of rendering tofu
+                IDWriteFontFallback* systemFallback = nullptr;
+                if (SUCCEEDED(factory2->GetSystemFontFallback(&systemFallback))) {
+                    builder->AddMappings(systemFallback);
+                    systemFallback->Release();
+                }
 
                 builder->CreateFontFallback(&app.fontFallback);
                 builder->Release();
@@ -144,6 +166,7 @@ void updateTextFormats(App& app) {
     }
 
     updateOverlayFormats(app);
+    app.appliedZoomFactor = app.zoomFactor;
     app.layoutDirty = true;
 }
 
@@ -166,19 +189,11 @@ void updateOverlayFormats(App& app) {
         DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         11.0f * scale, L"en-us", &app.themeHeaderFormat);
 
-    app.themePreviewFormats.resize(THEME_COUNT);
-    for (int i = 0; i < THEME_COUNT; i++) {
-        const D2DTheme& t = THEMES[i];
-        app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            14.0f * scale, L"en-us", &app.themePreviewFormats[i].name);
-        app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
-            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            11.0f * scale, L"en-us", &app.themePreviewFormats[i].preview);
-        app.dwriteFactory->CreateTextFormat(t.codeFontFamily, nullptr,
-            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            10.0f * scale, L"en-us", &app.themePreviewFormats[i].code);
-    }
+    // Theme preview formats (3 per theme, several distinct font families) are
+    // created lazily by ensureThemePreviewFormats when the chooser first opens
+    // — they were ~30 CreateTextFormat calls on the startup critical path.
+    // releaseOverlayFormats() above already cleared them; they rebuild at the
+    // current scale on next use.
 
     // Folder browser format
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
@@ -211,6 +226,25 @@ void updateOverlayFormats(App& app) {
             app.editorCharWidth = metrics.widthIncludingTrailingWhitespace;
             measureLayout->Release();
         }
+    }
+}
+
+void ensureThemePreviewFormats(App& app) {
+    if (!app.themePreviewFormats.empty()) return;
+
+    float scale = app.contentScale;
+    app.themePreviewFormats.resize(THEME_COUNT);
+    for (int i = 0; i < THEME_COUNT; i++) {
+        const D2DTheme& t = THEMES[i];
+        app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
+            DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            14.0f * scale, L"en-us", &app.themePreviewFormats[i].name);
+        app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
+            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            11.0f * scale, L"en-us", &app.themePreviewFormats[i].preview);
+        app.dwriteFactory->CreateTextFormat(t.codeFontFamily, nullptr,
+            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            10.0f * scale, L"en-us", &app.themePreviewFormats[i].code);
     }
 }
 

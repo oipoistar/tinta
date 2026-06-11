@@ -1,5 +1,6 @@
 #include "overlays.h"
 #include "utils.h"
+#include "d2d_init.h"
 
 #include <chrono>
 #include <algorithm>
@@ -88,20 +89,24 @@ void renderSearchOverlay(App& app) {
                 searchTextFormat,
                 D2D1::RectF(textX, barY + dpi(app, 12.0f), textX + textWidth, barY + barHeight), app.brush);
 
-            // Blinking cursor
-            auto now = std::chrono::steady_clock::now();
-            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-            bool cursorVisible = (ms % 1000) < 500;
-            if (app.searchActive && cursorVisible) {
-                float queryWidth = measureText(app, app.searchQuery, searchTextFormat);
-                float cursorX = textX + queryWidth + 2;
+            // Blinking cursor (blink state driven by TIMER_CURSOR_BLINK).
+            // Query width is cached — it only changes when the query or the
+            // text format changes, not per frame.
+            if (app.searchActive && app.cursorBlinkOn) {
+                static std::wstring cachedQuery;
+                static IDWriteTextFormat* cachedFormat = nullptr;
+                static float cachedQueryWidth = 0.0f;
+                if (cachedQuery != app.searchQuery || cachedFormat != searchTextFormat) {
+                    cachedQueryWidth = measureText(app, app.searchQuery, searchTextFormat);
+                    cachedQuery = app.searchQuery;
+                    cachedFormat = searchTextFormat;
+                }
+                float cursorX = textX + cachedQueryWidth + 2;
                 app.brush->SetColor(textColor);
                 app.renderTarget->DrawLine(
                     D2D1::Point2F(cursorX, barY + dpi(app, 12.0f)),
                     D2D1::Point2F(cursorX, barY + dpi(app, 32.0f)),
                     app.brush, dpi(app, 1.5f));
-                // Keep animating cursor
-                InvalidateRect(app.hwnd, nullptr, FALSE);
             }
         }
 
@@ -439,6 +444,9 @@ void renderToc(App& app) {
 }
 
 void renderThemeChooser(App& app) {
+    // Preview formats are created lazily on first open (not at startup)
+    ensureThemePreviewFormats(app);
+
     // Animate in - only invalidate while progressing
     if (app.themeChooserAnimation < 1.0f) {
         float prev = app.themeChooserAnimation;

@@ -377,60 +377,116 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         float linkLineStartX = x;
         float linkLineY = y;
 
+        // Measure the whole element once: cluster metrics give every word
+        // width without creating one IDWriteTextLayout per word. Word splits
+        // happen at spaces, which are always cluster boundaries.
+        std::vector<float> cumW(text.length() + 1, -1.0f);
+        cumW[0] = 0.0f;
+        {
+            LayoutInfo measureInfo = createLayout(app, text, format, lineHeight, app.bodyTypography);
+            if (measureInfo.layout) {
+                UINT32 clusterCount = 0;
+                measureInfo.layout->GetClusterMetrics(nullptr, 0, &clusterCount);
+                if (clusterCount > 0) {
+                    std::vector<DWRITE_CLUSTER_METRICS> clusters(clusterCount);
+                    if (SUCCEEDED(measureInfo.layout->GetClusterMetrics(
+                            clusters.data(), clusterCount, &clusterCount))) {
+                        size_t cpos = 0;
+                        float w = 0.0f;
+                        for (UINT32 ci = 0; ci < clusterCount && cpos < text.length(); ci++) {
+                            w += clusters[ci].width;
+                            cpos += clusters[ci].length;
+                            if (cpos <= text.length()) cumW[cpos] = w;
+                        }
+                    }
+                }
+                measureInfo.layout->Release();
+            }
+            // Fill boundaries that fall inside clusters (safety; word splits
+            // never land there)
+            float last = 0.0f;
+            for (auto& v : cumW) { if (v < 0.0f) v = last; else last = v; }
+        }
+        auto widthOf = [&cumW](size_t a, size_t b) { return cumW[b] - cumW[a]; };
+
+        // Words on the same line merge into one drawn layout; per-word rects
+        // are still recorded so hit-testing/selection/search stay word-level.
+        struct WordRef { size_t start, len; };
+        std::vector<WordRef> segWords;
+        size_t segStart = 0;
+        float segX = 0.0f;
+        bool segOpen = false;
+        float lastWordEndX = linkLineStartX;
+
+        auto flushSegment = [&](size_t segEnd) {
+            if (!segOpen) return;
+            segOpen = false;
+            if (segEnd <= segStart) { segWords.clear(); return; }
+            std::wstring_view segText(text.data() + segStart, segEnd - segStart);
+            LayoutInfo info = createLayout(app, segText, format, lineHeight, app.bodyTypography);
+            float segWidth = widthOf(segStart, segEnd);
+            D2D1_POINT_2F segPos = D2D1::Point2F(segX, y);
+            D2D1_RECT_F segBounds = D2D1::RectF(segX, y, segX + segWidth, y + lineHeight);
+            addTextRun(app, std::move(info), segPos, segBounds, color,
+                       textDocStart + segStart, segEnd - segStart, false);
+            for (const auto& w : segWords) {
+                float wx = segX + widthOf(segStart, w.start);
+                D2D1_RECT_F wb = D2D1::RectF(wx, y, wx + widthOf(w.start, w.start + w.len),
+                                             y + lineHeight);
+                addTextRect(app, wb, textDocStart + w.start, w.len);
+            }
+            segWords.clear();
+        };
+
         size_t pos = 0;
+        size_t lastWordEnd = 0;
         while (pos < text.length()) {
             size_t spacePos = text.find(L' ', pos);
             if (spacePos == std::wstring::npos) spacePos = text.length();
 
-            size_t wordStart = pos;
-            std::wstring_view word(text.data() + wordStart, spacePos - wordStart);
-            if (word.empty()) {
-                if (spacePos < text.length()) {
-                    x += spaceWidth;
-                    pos = spacePos + 1;
-                } else {
-                    pos = spacePos;
+            size_t wordLen = spacePos - pos;
+            if (wordLen > 0) {
+                float wordWidth = widthOf(pos, spacePos);
+                float wordX = segOpen ? segX + widthOf(segStart, pos) : x;
+
+                if (wordX + wordWidth > maxX && wordX > startX) {
+                    // Word wraps: flush the current line's segment first
+                    flushSegment(lastWordEnd);
+                    if (isLink && lastWordEndX > linkLineStartX) {
+                        addLinkSegment(linkLineStartX, lastWordEndX, linkLineY, linkUrl, color);
+                    }
+                    x = startX;
+                    y += lineHeight;
+                    linkLineStartX = x;
+                    linkLineY = y;
+                    wordX = x;
                 }
-                continue;
-            }
 
-            size_t wordDocStart = textDocStart + wordStart;
-            LayoutInfo info = createLayout(app, word, format, lineHeight, app.bodyTypography);
-            float wordWidth = info.width;
-
-            if (x + wordWidth > maxX && x > startX) {
-                if (isLink && x > linkLineStartX) {
-                    addLinkSegment(linkLineStartX, x, linkLineY, linkUrl, color);
+                if (!segOpen) {
+                    segOpen = true;
+                    segStart = pos;
+                    segX = wordX;
                 }
-                x = startX;
-                y += lineHeight;
-                linkLineStartX = x;
-                linkLineY = y;
+                segWords.push_back({pos, wordLen});
+                lastWordEnd = spacePos;
+                lastWordEndX = segX + widthOf(segStart, spacePos);
+                x = lastWordEndX;
             }
-
-            D2D1_POINT_2F posPoint = D2D1::Point2F(x, y);
-            D2D1_RECT_F bounds = D2D1::RectF(x, y, x + wordWidth, y + lineHeight);
-            addTextRun(app, std::move(info), posPoint, bounds, color,
-                       wordDocStart, word.length(), true);
-
-            x += wordWidth;
 
             if (spacePos < text.length()) {
-                x += spaceWidth;
+                // Advance past the space (shaped width inside an open segment)
+                x = segOpen ? segX + widthOf(segStart, spacePos + 1) : x + spaceWidth;
                 pos = spacePos + 1;
             } else {
                 pos = spacePos;
             }
         }
+        flushSegment(lastWordEnd);
 
         app.docText += text;
 
-        if (isLink && x > linkLineStartX) {
-            float underlineEndX = x;
-            if (!text.empty() && text.back() == L' ') {
-                underlineEndX = x - spaceWidth;
-            }
-            addLinkSegment(linkLineStartX, underlineEndX, linkLineY, linkUrl, color);
+        if (isLink && lastWordEndX > linkLineStartX) {
+            addLinkSegment(linkLineStartX, lastWordEndX, linkLineY, linkUrl, color);
         }
     }
 
@@ -534,20 +590,41 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
             std::vector<SyntaxToken> tokens = tokenizeLine(wline, language, inBlockComment);
             float tokenX = indent + padding;
 
-            for (const auto& token : tokens) {
-                if (token.text.empty()) continue;
+            // Merge consecutive same-color tokens into one layout — a line
+            // typically collapses to a handful of color runs instead of one
+            // IDWriteTextLayout per token.
+            size_t ti = 0;
+            while (ti < tokens.size()) {
+                if (tokens[ti].text.empty()) { ti++; continue; }
 
-                D2D1_COLOR_F tokenColor = getTokenColor(app.theme, token.tokenType);
-                LayoutInfo info = createLayout(app, token.text, app.codeFormat, lineHeight, app.codeTypography);
-                float tokenWidth = info.width;
+                D2D1_COLOR_F runColor = getTokenColor(app.theme, tokens[ti].tokenType);
+                std::wstring_view runText = tokens[ti].text;
+                size_t tj = ti + 1;
+                while (tj < tokens.size()) {
+                    const auto& next = tokens[tj];
+                    if (next.text.empty()) { tj++; continue; }
+                    D2D1_COLOR_F c = getTokenColor(app.theme, next.tokenType);
+                    bool sameColor = c.r == runColor.r && c.g == runColor.g &&
+                                     c.b == runColor.b && c.a == runColor.a;
+                    // Tokens are views into wline; only merge physically
+                    // adjacent ones so the combined view stays valid
+                    bool adjacent = next.text.data() == runText.data() + runText.size();
+                    if (!sameColor || !adjacent) break;
+                    runText = std::wstring_view(runText.data(), runText.size() + next.text.size());
+                    tj++;
+                }
+
+                LayoutInfo info = createLayout(app, runText, app.codeFormat, lineHeight, app.codeTypography);
+                float runWidth = info.width;
 
                 D2D1_POINT_2F pos = D2D1::Point2F(tokenX, textY);
-                D2D1_RECT_F bounds = D2D1::RectF(tokenX, textY, tokenX + tokenWidth, textY + lineHeight);
-                addTextRun(app, std::move(info), pos, bounds, tokenColor,
+                D2D1_RECT_F bounds = D2D1::RectF(tokenX, textY, tokenX + runWidth, textY + lineHeight);
+                addTextRun(app, std::move(info), pos, bounds, runColor,
                            lineDocStart, 0, false);
 
-                tokenX += tokenWidth;
-                lineWidth += tokenWidth;
+                tokenX += runWidth;
+                lineWidth += runWidth;
+                ti = tj;
             }
         } else {
             LayoutInfo info = createLayout(app, wline, app.codeFormat, lineHeight, app.codeTypography);
@@ -1087,14 +1164,19 @@ static size_t countElements(const ElementPtr& elem) {
 
 } // namespace
 
-void layoutDocument(App& app) {
+namespace {
+
+// Reset layout state and prepare for laying out blocks. Returns false when
+// there is nothing to lay out (no document).
+bool layoutBegin(App& app) {
     app.clearLayoutCache();
+    app.layoutTimeUs = 0;
 
     if (!app.root) {
         app.contentHeight = 0;
         app.contentWidth = app.width;
-        app.layoutDirty = false;
-        return;
+        app.layoutComplete = true;
+        return false;
     }
 
     // Pre-allocate vectors based on estimated element count
@@ -1108,31 +1190,103 @@ void layoutDocument(App& app) {
     app.docText.reserve(elemCount * 20);  // ~20 chars per element average
 
     float scale = app.contentScale * app.zoomFactor;
-    float y = 20.0f * scale;
-    float indent = 40.0f * scale;
 
     // In edit mode, use preview pane width instead of full window
     float layoutWidth = app.width;
     if (app.editMode) {
         layoutWidth = app.width * (1.0f - app.editorSplitRatio) - 6;
     }
-    float maxWidth = layoutWidth - indent * 2;
 
+    app.layoutIndent = 40.0f * scale;
+    app.layoutMaxWidth = layoutWidth - app.layoutIndent * 2;
+    app.layoutCursorY = 20.0f * scale;
+    app.layoutNextBlock = 0;
+    app.layoutComplete = false;
     app.contentWidth = layoutWidth;
-
     app.scrollAnchors.clear();
-    for (const auto& child : app.root->children) {
+    return true;
+}
+
+// Lay out top-level blocks until targetY is passed (targetY < 0: no limit) or
+// budgetUs is exhausted (budgetUs <= 0: no limit). Returns true when all
+// blocks are done.
+bool layoutStep(App& app, float targetY, int64_t budgetUs) {
+    auto t0 = Clock::now();
+    const auto& children = app.root->children;
+    float y = app.layoutCursorY;
+
+    while (app.layoutNextBlock < children.size()) {
+        if (targetY >= 0.0f && y > targetY) break;
+        if (budgetUs > 0 && usElapsed(t0) > budgetUs) break;
+
+        const auto& child = children[app.layoutNextBlock];
         // Record scroll anchor from source offset
         size_t offset = findFirstSourceOffset(child);
         if (offset != SIZE_MAX) {
             app.scrollAnchors.push_back({offset, y});
         }
-        layoutElement(app, child, y, indent, maxWidth);
+        layoutElement(app, child, y, app.layoutIndent, app.layoutMaxWidth);
+        app.layoutNextBlock++;
     }
 
+    app.layoutCursorY = y;
+    // Partial content height grows as layout fills in (keeps scrollbar sane)
+    float scale = app.contentScale * app.zoomFactor;
     app.contentHeight = y + 40.0f * scale;
+    return app.layoutNextBlock >= children.size();
+}
+
+void layoutFinish(App& app) {
     // Defer toLower to when search actually needs it (lazy rebuild)
     app.docTextLower.clear();
     mapSearchMatchesToLayout(app);
+    app.layoutComplete = true;
+}
+
+} // namespace
+
+void layoutDocument(App& app) {
+    auto t0 = Clock::now();
+    if (layoutBegin(app)) {
+        layoutStep(app, -1.0f, -1);
+        layoutFinish(app);
+    }
     app.layoutDirty = false;
+    app.layoutTimeUs += (size_t)usElapsed(t0);
+}
+
+void layoutDocumentViewportFirst(App& app) {
+    auto t0 = Clock::now();
+    if (layoutBegin(app)) {
+        // Lay out through two viewports past the current scroll so the first
+        // frame presents immediately; the rest continues in chunks.
+        float targetY = app.scrollY + (float)app.height * 2.0f;
+        if (layoutStep(app, targetY, -1)) {
+            layoutFinish(app);
+        }
+    }
+    app.layoutDirty = false;
+    app.layoutTimeUs += (size_t)usElapsed(t0);
+}
+
+bool layoutDocumentContinue(App& app, int64_t budgetUs) {
+    if (app.layoutComplete) return true;
+    auto t0 = Clock::now();
+    bool done = layoutStep(app, -1.0f, budgetUs);
+    if (done) layoutFinish(app);
+    app.layoutTimeUs += (size_t)usElapsed(t0);
+    return done;
+}
+
+void ensureLayoutComplete(App& app) {
+    if (app.layoutDirty) {
+        layoutDocument(app);
+        return;
+    }
+    if (!app.layoutComplete) {
+        auto t0 = Clock::now();
+        layoutStep(app, -1.0f, -1);
+        layoutFinish(app);
+        app.layoutTimeUs += (size_t)usElapsed(t0);
+    }
 }

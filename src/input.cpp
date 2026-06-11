@@ -5,6 +5,7 @@
 #include "search.h"
 #include "d2d_init.h"
 #include "settings.h"
+#include "render.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -17,6 +18,22 @@
 static HCURSOR cursorArrow = LoadCursor(nullptr, IDC_ARROW);
 static HCURSOR cursorHand  = LoadCursor(nullptr, IDC_HAND);
 static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
+
+// Ctrl+wheel zoom. The scroll anchor scales immediately, but text format
+// recreation (~47 COM objects) + full relayout is applied on the leading
+// tick and then coalesced via TIMER_ZOOM_APPLY while the wheel keeps spinning.
+static void applyZoomDelta(App& app, float delta) {
+    float oldZoom = app.zoomFactor;
+    app.zoomFactor = std::max(0.5f, std::min(3.0f, app.zoomFactor + delta * 0.1f));
+    float zoomRatio = app.zoomFactor / oldZoom;
+    app.scrollY *= zoomRatio;
+    app.targetScrollY *= zoomRatio;
+    if (!app.zoomApplyPending) {
+        updateTextFormats(app);
+        app.zoomApplyPending = true;
+        SetTimer(app.hwnd, TIMER_ZOOM_APPLY, 80, nullptr);
+    }
+}
 
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -35,13 +52,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         float sepX = app.width * app.editorSplitRatio;
         if (app.mouseX < sepX) {
             if (ctrl) {
-                float oldZoom = app.zoomFactor;
-                float zoomDelta = delta * 0.1f;
-                app.zoomFactor = std::max(0.5f, std::min(3.0f, app.zoomFactor + zoomDelta));
-                float zoomRatio = app.zoomFactor / oldZoom;
-                app.scrollY *= zoomRatio;
-                app.targetScrollY *= zoomRatio;
-                updateTextFormats(app);
+                applyZoomDelta(app, delta);
                 InvalidateRect(hwnd, nullptr, FALSE);
             } else {
                 handleEditorMouseWheel(app, hwnd, delta);
@@ -88,13 +99,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
     if (ctrl) {
         // Zoom in/out — scale scroll position to keep content anchored
-        float oldZoom = app.zoomFactor;
-        float zoomDelta = delta * 0.1f;
-        app.zoomFactor = std::max(0.5f, std::min(3.0f, app.zoomFactor + zoomDelta));
-        float zoomRatio = app.zoomFactor / oldZoom;
-        app.scrollY *= zoomRatio;
-        app.targetScrollY *= zoomRatio;
-        updateTextFormats(app);
+        applyZoomDelta(app, delta);
     } else {
         // Normal scroll
         app.targetScrollY -= delta * dpi(app, 60.0f);
@@ -715,6 +720,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             copyToClipboard(hwnd, app.codeBlocks[app.hoveredCodeBlock].codeText);
             app.showCopiedNotification = true;
             app.copiedNotificationStart = std::chrono::steady_clock::now();
+            startNotificationTimer(app);
             app.hoveredCodeBlock = -1;
             app.selecting = false;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -768,6 +774,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             copyToClipboard(hwnd, app.selectedText);
             app.showCopiedNotification = true;
             app.copiedNotificationStart = std::chrono::steady_clock::now();
+            startNotificationTimer(app);
             app.hasSelection = false;
             app.selectedText.clear();
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -787,6 +794,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 app.searchQuery.clear();
                 app.searchMatches.clear();
                 app.searchAnimation = 0;
+                updateBlinkTimer(app);
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
             case VK_RETURN:
@@ -801,6 +809,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 // Delete last character
                 if (!app.searchQuery.empty()) {
                     app.searchQuery.pop_back();
+                    resetCursorBlink(app);
                     performSearch(app);
                     if (!app.searchMatches.empty()) {
                         scrollToCurrentMatch(app);
@@ -842,6 +851,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.showCopiedNotification = true;
                     app.copiedNotificationAlpha = 1.0f;
                     app.copiedNotificationStart = std::chrono::steady_clock::now();
+                    startNotificationTimer(app);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
                 break;
@@ -856,6 +866,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.searchMatches.clear();
                     app.searchCurrentIndex = 0;
                     app.searchJustOpened = true;
+                    updateBlinkTimer(app);
                 }
                 InvalidateRect(hwnd, nullptr, FALSE);
                 break;
@@ -873,6 +884,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.searchQuery.clear();
                     app.searchMatches.clear();
                     app.searchAnimation = 0;
+                    updateBlinkTimer(app);
                 } else if (app.showFolderBrowser) {
                     app.showFolderBrowser = false;
                     app.folderBrowserAnimation = 0;
@@ -915,6 +927,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 if (!app.showSearch && !app.showThemeChooser && !app.showFolderBrowser) {
                     app.showToc = !app.showToc;
                     if (app.showToc) {
+                        ensureLayoutComplete(app);  // headings list is built during layout
                         app.tocAnimation = 0;
                         app.tocScroll = 0;
                         app.hoveredTocIndex = -1;
@@ -941,6 +954,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.searchMatches.clear();
                     app.searchCurrentIndex = 0;
                     app.searchJustOpened = true;
+                    updateBlinkTimer(app);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
                 break;
@@ -969,6 +983,9 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 app.targetScrollY = 0;
                 break;
             case VK_END:
+                // Jump-to-bottom needs the final content height
+                ensureLayoutComplete(app);
+                maxScroll = std::max(0.0f, app.contentHeight - app.height);
                 app.targetScrollY = maxScroll;
                 break;
             case 'S':
@@ -1018,6 +1035,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
         // Only handle printable characters (not control chars)
         if (ch >= 32 && ch != 127) {
             app.searchQuery += ch;
+            resetCursorBlink(app);
             performSearch(app);
             if (!app.searchMatches.empty()) {
                 app.searchCurrentIndex = 0;
