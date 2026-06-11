@@ -1,5 +1,26 @@
 # Changelog
 
+## [v2.0.0] - 2026-06-12
+
+### Added
+- Layout time metric in the stats overlay (press S)
+- "Save failed" notification when the file can't be written (locked or read-only)
+
+### Performance
+- Viewport-first layout: documents present the first screenful immediately; the rest lays out in background slices that yield to input
+- Merged text layouts: one DirectWrite layout per line segment instead of per word, and one per color run instead of per syntax token
+- Editor reparse debounced (150 ms) instead of re-parsing the document on every keystroke
+- Cursor blink and notification fades are timer-driven — idle CPU usage is now zero
+- Theme chooser preview formats created lazily instead of at startup; switching between same-font themes no longer recreates text formats
+- Ctrl+scroll zoom coalesces rapid wheel ticks instead of rebuilding formats per tick
+
+### Fixed
+- CJK full-width punctuation (（）：！etc.) rendered as missing-glyph boxes; other scripts now fall back through the system font chain (#9)
+- Unsaved-changes exit prompt is now persistent and sized to its text instead of fading out after 3 seconds while still armed
+- Modifier keys (e.g. the Ctrl of Ctrl+S) no longer silently dismiss the exit prompt; only Y / N / ESC respond
+- Ctrl+S saves from the exit prompt and while the search bar is open in edit mode
+- Failed saves no longer leave the document permanently dirty and edit mode impossible to exit
+
 ## [v1.9.0] - 2026-03-02
 
 ### Added
