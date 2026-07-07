@@ -28,6 +28,13 @@ Tinta is a **fast, lightweight markdown viewer and reader for Windows**, built w
 
 Grab [the latest release](https://github.com/oipoistar/tinta/releases/latest) — a single portable `tinta.exe`, no installation required. Run it, open a markdown file, done.
 
+Or install with [Scoop](https://scoop.sh):
+
+```pwsh
+scoop bucket add tinta https://github.com/oipoistar/scoop-bucket
+scoop install tinta
+```
+
 ## Why Tinta?
 
 Most markdown apps ship an entire browser to render text. Tinta uses the GPU-accelerated text stack already built into Windows:
