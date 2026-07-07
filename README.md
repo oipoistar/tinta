@@ -2,10 +2,13 @@
   <img src="resources/tinta.ico" width="80">
   <h1>Tinta</h1>
   <p><em>Markdown, distilled.</em></p>
-  <p>A fast, lightweight markdown reader for Windows</p>
+  <p>A fast, lightweight markdown viewer for Windows</p>
 
   <a href="https://github.com/oipoistar/tinta/releases/latest">
     <img src="https://img.shields.io/github/v/release/oipoistar/tinta?label=Download&style=for-the-badge&color=1a1a2e" alt="Download">
+  </a>
+  <a href="https://tinta.cc">
+    <img src="https://img.shields.io/badge/website-tinta.cc-8b4513?style=for-the-badge" alt="Website">
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT License">
@@ -14,7 +17,28 @@
 
 <br>
 
-Built with Direct2D and DirectWrite for hardware-accelerated rendering. <1MB binary, ~200ms startup.
+Tinta is a **fast, lightweight markdown viewer and reader for Windows**, built with Direct2D and DirectWrite for hardware-accelerated rendering. A single native executable under 1 MB that opens instantly — no Electron, no web engine, no installer.
+
+<p align="center">
+  <img src="https://tinta.cc/img/screenshots/paper.png" width="49%" alt="Tinta markdown viewer on Windows — Paper light theme">
+  <img src="https://tinta.cc/img/screenshots/midnight.png" width="49%" alt="Tinta markdown viewer on Windows — Midnight dark theme">
+</p>
+
+## Download
+
+Grab [the latest release](https://github.com/oipoistar/tinta/releases/latest) — a single portable `tinta.exe`, no installation required. Run it, open a markdown file, done.
+
+## Why Tinta?
+
+Most markdown apps ship an entire browser to render text. Tinta uses the GPU-accelerated text stack already built into Windows:
+
+|  | Tinta | Typora | Obsidian | VS Code |
+|---|---|---|---|---|
+| Startup | **~200 ms** | ~1.5 s | ~3 s | ~2 s |
+| Install size | **< 1 MB** | ~90 MB | ~250 MB | ~350 MB |
+| Runtime | **Native Direct2D** | Electron | Electron | Electron |
+
+It's a viewer first: perfect as the double-click default for `.md` files, for reading READMEs, notes, and documentation — with an edit mode when you need it.
 
 ## Features
 
