@@ -11,6 +11,7 @@ void exitEditMode(App& app);
 // Editor input handlers
 void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam);
 void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam);
+void editorPositionImeWindow(App& app, HWND hwnd);
 void handleEditorMouseDown(App& app, HWND hwnd, int x, int y);
 void handleEditorMouseUp(App& app, HWND hwnd, int x, int y);
 void handleEditorMouseMove(App& app, HWND hwnd, int x, int y);
