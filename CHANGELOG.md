@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v2.0.1] - 2026-07-08
 
 ### Fixed
 - Edit mode: caret, mouse clicks, and selection highlights were misaligned on lines containing CJK or other full-width characters — column math assumed a fixed character width; all caret/click/selection positioning now goes through DirectWrite hit testing (#12)
