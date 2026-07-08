@@ -650,6 +650,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) handleCharInput(*app, hwnd, wParam);
             return 0;
 
+        case WM_IME_STARTCOMPOSITION:
+        case WM_IME_COMPOSITION:
+            // Anchor the IME composition/candidate window at the caret in
+            // edit mode, then let DefWindowProc run default IME handling
+            if (app && app->editMode) editorPositionImeWindow(*app, hwnd);
+            break;
+
         case WM_DROPFILES:
             if (app) handleDropFiles(*app, hwnd, wParam);
             return 0;

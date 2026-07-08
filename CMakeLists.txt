@@ -81,6 +81,7 @@ target_link_libraries(tinta PRIVATE
     windowscodecs
     urlmon
     ole32
+    imm32
 )
 
 target_compile_definitions(tinta PRIVATE UNICODE _UNICODE)

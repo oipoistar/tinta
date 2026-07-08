@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Edit mode: caret, mouse clicks, and selection highlights were misaligned on lines containing CJK or other full-width characters — column math assumed a fixed character width; all caret/click/selection positioning now goes through DirectWrite hit testing (#12)
+- Edit mode: clicking past the end of a line with full-width characters could not place the cursor at the line end (#12)
+- Edit mode: double-click now selects a contiguous CJK run instead of nothing (#12)
+- Edit mode: Backspace/Delete and Left/Right no longer split surrogate pairs (emoji and supplementary-plane characters)
+- Edit mode: IME composition window (Chinese/Japanese/Korean input) now appears at the caret instead of the window corner
+- Edit mode: reparse debounce raised to 300 ms to reduce stutter while typing with an IME
+
 ## [v2.0.0] - 2026-06-12
 
 ### Added
