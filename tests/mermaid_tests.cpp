@@ -167,6 +167,36 @@ void testFiles(int argc, char** argv) {
     }
 }
 
+void testAttributeSyntaxRejected() {
+    const char* source = R"(flowchart TD
+A@{ shape: rounded, label: "Fancy" } --> B[Plain]
+)";
+    auto result = mermaid::parse(source);
+    check(!result.success, "v11 '@{ }' attribute syntax fails instead of mis-rendering");
+}
+
+void testLayoutExposesRanks() {
+    const char* source = R"(graph LR
+A --> B
+B --> C
+C --> D
+A --> D
+)";
+    auto result = mermaid::parse(source);
+    check(result.success, "rank test diagram parses");
+    if (!result.success) return;
+
+    std::vector<mermaid::Size> sizes(result.diagram.nodes.size(), {100.0f, 40.0f});
+    auto layout = mermaid::layout(result.diagram, sizes, 20.0f, 60.0f);
+    check(layout.ranks.size() == result.diagram.nodes.size(),
+          "layout exposes one rank per node");
+    if (layout.ranks.size() == 4) {
+        check(layout.ranks[0] == 0 && layout.ranks[1] == 1 &&
+              layout.ranks[2] == 2 && layout.ranks[3] == 3,
+              "ranks follow the longest path (A=0, B=1, C=2, D=3)");
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -176,6 +206,8 @@ int main(int argc, char** argv) {
     testUnsupportedDiagram();
     testBomAndSemicolonStatements();
     testCyclicLayout();
+    testAttributeSyntaxRejected();
+    testLayoutExposesRanks();
     testFiles(argc, argv);
 
     if (failures != 0) {

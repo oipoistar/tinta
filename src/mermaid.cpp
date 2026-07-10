@@ -347,6 +347,15 @@ bool parseNodeSpec(std::string_view line, size_t& position, size_t sourceOffset,
     spec.sourceOffset = sourceOffset + idStart;
     skipSpaces(line, position);
 
+    // Mermaid v11 attribute syntax (A@{ shape: ..., label: ... }) is not
+    // supported — fail so the block falls back to a readable code block
+    // instead of rendering the raw attributes as a diamond label
+    if (!spec.id.empty() && spec.id.back() == '@' &&
+        position < line.size() && line[position] == '{') {
+        error = "Mermaid '@{ }' attribute syntax is not supported";
+        return false;
+    }
+
     const Delimiter* delimiter = nullptr;
     for (const auto& candidate : kDelimiters) {
         if (startsWithAt(line, position, candidate.open)) {
@@ -773,6 +782,7 @@ Layout layout(const Diagram& diagram, const std::vector<Size>& nodeSizes,
 
     std::vector<std::vector<size_t>> ranks(maxRank + 1);
     for (size_t i = 0; i < nodeCount; i++) ranks[rank[i]].push_back(i);
+    result.ranks = rank;
 
     std::vector<float> order(nodeCount, 0.0f);
     for (size_t level = 0; level < ranks.size(); level++) {

@@ -88,6 +88,7 @@ struct Rect {
 
 struct Layout {
     std::vector<Rect> nodes;
+    std::vector<size_t> ranks;  // layer index per node, for edge routing
     float width = 0.0f;
     float height = 0.0f;
 };

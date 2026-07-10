@@ -5,6 +5,13 @@
 ### Added
 - Native Mermaid `flowchart`/`graph` rendering for `.mmd` files and fenced `mermaid` blocks
 - `.mmd` support in the folder browser, drag-and-drop, live edit preview, file watching, and Windows file association registration
+- Shift+mouse wheel scrolls horizontally (same as tilt wheels)
+
+### Fixed
+- Mermaid: edges that skip over intermediate ranks now route around the diagram through an exterior lane instead of cutting straight through nodes — their labels no longer land on unrelated edges
+- Mermaid: edge labels render as bordered chips on the edge instead of erasing the line beneath them
+- Mermaid: unsupported v11 `@{ }` attribute syntax now falls back to a readable code block instead of rendering raw attributes as a diamond
+- Long code block lines now extend the block background and participate in horizontal scrolling instead of being clipped with no way to reach them
 
 ## [v2.0.1] - 2026-07-08
 

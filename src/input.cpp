@@ -101,6 +101,13 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     if (ctrl) {
         // Zoom in/out — scale scroll position to keep content anchored
         applyZoomDelta(app, delta);
+    } else if ((GetKeyState(VK_SHIFT) & 0x8000) != 0) {
+        // Shift+wheel: horizontal scroll (wheel up = left), same as tilt wheels
+        app.targetScrollX -= delta * dpi(app, 60.0f);
+        float maxScrollX = std::max(
+            0.0f, app.contentWidth - documentViewportWidth(app));
+        app.targetScrollX = std::max(0.0f, std::min(app.targetScrollX, maxScrollX));
+        app.scrollX = app.targetScrollX;
     } else {
         // Normal scroll
         app.targetScrollY -= delta * dpi(app, 60.0f);
