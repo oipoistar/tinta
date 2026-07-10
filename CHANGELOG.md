@@ -6,6 +6,9 @@
 - Native Mermaid `flowchart`/`graph` rendering for `.mmd` files and fenced `mermaid` blocks
 - `.mmd` support in the folder browser, drag-and-drop, live edit preview, file watching, and Windows file association registration
 - Shift+mouse wheel scrolls horizontally (same as tilt wheels)
+- Edit mode: Ctrl+P shows/hides the preview pane; the editor takes the full window while it's hidden (#17)
+- Edit mode: Ctrl+W toggles soft word wrap in the editor (off by default); caret, clicks, selection, and search highlights follow wrapped rows (#17)
+- Both editor view options persist across sessions
 
 ### Fixed
 - Mermaid: edges that skip over intermediate ranks now route around the diagram through an exterior lane instead of cutting straight through nodes — their labels no longer land on unrelated edges

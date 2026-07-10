@@ -105,6 +105,8 @@ struct Settings {
     int windowHeight = 768;
     bool windowMaximized = false;
     bool hasAskedFileAssociation = false;
+    bool editorShowPreview = true;
+    bool editorWordWrap = false;
 };
 
 // Application state
@@ -436,9 +438,21 @@ struct App {
     bool editorDirty = false;
     std::vector<size_t> editorLineStarts;
 
+    // Editor view options (persisted)
+    bool editorShowPreview = true;
+    bool editorWordWrap = false;
+
+    // Soft-wrap metrics: cumulative visual rows before each logical line
+    // (editorRowStarts.size() == lines + 1). Only maintained while
+    // editorWordWrap is on; rebuilt when text or wrap width changes.
+    std::vector<size_t> editorRowStarts;
+    size_t editorTotalRows = 0;
+    float editorRowMetricsWidth = -1.0f;  // wrap width the metrics were built for
+
     // Editor cursor & selection
     size_t editorCursorPos = 0;
     int editorDesiredCol = -1;
+    float editorDesiredX = -1.0f;  // desired caret x for Up/Down in wrap mode
     bool editorSelecting = false;
     size_t editorSelStart = 0;
     size_t editorSelEnd = 0;
@@ -549,8 +563,19 @@ inline float dpi(const App& app, float value) {
     return value * app.contentScale;
 }
 
+// Width of the editor pane in edit mode (full window when preview is hidden)
+inline float editorPaneWidth(const App& app) {
+    return app.editorShowPreview
+        ? app.width * app.editorSplitRatio - 3.0f
+        : static_cast<float>(app.width);
+}
+
 inline float documentViewportX(const App& app) {
-    return app.editMode ? app.width * app.editorSplitRatio + 3.0f : 0.0f;
+    if (!app.editMode) return 0.0f;
+    // Preview hidden: zero-width viewport at the right edge — document
+    // rendering flows through unchanged and clips to nothing
+    if (!app.editorShowPreview) return static_cast<float>(app.width);
+    return app.width * app.editorSplitRatio + 3.0f;
 }
 
 inline float documentViewportWidth(const App& app) {

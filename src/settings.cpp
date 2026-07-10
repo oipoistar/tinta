@@ -35,6 +35,8 @@ void saveSettings(const Settings& settings) {
     file << "windowHeight=" << settings.windowHeight << "\n";
     file << "windowMaximized=" << (settings.windowMaximized ? 1 : 0) << "\n";
     file << "hasAskedFileAssociation=" << (settings.hasAskedFileAssociation ? 1 : 0) << "\n";
+    file << "editorShowPreview=" << (settings.editorShowPreview ? 1 : 0) << "\n";
+    file << "editorWordWrap=" << (settings.editorWordWrap ? 1 : 0) << "\n";
 }
 
 Settings loadSettings() {
@@ -75,6 +77,10 @@ Settings loadSettings() {
             settings.windowMaximized = (value == "1");
         } else if (key == "hasAskedFileAssociation") {
             settings.hasAskedFileAssociation = (value == "1");
+        } else if (key == "editorShowPreview") {
+            settings.editorShowPreview = (value == "1");
+        } else if (key == "editorWordWrap") {
+            settings.editorWordWrap = (value == "1");
         }
     }
     return settings;

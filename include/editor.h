@@ -34,6 +34,7 @@ void scrollEditorToMatch(App& app);
 
 // Utility
 void rebuildLineStarts(App& app);
+size_t editorTopVisibleLine(App& app);
 std::string toUtf8(const std::wstring& wstr);
 
 #endif // TINTA_EDITOR_H
