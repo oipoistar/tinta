@@ -22,6 +22,9 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
       - name: Get version from tag
         id: version
         shell: bash
@@ -36,16 +39,17 @@ jobs:
 
             **Markdown, distilled.**
 
-            A fast, lightweight markdown reader for Windows.
+            A fast, lightweight Markdown and Mermaid reader for Windows.
 
             ### Installation
             1. Download `tinta.exe` below
             2. Run it (you may need to click "More info" → "Run anyway" on SmartScreen)
-            3. Optionally run `tinta.exe /register` to set as default .md viewer
+            3. Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
             ### What's included
             - 10 beautiful themes (5 light, 5 dark)
             - Hardware-accelerated rendering via Direct2D
+            - Native Mermaid flowchart rendering
             - ~270KB single executable, no dependencies
           files: build/Release/tinta.exe
         env:

@@ -384,6 +384,7 @@ std::string elementTypeToString(ElementType type) {
         case ElementType::Paragraph: return "Paragraph";
         case ElementType::Heading: return "Heading";
         case ElementType::CodeBlock: return "CodeBlock";
+        case ElementType::MermaidDiagram: return "MermaidDiagram";
         case ElementType::BlockQuote: return "BlockQuote";
         case ElementType::List: return "List";
         case ElementType::ListItem: return "ListItem";

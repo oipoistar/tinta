@@ -177,6 +177,7 @@ struct App {
     MarkdownParser parser;
     ElementPtr root;
     std::string currentFile;
+    bool focusMermaidOnNextLayout = false;
     size_t parseTimeUs = 0;
     float contentHeight = 0;
     float contentWidth = 0;
@@ -341,9 +342,36 @@ struct App {
         D2D1_COLOR_F color{};
         float stroke = 1.0f;
     };
+    enum class LayoutShapeType {
+        Rectangle,
+        RoundedRectangle,
+        Diamond,
+        Stadium,
+        Ellipse,
+        Hexagon,
+    };
+    struct LayoutShape {
+        LayoutShapeType type = LayoutShapeType::Rectangle;
+        D2D1_RECT_F rect{};
+        D2D1_COLOR_F fill{};
+        D2D1_COLOR_F stroke{};
+        float strokeWidth = 1.0f;
+        float radius = 0.0f;
+    };
+    struct LayoutConnector {
+        std::vector<D2D1_POINT_2F> points;
+        D2D1_RECT_F bounds{};
+        D2D1_COLOR_F color{};
+        float stroke = 1.0f;
+        float arrowSize = 8.0f;
+        bool directed = true;
+        bool dashed = false;
+    };
     std::vector<LayoutTextRun> layoutTextRuns;
     std::vector<LayoutRect> layoutRects;
     std::vector<LayoutLine> layoutLines;
+    std::vector<LayoutShape> layoutShapes;
+    std::vector<LayoutConnector> layoutConnectors;
     bool layoutDirty = true;
 
     // Incremental layout: the first paint lays out ~2 viewports, the rest
@@ -363,8 +391,6 @@ struct App {
     std::vector<ScrollAnchor> scrollAnchors;
     std::vector<size_t> editorLineByteOffsets;  // UTF-8 byte offset per editor line
 
-    // Search match layout mapping (document Y for each match)
-    std::vector<float> searchMatchYs;
     size_t searchMatchCursor = 0;
 
     // Copied notification (fades out over 2 seconds)
@@ -460,6 +486,8 @@ struct App {
         layoutTextRuns.clear();
         layoutRects.clear();
         layoutLines.clear();
+        layoutShapes.clear();
+        layoutConnectors.clear();
         layoutBitmaps.clear();
         linkRects.clear();
         codeBlocks.clear();
@@ -519,6 +547,17 @@ struct App {
 
 inline float dpi(const App& app, float value) {
     return value * app.contentScale;
+}
+
+inline float documentViewportX(const App& app) {
+    return app.editMode ? app.width * app.editorSplitRatio + 3.0f : 0.0f;
+}
+
+inline float documentViewportWidth(const App& app) {
+    float width = app.editMode
+        ? static_cast<float>(app.width) - documentViewportX(app)
+        : static_cast<float>(app.width);
+    return width > 0.0f ? width : 0.0f;
 }
 
 // Cursor blink runs on a timer instead of per-frame InvalidateRect so the

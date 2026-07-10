@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "document.h"
 
 #include <windows.h>
 #include <shlobj.h>
@@ -79,6 +80,26 @@ Settings loadSettings() {
     return settings;
 }
 
+static bool hasRegisteredFileAssociation(std::wstring_view extension) {
+    HKEY hKey;
+    LONG result = RegOpenKeyExW(
+        HKEY_CURRENT_USER,
+        L"Software\\Tinta\\Capabilities\\FileAssociations",
+        0, KEY_READ, &hKey);
+    if (result != ERROR_SUCCESS) return false;
+
+    wchar_t value[64] = {};
+    DWORD type = 0;
+    DWORD size = sizeof(value);
+    result = RegQueryValueExW(
+        hKey, extension.data(), nullptr, &type,
+        reinterpret_cast<BYTE*>(value), &size);
+    RegCloseKey(hKey);
+    return result == ERROR_SUCCESS &&
+        type == REG_SZ &&
+        wcscmp(value, L"Tinta.MarkdownFile") == 0;
+}
+
 bool registerFileAssociation() {
     // Get the path to the current executable
     wchar_t exePath[MAX_PATH];
@@ -92,7 +113,7 @@ bool registerFileAssociation() {
     result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\Tinta.MarkdownFile", 0, nullptr,
                               REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
     if (result != ERROR_SUCCESS) return false;
-    const wchar_t* desc = L"Markdown Document";
+    const wchar_t* desc = L"Tinta Document";
     RegSetValueExW(hKey, nullptr, 0, REG_SZ, (BYTE*)desc, (DWORD)((wcslen(desc) + 1) * sizeof(wchar_t)));
     RegCloseKey(hKey);
 
@@ -120,7 +141,7 @@ bool registerFileAssociation() {
                               REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
     if (result != ERROR_SUCCESS) return false;
     const wchar_t* appName = L"Tinta";
-    const wchar_t* appDesc = L"A fast, lightweight markdown reader";
+    const wchar_t* appDesc = L"A fast, lightweight Markdown and Mermaid reader";
     RegSetValueExW(hKey, L"ApplicationName", 0, REG_SZ, (BYTE*)appName, (DWORD)((wcslen(appName) + 1) * sizeof(wchar_t)));
     RegSetValueExW(hKey, L"ApplicationDescription", 0, REG_SZ, (BYTE*)appDesc, (DWORD)((wcslen(appDesc) + 1) * sizeof(wchar_t)));
     RegCloseKey(hKey);
@@ -129,8 +150,15 @@ bool registerFileAssociation() {
     result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Tinta\\Capabilities\\FileAssociations", 0, nullptr,
                               REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
     if (result != ERROR_SUCCESS) return false;
-    RegSetValueExW(hKey, L".md", 0, REG_SZ, (BYTE*)progId, (DWORD)((wcslen(progId) + 1) * sizeof(wchar_t)));
-    RegSetValueExW(hKey, L".markdown", 0, REG_SZ, (BYTE*)progId, (DWORD)((wcslen(progId) + 1) * sizeof(wchar_t)));
+    for (std::wstring_view extension : DOCUMENT_FILE_EXTENSIONS) {
+        result = RegSetValueExW(
+            hKey, extension.data(), 0, REG_SZ, (BYTE*)progId,
+            (DWORD)((wcslen(progId) + 1) * sizeof(wchar_t)));
+        if (result != ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            return false;
+        }
+    }
     RegCloseKey(hKey);
 
     // Add to RegisteredApplications
@@ -141,19 +169,18 @@ bool registerFileAssociation() {
     RegSetValueExW(hKey, L"Tinta", 0, REG_SZ, (BYTE*)capPath, (DWORD)((wcslen(capPath) + 1) * sizeof(wchar_t)));
     RegCloseKey(hKey);
 
-    // Add OpenWithProgids for .md
-    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.md\\OpenWithProgids", 0, nullptr,
-                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
-    if (result != ERROR_SUCCESS) return false;
-    RegSetValueExW(hKey, progId, 0, REG_NONE, nullptr, 0);
-    RegCloseKey(hKey);
-
-    // Add OpenWithProgids for .markdown
-    result = RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.markdown\\OpenWithProgids", 0, nullptr,
-                              REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
-    if (result != ERROR_SUCCESS) return false;
-    RegSetValueExW(hKey, progId, 0, REG_NONE, nullptr, 0);
-    RegCloseKey(hKey);
+    for (std::wstring_view extension : DOCUMENT_FILE_EXTENSIONS) {
+        std::wstring keyPath = L"Software\\Classes\\";
+        keyPath.append(extension);
+        keyPath += L"\\OpenWithProgids";
+        result = RegCreateKeyExW(
+            HKEY_CURRENT_USER, keyPath.c_str(), 0, nullptr,
+            REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, nullptr);
+        if (result != ERROR_SUCCESS) return false;
+        result = RegSetValueExW(hKey, progId, 0, REG_NONE, nullptr, 0);
+        RegCloseKey(hKey);
+        if (result != ERROR_SUCCESS) return false;
+    }
 
     // Notify shell of the change
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
@@ -166,11 +193,22 @@ void openDefaultAppsSettings() {
 }
 
 void askAndRegisterFileAssociation(Settings& settings) {
-    if (settings.hasAskedFileAssociation) return;
+    if (settings.hasAskedFileAssociation) {
+        if (hasRegisteredFileAssociation(L".md") &&
+            !hasRegisteredFileAssociation(L".mmd") &&
+            !registerFileAssociation()) {
+            MessageBoxW(
+                nullptr,
+                L"Failed to add the .mmd file association. Run tinta.exe /register to try again.",
+                L"Tinta - File Association",
+                MB_OK | MB_ICONWARNING);
+        }
+        return;
+    }
 
     int result = MessageBoxW(
         nullptr,
-        L"Would you like to set Tinta as the default viewer for .md files?\n\n"
+        L"Would you like to set Tinta as the default viewer for Markdown and Mermaid files?\n\n"
         L"Windows will open Settings where you can select Tinta.",
         L"Tinta - File Association",
         MB_YESNO | MB_ICONQUESTION
@@ -181,7 +219,7 @@ void askAndRegisterFileAssociation(Settings& settings) {
             MessageBoxW(nullptr,
                        L"Tinta has been registered.\n\n"
                        L"In the Settings window that opens:\n"
-                       L"1. Search for '.md'\n"
+                       L"1. Search for '.md' or '.mmd'\n"
                        L"2. Click on the current default app\n"
                        L"3. Select 'Tinta' from the list",
                        L"Almost done!", MB_OK | MB_ICONINFORMATION);

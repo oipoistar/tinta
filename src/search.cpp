@@ -2,6 +2,13 @@
 #include "utils.h"
 #include "render.h"
 
+#include <algorithm>
+#include <limits>
+
+namespace {
+constexpr size_t kNoTextRect = std::numeric_limits<size_t>::max();
+}
+
 void performSearch(App& app) {
     app.searchMatches.clear();
     app.searchCurrentIndex = 0;
@@ -30,7 +37,7 @@ void performSearch(App& app) {
     size_t pos = 0;
     while ((pos = textLower.find(queryLower, pos)) != std::wstring::npos) {
         App::SearchMatch match;
-        match.textRectIndex = 0;
+        match.textRectIndex = kNoTextRect;
         match.startPos = pos;
         match.length = app.searchQuery.length();
         match.highlightRect = D2D1::RectF(0, 0, 0, 0);
@@ -38,22 +45,21 @@ void performSearch(App& app) {
         pos += app.searchQuery.length();
     }
 
-    app.searchMatchYs.assign(app.searchMatches.size(), -1.0f);
     mapSearchMatchesToLayout(app);
 }
 
 void mapSearchMatchesToLayout(App& app) {
-    if (app.searchMatches.empty()) {
-        app.searchMatchYs.clear();
-        return;
+    for (auto& match : app.searchMatches) {
+        match.textRectIndex = kNoTextRect;
+        match.highlightRect = D2D1::RectF(0, 0, 0, 0);
     }
+    if (app.searchMatches.empty()) return;
     if (app.textRects.empty()) return;
-    if (app.searchMatchYs.size() != app.searchMatches.size()) {
-        app.searchMatchYs.assign(app.searchMatches.size(), -1.0f);
-    }
 
     size_t matchIndex = 0;
-    for (const auto& tr : app.textRects) {
+    for (size_t textRectIndex = 0; textRectIndex < app.textRects.size();
+         textRectIndex++) {
+        const auto& tr = app.textRects[textRectIndex];
         size_t rectStart = tr.docStart;
         size_t rectEnd = rectStart + tr.docLength;
         if (rectEnd <= rectStart) continue;
@@ -70,14 +76,38 @@ void mapSearchMatchesToLayout(App& app) {
 
         size_t mi = matchIndex;
         while (mi < app.searchMatches.size()) {
-            const auto& m = app.searchMatches[mi];
+            auto& m = app.searchMatches[mi];
             if (m.startPos >= rectEnd) break;
 
-            if (app.searchMatchYs[mi] < 0.0f) {
-                // Use line top as match Y (document coordinates)
-                app.searchMatchYs[mi] = tr.rect.top;
+            size_t mEnd = m.startPos + m.length;
+            size_t overlapStart = std::max(rectStart, m.startPos);
+            size_t overlapEnd = std::min(rectEnd, mEnd);
+            if (overlapStart < overlapEnd) {
+                float totalWidth = tr.rect.right - tr.rect.left;
+                float charWidth = totalWidth / static_cast<float>(tr.docLength);
+                float startX =
+                    tr.rect.left + static_cast<float>(overlapStart - rectStart) * charWidth;
+                float endX =
+                    startX + static_cast<float>(overlapEnd - overlapStart) * charWidth;
+                D2D1_RECT_F fragment =
+                    D2D1::RectF(startX, tr.rect.top, endX, tr.rect.bottom);
+
+                if (m.textRectIndex == kNoTextRect) {
+                    m.textRectIndex = textRectIndex;
+                    m.highlightRect = fragment;
+                } else {
+                    m.highlightRect.left = std::min(m.highlightRect.left, fragment.left);
+                    m.highlightRect.top = std::min(m.highlightRect.top, fragment.top);
+                    m.highlightRect.right = std::max(m.highlightRect.right, fragment.right);
+                    m.highlightRect.bottom = std::max(m.highlightRect.bottom, fragment.bottom);
+                }
             }
-            mi++;
+
+            if (mEnd <= rectEnd) {
+                mi++;
+            } else {
+                break;
+            }
         }
 
         matchIndex = mi;
@@ -90,16 +120,8 @@ void scrollToCurrentMatch(App& app) {
 
     const auto& match = app.searchMatches[app.searchCurrentIndex];
 
-    float estimatedY = -1.0f;
-
-    // Prefer exact line Y recorded during render
-    if (app.searchCurrentIndex >= 0 &&
-        app.searchCurrentIndex < (int)app.searchMatchYs.size()) {
-        float matchY = app.searchMatchYs[app.searchCurrentIndex];
-        if (matchY >= 0.0f) {
-            estimatedY = matchY;
-        }
-    }
+    bool hasLayoutBounds = match.textRectIndex != kNoTextRect;
+    float estimatedY = hasLayoutBounds ? match.highlightRect.top : -1.0f;
 
     // Fallback: estimate based on character ratio
     if (estimatedY < 0.0f) {
@@ -116,4 +138,24 @@ void scrollToCurrentMatch(App& app) {
     float maxScroll = std::max(0.0f, app.contentHeight - app.height);
     app.targetScrollY = std::max(0.0f, std::min(app.targetScrollY, maxScroll));
     app.scrollY = app.targetScrollY;
+
+    if (hasLayoutBounds) {
+        float viewportWidth = documentViewportWidth(app);
+        float viewportLeft = app.scrollX;
+        float viewportRight = viewportLeft + viewportWidth;
+        if (viewportWidth > 0.0f &&
+            (match.highlightRect.left < viewportLeft ||
+             match.highlightRect.right > viewportRight)) {
+            float matchCenter =
+                (match.highlightRect.left + match.highlightRect.right) * 0.5f;
+            app.targetScrollX = matchCenter - viewportWidth * 0.5f;
+        } else {
+            app.targetScrollX = app.scrollX;
+        }
+
+        float maxScrollX = std::max(0.0f, app.contentWidth - viewportWidth);
+        app.targetScrollX =
+            std::max(0.0f, std::min(app.targetScrollX, maxScrollX));
+        app.scrollX = app.targetScrollX;
+    }
 }

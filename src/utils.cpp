@@ -200,6 +200,10 @@ void extractText(const ElementPtr& elem, std::wstring& out) {
             out += L"\n\n";
             break;
         }
+        case ElementType::MermaidDiagram:
+            out += toWide(elem->text);
+            if (!out.empty() && out.back() != L'\n') out += L"\n";
+            break;
         case ElementType::Ruby:
             // Include base text but skip RubyText (annotation)
             for (const auto& child : elem->children) {

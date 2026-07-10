@@ -1,4 +1,5 @@
 #include "file_utils.h"
+#include "document.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -80,17 +81,8 @@ void populateFolderItems(App& app) {
 
         if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             folders.push_back({name, true});
-        } else {
-            // Check file extension
-            size_t dotPos = name.rfind(L'.');
-            if (dotPos != std::wstring::npos) {
-                std::wstring ext = name.substr(dotPos);
-                // Convert to lowercase for comparison
-                for (auto& c : ext) c = towlower(c);
-                if (ext == L".md" || ext == L".markdown") {
-                    files.push_back({name, false});
-                }
-            }
+        } else if (isSupportedDocumentPath(name)) {
+            files.push_back({name, false});
         }
     } while (FindNextFileW(hFind, &findData));
 

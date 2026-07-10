@@ -11,9 +11,11 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <functional>
 #include "settings.h"
+#include "document.h"
 #include "d2d_init.h"
 #include "utils.h"
 #include "syntax.h"
@@ -99,8 +101,8 @@ void render(App& app) {
         app.renderTarget->Clear(app.theme.background);
 
         float editorWidth = app.width * app.editorSplitRatio - 3;
-        float previewX = app.width * app.editorSplitRatio + 3;
-        float previewWidth = app.width - previewX;
+        float previewX = documentViewportX(app);
+        float previewWidth = documentViewportWidth(app);
 
         // Render editor (left pane)
         renderEditor(app, editorWidth);
@@ -133,7 +135,8 @@ void render(App& app) {
 render_document:
 
     // Clamp scroll values
-    float maxScrollX = std::max(0.0f, app.contentWidth - app.width);
+    float documentWidth = documentViewportWidth(app);
+    float maxScrollX = std::max(0.0f, app.contentWidth - documentWidth);
     float maxScrollY = std::max(0.0f, app.contentHeight - app.height);
     app.scrollX = std::max(0.0f, std::min(app.scrollX, maxScrollX));
     app.scrollY = std::max(0.0f, std::min(app.scrollY, maxScrollY));
@@ -142,7 +145,7 @@ render_document:
     const float viewportTop = app.scrollY;
     const float viewportBottom = app.scrollY + app.height;
     const float viewportLeft = app.scrollX;
-    const float viewportRight = app.scrollX + app.width;
+    const float viewportRight = app.scrollX + documentWidth;
     const float cullMargin = 100.0f;
 
     for (const auto& rect : app.layoutRects) {
@@ -160,6 +163,200 @@ render_document:
                        rect.rect.right - app.scrollX, rect.rect.bottom - app.scrollY),
             app.brush);
         app.drawCalls++;
+    }
+
+    ID2D1StrokeStyle* dashedStrokeStyle = nullptr;
+    if (std::any_of(
+            app.layoutConnectors.begin(), app.layoutConnectors.end(),
+            [](const App::LayoutConnector& connector) { return connector.dashed; })) {
+        D2D1_STROKE_STYLE_PROPERTIES properties = {
+            D2D1_CAP_STYLE_FLAT,
+            D2D1_CAP_STYLE_FLAT,
+            D2D1_CAP_STYLE_FLAT,
+            D2D1_LINE_JOIN_MITER,
+            10.0f,
+            D2D1_DASH_STYLE_DASH,
+            0.0f,
+        };
+        app.d2dFactory->CreateStrokeStyle(
+            properties, nullptr, 0, &dashedStrokeStyle);
+    }
+
+    for (const auto& connector : app.layoutConnectors) {
+        if (connector.bounds.bottom < viewportTop - cullMargin ||
+            connector.bounds.top > viewportBottom + cullMargin ||
+            connector.bounds.right < viewportLeft - cullMargin ||
+            connector.bounds.left > viewportRight + cullMargin ||
+            connector.points.size() < 2) {
+            continue;
+        }
+
+        app.brush->SetColor(connector.color);
+        for (size_t i = 1; i < connector.points.size(); i++) {
+            const auto& from = connector.points[i - 1];
+            const auto& to = connector.points[i];
+            app.renderTarget->DrawLine(
+                D2D1::Point2F(from.x - app.scrollX, from.y - app.scrollY),
+                D2D1::Point2F(to.x - app.scrollX, to.y - app.scrollY),
+                app.brush, connector.stroke,
+                connector.dashed ? dashedStrokeStyle : nullptr);
+            app.drawCalls++;
+        }
+
+        if (connector.directed) {
+            const auto& tip = connector.points.back();
+            const auto& previous = connector.points[connector.points.size() - 2];
+            float dx = tip.x - previous.x;
+            float dy = tip.y - previous.y;
+            float length = std::sqrt(dx * dx + dy * dy);
+            if (length > 0.001f) {
+                dx /= length;
+                dy /= length;
+                float wing = connector.arrowSize * 0.5f;
+                D2D1_POINT_2F left = D2D1::Point2F(
+                    tip.x - dx * connector.arrowSize + dy * wing,
+                    tip.y - dy * connector.arrowSize - dx * wing);
+                D2D1_POINT_2F right = D2D1::Point2F(
+                    tip.x - dx * connector.arrowSize - dy * wing,
+                    tip.y - dy * connector.arrowSize + dx * wing);
+                D2D1_POINT_2F screenTip =
+                    D2D1::Point2F(tip.x - app.scrollX, tip.y - app.scrollY);
+                app.renderTarget->DrawLine(
+                    screenTip,
+                    D2D1::Point2F(left.x - app.scrollX, left.y - app.scrollY),
+                    app.brush, connector.stroke);
+                app.renderTarget->DrawLine(
+                    screenTip,
+                    D2D1::Point2F(right.x - app.scrollX, right.y - app.scrollY),
+                    app.brush, connector.stroke);
+                app.drawCalls += 2;
+            }
+        }
+    }
+    if (dashedStrokeStyle) dashedStrokeStyle->Release();
+
+    auto drawPolygon = [&](const D2D1_POINT_2F* points, size_t count,
+                           const App::LayoutShape& shape) {
+        if (count < 3) return;
+
+        ID2D1PathGeometry* geometry = nullptr;
+        if (FAILED(app.d2dFactory->CreatePathGeometry(&geometry)) || !geometry) return;
+
+        ID2D1GeometrySink* sink = nullptr;
+        if (SUCCEEDED(geometry->Open(&sink)) && sink) {
+            sink->BeginFigure(points[0], D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddLines(points + 1, static_cast<UINT32>(count - 1));
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+            sink->Close();
+            sink->Release();
+
+            if (shape.fill.a > 0.0f) {
+                app.brush->SetColor(shape.fill);
+                app.renderTarget->FillGeometry(geometry, app.brush);
+                app.drawCalls++;
+            }
+            if (shape.stroke.a > 0.0f && shape.strokeWidth > 0.0f) {
+                app.brush->SetColor(shape.stroke);
+                app.renderTarget->DrawGeometry(
+                    geometry, app.brush, shape.strokeWidth);
+                app.drawCalls++;
+            }
+        }
+        geometry->Release();
+    };
+
+    for (const auto& shape : app.layoutShapes) {
+        if (shape.rect.bottom < viewportTop - cullMargin ||
+            shape.rect.top > viewportBottom + cullMargin ||
+            shape.rect.right < viewportLeft - cullMargin ||
+            shape.rect.left > viewportRight + cullMargin) {
+            continue;
+        }
+
+        D2D1_RECT_F rect = D2D1::RectF(
+            shape.rect.left - app.scrollX,
+            shape.rect.top - app.scrollY,
+            shape.rect.right - app.scrollX,
+            shape.rect.bottom - app.scrollY);
+
+        if (shape.type == App::LayoutShapeType::Diamond) {
+            float centerX = (rect.left + rect.right) * 0.5f;
+            float centerY = (rect.top + rect.bottom) * 0.5f;
+            D2D1_POINT_2F points[] = {
+                D2D1::Point2F(centerX, rect.top),
+                D2D1::Point2F(rect.right, centerY),
+                D2D1::Point2F(centerX, rect.bottom),
+                D2D1::Point2F(rect.left, centerY),
+            };
+            drawPolygon(points, 4, shape);
+            continue;
+        }
+
+        if (shape.type == App::LayoutShapeType::Hexagon) {
+            float inset = (rect.right - rect.left) * 0.18f;
+            float centerY = (rect.top + rect.bottom) * 0.5f;
+            D2D1_POINT_2F points[] = {
+                D2D1::Point2F(rect.left + inset, rect.top),
+                D2D1::Point2F(rect.right - inset, rect.top),
+                D2D1::Point2F(rect.right, centerY),
+                D2D1::Point2F(rect.right - inset, rect.bottom),
+                D2D1::Point2F(rect.left + inset, rect.bottom),
+                D2D1::Point2F(rect.left, centerY),
+            };
+            drawPolygon(points, 6, shape);
+            continue;
+        }
+
+        app.brush->SetColor(shape.fill);
+        if (shape.type == App::LayoutShapeType::Ellipse) {
+            D2D1_ELLIPSE ellipse = D2D1::Ellipse(
+                D2D1::Point2F(
+                    (rect.left + rect.right) * 0.5f,
+                    (rect.top + rect.bottom) * 0.5f),
+                (rect.right - rect.left) * 0.5f,
+                (rect.bottom - rect.top) * 0.5f);
+            if (shape.fill.a > 0.0f) {
+                app.renderTarget->FillEllipse(ellipse, app.brush);
+                app.drawCalls++;
+            }
+            if (shape.stroke.a > 0.0f && shape.strokeWidth > 0.0f) {
+                app.brush->SetColor(shape.stroke);
+                app.renderTarget->DrawEllipse(
+                    ellipse, app.brush, shape.strokeWidth);
+                app.drawCalls++;
+            }
+            continue;
+        }
+
+        if (shape.type == App::LayoutShapeType::RoundedRectangle ||
+            shape.type == App::LayoutShapeType::Stadium) {
+            float radius = shape.type == App::LayoutShapeType::Stadium
+                ? (rect.bottom - rect.top) * 0.5f
+                : shape.radius;
+            D2D1_ROUNDED_RECT rounded = D2D1::RoundedRect(rect, radius, radius);
+            if (shape.fill.a > 0.0f) {
+                app.renderTarget->FillRoundedRectangle(rounded, app.brush);
+                app.drawCalls++;
+            }
+            if (shape.stroke.a > 0.0f && shape.strokeWidth > 0.0f) {
+                app.brush->SetColor(shape.stroke);
+                app.renderTarget->DrawRoundedRectangle(
+                    rounded, app.brush, shape.strokeWidth);
+                app.drawCalls++;
+            }
+            continue;
+        }
+
+        if (shape.fill.a > 0.0f) {
+            app.renderTarget->FillRectangle(rect, app.brush);
+            app.drawCalls++;
+        }
+        if (shape.stroke.a > 0.0f && shape.strokeWidth > 0.0f) {
+            app.brush->SetColor(shape.stroke);
+            app.renderTarget->DrawRectangle(
+                rect, app.brush, shape.strokeWidth);
+            app.drawCalls++;
+        }
     }
 
     // Render images (bitmaps)
@@ -254,7 +451,7 @@ render_document:
 
     // Determine scrollbar visibility
     bool needsVScroll = app.contentHeight > app.height;
-    bool needsHScroll = app.contentWidth > app.width;
+    bool needsHScroll = app.contentWidth > documentWidth;
     float scrollbarSize = dpi(app, 14.0f);
 
     // Scrollbar color: dark on light themes, light on dark themes
@@ -273,16 +470,16 @@ render_document:
 
         app.brush->SetColor(D2D1::ColorF(sbColorValue, sbColorValue, sbColorValue, sbAlpha));
         app.renderTarget->FillRoundedRectangle(
-            D2D1::RoundedRect(D2D1::RectF(app.width - sbWidth - dpi(app, 4.0f), sbY,
-                                          app.width - dpi(app, 4.0f), sbY + sbHeight), 3, 3),
+            D2D1::RoundedRect(D2D1::RectF(documentWidth - sbWidth - dpi(app, 4.0f), sbY,
+                                          documentWidth - dpi(app, 4.0f), sbY + sbHeight), 3, 3),
             app.brush);
         app.drawCalls++;
     }
 
     // Draw horizontal scrollbar
     if (needsHScroll) {
-        float maxScrollX = std::max(0.0f, app.contentWidth - app.width);
-        float trackWidth = app.width - (needsVScroll ? scrollbarSize : 0);
+        float maxScrollX = std::max(0.0f, app.contentWidth - documentWidth);
+        float trackWidth = documentWidth - (needsVScroll ? scrollbarSize : 0);
         float sbWidth = trackWidth / app.contentWidth * trackWidth;
         sbWidth = std::max(sbWidth, dpi(app, 30.0f));
         float sbX = (maxScrollX > 0) ? (app.scrollX / maxScrollX * (trackWidth - sbWidth)) : 0;
@@ -736,11 +933,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 static const char* sampleMarkdown = R"(# Welcome to Tinta
 
-**Tinta** is a fast, lightweight markdown reader for Windows.
+**Tinta** is a fast, lightweight Markdown and Mermaid viewer for Windows.
 
 ## Getting Started
 
-- **Drag & drop** a `.md` file onto this window
+- **Drag & drop** a `.md` or `.mmd` file onto this window
 - Press **B** to browse and open files from a folder
 - Or run `tinta.exe readme.md` from the command line
 - Press **?** for all available keyboard shortcuts
@@ -748,6 +945,7 @@ static const char* sampleMarkdown = R"(# Welcome to Tinta
 ## Features
 
 - 10 beautiful themes — press **T** to choose
+- Native Mermaid flowchart rendering for `.mmd` files
 - Edit mode with live preview — press **:**
 - Search — press **F**
 - Table of contents — press **Tab**
@@ -845,7 +1043,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             MessageBoxW(nullptr,
                        L"Tinta has been registered.\n\n"
                        L"In the Settings window that opens:\n"
-                       L"1. Search for '.md'\n"
+                       L"1. Search for '.md' or '.mmd'\n"
                        L"2. Click on the current default app\n"
                        L"3. Select 'Tinta' from the list",
                        L"Almost done!", MB_OK | MB_ICONINFORMATION);
@@ -922,12 +1120,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // Load document
     t0 = Clock::now();
 
-    auto loadMarkdown = [&](const std::string& content) {
-        auto result = app.parser.parse(content);
+    auto loadDocumentContent = [&](const std::string& content, std::string_view path) {
+        auto result = parseDocument(app.parser, content, path);
         if (result.success) {
             app.root = result.root;
             app.parseTimeUs = result.parseTimeUs;
         }
+        return result.success;
     };
 
     auto loadFile = [&](const std::string& path) -> bool {
@@ -937,19 +1136,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         if (!file) return false;
         std::stringstream buffer;
         buffer << file.rdbuf();
-        loadMarkdown(buffer.str());
-        return true;
+        return loadDocumentContent(buffer.str(), path);
     };
 
     if (!inputFile.empty()) {
-        loadFile(inputFile);
-        app.currentFile = inputFile;
+        if (loadFile(inputFile)) {
+            app.currentFile = inputFile;
+            app.focusMermaidOnNextLayout = isMermaidDocumentPath(inputFile);
+        } else {
+            loadDocumentContent(sampleMarkdown, {});
+        }
     } else {
         // Try syntax.md
         if (loadFile("syntax.md")) {
             app.currentFile = "syntax.md";
         } else {
-            loadMarkdown(sampleMarkdown);
+            loadDocumentContent(sampleMarkdown, {});
         }
     }
 
