@@ -84,6 +84,8 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `:` | Enter edit mode |
 | `ESC` `ESC` | Exit edit mode |
 | `Ctrl+S` | Save (in edit mode) |
+| `Ctrl+P` | Show/hide preview pane (in edit mode) |
+| `Ctrl+W` | Toggle word wrap (in edit mode) |
 | `Q` | Quit |
 
 ## Building

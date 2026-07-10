@@ -50,7 +50,9 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
     // Edit mode: route scroll to editor or preview based on mouse X
     if (app.editMode) {
-        float sepX = app.width * app.editorSplitRatio;
+        float sepX = app.editorShowPreview
+            ? app.width * app.editorSplitRatio
+            : static_cast<float>(app.width);
         if (app.mouseX < sepX) {
             if (ctrl) {
                 applyZoomDelta(app, delta);
@@ -157,7 +159,9 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     if (app.editMode) {
         handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
         // If mouse is in the preview pane and not dragging separator, fall through for link hover etc.
-        float sepX = app.width * app.editorSplitRatio;
+        float sepX = app.editorShowPreview
+            ? app.width * app.editorSplitRatio
+            : static_cast<float>(app.width);
         if (app.mouseX < sepX || app.draggingSeparator || app.editorSelecting) return;
         // For preview pane, adjust mouseX to be relative to preview offset
         // but we leave the existing code to work with document coordinates
@@ -357,7 +361,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     if (app.editMode) {
         int x = GET_X_LPARAM(lParam);
         int y = GET_Y_LPARAM(lParam);
-        float sepX = app.width * app.editorSplitRatio;
+        float sepX = app.editorShowPreview
+            ? app.width * app.editorSplitRatio
+            : static_cast<float>(app.width);
         if (x < sepX + 6) {
             handleEditorMouseDown(app, hwnd, x, y);
             return;

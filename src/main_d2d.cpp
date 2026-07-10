@@ -39,7 +39,11 @@ void render(App& app) {
     app.drawCalls = 0;
 
     if (app.layoutDirty) {
-        if (app.editMode) {
+        if (app.editMode && !app.editorShowPreview) {
+            // Preview hidden: defer document layout until it's shown again
+            // (the viewport is zero-width, so laying out now would be wasted
+            // work against a nonsense max width)
+        } else if (app.editMode) {
             // Edit mode needs complete scroll anchors for preview sync
             layoutDocument(app);
         } else {
@@ -53,10 +57,10 @@ void render(App& app) {
     }
 
     // Sync preview scroll to editor scroll position using source-offset anchors
-    if (app.editMode && !app.scrollAnchors.empty() && !app.editorLineByteOffsets.empty()) {
-        // Find the editor's top visible line
-        float lineHeight = app.editorTextFormat ? app.editorTextFormat->GetFontSize() * 1.5f : 20.0f;
-        int topLine = (int)(app.editorScrollY / lineHeight);
+    if (app.editMode && app.editorShowPreview &&
+        !app.scrollAnchors.empty() && !app.editorLineByteOffsets.empty()) {
+        // Find the editor's top visible line (row-aware in wrap mode)
+        int topLine = (int)editorTopVisibleLine(app);
         topLine = std::max(0, std::min(topLine, (int)app.editorLineByteOffsets.size() - 1));
         size_t topByteOffset = app.editorLineByteOffsets[topLine];
 
@@ -100,15 +104,15 @@ void render(App& app) {
     if (app.editMode) {
         app.renderTarget->Clear(app.theme.background);
 
-        float editorWidth = app.width * app.editorSplitRatio - 3;
+        float editorWidth = editorPaneWidth(app);
         float previewX = documentViewportX(app);
         float previewWidth = documentViewportWidth(app);
 
-        // Render editor (left pane)
+        // Render editor (left pane; full width when the preview is hidden)
         renderEditor(app, editorWidth);
 
         // Render separator
-        renderSeparator(app);
+        if (app.editorShowPreview) renderSeparator(app);
 
         // Render preview (right pane) using clip + transform
         app.renderTarget->PushAxisAlignedClip(
@@ -909,6 +913,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 Settings settings = loadSettings();
                 settings.themeIndex = app->currentThemeIndex;
                 settings.zoomFactor = app->zoomFactor;
+                settings.editorShowPreview = app->editorShowPreview;
+                settings.editorWordWrap = app->editorWordWrap;
 
                 // Get window placement for position/size/maximized state
                 WINDOWPLACEMENT wp = {};
@@ -1012,6 +1018,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.theme = THEMES[savedSettings.themeIndex];
     app.darkMode = app.theme.isDark;
     app.zoomFactor = savedSettings.zoomFactor;
+    app.editorShowPreview = savedSettings.editorShowPreview;
+    app.editorWordWrap = savedSettings.editorWordWrap;
 
     // Parse command line
     std::string inputFile;
