@@ -112,6 +112,12 @@ std::string decodeLabel(std::string_view encoded) {
                 i += 2;
                 continue;
             }
+            if (next == 'n') {
+                // Mermaid renders a literal \n in labels as a line break
+                decoded.push_back('\n');
+                i += 2;
+                continue;
+            }
         }
 
         if (encoded[i] == '<') {
