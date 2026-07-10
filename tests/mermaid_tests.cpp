@@ -167,6 +167,18 @@ void testFiles(int argc, char** argv) {
     }
 }
 
+void testBackslashNLineBreak() {
+    const char* source = R"(graph TD
+    BG[background thread\nengine.stop / PlotLan / DNS] --> TK[main]
+)";
+    auto result = mermaid::parse(source);
+    check(result.success, "label with \\n parses");
+    if (!result.success) return;
+    const auto* bg = findNode(result.diagram, "BG");
+    check(bg && bg->label == "background thread\nengine.stop / PlotLan / DNS",
+          "literal \\n in a label becomes a line break");
+}
+
 void testAttributeSyntaxRejected() {
     const char* source = R"(flowchart TD
 A@{ shape: rounded, label: "Fancy" } --> B[Plain]
@@ -206,6 +218,7 @@ int main(int argc, char** argv) {
     testUnsupportedDiagram();
     testBomAndSemicolonStatements();
     testCyclicLayout();
+    testBackslashNLineBreak();
     testAttributeSyntaxRejected();
     testLayoutExposesRanks();
     testFiles(argc, argv);

@@ -770,6 +770,8 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
     app.layoutConnectors.reserve(
         app.layoutConnectors.size() + diagram.edges.size());
     size_t exteriorLane = 0;
+    std::vector<D2D1_RECT_F> placedLabelRects;
+    placedLabelRects.reserve(diagram.edges.size());
     for (size_t edgeIndex = 0; edgeIndex < diagram.edges.size(); edgeIndex++) {
         const auto& edge = diagram.edges[edgeIndex];
         if (edge.from >= nodeRects.size() || edge.to >= nodeRects.size()) continue;
@@ -917,11 +919,38 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
             const auto& middleEnd = points[middle];
             float centerX = (middleStart.x + middleEnd.x) * 0.5f;
             float centerY = (middleStart.y + middleEnd.y) * 0.5f;
-            D2D1_RECT_F labelRect = D2D1::RectF(
-                centerX - edgeLabel.width * 0.5f,
-                centerY - edgeLabel.height * 0.5f,
-                centerX + edgeLabel.width * 0.5f,
-                centerY + edgeLabel.height * 0.5f);
+            auto chipAt = [&](float cx, float cy) {
+                return D2D1::RectF(
+                    cx - edgeLabel.width * 0.5f,
+                    cy - edgeLabel.height * 0.5f,
+                    cx + edgeLabel.width * 0.5f,
+                    cy + edgeLabel.height * 0.5f);
+            };
+            D2D1_RECT_F labelRect = chipAt(centerX, centerY);
+
+            // Parallel exterior lanes sit only a few pixels apart, so their
+            // midpoint chips stack on top of each other — slide an
+            // overlapping chip along its own segment until it finds space
+            bool segVertical = std::abs(middleEnd.x - middleStart.x) <
+                               std::abs(middleEnd.y - middleStart.y);
+            float stepX = segVertical ? 0.0f : edgeLabel.width + 8.0f * scale;
+            float stepY = segVertical ? edgeLabel.height + 8.0f * scale : 0.0f;
+            auto overlapsPlaced = [&](const D2D1_RECT_F& rect) {
+                for (const auto& placed : placedLabelRects) {
+                    if (rect.left < placed.right && rect.right > placed.left &&
+                        rect.top < placed.bottom && rect.bottom > placed.top) {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            for (int attempt = 1; attempt <= 8 && overlapsPlaced(labelRect); attempt++) {
+                float direction = (attempt % 2 == 1) ? 1.0f : -1.0f;
+                float magnitude = (float)((attempt + 1) / 2);
+                labelRect = chipAt(centerX + stepX * direction * magnitude,
+                                   centerY + stepY * direction * magnitude);
+            }
+            placedLabelRects.push_back(labelRect);
             // Draw the label as a visible chip on the edge — an invisible
             // background-colored pill erases the line under it, which makes
             // edges look disconnected and labels look like floating text

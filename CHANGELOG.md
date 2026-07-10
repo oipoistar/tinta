@@ -11,6 +11,8 @@
 - Mermaid: edges that skip over intermediate ranks now route around the diagram through an exterior lane instead of cutting straight through nodes — their labels no longer land on unrelated edges
 - Mermaid: edge labels render as bordered chips on the edge instead of erasing the line beneath them
 - Mermaid: unsupported v11 `@{ }` attribute syntax now falls back to a readable code block instead of rendering raw attributes as a diamond
+- Mermaid: edge label chips slide along their edge to avoid stacking on top of each other when several labeled edges share the same corridor
+- Mermaid: a literal `\n` in node and edge labels renders as a line break, matching mermaid.js
 - Long code block lines now extend the block background and participate in horizontal scrolling instead of being clipped with no way to reach them
 
 ## [v2.0.1] - 2026-07-08
