@@ -50,7 +50,7 @@ jobs:
             - 10 beautiful themes (5 light, 5 dark)
             - Hardware-accelerated rendering via Direct2D
             - Native Mermaid flowchart rendering
-            - ~270KB single executable, no dependencies
+            - Single portable executable under 1 MB, no dependencies
           files: build/Release/tinta.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
