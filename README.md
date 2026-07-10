@@ -52,6 +52,8 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Lightning-fast startup** - Direct2D rendering, no web engine overhead
 - **10 beautiful themes** - 5 light and 5 dark themes to choose from
 - **Hardware-accelerated** - Smooth text rendering via DirectWrite
+- **Word wrap** - Optional soft wrap in the editor (Ctrl+W)
+- **Focused editing** - Hide the preview pane while writing (Ctrl+P)
 - **Native Mermaid flowcharts** - Render `.mmd` files and fenced `mermaid` blocks without a web engine
 - **Rich tables** - Tables with bold, italic, code, and clickable links in cells
 - **Folder browser** - Press B to browse and open Markdown or Mermaid files
