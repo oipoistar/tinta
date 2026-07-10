@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v2.1.0] - 2026-07-10
 
 ### Added
 - Native Mermaid `flowchart`/`graph` rendering for `.mmd` files and fenced `mermaid` blocks
