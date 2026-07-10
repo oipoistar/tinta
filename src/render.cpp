@@ -789,10 +789,23 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
         float toCenterY = (to.top + to.bottom) * 0.5f;
         bool selfLoop = edge.from == edge.to;
 
+        // Edges that skip over intermediate ranks would cut straight through
+        // the nodes between them (and drop their label onto whatever edge
+        // happens to sit at the midpoint) — route those through an exterior
+        // lane like back-edges instead
+        bool skipsRanks = false;
+        if (edge.from < graphLayout.ranks.size() &&
+            edge.to < graphLayout.ranks.size()) {
+            size_t fromRank = graphLayout.ranks[edge.from];
+            size_t toRank = graphLayout.ranks[edge.to];
+            skipsRanks = (fromRank < toRank ? toRank - fromRank
+                                            : fromRank - toRank) > 1;
+        }
+
         if (vertical) {
             bool topToBottom =
                 diagram.direction == mermaid::Direction::TopToBottom;
-            bool forward = !selfLoop &&
+            bool forward = !selfLoop && !skipsRanks &&
                 (topToBottom ? toCenterY > fromCenterY : toCenterY < fromCenterY);
             if (selfLoop) {
                 float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
@@ -834,7 +847,7 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
         } else {
             bool leftToRight =
                 diagram.direction == mermaid::Direction::LeftToRight;
-            bool forward = !selfLoop &&
+            bool forward = !selfLoop && !skipsRanks &&
                 (leftToRight ? toCenterX > fromCenterX : toCenterX < fromCenterX);
             if (selfLoop) {
                 float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
@@ -909,14 +922,17 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
                 centerY - edgeLabel.height * 0.5f,
                 centerX + edgeLabel.width * 0.5f,
                 centerY + edgeLabel.height * 0.5f);
-            D2D1_COLOR_F transparent = app.theme.background;
-            transparent.a = 0.0f;
+            // Draw the label as a visible chip on the edge — an invisible
+            // background-colored pill erases the line under it, which makes
+            // edges look disconnected and labels look like floating text
+            D2D1_COLOR_F chipStroke = connectorColor;
+            chipStroke.a *= 0.6f;
             app.layoutShapes.push_back({
                 App::LayoutShapeType::RoundedRectangle,
                 labelRect,
-                app.theme.background,
-                transparent,
-                0.0f,
+                app.theme.codeBackground,
+                chipStroke,
+                1.2f * scale,
                 4.0f * scale,
             });
             diagramLeft = std::min(diagramLeft, labelRect.left);
@@ -1062,6 +1078,7 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
     app.docText += L"\n";
 
     float blockHeight = lineCount * lineHeight + padding * 2;
+    size_t bgRectIndex = app.layoutRects.size();
     app.layoutRects.push_back({D2D1::RectF(indent, y, indent + maxWidth, y + blockHeight),
                                app.theme.codeBackground});
 
@@ -1076,6 +1093,7 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
     bool inBlockComment = false;
     size_t codeDocStart = app.docText.size();
     size_t lineStart = 0;
+    float maxLineWidth = 0.0f;
 
     while (lineStart <= wcode.length()) {
         size_t lineEnd = wcode.find(L'\n', lineStart);
@@ -1143,9 +1161,19 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
             addTextRect(app, lineBounds, lineDocStart, wline.length());
         }
 
+        maxLineWidth = std::max(maxLineWidth, lineWidth);
         textY += lineHeight;
         if (lineEnd == wcode.length()) break;
         lineStart = lineEnd + 1;
+    }
+
+    // Long code lines used to be clipped at the block edge with no way to
+    // reach them — extend the block background and the document width so
+    // wide code participates in horizontal scrolling like diagrams do
+    float widestExtent = maxLineWidth + padding * 2;
+    if (widestExtent > maxWidth) {
+        app.layoutRects[bgRectIndex].rect.right = indent + widestExtent;
+        app.contentWidth = std::max(app.contentWidth, indent + widestExtent);
     }
 
     app.docText += wcode;
