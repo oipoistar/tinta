@@ -16,6 +16,7 @@ enum class ElementType {
     Paragraph,
     Heading,
     CodeBlock,
+    MermaidDiagram,
     BlockQuote,
     List,
     ListItem,

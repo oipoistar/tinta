@@ -1,4 +1,5 @@
 #include "editor.h"
+#include "document.h"
 #include "utils.h"
 #include "file_utils.h"
 #include "render.h"
@@ -403,7 +404,7 @@ void editorReparse(App& app) {
         }
     }
 
-    auto result = app.parser.parse(utf8);
+    auto result = parseDocument(app.parser, utf8, app.currentFile);
     if (result.success) {
         app.root = result.root;
         app.parseTimeUs = result.parseTimeUs;
@@ -475,6 +476,7 @@ void enterEditMode(App& app) {
     updateBlinkTimer(app);
 
     // Force layout at new width
+    app.focusMermaidOnNextLayout = isMermaidDocumentPath(app.currentFile);
     app.layoutDirty = true;
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
@@ -519,7 +521,7 @@ void exitEditMode(App& app) {
     if (file) {
         std::stringstream buf;
         buf << file.rdbuf();
-        auto result = app.parser.parse(buf.str());
+        auto result = parseDocument(app.parser, buf.str(), app.currentFile);
         if (result.success) {
             app.root = result.root;
             app.parseTimeUs = result.parseTimeUs;
@@ -529,6 +531,7 @@ void exitEditMode(App& app) {
     // Update window title (remove dirty marker)
     updateWindowTitle(app);
 
+    app.focusMermaidOnNextLayout = isMermaidDocumentPath(app.currentFile);
     app.layoutDirty = true;
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }

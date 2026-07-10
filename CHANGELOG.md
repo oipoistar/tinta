@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Native Mermaid `flowchart`/`graph` rendering for `.mmd` files and fenced `mermaid` blocks
+- `.mmd` support in the folder browser, drag-and-drop, live edit preview, file watching, and Windows file association registration
+
 ## [v2.0.1] - 2026-07-08
 
 ### Fixed

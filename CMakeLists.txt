@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 
+include(CTest)
+
 # Build type
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
@@ -42,6 +44,8 @@ set(SOURCES
     src/overlays.cpp
     src/input.cpp
     src/editor.cpp
+    src/mermaid.cpp
+    src/document.cpp
 )
 
 set(HEADERS
@@ -58,6 +62,8 @@ set(HEADERS
     include/overlays.h
     include/input.h
     include/editor.h
+    include/mermaid.h
+    include/document.h
 )
 
 # Windows resource file (icon)
@@ -85,6 +91,29 @@ target_link_libraries(tinta PRIVATE
 )
 
 target_compile_definitions(tinta PRIVATE UNICODE _UNICODE)
+
+if(BUILD_TESTING)
+    add_executable(mermaid_tests
+        tests/mermaid_tests.cpp
+        src/mermaid.cpp
+    )
+    target_include_directories(mermaid_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    add_test(NAME mermaid_parser COMMAND mermaid_tests)
+
+    add_executable(document_tests
+        tests/document_tests.cpp
+        src/document.cpp
+        src/markdown.cpp
+    )
+    target_include_directories(document_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${md4c_SOURCE_DIR}/src
+    )
+    target_link_libraries(document_tests PRIVATE md4c)
+    add_test(NAME document_types COMMAND document_tests)
+endif()
 
 # Install
 install(TARGETS tinta RUNTIME DESTINATION bin)

@@ -2,7 +2,7 @@
   <img src="resources/tinta.ico" width="80">
   <h1>Tinta</h1>
   <p><em>Markdown, distilled.</em></p>
-  <p>A fast, lightweight markdown viewer for Windows</p>
+  <p>A fast, lightweight Markdown and Mermaid viewer for Windows</p>
 
   <a href="https://github.com/oipoistar/tinta/releases/latest">
     <img src="https://img.shields.io/github/v/release/oipoistar/tinta?label=Download&style=for-the-badge&color=1a1a2e" alt="Download">
@@ -17,7 +17,7 @@
 
 <br>
 
-Tinta is a **fast, lightweight markdown viewer and reader for Windows**, built with Direct2D and DirectWrite for hardware-accelerated rendering. A single native executable under 1 MB that opens instantly — no Electron, no web engine, no installer.
+Tinta is a **fast, lightweight Markdown and Mermaid viewer for Windows**, built with Direct2D and DirectWrite for hardware-accelerated rendering. A single native executable under 1 MB that opens instantly — no Electron, no web engine, no installer.
 
 <p align="center">
   <img src="https://tinta.cc/img/screenshots/paper.png" width="49%" alt="Tinta markdown viewer on Windows — Paper light theme">
@@ -26,7 +26,7 @@ Tinta is a **fast, lightweight markdown viewer and reader for Windows**, built w
 
 ## Download
 
-Grab [the latest release](https://github.com/oipoistar/tinta/releases/latest) — a single portable `tinta.exe`, no installation required. Run it, open a markdown file, done.
+Grab [the latest release](https://github.com/oipoistar/tinta/releases/latest) — a single portable `tinta.exe`, no installation required. Run it and open a Markdown or Mermaid file.
 
 Or install with [Scoop](https://scoop.sh):
 
@@ -45,22 +45,23 @@ Most markdown apps ship an entire browser to render text. Tinta uses the GPU-acc
 | Install size | **< 1 MB** | ~90 MB | ~250 MB | ~350 MB |
 | Runtime | **Native Direct2D** | Electron | Electron | Electron |
 
-It's a viewer first: perfect as the double-click default for `.md` files, for reading READMEs, notes, and documentation — with an edit mode when you need it.
+It's a viewer first: perfect as the double-click default for `.md` and `.mmd` files, for reading documentation and diagrams — with an edit mode when you need it.
 
 ## Features
 
 - **Lightning-fast startup** - Direct2D rendering, no web engine overhead
 - **10 beautiful themes** - 5 light and 5 dark themes to choose from
 - **Hardware-accelerated** - Smooth text rendering via DirectWrite
+- **Native Mermaid flowcharts** - Render `.mmd` files and fenced `mermaid` blocks without a web engine
 - **Rich tables** - Tables with bold, italic, code, and clickable links in cells
-- **Folder browser** - Press B to browse and open markdown files
+- **Folder browser** - Press B to browse and open Markdown or Mermaid files
 - **Table of contents** - Press Tab to see document headings, click to jump
 - **Edit mode** - Press `:` to edit markdown with live preview, search works in editor too
 - **Search** - Find text with F or Ctrl+F, cycle through matches with Enter
 - **Persistent settings** - Remembers your theme, zoom level, and window position
 - **Text selection & copy** - Select text and copy to clipboard
 - **Zoom support** - Ctrl+scroll to zoom in/out
-- **Drag & drop** - Drop any markdown file to view it
+- **Drag & drop** - Drop any Markdown or Mermaid file to view it
 - **Minimal footprint** - Small binary, minimal dependencies
 
 ## Keyboard Shortcuts
@@ -101,8 +102,11 @@ The executable will be at `build/Release/tinta.exe`.
 ## Usage
 
 ```bash
-# Open a markdown file
+# Open a Markdown file
 tinta.exe document.md
+
+# Open a Mermaid flowchart
+tinta.exe diagram.mmd
 
 # Open with light theme
 tinta.exe -l document.md
@@ -110,22 +114,26 @@ tinta.exe -l document.md
 # Show stats on startup
 tinta.exe -s document.md
 
-# Register as default .md viewer
+# Register for Markdown and Mermaid files
 tinta.exe /register
 ```
 
-Or simply drag and drop a `.md` file onto the window.
+Or simply drag and drop a `.md` or `.mmd` file onto the window.
 
 ## File Association
 
-On first launch, Tinta will ask if you want to set it as the default viewer for `.md` files. If you choose "No", you won't be asked again.
+On first launch, Tinta will ask if you want to set it as the default viewer for Markdown and Mermaid files. If you choose "No", you won't be asked again.
 
 To register Tinta as the default viewer later, run:
 ```bash
 tinta.exe /register
 ```
 
-This sets up the file association in the Windows registry so you can double-click any `.md` file to open it in Tinta.
+This registers `.md`, `.markdown`, and `.mmd` so you can select Tinta as their default app in Windows Settings.
+
+## Mermaid Support
+
+Tinta natively renders Mermaid `flowchart` and `graph` diagrams in `.mmd` files and fenced `mermaid` code blocks. It supports TB/TD, BT, LR, and RL layouts; common node shapes; directed and labeled edges; `classDef`, `class`, and `style` styling. Unsupported Mermaid diagram families fall back to readable source code.
 
 ## Themes
 
