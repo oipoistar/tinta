@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The executable now embeds proper version metadata (company, product, description, version) — files without it disproportionately trip antivirus ML heuristics
+- md4c dependency pinned by commit hash instead of tag
+
 ## [v2.1.0] - 2026-07-10
 
 ### Added
