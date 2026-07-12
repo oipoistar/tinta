@@ -24,7 +24,7 @@ include(FetchContent)
 FetchContent_Declare(
     md4c
     GIT_REPOSITORY https://github.com/mity/md4c.git
-    GIT_TAG release-0.5.2
+    GIT_TAG 729e6b8b320caa96328968ab27d7db2235e4fb47  # release-0.5.2, pinned by commit
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(md4c)
@@ -90,7 +90,10 @@ target_link_libraries(tinta PRIVATE
     imm32
 )
 
-target_compile_definitions(tinta PRIVATE UNICODE _UNICODE)
+target_compile_definitions(tinta PRIVATE UNICODE _UNICODE
+    TINTA_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    TINTA_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    TINTA_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 
 if(BUILD_TESTING)
     add_executable(mermaid_tests
