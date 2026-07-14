@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v2.1.5] - 2026-07-14
 
 ### Fixed
 - Window no longer restores onto a disconnected monitor — the saved position is validated against the monitors present at startup and clamped into the nearest one (#25)
