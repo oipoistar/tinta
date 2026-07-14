@@ -1086,12 +1086,39 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     wc.lpszClassName = L"Tinta";
     RegisterClassExW(&wc);
 
+    // Validate the saved window position against the monitors that exist
+    // NOW — a position saved on a since-disconnected screen (docked laptop,
+    // unplugged external monitor) would otherwise restore off-screen (#25)
+    int windowX = savedSettings.windowX;
+    int windowY = savedSettings.windowY;
+    if (windowX != CW_USEDEFAULT && windowY != CW_USEDEFAULT) {
+        RECT saved = { windowX, windowY,
+                       windowX + savedSettings.windowWidth,
+                       windowY + savedSettings.windowHeight };
+        HMONITOR monitor = MonitorFromRect(&saved, MONITOR_DEFAULTTONULL);
+        if (!monitor) {
+            // Fully off every live monitor: clamp into the nearest one
+            monitor = MonitorFromRect(&saved, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO mi = { sizeof(mi) };
+            if (monitor && GetMonitorInfoW(monitor, &mi)) {
+                const RECT& wa = mi.rcWork;
+                int width = std::min<int>(savedSettings.windowWidth, wa.right - wa.left);
+                int height = std::min<int>(savedSettings.windowHeight, wa.bottom - wa.top);
+                windowX = std::max<int>(wa.left, std::min<int>(windowX, wa.right - width));
+                windowY = std::max<int>(wa.top, std::min<int>(windowY, wa.bottom - height));
+            } else {
+                windowX = CW_USEDEFAULT;
+                windowY = CW_USEDEFAULT;
+            }
+        }
+    }
+
     app.hwnd = CreateWindowExW(
         WS_EX_ACCEPTFILES,
         L"Tinta",
         L"Tinta",
         WS_OVERLAPPEDWINDOW,
-        savedSettings.windowX, savedSettings.windowY,
+        windowX, windowY,
         savedSettings.windowWidth, savedSettings.windowHeight,
         nullptr, nullptr, hInstance, nullptr
     );

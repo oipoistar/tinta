@@ -333,7 +333,12 @@ ParseResult MarkdownParser::parse(const std::string& markdown) {
             MD_FLAG_STRIKETHROUGH |
             MD_FLAG_PERMISSIVEAUTOLINKS |
             MD_FLAG_PERMISSIVEURLAUTOLINKS |
-            MD_FLAG_TASKLISTS
+            MD_FLAG_TASKLISTS |
+            // Real-world notes (especially AI-chat exports) indent list
+            // continuations far enough that CommonMark turns them into code
+            // blocks — literal ** markers, no wrapping (#24). Fenced ```
+            // blocks are unaffected and remain the way to write code.
+            MD_FLAG_NOINDENTEDCODEBLOCKS
         ),
         enterBlockCallback,
         leaveBlockCallback,

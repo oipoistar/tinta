@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- Window no longer restores onto a disconnected monitor — the saved position is validated against the monitors present at startup and clamped into the nearest one (#25)
+- Deeply indented list continuations (common in AI-chat markdown exports) render as regular text instead of code blocks with literal `**` markers; fenced ``` blocks are unaffected (#24)
+
 ### Changed
 - The executable now embeds proper version metadata (company, product, description, version) — files without it disproportionately trip antivirus ML heuristics
 - md4c dependency pinned by commit hash instead of tag
