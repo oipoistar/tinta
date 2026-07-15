@@ -6,6 +6,10 @@
 - Obsidian/Typora inline extensions: `==highlight==`, `^superscript^`, `~subscript~` (#24)
 - `~~strikethrough~~` now actually renders with a line through the text — previously the markers were consumed but no styling was applied
 
+### Fixed
+- Chinese/Japanese/Korean text now wraps correctly everywhere — line breaking uses the Unicode line breaking algorithm (via DirectWrite) instead of only breaking at spaces, so CJK paragraphs fill the line and break between ideographs with proper punctuation rules, long URLs break at slashes, and table cells wrap their content within the column instead of overflowing into neighbors (#24)
+- A single unbreakable run wider than the whole line now splits at glyph-cluster boundaries instead of being clipped at the window or cell edge (#24)
+
 ## [v2.1.5] - 2026-07-14
 
 ### Fixed

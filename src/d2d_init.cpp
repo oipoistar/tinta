@@ -17,6 +17,9 @@ bool initD2D(App& app) {
 
     hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
         __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&app.dwriteFactory));
+    if (app.dwriteFactory) {
+        app.dwriteFactory->CreateTextAnalyzer(&app.textAnalyzer);
+    }
     if (FAILED(hr)) return false;
 
     app.metrics.dwriteInitUs = usElapsed(t0);

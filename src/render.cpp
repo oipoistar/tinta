@@ -188,6 +188,137 @@ static float getSpaceWidth(App& app, IDWriteTextFormat* format) {
 static void layoutElement(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth);
 static void layoutImage(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth);
 
+// --- UAX#14 line-break analysis ---
+//
+// DirectWrite's text analyzer implements the Unicode line breaking
+// algorithm, including CJK rules (a break opportunity between almost every
+// pair of ideographs, but never before closing punctuation like 。，」or
+// after opening brackets). Chinese prose has no spaces, so anything less
+// treats an entire sentence as one unbreakable word.
+
+namespace {
+
+class LineBreakAnalysis final : public IDWriteTextAnalysisSource,
+                                public IDWriteTextAnalysisSink {
+public:
+    LineBreakAnalysis(const wchar_t* text, UINT32 length)
+        : text_(text), length_(length), breakpoints_(length) {}
+
+    std::vector<DWRITE_LINE_BREAKPOINT> breakpoints_;
+
+    // Stack-allocated and used synchronously: refcounting is inert
+    ULONG STDMETHODCALLTYPE AddRef() override { return 2; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** object) override {
+        if (riid == __uuidof(IDWriteTextAnalysisSource)) {
+            *object = static_cast<IDWriteTextAnalysisSource*>(this);
+            return S_OK;
+        }
+        if (riid == __uuidof(IDWriteTextAnalysisSink)) {
+            *object = static_cast<IDWriteTextAnalysisSink*>(this);
+            return S_OK;
+        }
+        if (riid == __uuidof(IUnknown)) {
+            *object = static_cast<IUnknown*>(static_cast<IDWriteTextAnalysisSource*>(this));
+            return S_OK;
+        }
+        *object = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    // IDWriteTextAnalysisSource
+    HRESULT STDMETHODCALLTYPE GetTextAtPosition(UINT32 position, const WCHAR** text,
+                                                UINT32* textLength) override {
+        if (position >= length_) { *text = nullptr; *textLength = 0; return S_OK; }
+        *text = text_ + position;
+        *textLength = length_ - position;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetTextBeforePosition(UINT32 position, const WCHAR** text,
+                                                    UINT32* textLength) override {
+        if (position == 0 || position > length_) { *text = nullptr; *textLength = 0; return S_OK; }
+        *text = text_;
+        *textLength = position;
+        return S_OK;
+    }
+    DWRITE_READING_DIRECTION STDMETHODCALLTYPE GetParagraphReadingDirection() override {
+        return DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
+    }
+    HRESULT STDMETHODCALLTYPE GetLocaleName(UINT32 position, UINT32* textLength,
+                                            const WCHAR** localeName) override {
+        *localeName = L"en-us";
+        *textLength = length_ - position;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetNumberSubstitution(UINT32 position, UINT32* textLength,
+                                                    IDWriteNumberSubstitution** substitution) override {
+        *substitution = nullptr;
+        *textLength = length_ - position;
+        return S_OK;
+    }
+
+    // IDWriteTextAnalysisSink
+    HRESULT STDMETHODCALLTYPE SetLineBreakpoints(UINT32 position, UINT32 length,
+                                                 const DWRITE_LINE_BREAKPOINT* lineBreakpoints) override {
+        for (UINT32 i = 0; i < length && position + i < breakpoints_.size(); i++) {
+            breakpoints_[position + i] = lineBreakpoints[i];
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE SetScriptAnalysis(UINT32, UINT32, const DWRITE_SCRIPT_ANALYSIS*) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE SetBidiLevel(UINT32, UINT32, UINT8, UINT8) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE SetNumberSubstitution(UINT32, UINT32, IDWriteNumberSubstitution*) override { return S_OK; }
+
+private:
+    const wchar_t* text_;
+    UINT32 length_;
+};
+
+// canBreak[i] == true when a line may break before text[i]; canBreak[len]
+// is always true. Falls back to space-only breaking if analysis fails.
+void analyzeBreakOpportunities(App& app, const std::wstring& text, std::vector<bool>& canBreak) {
+    canBreak.assign(text.size() + 1, false);
+    if (text.empty()) return;
+    canBreak[text.size()] = true;
+
+    // Fast path: plain ASCII prose with ordinary token lengths breaks at
+    // spaces exactly like the full algorithm — skip the analyzer round trip
+    bool simple = true;
+    size_t tokenLen = 0;
+    for (wchar_t c : text) {
+        if (c >= 0x80) { simple = false; break; }
+        if (c == L' ') tokenLen = 0;
+        else if (++tokenLen > 60) { simple = false; break; }  // long URLs etc. want real breaks
+    }
+    if (simple) {
+        for (size_t i = 1; i < text.size(); i++) {
+            if (text[i - 1] == L' ') canBreak[i] = true;
+        }
+        return;
+    }
+
+    bool analyzed = false;
+    if (app.textAnalyzer) {
+        LineBreakAnalysis analysis(text.c_str(), (UINT32)text.size());
+        if (SUCCEEDED(app.textAnalyzer->AnalyzeLineBreakpoints(
+                &analysis, 0, (UINT32)text.size(), &analysis))) {
+            for (size_t i = 1; i < text.size(); i++) {
+                UINT8 after = analysis.breakpoints_[i - 1].breakConditionAfter;
+                canBreak[i] = (after == DWRITE_BREAK_CONDITION_CAN_BREAK ||
+                               after == DWRITE_BREAK_CONDITION_MUST_BREAK);
+            }
+            analyzed = true;
+        }
+    }
+    if (!analyzed) {
+        for (size_t i = 1; i < text.size(); i++) {
+            if (text[i - 1] == L' ') canBreak[i] = true;
+        }
+    }
+}
+
+} // namespace
+
 static void layoutInlineContent(App& app, const std::vector<ElementPtr>& elements,
                                 float startX, float& y, float maxWidth,
                                 IDWriteTextFormat* baseFormat, D2D1_COLOR_F baseColor,
@@ -444,11 +575,13 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         float linkLineStartX = x;
         float linkLineY = y;
 
-        // Measure the whole element once: cluster metrics give every word
-        // width without creating one IDWriteTextLayout per word. Word splits
-        // happen at spaces, which are always cluster boundaries.
+        // Measure the whole element once: cluster metrics give every break
+        // unit's width without creating one IDWriteTextLayout per unit.
         std::vector<float> cumW(text.length() + 1, -1.0f);
+        std::vector<bool> isBoundary(text.length() + 1, false);
         cumW[0] = 0.0f;
+        isBoundary[0] = true;
+        isBoundary[text.length()] = true;
         {
             LayoutInfo measureInfo = createLayout(app, text, format, lineHeight, app.bodyTypography);
             if (measureInfo.layout) {
@@ -463,13 +596,16 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                         for (UINT32 ci = 0; ci < clusterCount && cpos < text.length(); ci++) {
                             w += clusters[ci].width;
                             cpos += clusters[ci].length;
-                            if (cpos <= text.length()) cumW[cpos] = w;
+                            if (cpos <= text.length()) {
+                                cumW[cpos] = w;
+                                isBoundary[cpos] = true;
+                            }
                         }
                     }
                 }
                 measureInfo.layout->Release();
             }
-            // Fill boundaries that fall inside clusters (safety; word splits
+            // Fill positions that fall inside clusters (break opportunities
             // never land there)
             float last = 0.0f;
             for (auto& v : cumW) { if (v < 0.0f) v = last; else last = v; }
@@ -516,48 +652,85 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
             segWords.clear();
         };
 
+        // Break opportunities from the Unicode line breaking algorithm:
+        // spaces for Latin text, between-ideograph positions (with proper
+        // punctuation rules) for CJK, after / and - inside URLs, etc.
+        std::vector<bool> canBreak;
+        analyzeBreakOpportunities(app, text, canBreak);
+
         size_t pos = 0;
         size_t lastWordEnd = 0;
+
+        auto emitWord = [&](size_t wordStart, size_t wordEnd) {
+            float wordWidth = widthOf(wordStart, wordEnd);
+            float wordX = segOpen ? segX + widthOf(segStart, wordStart) : x;
+
+            if (wordX + wordWidth > maxX && wordX > startX) {
+                // Unit wraps: flush the current line's segment first
+                flushSegment(lastWordEnd);
+                if (isLink && lastWordEndX > linkLineStartX) {
+                    addLinkSegment(linkLineStartX, lastWordEndX, linkLineY, linkUrl, color);
+                }
+                x = startX;
+                y += lineHeight;
+                linkLineStartX = x;
+                linkLineY = y;
+                wordX = x;
+            }
+
+            if (!segOpen) {
+                segOpen = true;
+                segStart = wordStart;
+                segX = wordX;
+            }
+            segWords.push_back({wordStart, wordEnd - wordStart});
+            lastWordEnd = wordEnd;
+            lastWordEndX = segX + widthOf(segStart, wordEnd);
+            x = lastWordEndX;
+        };
+
         while (pos < text.length()) {
-            size_t spacePos = text.find(L' ', pos);
-            if (spacePos == std::wstring::npos) spacePos = text.length();
+            // The next unit runs to the following break opportunity
+            size_t bp = pos + 1;
+            while (bp < text.length() && !canBreak[bp]) bp++;
 
-            size_t wordLen = spacePos - pos;
-            if (wordLen > 0) {
-                float wordWidth = widthOf(pos, spacePos);
-                float wordX = segOpen ? segX + widthOf(segStart, pos) : x;
+            // Trailing spaces belong to the unit but don't participate in
+            // the wrap decision and never render at a line start
+            size_t vis = bp;
+            while (vis > pos && text[vis - 1] == L' ') vis--;
 
-                if (wordX + wordWidth > maxX && wordX > startX) {
-                    // Word wraps: flush the current line's segment first
-                    flushSegment(lastWordEnd);
-                    if (isLink && lastWordEndX > linkLineStartX) {
-                        addLinkSegment(linkLineStartX, lastWordEndX, linkLineY, linkUrl, color);
+            if (vis > pos) {
+                if (widthOf(pos, vis) > maxWidth) {
+                    // Emergency break: a single unbreakable unit wider than a
+                    // whole line splits at cluster boundaries so nothing is
+                    // ever clipped or overlaps a neighbor
+                    size_t pieceStart = pos;
+                    while (widthOf(pieceStart, vis) > maxWidth) {
+                        size_t lo = pieceStart + 1, hi = vis - 1;
+                        while (lo < hi) {
+                            size_t mid = (lo + hi + 1) / 2;
+                            if (widthOf(pieceStart, mid) <= maxWidth) lo = mid;
+                            else hi = mid - 1;
+                        }
+                        size_t pieceEnd = lo;
+                        while (pieceEnd > pieceStart + 1 && !isBoundary[pieceEnd]) pieceEnd--;
+                        if (pieceEnd <= pieceStart) pieceEnd = pieceStart + 1;
+                        emitWord(pieceStart, pieceEnd);
+                        pieceStart = pieceEnd;
+                        if (pieceStart >= vis) break;
                     }
-                    x = startX;
-                    y += lineHeight;
-                    linkLineStartX = x;
-                    linkLineY = y;
-                    wordX = x;
+                    if (pieceStart < vis) emitWord(pieceStart, vis);
+                } else {
+                    emitWord(pos, vis);
                 }
-
-                if (!segOpen) {
-                    segOpen = true;
-                    segStart = pos;
-                    segX = wordX;
-                }
-                segWords.push_back({pos, wordLen});
-                lastWordEnd = spacePos;
-                lastWordEndX = segX + widthOf(segStart, spacePos);
-                x = lastWordEndX;
             }
 
-            if (spacePos < text.length()) {
-                // Advance past the space (shaped width inside an open segment)
-                x = segOpen ? segX + widthOf(segStart, spacePos + 1) : x + spaceWidth;
-                pos = spacePos + 1;
-            } else {
-                pos = spacePos;
+            if (bp > vis) {
+                // Advance x across the trailing spaces (shaped width when a
+                // segment is open)
+                x = segOpen ? segX + widthOf(segStart, bp) : x + widthOf(vis, bp);
             }
+            pos = bp;
         }
         flushSegment(lastWordEnd);
 
