@@ -64,6 +64,7 @@ void updateTextFormats(App& app) {
     if (app.codeFormat) { app.codeFormat->Release(); app.codeFormat = nullptr; }
     if (app.boldFormat) { app.boldFormat->Release(); app.boldFormat = nullptr; }
     if (app.italicFormat) { app.italicFormat->Release(); app.italicFormat = nullptr; }
+    if (app.supSubFormat) { app.supSubFormat->Release(); app.supSubFormat = nullptr; }
     for (auto& fmt : app.headingFormats) {
         if (fmt) { fmt->Release(); fmt = nullptr; }
     }
@@ -96,6 +97,11 @@ void updateTextFormats(App& app) {
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
         fontSize, L"en-us", &app.italicFormat);
 
+    // Small format for ^superscript^ / ~subscript~ spans
+    app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        fontSize * 0.68f, L"en-us", &app.supSubFormat);
+
     // Heading formats by level (use Segoe UI to match previous behavior)
     const wchar_t* headingFont = L"Segoe UI";
     float headingSizes[] = {32, 26, 22, 18, 16, 14};
@@ -111,6 +117,7 @@ void updateTextFormats(App& app) {
     if (app.codeFormat) app.codeFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     if (app.boldFormat) app.boldFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     if (app.italicFormat) app.italicFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    if (app.supSubFormat) app.supSubFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     for (auto* fmt : app.headingFormats) {
         if (fmt) fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     }

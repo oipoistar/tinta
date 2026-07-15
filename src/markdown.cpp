@@ -315,6 +315,114 @@ static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, voi
 }
 
 // MarkdownParser implementation
+// --- Inline extension post-pass (==highlight==, ^sup^, ~sub~) ---
+//
+// md4c has no extension hooks for these Obsidian/Typora spans, so a pass
+// over the finished tree splits Text nodes that contain them. Code spans,
+// code blocks, and Mermaid sources are never touched.
+
+namespace {
+
+struct ExtensionMatch {
+    size_t start;       // index of the opening delimiter
+    size_t contentLen;  // bytes between the delimiters
+    size_t delimLen;    // 2 for ==, 1 for ^ and ~
+    ElementType type;
+};
+
+// Find the first extension span at or after `from`. Delimiters are ASCII,
+// so byte scanning is UTF-8 safe.
+static bool findExtensionSpan(const std::string& text, size_t from, ExtensionMatch& match) {
+    for (size_t i = from; i < text.size(); i++) {
+        char c = text[i];
+        if (c == '=' && i + 1 < text.size() && text[i + 1] == '=') {
+            size_t close = text.find("==", i + 2);
+            if (close != std::string::npos && close > i + 2) {
+                match = {i, close - (i + 2), 2, ElementType::Highlight};
+                return true;
+            }
+        } else if (c == '~' && i + 1 < text.size() && text[i + 1] == '~') {
+            size_t close = text.find("~~", i + 2);
+            if (close != std::string::npos && close > i + 2) {
+                match = {i, close - (i + 2), 2, ElementType::Strikethrough};
+                return true;
+            }
+            // No closing ~~: fall through to try a single-tilde subscript
+            size_t single = text.find('~', i + 2);
+            if (single == std::string::npos) continue;
+            i++;  // retry from the second tilde as a potential single opener
+            continue;
+        } else if (c == '^' || c == '~') {
+            size_t close = text.find(c, i + 1);
+            if (close == std::string::npos || close == i + 1) continue;
+            // Typora rule: no whitespace inside sup/sub spans
+            bool hasSpace = false;
+            for (size_t j = i + 1; j < close; j++) {
+                unsigned char uc = static_cast<unsigned char>(text[j]);
+                if (uc == ' ' || uc == '\t' || uc == '\n') { hasSpace = true; break; }
+            }
+            if (hasSpace) continue;
+            match = {i, close - (i + 1), 1,
+                     c == '^' ? ElementType::Superscript : ElementType::Subscript};
+            return true;
+        }
+    }
+    return false;
+}
+
+static ElementPtr makeTextElement(std::string text, Element* parent) {
+    auto node = std::make_shared<Element>(ElementType::Text);
+    node->text = std::move(text);
+    node->parent = parent;
+    return node;
+}
+
+static void splitInlineExtensions(const ElementPtr& parent) {
+    if (parent->type == ElementType::Code ||
+        parent->type == ElementType::CodeBlock ||
+        parent->type == ElementType::MermaidDiagram) {
+        return;
+    }
+
+    std::vector<ElementPtr> rebuilt;
+    bool changed = false;
+    for (auto& child : parent->children) {
+        if (child->type != ElementType::Text) {
+            splitInlineExtensions(child);
+            rebuilt.push_back(child);
+            continue;
+        }
+
+        const std::string& text = child->text;
+        size_t cursor = 0;
+        ExtensionMatch m;
+        bool any = false;
+        while (findExtensionSpan(text, cursor, m)) {
+            any = true;
+            if (m.start > cursor) {
+                rebuilt.push_back(makeTextElement(text.substr(cursor, m.start - cursor), parent.get()));
+            }
+            auto span = std::make_shared<Element>(m.type);
+            span->parent = parent.get();
+            span->children.push_back(makeTextElement(
+                text.substr(m.start + m.delimLen, m.contentLen), span.get()));
+            rebuilt.push_back(std::move(span));
+            cursor = m.start + m.delimLen + m.contentLen + m.delimLen;
+        }
+        if (!any) {
+            rebuilt.push_back(child);
+            continue;
+        }
+        changed = true;
+        if (cursor < text.size()) {
+            rebuilt.push_back(makeTextElement(text.substr(cursor), parent.get()));
+        }
+    }
+    if (changed) parent->children = std::move(rebuilt);
+}
+
+} // namespace
+
 MarkdownParser::MarkdownParser() = default;
 MarkdownParser::~MarkdownParser() = default;
 
@@ -330,7 +438,9 @@ ParseResult MarkdownParser::parse(const std::string& markdown) {
         0, // abi_version
         static_cast<unsigned>(
             MD_FLAG_TABLES |
-            MD_FLAG_STRIKETHROUGH |
+            // Strikethrough is handled in the extension post-pass: md4c's
+            // implementation also consumes single ~tilde~ pairs, which we
+            // need for ~subscript~
             MD_FLAG_PERMISSIVEAUTOLINKS |
             MD_FLAG_PERMISSIVEURLAUTOLINKS |
             MD_FLAG_TASKLISTS |
@@ -361,6 +471,7 @@ ParseResult MarkdownParser::parse(const std::string& markdown) {
     }
 
     ctx.flushText();
+    splitInlineExtensions(ctx.root);
     result.root = ctx.root;
     result.success = true;
     return result;
@@ -390,6 +501,10 @@ std::string elementTypeToString(ElementType type) {
         case ElementType::Heading: return "Heading";
         case ElementType::CodeBlock: return "CodeBlock";
         case ElementType::MermaidDiagram: return "MermaidDiagram";
+        case ElementType::Highlight: return "Highlight";
+        case ElementType::Strikethrough: return "Strikethrough";
+        case ElementType::Superscript: return "Superscript";
+        case ElementType::Subscript: return "Subscript";
         case ElementType::BlockQuote: return "BlockQuote";
         case ElementType::List: return "List";
         case ElementType::ListItem: return "ListItem";

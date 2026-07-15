@@ -36,6 +36,11 @@ enum class ElementType {
     HardBreak,
     Ruby,
     RubyText,
+    // Obsidian/Typora inline extensions (parsed in a post-pass)
+    Highlight,     // ==text==
+    Superscript,   // ^text^
+    Subscript,     // ~text~
+    Strikethrough, // ~~text~~ (handled in the post-pass, not md4c)
 };
 
 // Forward declaration
