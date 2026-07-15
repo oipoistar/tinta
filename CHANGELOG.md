@@ -9,6 +9,8 @@
 ### Fixed
 - Chinese/Japanese/Korean text now wraps correctly everywhere — line breaking uses the Unicode line breaking algorithm (via DirectWrite) instead of only breaking at spaces, so CJK paragraphs fill the line and break between ideographs with proper punctuation rules, long URLs break at slashes, and table cells wrap their content within the column instead of overflowing into neighbors (#24)
 - A single unbreakable run wider than the whole line now splits at glyph-cluster boundaries instead of being clipped at the window or cell edge (#24)
+- Table columns distribute like a browser's auto layout: narrow columns keep their natural width and only wide columns shrink — a three-character CJK header no longer collapses into a vertical strip while one huge cell hogs the row (#24)
+- Tables whose minimum column widths exceed the window width now participate in horizontal scrolling
 
 ## [v2.1.5] - 2026-07-14
 
