@@ -35,6 +35,45 @@ int main() {
               ".mmd content becomes a Mermaid diagram element");
     }
 
+    // Obsidian/Typora inline extensions
+    auto ext = parseDocument(parser,
+        "before ==mark 中文== mid x^2^ and H~2~O ~~gone~~ `==not this==`\n", "notes.md");
+    check(ext.success, "extension test parses");
+    if (ext.success && !ext.root->children.empty()) {
+        const auto& para = ext.root->children[0];
+        int highlights = 0, sups = 0, subs = 0, codeIntact = 0, strikes = 0;
+        for (const auto& child : para->children) {
+            if (child->type == qmd::ElementType::Highlight) {
+                highlights++;
+                check(!child->children.empty() &&
+                      child->children[0]->text == "mark \xe4\xb8\xad\xe6\x96\x87",
+                      "highlight content preserved incl. CJK");
+            }
+            if (child->type == qmd::ElementType::Superscript) {
+                sups++;
+                check(!child->children.empty() && child->children[0]->text == "2",
+                      "superscript content preserved");
+            }
+            if (child->type == qmd::ElementType::Subscript) subs++;
+            if (child->type == qmd::ElementType::Strikethrough) {
+                strikes++;
+                check(!child->children.empty() && child->children[0]->text == "gone",
+                      "strikethrough content preserved");
+            }
+            if (child->type == qmd::ElementType::Code) {
+                codeIntact++;
+                check(!child->children.empty() &&
+                      child->children[0]->text == "==not this==",
+                      "code spans are not transformed");
+            }
+        }
+        check(highlights == 1, "one ==highlight== parsed");
+        check(sups == 1, "one ^sup^ parsed");
+        check(subs == 1, "one ~sub~ parsed");
+        check(strikes == 1, "one ~~strike~~ parsed");
+        check(codeIntact == 1, "inline code untouched");
+    }
+
     auto markdown = parseDocument(parser, "# Heading\n", "notes.md");
     check(markdown.success, "Markdown document still parses");
     check(markdown.root && !markdown.root->children.empty() &&

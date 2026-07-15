@@ -215,6 +215,10 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         D2D1_COLOR_F color = baseColor;
         std::string linkUrl = baseLinkUrl;
         bool isLink = !baseLinkUrl.empty();
+        bool hasBg = false;
+        bool hasStrike = false;
+        D2D1_COLOR_F bgColor{};
+        float drawYOffset = 0.0f;
 
         std::wstring text;
 
@@ -234,6 +238,48 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
 
             case ElementType::Emphasis:
                 format = app.italicFormat;
+                for (const auto& child : elem->children) {
+                    if (child->type == ElementType::Text) {
+                        text += toWide(child->text);
+                    }
+                }
+                break;
+
+            case ElementType::Strikethrough:
+                hasStrike = true;
+                for (const auto& child : elem->children) {
+                    if (child->type == ElementType::Text) {
+                        text += toWide(child->text);
+                    }
+                }
+                break;
+
+            case ElementType::Highlight:
+                // ==text== renders on a marker-pen background
+                hasBg = true;
+                bgColor = app.theme.isDark
+                    ? D2D1::ColorF(0.98f, 0.80f, 0.25f, 0.28f)
+                    : D2D1::ColorF(1.00f, 0.88f, 0.20f, 0.45f);
+                for (const auto& child : elem->children) {
+                    if (child->type == ElementType::Text) {
+                        text += toWide(child->text);
+                    }
+                }
+                break;
+
+            case ElementType::Superscript:
+                // Small text; NEAR alignment already sits it at the top of the line
+                format = app.supSubFormat ? app.supSubFormat : baseFormat;
+                for (const auto& child : elem->children) {
+                    if (child->type == ElementType::Text) {
+                        text += toWide(child->text);
+                    }
+                }
+                break;
+
+            case ElementType::Subscript:
+                format = app.supSubFormat ? app.supSubFormat : baseFormat;
+                drawYOffset = lineHeight * 0.38f;
                 for (const auto& child : elem->children) {
                     if (child->type == ElementType::Text) {
                         text += toWide(child->text);
@@ -446,7 +492,18 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
             std::wstring_view segText(text.data() + segStart, segEnd - segStart);
             LayoutInfo info = createLayout(app, segText, format, lineHeight, app.bodyTypography);
             float segWidth = widthOf(segStart, segEnd);
-            D2D1_POINT_2F segPos = D2D1::Point2F(segX, y);
+            if (hasBg) {
+                app.layoutRects.push_back({
+                    D2D1::RectF(segX - 2, y + 1, segX + segWidth + 2, y + lineHeight - 1),
+                    bgColor});
+            }
+            if (hasStrike) {
+                float strikeY = y + lineHeight * 0.55f;
+                app.layoutLines.push_back({D2D1::Point2F(segX, strikeY),
+                                           D2D1::Point2F(segX + segWidth, strikeY),
+                                           color, 1.0f});
+            }
+            D2D1_POINT_2F segPos = D2D1::Point2F(segX, y + drawYOffset);
             D2D1_RECT_F segBounds = D2D1::RectF(segX, y, segX + segWidth, y + lineHeight);
             addTextRun(app, std::move(info), segPos, segBounds, color,
                        textDocStart + segStart, segEnd - segStart, false);

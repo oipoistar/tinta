@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Obsidian/Typora inline extensions: `==highlight==`, `^superscript^`, `~subscript~` (#24)
+- `~~strikethrough~~` now actually renders with a line through the text — previously the markers were consumed but no styling was applied
+
 ## [v2.1.5] - 2026-07-14
 
 ### Fixed

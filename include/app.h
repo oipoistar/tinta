@@ -482,6 +482,7 @@ struct App {
     std::vector<EditAction> redoStack;
 
     // Editor text format (monospace)
+    IDWriteTextFormat* supSubFormat = nullptr;   // small size for ^sup^/~sub~
     IDWriteTextFormat* editorTextFormat = nullptr;
     float editorCharWidth = 0.0f; // Measured monospace char width
 
@@ -519,6 +520,7 @@ struct App {
         if (folderBrowserFormat) { folderBrowserFormat->Release(); folderBrowserFormat = nullptr; }
         if (tocFormat) { tocFormat->Release(); tocFormat = nullptr; }
         if (tocFormatBold) { tocFormatBold->Release(); tocFormatBold = nullptr; }
+        if (supSubFormat) { supSubFormat->Release(); supSubFormat = nullptr; }
         if (editorTextFormat) { editorTextFormat->Release(); editorTextFormat = nullptr; }
         for (auto& fmt : themePreviewFormats) {
             if (fmt.name) { fmt.name->Release(); fmt.name = nullptr; }
