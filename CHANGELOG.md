@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v2.2.0] - 2026-07-15
 
 ### Added
 - Obsidian/Typora inline extensions: `==highlight==`, `^superscript^`, `~subscript~` (#24)
