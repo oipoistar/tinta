@@ -1725,17 +1725,54 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
         }
     }
 
-    // Distribute widths: if total exceeds maxWidth, scale proportionally
+    // Distribute widths like a browser's auto table layout: columns whose
+    // natural width is under their fair share keep it untouched; only the
+    // wide columns shrink, splitting the remaining space proportionally.
+    // Pure proportional scaling starved narrow columns (a 3-character CJK
+    // header ended up one character wide) while a single huge cell hogged
+    // the row (#24).
     float totalWidth = 0;
     for (int c = 0; c < colCount; c++) totalWidth += colWidths[c];
 
     if (totalWidth > maxWidth) {
-        float ratio = maxWidth / totalWidth;
-        for (int c = 0; c < colCount; c++) {
-            colWidths[c] = std::max(minColWidth, colWidths[c] * ratio);
+        // Floor: at least ~2.5 CJK glyphs per line so no column degenerates
+        // into a vertical strip
+        float minCol = std::max(minColWidth, fontSize * 2.5f + cellPadding * 2);
+        std::vector<bool> fixed(colCount, false);
+        float available = maxWidth;
+        int unfixedCount = colCount;
+        bool changed = true;
+        while (changed && unfixedCount > 0) {
+            changed = false;
+            float fair = available / unfixedCount;
+            for (int c = 0; c < colCount; c++) {
+                if (!fixed[c] && colWidths[c] <= fair) {
+                    fixed[c] = true;
+                    available -= colWidths[c];
+                    unfixedCount--;
+                    changed = true;
+                }
+            }
+        }
+        if (unfixedCount > 0) {
+            float naturalSum = 0;
+            for (int c = 0; c < colCount; c++) {
+                if (!fixed[c]) naturalSum += colWidths[c];
+            }
+            for (int c = 0; c < colCount; c++) {
+                if (!fixed[c]) {
+                    float w = (naturalSum > 0.0f)
+                        ? available * (colWidths[c] / naturalSum)
+                        : available / unfixedCount;
+                    colWidths[c] = std::max(minCol, w);
+                }
+            }
         }
         totalWidth = 0;
         for (int c = 0; c < colCount; c++) totalWidth += colWidths[c];
+        // Minimum widths can push past maxWidth; the table then joins
+        // horizontal scrolling instead of squeezing columns unreadably
+        app.contentWidth = std::max(app.contentWidth, indent + totalWidth);
     }
 
     // Pass 1b: Measure row heights via layoutInlineContent with snapshot-rollback
