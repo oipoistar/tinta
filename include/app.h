@@ -145,6 +145,7 @@ struct App {
     // DirectWrite
     IDWriteFactory* dwriteFactory = nullptr;
     IDWriteFontFallback* fontFallback = nullptr;  // For emoji font fallback
+    IDWriteTextAnalyzer* textAnalyzer = nullptr;  // UAX#14 line-break analysis
     IDWriteTextFormat* textFormat = nullptr;
     IDWriteTextFormat* headingFormat = nullptr;
     IDWriteTextFormat* codeFormat = nullptr;
@@ -546,6 +547,7 @@ struct App {
         if (deviceContext) { deviceContext->Release(); deviceContext = nullptr; }
         if (renderTarget) { renderTarget->Release(); renderTarget = nullptr; }
         if (fontFallback) { fontFallback->Release(); fontFallback = nullptr; }
+        if (textAnalyzer) { textAnalyzer->Release(); textAnalyzer = nullptr; }
         if (textFormat) { textFormat->Release(); textFormat = nullptr; }
         if (headingFormat) { headingFormat->Release(); headingFormat = nullptr; }
         if (codeFormat) { codeFormat->Release(); codeFormat = nullptr; }
