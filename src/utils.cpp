@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "render.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -152,15 +153,32 @@ void openUrl(const std::string& url) {
 std::string slugifyHeading(const std::wstring& text) {
     std::wstring filtered;
     filtered.reserve(text.size());
+    auto isWidePunct = [](wchar_t c) {
+        // Punctuation is stripped from slugs in any script (GitHub rule):
+        // general punctuation (— …), CJK symbols/punctuation (、。「」【】),
+        // vertical/compat forms, and fullwidth ASCII punctuation variants
+        return (c >= 0x2000 && c <= 0x206F) ||
+               (c >= 0x3000 && c <= 0x303F) ||
+               (c >= 0xFE30 && c <= 0xFE4F) ||
+               (c >= 0xFF00 && c <= 0xFF0F) ||
+               (c >= 0xFF1A && c <= 0xFF20) ||
+               (c >= 0xFF3B && c <= 0xFF40) ||
+               (c >= 0xFF5B && c <= 0xFF65);
+    };
     for (wchar_t c : text) {
-        if (iswalnum(c)) {
+        if (c >= 0x80) {
+            // GitHub keeps non-ASCII letters in slugs (CJK headings form
+            // valid anchors) but still strips punctuation; iswalnum() is
+            // unreliable for both under the default C locale
+            if (!isWidePunct(c)) filtered += c;
+        } else if (iswalnum(c)) {
             filtered += towlower(c);
         } else if (c == L' ') {
             filtered += L'-';
         } else if (c == L'-' || c == L'_') {
             filtered += c;
         }
-        // else: drop punctuation/emoji/etc, matching GitHub's slug rules
+        // else: drop ASCII punctuation, matching GitHub's slug rules
     }
     if (filtered.empty()) return {};
 
@@ -177,14 +195,24 @@ void scrollToHeadingY(App& app, float headingY) {
     float maxScroll = std::max(0.0f, app.contentHeight - app.height);
     app.scrollY = std::max(0.0f, std::min(targetY, maxScroll));
     app.targetScrollY = app.scrollY;
+    // Not every click path repaints afterwards (a bare link click outside a
+    // selection doesn't) — internal jumps must show immediately
+    InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 bool scrollToHeadingId(App& app, const std::string& id) {
-    for (const auto& h : app.headings) {
-        if (h.id == id) {
-            scrollToHeadingY(app, h.y);
-            return true;
+    // Headings populate during the viewport-first background layout; an
+    // early click on an anchor into a not-yet-laid-out section would miss.
+    // Finish the layout synchronously before declaring the target absent.
+    for (int attempt = 0; attempt < 2; attempt++) {
+        for (const auto& h : app.headings) {
+            if (h.id == id) {
+                scrollToHeadingY(app, h.y);
+                return true;
+            }
         }
+        if (app.layoutComplete && !app.layoutDirty) break;
+        ensureLayoutComplete(app);
     }
     return false;
 }
