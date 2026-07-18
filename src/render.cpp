@@ -771,7 +771,12 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
             else for (const auto& c : e->children) extract(c);
         };
         for (const auto& child : elem->children) extract(child);
-        app.headings.push_back({headingText, elem->level, y});
+
+        std::string baseId = slugifyHeading(headingText);
+        int& n = app.headingSlugCounts[baseId];
+        std::string id = (n == 0) ? baseId : (baseId + "-" + std::to_string(n));
+        n++;
+        app.headings.push_back({headingText, elem->level, y, id});
     }
 
     layoutInlineContent(app, elem->children, indent, y, maxWidth, format, app.theme.heading);

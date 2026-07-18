@@ -234,8 +234,10 @@ struct App {
         std::wstring text;
         int level;       // 1-6
         float y;         // document Y coordinate
+        std::string id;  // GitHub-style slug for anchor links
     };
     std::vector<HeadingInfo> headings;
+    std::unordered_map<std::string, int> headingSlugCounts;
     int hoveredTocIndex = -1;
     float tocScroll = 0.0f;
 
@@ -512,6 +514,7 @@ struct App {
         docText.clear();
         docTextLower.clear();
         headings.clear();
+        headingSlugCounts.clear();
     }
 
     void releaseOverlayFormats() {

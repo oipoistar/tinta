@@ -149,6 +149,55 @@ void openUrl(const std::string& url) {
     }
 }
 
+std::string slugifyHeading(const std::wstring& text) {
+    std::wstring filtered;
+    filtered.reserve(text.size());
+    for (wchar_t c : text) {
+        if (iswalnum(c)) {
+            filtered += towlower(c);
+        } else if (c == L' ') {
+            filtered += L'-';
+        } else if (c == L'-' || c == L'_') {
+            filtered += c;
+        }
+        // else: drop punctuation/emoji/etc, matching GitHub's slug rules
+    }
+    if (filtered.empty()) return {};
+
+    int len = WideCharToMultiByte(CP_UTF8, 0, filtered.c_str(), (int)filtered.size(),
+                                   nullptr, 0, nullptr, nullptr);
+    std::string out(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, filtered.c_str(), (int)filtered.size(),
+                         &out[0], len, nullptr, nullptr);
+    return out;
+}
+
+void scrollToHeadingY(App& app, float headingY) {
+    float targetY = headingY - 20.0f;
+    float maxScroll = std::max(0.0f, app.contentHeight - app.height);
+    app.scrollY = std::max(0.0f, std::min(targetY, maxScroll));
+    app.targetScrollY = app.scrollY;
+}
+
+bool scrollToHeadingId(App& app, const std::string& id) {
+    for (const auto& h : app.headings) {
+        if (h.id == id) {
+            scrollToHeadingY(app, h.y);
+            return true;
+        }
+    }
+    return false;
+}
+
+void handleLinkClick(App& app) {
+    if (app.hoveredLink.empty()) return;
+    if (app.hoveredLink[0] == '#') {
+        scrollToHeadingId(app, app.hoveredLink.substr(1));
+    } else {
+        openUrl(app.hoveredLink);
+    }
+}
+
 void copyToClipboard(HWND hwnd, const std::wstring& text) {
     if (text.empty()) return;
 

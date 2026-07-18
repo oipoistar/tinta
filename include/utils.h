@@ -32,4 +32,9 @@ void openUrl(const std::string& url);
 void copyToClipboard(HWND hwnd, const std::wstring& text);
 void extractText(const ElementPtr& elem, std::wstring& out);
 
+std::string slugifyHeading(const std::wstring& text);
+void scrollToHeadingY(App& app, float headingY);
+bool scrollToHeadingId(App& app, const std::string& id);
+void handleLinkClick(App& app);
+
 #endif // TINTA_UTILS_H
