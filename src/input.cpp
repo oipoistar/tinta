@@ -579,10 +579,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             // Click inside panel
             if (app.hoveredTocIndex >= 0 && app.hoveredTocIndex < (int)app.headings.size()) {
                 // Scroll document to heading
-                float headingY = app.headings[app.hoveredTocIndex].y - 20.0f;
-                float maxScroll = std::max(0.0f, app.contentHeight - app.height);
-                app.scrollY = std::max(0.0f, std::min(headingY, maxScroll));
-                app.targetScrollY = app.scrollY;
+                scrollToHeadingY(app, app.headings[app.hoveredTocIndex].y);
 
                 // Close TOC
                 app.showToc = false;
@@ -775,7 +772,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 app.hasSelection = true;
             } else if (!app.hoveredLink.empty()) {
                 // It was just a click on a link
-                openUrl(app.hoveredLink);
+                handleLinkClick(app);
                 app.hasSelection = false;
             } else {
                 app.hasSelection = false;
@@ -784,7 +781,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         InvalidateRect(hwnd, nullptr, FALSE);
     } else if (!app.hoveredLink.empty()) {
         // Click on link
-        openUrl(app.hoveredLink);
+        handleLinkClick(app);
     }
 
     app.mouseDown = false;
