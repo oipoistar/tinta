@@ -17,6 +17,12 @@ cmake-build-*/
 *.obj
 *.pdb
 
+# Packaging
+packaging/msix/out/
+*.msix
+*.pfx
+Package.StoreAssociation.xml
+
 # Misc
 *.log
 .DS_Store

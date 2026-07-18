@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <shellapi.h>
+#include <appmodel.h>
 #include <fstream>
 #include <string>
 
@@ -84,6 +85,13 @@ Settings loadSettings() {
         }
     }
     return settings;
+}
+
+// Packaged (MSIX/Store) installs declare file associations in AppxManifest.xml;
+// runtime registry writes would only land in the package's virtual registry.
+static bool isRunningPackaged() {
+    UINT32 length = 0;
+    return GetCurrentPackageFullName(&length, nullptr) != APPMODEL_ERROR_NO_PACKAGE;
 }
 
 static bool hasRegisteredFileAssociation(std::wstring_view extension) {
@@ -199,6 +207,7 @@ void openDefaultAppsSettings() {
 }
 
 void askAndRegisterFileAssociation(Settings& settings) {
+    if (isRunningPackaged()) return;
     if (settings.hasAskedFileAssociation) {
         if (hasRegisteredFileAssociation(L".md") &&
             !hasRegisteredFileAssociation(L".mmd") &&
