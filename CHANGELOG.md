@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.3.0] - 2026-07-16
+
+### Added
+- Document-internal anchor links: `[text](#section-title)` scrolls to the matching heading, with GitHub-style slugs (including CJK headings — `[跳转到顶部](#一基础文本)` works). Contributed by @learn-more (#32), CJK slugs and edge-case polish in #33
+
 ## [v2.2.0] - 2026-07-15
 
 ### Added
