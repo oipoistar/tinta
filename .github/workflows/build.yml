@@ -54,3 +54,60 @@ jobs:
           files: build/Release/tinta.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publishes the release to the Microsoft Store (app 9MZ5MZ3L9RKF).
+  # Skips itself until the MSSTORE_* secrets are configured — see packaging/msix/README notes.
+  store:
+    runs-on: windows-latest
+    needs: build
+    env:
+      MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+      MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+      MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+      MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+
+    steps:
+      - name: Check Store credentials
+        id: gate
+        shell: bash
+        run: |
+          if [ -n "$MSSTORE_CLIENT_SECRET" ]; then
+            echo "on=true" >> $GITHUB_OUTPUT
+          else
+            echo "on=false" >> $GITHUB_OUTPUT
+            echo "MSSTORE_* secrets not set - skipping Store publish."
+          fi
+
+      - name: Checkout code
+        if: steps.gate.outputs.on == 'true'
+        uses: actions/checkout@v4
+
+      - name: Download release asset
+        if: steps.gate.outputs.on == 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build\Release | Out-Null
+          gh release download $env:GITHUB_REF_NAME --pattern tinta.exe --output build\Release\tinta.exe --repo $env:GITHUB_REPOSITORY
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pack MSIX
+        if: steps.gate.outputs.on == 'true'
+        shell: pwsh
+        run: pwsh -File packaging/msix/pack.ps1 -ExePath build/Release/tinta.exe
+
+      - name: Setup Microsoft Store CLI
+        if: steps.gate.outputs.on == 'true'
+        uses: microsoft/setup-msstore-cli@v1
+
+      - name: Configure Store CLI
+        if: steps.gate.outputs.on == 'true'
+        shell: pwsh
+        run: msstore reconfigure --tenantId $env:MSSTORE_TENANT_ID --sellerId $env:MSSTORE_SELLER_ID --clientId $env:MSSTORE_CLIENT_ID --clientSecret $env:MSSTORE_CLIENT_SECRET
+
+      - name: Publish to Microsoft Store
+        if: steps.gate.outputs.on == 'true'
+        shell: pwsh
+        run: |
+          $msix = Get-ChildItem packaging/msix/out/tinta-*.msix | Select-Object -First 1
+          msstore publish $msix.FullName --appId 9MZ5MZ3L9RKF
