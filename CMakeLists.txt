@@ -17,6 +17,9 @@ if(MSVC)
     add_compile_options(/W4)
     add_compile_options($<$<CONFIG:Release>:/O2>)
     add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    # Static CRT: the exe must run on clean Windows installs without the
+    # VC++ redistributable (costs ~250 KB, keeps the single-file promise)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 # MD4C markdown parser
