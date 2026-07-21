@@ -13,6 +13,12 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT License">
   </a>
+
+  <p>
+    <a href="https://apps.microsoft.com/detail/9MZ5MZ3L9RKF">
+      <img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get Tinta from the Microsoft Store">
+    </a>
+  </p>
 </div>
 
 <br>
@@ -27,6 +33,12 @@ Tinta is a **fast, lightweight Markdown and Mermaid viewer for Windows**, built 
 ## Download
 
 Grab [the latest release](https://github.com/oipoistar/tinta/releases/latest) — a single portable `tinta.exe`, no installation required. Run it and open a Markdown or Mermaid file.
+
+Or install from the [Microsoft Store](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF) (automatic updates, Store-signed):
+
+```pwsh
+winget install "Tinta Markdown Viewer" -s msstore
+```
 
 Or install with [Scoop](https://scoop.sh):
 
