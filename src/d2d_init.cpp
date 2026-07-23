@@ -209,6 +209,18 @@ void updateOverlayFormats(App& app) {
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         13.0f * scale, L"en-us", &app.folderBrowserFormat);
+    if (app.folderBrowserFormat) {
+        // Entries render on fixed-height rows: wrapping would overlap the next
+        // row, so keep everything single-line and trim with an ellipsis
+        app.folderBrowserFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        DWRITE_TRIMMING trimming = { DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
+        IDWriteInlineObject* ellipsis = nullptr;
+        app.dwriteFactory->CreateEllipsisTrimmingSign(app.folderBrowserFormat, &ellipsis);
+        if (ellipsis) {
+            app.folderBrowserFormat->SetTrimming(&trimming, ellipsis);
+            ellipsis->Release();
+        }
+    }
 
     // TOC formats
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,

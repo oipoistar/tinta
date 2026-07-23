@@ -176,23 +176,35 @@ void renderFolderBrowser(App& app) {
         headerColor.a = anim;
         app.brush->SetColor(headerColor);
 
-        // Truncate path if too long
+        // Truncate path if too long, keeping the tail (leaf folder) visible:
+        // measure with the actual font instead of estimating character widths,
+        // which breaks down for CJK and other wide scripts
         std::wstring displayPath = app.folderBrowserPath;
         float maxPathWidth = panelWidth - padding * 2;
 
-        // Truncation: estimate max chars from average char width, then measure once
-        if (!displayPath.empty()) {
-            float avgCharWidth = browserFormat->GetFontSize() * 0.55f;
-            size_t maxChars = (size_t)(maxPathWidth / avgCharWidth);
-            if (displayPath.length() > maxChars && maxChars > 6) {
-                // Find a separator near the truncation point for clean breaks
-                size_t keepLen = maxChars - 3;  // room for "..."
-                size_t sepPos = displayPath.rfind(L'\\', displayPath.length() - keepLen);
-                if (sepPos != std::wstring::npos && sepPos > 3) {
-                    displayPath = L"..." + displayPath.substr(sepPos);
-                } else {
-                    displayPath = L"..." + displayPath.substr(displayPath.length() - keepLen);
+        if (!displayPath.empty() && app.dwriteFactory) {
+            auto textWidth = [&](const std::wstring& s) {
+                float w = 0.0f;
+                IDWriteTextLayout* layout = nullptr;
+                if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(
+                        s.c_str(), (UINT32)s.length(), browserFormat,
+                        1000000.0f, headerHeight, &layout)) && layout) {
+                    DWRITE_TEXT_METRICS metrics;
+                    if (SUCCEEDED(layout->GetMetrics(&metrics))) {
+                        w = metrics.widthIncludingTrailingWhitespace;
+                    }
+                    layout->Release();
                 }
+                return w;
+            };
+            if (textWidth(displayPath) > maxPathWidth) {
+                std::wstring tail = displayPath;
+                while (textWidth(L"..." + tail) > maxPathWidth) {
+                    size_t sep = tail.find(L'\\', 1);
+                    if (sep == std::wstring::npos) break;  // one long component: ellipsis trimming cuts it
+                    tail = tail.substr(sep);
+                }
+                displayPath = L"..." + tail;
             }
         }
 
