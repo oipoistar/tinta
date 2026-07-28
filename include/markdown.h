@@ -59,6 +59,8 @@ struct Element {
     std::string language;     // for code blocks
     int align = 0;            // for table cells (0=default, 1=left, 2=center, 3=right)
     int col_count = 0;        // for tables (number of columns)
+    int alertKind = 0;        // for blockquotes: GitHub alert (0=none, 1=note, 2=tip,
+                              // 3=important, 4=warning, 5=caution)
 
     size_t sourceOffset = SIZE_MAX; // byte offset in original markdown source
 

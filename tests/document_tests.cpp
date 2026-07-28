@@ -74,6 +74,27 @@ int main() {
         check(codeIntact == 1, "inline code untouched");
     }
 
+    // GitHub alerts
+    auto alert = parseDocument(parser, "> [!NOTE]\n> Body text here.\n", "notes.md");
+    check(alert.success, "alert blockquote parses");
+    if (alert.success && !alert.root->children.empty()) {
+        const auto& quote = alert.root->children[0];
+        check(quote->type == qmd::ElementType::BlockQuote, "alert stays a blockquote");
+        check(quote->alertKind == 1, "[!NOTE] detected as alert kind 1");
+        check(!quote->children.empty() &&
+              !quote->children[0]->children.empty() &&
+              quote->children[0]->children[0]->text == "Body text here.",
+              "alert marker stripped, body preserved");
+    }
+    auto caution = parseDocument(parser, "> [!caution]\n> Careful.\n", "notes.md");
+    check(caution.success && !caution.root->children.empty() &&
+          caution.root->children[0]->alertKind == 5,
+          "alert markers match case-insensitively");
+    auto notAlert = parseDocument(parser, "> [!NOTE] trailing words\n", "notes.md");
+    check(notAlert.success && !notAlert.root->children.empty() &&
+          notAlert.root->children[0]->alertKind == 0,
+          "marker with trailing text on the same line stays a plain quote");
+
     auto markdown = parseDocument(parser, "# Heading\n", "notes.md");
     check(markdown.success, "Markdown document still parses");
     check(markdown.root && !markdown.root->children.empty() &&

@@ -1450,12 +1450,43 @@ static void layoutBlockquote(App& app, const ElementPtr& elem, float& y, float i
     float quoteIndent = 20.0f * scale;
     float startY = y;
 
+    // GitHub alert callouts: accent-colored bar plus a bold title line.
+    // Colors are github.com's light/dark alert accents, picked by theme.
+    static const struct {
+        const wchar_t* title;
+        uint32_t light;
+        uint32_t dark;
+    } ALERT_STYLES[] = {
+        {L"\u24D8  Note",            0x0969DA, 0x4493F8},  // circled info
+        {L"\U0001F4A1\uFE0E  Tip",   0x1A7F37, 0x3FB950},  // bulb, text presentation
+        {L"\u2757\uFE0E  Important", 0x8250DF, 0xAB7DF8},  // exclamation
+        {L"\u26A0\uFE0E  Warning",   0x9A6700, 0xD29922},  // warning triangle
+        {L"\u26D4\uFE0E  Caution",   0xCF222E, 0xF85149},  // no-entry
+    };
+
+    D2D1_COLOR_F barColor = app.theme.blockquoteBorder;
+    if (elem->alertKind >= 1 && elem->alertKind <= 5) {
+        const auto& style = ALERT_STYLES[elem->alertKind - 1];
+        barColor = hexColor(app.theme.isDark ? style.dark : style.light);
+
+        std::wstring title = style.title;
+        LayoutInfo info = createLayout(app, title, app.textFormat, 24.0f, app.bodyTypography);
+        if (info.layout) {
+            DWRITE_TEXT_RANGE range = {0, (UINT32)title.length()};
+            info.layout->SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, range);
+        }
+        D2D1_POINT_2F pos = D2D1::Point2F(indent + quoteIndent, y);
+        D2D1_RECT_F bounds = D2D1::RectF(indent + quoteIndent, y,
+                                         indent + maxWidth, y + 24 * scale);
+        addTextRun(app, std::move(info), pos, bounds, barColor, 0, 0, false);
+        y += 30 * scale;
+    }
+
     for (const auto& child : elem->children) {
         layoutElement(app, child, y, indent + quoteIndent, maxWidth - quoteIndent);
     }
 
-    app.layoutRects.push_back({D2D1::RectF(indent, startY, indent + 4, y),
-                               app.theme.blockquoteBorder});
+    app.layoutRects.push_back({D2D1::RectF(indent, startY, indent + 4, y), barColor});
 }
 
 static void layoutList(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
