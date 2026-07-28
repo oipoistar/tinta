@@ -1,5 +1,18 @@
 # Changelog
 
+## [v2.4.0] - 2026-07-29
+
+### Added
+- GitHub alerts: `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, and `[!CAUTION]` blockquotes render as styled callouts with GitHub's alert colors, adapted to light and dark themes (#41)
+- Microsoft Store releases: Tinta is on the Store as [Tinta Markdown Viewer](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF); MSIX packaging lives in `packaging/msix/` and CI can publish new versions automatically
+
+### Fixed
+- Folder browser: long file and folder names no longer wrap over the entries below — they trim with an ellipsis, and the path header keeps the end of the path visible (correctly measured for CJK names too) (#39)
+
+### Changed
+- The C runtime is statically linked: the exe runs on clean Windows installs without the VC++ Redistributable (573 KB → 821 KB, still a single dependency-free file under 1 MB)
+- Packaged (Store) installs skip the file-association prompt — associations are declared in the app manifest instead
+
 ## [v2.3.0] - 2026-07-16
 
 ### Added
