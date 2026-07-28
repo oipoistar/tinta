@@ -377,6 +377,48 @@ static ElementPtr makeTextElement(std::string text, Element* parent) {
     return node;
 }
 
+// GitHub alerts: a blockquote whose first line is exactly [!NOTE], [!TIP],
+// [!IMPORTANT], [!WARNING] or [!CAUTION] renders as a styled callout.
+// The marker must be alone on its line, matching github.com behavior.
+static void detectGitHubAlerts(const ElementPtr& parent) {
+    static const char* MARKERS[] = {"[!note]", "[!tip]", "[!important]", "[!warning]", "[!caution]"};
+
+    for (auto& child : parent->children) {
+        detectGitHubAlerts(child);
+    }
+
+    if (parent->type != ElementType::BlockQuote || parent->children.empty()) return;
+    const ElementPtr& para = parent->children.front();
+    if (para->type != ElementType::Paragraph || para->children.empty()) return;
+    const ElementPtr& first = para->children.front();
+    if (first->type != ElementType::Text) return;
+
+    std::string marker = first->text;
+    while (!marker.empty() && (marker.back() == ' ' || marker.back() == '\t')) marker.pop_back();
+    for (auto& c : marker) c = (char)tolower((unsigned char)c);
+
+    int kind = 0;
+    for (int i = 0; i < 5; i++) {
+        if (marker == MARKERS[i]) { kind = i + 1; break; }
+    }
+    if (kind == 0) return;
+
+    // Marker must be the whole first line: alone in the paragraph, or
+    // followed by a line break
+    if (para->children.size() > 1 &&
+        para->children[1]->type != ElementType::SoftBreak &&
+        para->children[1]->type != ElementType::HardBreak) {
+        return;
+    }
+
+    parent->alertKind = kind;
+    size_t remove = std::min<size_t>(2, para->children.size());  // marker text + line break
+    para->children.erase(para->children.begin(), para->children.begin() + remove);
+    if (para->children.empty()) {
+        parent->children.erase(parent->children.begin());
+    }
+}
+
 static void splitInlineExtensions(const ElementPtr& parent) {
     if (parent->type == ElementType::Code ||
         parent->type == ElementType::CodeBlock ||
@@ -472,6 +514,7 @@ ParseResult MarkdownParser::parse(const std::string& markdown) {
 
     ctx.flushText();
     splitInlineExtensions(ctx.root);
+    detectGitHubAlerts(ctx.root);
     result.root = ctx.root;
     result.success = true;
     return result;
