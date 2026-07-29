@@ -252,6 +252,16 @@ static int leaveSpanCallback(MD_SPANTYPE type, void* /*detail*/, void* userdata)
     return 0;
 }
 
+// Matches <br>, <br/>, <br /> etc., case-insensitively
+static bool isBrTag(const MD_CHAR* text, MD_SIZE size) {
+    if (size < 4 || text[0] != '<' || text[size - 1] != '>') return false;
+    std::string norm;
+    for (MD_SIZE i = 0; i < size; i++) {
+        if (!isspace((unsigned char)text[i])) norm += (char)tolower((unsigned char)text[i]);
+    }
+    return norm == "<br>" || norm == "<br/>";
+}
+
 static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata) {
     auto* ctx = static_cast<ParserContext*>(userdata);
 
@@ -261,9 +271,21 @@ static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, voi
     }
 
     switch (type) {
+        case MD_TEXT_HTML:  // Capture HTML content
+            // Inline <br> becomes a hard line break (#45); raw HTML inside an
+            // HtmlBlock keeps accumulating so parseHtmlIntoElements sees it all
+            if (ctx->current() && ctx->current()->type != ElementType::HtmlBlock &&
+                isBrTag(text, size)) {
+                ctx->flushText();
+                auto elem = std::make_shared<Element>(ElementType::HardBreak);
+                elem->parent = ctx->current();
+                ctx->current()->children.push_back(elem);
+                break;
+            }
+            ctx->addText(text, size);
+            break;
         case MD_TEXT_NORMAL:
         case MD_TEXT_CODE:
-        case MD_TEXT_HTML:  // Capture HTML content
             ctx->addText(text, size);
             break;
 

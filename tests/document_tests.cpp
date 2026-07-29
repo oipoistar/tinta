@@ -95,6 +95,21 @@ int main() {
           notAlert.root->children[0]->alertKind == 0,
           "marker with trailing text on the same line stays a plain quote");
 
+    // Inline <br> becomes a hard break (#45)
+    auto br = parseDocument(parser, "line one<br>line two<BR/>line three<br />end\n", "notes.md");
+    check(br.success, "inline br document parses");
+    if (br.success && !br.root->children.empty()) {
+        int hardBreaks = 0;
+        int literalBr = 0;
+        for (const auto& child : br.root->children[0]->children) {
+            if (child->type == qmd::ElementType::HardBreak) hardBreaks++;
+            if (child->type == qmd::ElementType::Text &&
+                child->text.find("<br") != std::string::npos) literalBr++;
+        }
+        check(hardBreaks == 3, "all three <br> variants become hard breaks");
+        check(literalBr == 0, "no literal <br> text remains");
+    }
+
     auto markdown = parseDocument(parser, "# Heading\n", "notes.md");
     check(markdown.success, "Markdown document still parses");
     check(markdown.root && !markdown.root->children.empty() &&
