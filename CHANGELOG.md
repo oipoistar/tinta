@@ -1,5 +1,11 @@
 # Changelog
 
+## [v2.4.2] - 2026-07-30
+
+### Fixed
+- Remote images no longer freeze the app while they download: documents render immediately with a placeholder, images pop in when ready, and unreachable URLs settle as their alt text instead of blocking layout for the full connection timeout (#44)
+- Inline `<br>` tags render as line breaks instead of literal text — `<br>`, `<br/>`, and `<br />` are all recognized, case-insensitively (#45)
+
 ## [v2.4.0] - 2026-07-29
 
 ### Added
