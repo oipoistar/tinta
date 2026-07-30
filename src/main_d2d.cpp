@@ -34,7 +34,6 @@ void render(App& app);
 
 void render(App& app) {
     if (!app.renderTarget) return;
-    TintaPerfTimer _perf("render", 20.0);
 
     app.renderTarget->BeginDraw();
     app.drawCalls = 0;
@@ -818,10 +817,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         case WM_MOUSEWHEEL:
-            if (app) {
-                TintaPerfTimer _perf("wheel", 20.0);
-                handleMouseWheel(*app, hwnd, wParam, lParam);
-            }
+            if (app) handleMouseWheel(*app, hwnd, wParam, lParam);
             return 0;
 
         case WM_MOUSEHWHEEL:
@@ -906,12 +902,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // Continue an incomplete document layout in ~10ms slices, yielding
             // to input between slices
             if (app && !app->layoutDirty && !app->layoutComplete) {
-                bool done;
-                {
-                    TintaPerfTimer _perf("layoutChunk", 30.0);
-                    done = layoutDocumentContinue(*app, 10000);
-                }
-                tintaPerfDump("chunk");
+                bool done = layoutDocumentContinue(*app, 10000);
                 InvalidateRect(hwnd, nullptr, FALSE);  // scrollbar grows as layout fills in
                 if (!done) PostMessage(hwnd, WM_APP_LAYOUT_CHUNK, 0, 0);
             }
