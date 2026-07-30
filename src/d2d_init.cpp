@@ -145,10 +145,13 @@ void updateTextFormats(App& app) {
                 DWRITE_UNICODE_RANGE jpRanges[] = {
                     { 0x3040, 0x309F },    // Hiragana
                     { 0x30A0, 0x30FF },    // Katakana
+                    { 0x3190, 0x319F },    // Kanbun annotation marks
                     { 0x31F0, 0x31FF },    // Katakana phonetic extensions
+                    { 0x32D0, 0x32FF },    // Circled katakana + era names (㋐ ㋿)
+                    { 0x3300, 0x3357 },    // Squared katakana words (㌔ ㌘)
                     { 0xFF65, 0xFF9F },    // Halfwidth katakana
                 };
-                builder->AddMapping(jpRanges, 4, jpFamilies, 3);
+                builder->AddMapping(jpRanges, 7, jpFamilies, 3);
 
                 // --- Korean: Korean font first ---
                 const wchar_t* krFamilies[] = {
@@ -157,9 +160,11 @@ void updateTextFormats(App& app) {
                 DWRITE_UNICODE_RANGE krRanges[] = {
                     { 0x1100, 0x11FF },    // Hangul Jamo
                     { 0x3130, 0x318F },    // Hangul compatibility Jamo
+                    { 0x3200, 0x321E },    // Parenthesized Hangul (㈀ ㈜)
+                    { 0x3260, 0x327F },    // Circled Hangul (㉠ ㉻)
                     { 0xAC00, 0xD7AF },    // Hangul syllables
                 };
-                builder->AddMapping(krRanges, 3, krFamilies, 3);
+                builder->AddMapping(krRanges, 5, krFamilies, 3);
 
                 // --- CJK ideographs: Chinese font first ---
                 // Putting Microsoft YaHei UI before Japanese fonts ensures
@@ -171,7 +176,13 @@ void updateTextFormats(App& app) {
                 };
                 DWRITE_UNICODE_RANGE cjkRanges[] = {
                     { 0x2E80, 0x303F },    // CJK radicals, Kangxi, CJK symbols & punctuation
+                    { 0x3100, 0x312F },    // Bopomofo
+                    { 0x31A0, 0x31EF },    // Bopomofo extended + CJK strokes
+                    { 0x3220, 0x325F },    // Parenthesized/circled ideographs (㈠ ㊿)
+                    { 0x3280, 0x32CF },    // Circled ideographs + months (㊀ ㋀)
+                    { 0x3358, 0x33FF },    // CJK compatibility: units (㎜ ㎡ ㏄)
                     { 0x3400, 0x4DBF },    // CJK extension A
+                    { 0x4DC0, 0x4DFF },    // Yijing hexagrams
                     { 0x4E00, 0x9FFF },    // CJK unified ideographs
                     { 0xF900, 0xFAFF },    // CJK compatibility ideographs
                     { 0xFE10, 0xFE1F },    // Vertical forms (CJK punctuation)
@@ -180,7 +191,7 @@ void updateTextFormats(App& app) {
                     { 0xFFA0, 0xFFEF },    // Halfwidth/fullwidth forms (Hangul + rest)
                     { 0x20000, 0x2FA1F },  // CJK extensions B-F
                 };
-                builder->AddMapping(cjkRanges, 9, cjkFamilies, 4);
+                builder->AddMapping(cjkRanges, 15, cjkFamilies, 4);
 
                 // Emoji/symbol fallback for everything else
                 const wchar_t* emojiFamilies[] = {
