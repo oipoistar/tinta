@@ -892,6 +892,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             return 0;
 
+        case WM_APP_IMAGE_READY:
+            // A background image download finished: swap it into the cache
+            // and reflow (handler takes ownership of the result)
+            if (app) completeAsyncImage(*app, (void*)lParam);
+            return 0;
+
         case WM_APP_LAYOUT_CHUNK:
             // Continue an incomplete document layout in ~10ms slices, yielding
             // to input between slices

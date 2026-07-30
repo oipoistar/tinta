@@ -35,6 +35,10 @@ inline int64_t usElapsed(Clock::time_point start) {
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
 
+// Posted by an image download worker thread when a remote image finished
+// loading (lParam = AsyncImageResult*, ownership transfers to the handler)
+#define WM_APP_IMAGE_READY (WM_APP + 2)
+
 // Startup metrics
 struct StartupMetrics {
     int64_t windowInitUs = 0;
@@ -132,6 +136,7 @@ struct App {
         int width = 0;
         int height = 0;
         bool failed = false;
+        bool pending = false;  // remote image download in flight
     };
     std::unordered_map<std::string, ImageEntry> imageCache;
 
