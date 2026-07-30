@@ -17,4 +17,8 @@ bool layoutDocumentContinue(App& app, int64_t budgetUs);
 // Synchronously finishes any incomplete/dirty layout (search, TOC, End key)
 void ensureLayoutComplete(App& app);
 
+// UI-thread completion for WM_APP_IMAGE_READY: takes ownership of the
+// AsyncImageResult, updates the image cache, and triggers a reflow
+void completeAsyncImage(App& app, void* asyncResult);
+
 #endif // TINTA_RENDER_H
