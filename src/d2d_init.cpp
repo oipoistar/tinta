@@ -138,20 +138,49 @@ void updateTextFormats(App& app) {
                 reinterpret_cast<void**>(&factory2)))) {
             IDWriteFontFallbackBuilder* builder = nullptr;
             if (SUCCEEDED(factory2->CreateFontFallbackBuilder(&builder))) {
-                // CJK fonts for Japanese/Chinese/Korean characters
+                // --- Japanese kana: Japanese fonts first ---
+                const wchar_t* jpFamilies[] = {
+                    L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI"
+                };
+                DWRITE_UNICODE_RANGE jpRanges[] = {
+                    { 0x3040, 0x309F },    // Hiragana
+                    { 0x30A0, 0x30FF },    // Katakana
+                    { 0x31F0, 0x31FF },    // Katakana phonetic extensions
+                    { 0xFF65, 0xFF9F },    // Halfwidth katakana
+                };
+                builder->AddMapping(jpRanges, 4, jpFamilies, 3);
+
+                // --- Korean: Korean font first ---
+                const wchar_t* krFamilies[] = {
+                    L"Malgun Gothic", L"Microsoft YaHei UI", L"Yu Gothic UI"
+                };
+                DWRITE_UNICODE_RANGE krRanges[] = {
+                    { 0x1100, 0x11FF },    // Hangul Jamo
+                    { 0x3130, 0x318F },    // Hangul compatibility Jamo
+                    { 0xAC00, 0xD7AF },    // Hangul syllables
+                };
+                builder->AddMapping(krRanges, 3, krFamilies, 3);
+
+                // --- CJK ideographs: Chinese font first ---
+                // Putting Microsoft YaHei UI before Japanese fonts ensures
+                // Chinese characters use the Chinese glyph variant and a
+                // consistent Regular weight instead of Yu Gothic UI's
+                // visually-heavier strokes.
                 const wchar_t* cjkFamilies[] = {
-                    L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI", L"Malgun Gothic"
+                    L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo", L"Malgun Gothic"
                 };
                 DWRITE_UNICODE_RANGE cjkRanges[] = {
-                    { 0x2E80, 0x9FFF },    // CJK radicals, kana, ideographs
-                    { 0xAC00, 0xD7AF },    // Hangul syllables
+                    { 0x2E80, 0x303F },    // CJK radicals, Kangxi, CJK symbols & punctuation
+                    { 0x3400, 0x4DBF },    // CJK extension A
+                    { 0x4E00, 0x9FFF },    // CJK unified ideographs
                     { 0xF900, 0xFAFF },    // CJK compatibility ideographs
                     { 0xFE10, 0xFE1F },    // Vertical forms (CJK punctuation)
                     { 0xFE30, 0xFE4F },    // CJK compatibility forms
-                    { 0xFF00, 0xFFEF },    // Halfwidth/fullwidth forms (（）：！etc.)
+                    { 0xFF00, 0xFF64 },    // Fullwidth forms (Latin, punctuation, etc.)
+                    { 0xFFA0, 0xFFEF },    // Halfwidth/fullwidth forms (Hangul + rest)
                     { 0x20000, 0x2FA1F },  // CJK extensions B-F
                 };
-                builder->AddMapping(cjkRanges, 7, cjkFamilies, 4);
+                builder->AddMapping(cjkRanges, 9, cjkFamilies, 4);
 
                 // Emoji/symbol fallback for everything else
                 const wchar_t* emojiFamilies[] = {
