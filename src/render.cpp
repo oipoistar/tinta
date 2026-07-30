@@ -26,6 +26,7 @@ struct LayoutInfo {
 
 static LayoutInfo createLayout(App& app, std::wstring_view text, IDWriteTextFormat* format,
                                float lineHeight, IDWriteTypography* typography) {
+    TintaPerfAccum _acc(&g_perfCreateMs, &g_perfCreateN);
     LayoutInfo info;
     if (!format || text.empty()) return info;
 
@@ -277,6 +278,7 @@ private:
 // canBreak[i] == true when a line may break before text[i]; canBreak[len]
 // is always true. Falls back to space-only breaking if analysis fails.
 void analyzeBreakOpportunities(App& app, const std::wstring& text, std::vector<bool>& canBreak) {
+    TintaPerfAccum _acc(&g_perfAnalyzeMs, &g_perfAnalyzeN);
     canBreak.assign(text.size() + 1, false);
     if (text.empty()) return;
     canBreak[text.size()] = true;
@@ -323,6 +325,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                                 float startX, float& y, float maxWidth,
                                 IDWriteTextFormat* baseFormat, D2D1_COLOR_F baseColor,
                                 const std::string& baseLinkUrl = {}, float customLineHeight = 0.0f) {
+    TintaPerfAccum _acc(&g_perfInlineMs, &g_perfInlineN);
     float x = startX;
     float lineHeight = customLineHeight > 0 ? customLineHeight : baseFormat->GetFontSize() * 1.7f;
     float maxX = startX + maxWidth;
@@ -577,6 +580,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
 
         // Measure the whole element once: cluster metrics give every break
         // unit's width without creating one IDWriteTextLayout per unit.
+        TintaPerfAccum _accSetup(&g_perfSetupMs, &g_perfSetupN);
         std::vector<float> cumW(text.length() + 1, -1.0f);
         std::vector<bool> isBoundary(text.length() + 1, false);
         cumW[0] = 0.0f;
@@ -660,6 +664,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
 
         size_t pos = 0;
         size_t lastWordEnd = 0;
+        TintaPerfAccum _accLoop(&g_perfLoopMs, &g_perfLoopN);
 
         auto emitWord = [&](size_t wordStart, size_t wordEnd) {
             float wordWidth = widthOf(wordStart, wordEnd);
@@ -892,6 +897,7 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
                                  size_t sourceOffset, float& y,
                                  float indent, float maxWidth,
                                  D2D1_RECT_F* renderedBounds = nullptr) {
+    TintaPerfAccum _acc(&g_perfMermaidMs, &g_perfMermaidN);
     auto parsed = mermaid::parse(source);
     if (!parsed.success || parsed.diagram.nodes.empty()) return false;
 
@@ -1699,6 +1705,7 @@ static void layoutImage(App& app, const ElementPtr& elem, float& y, float indent
 }
 
 static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+    TintaPerfAccum _acc(&g_perfTableMs, &g_perfTableN);
     float scale = app.contentScale * app.zoomFactor;
     float cellPadding = 8.0f * scale;
     float fontSize = app.textFormat->GetFontSize();
@@ -2151,6 +2158,7 @@ bool layoutDocumentContinue(App& app, int64_t budgetUs) {
 }
 
 void ensureLayoutComplete(App& app) {
+    TintaPerfTimer _perf("ensureLayoutComplete", 1.0);
     if (app.layoutDirty) {
         layoutDocument(app);
         return;

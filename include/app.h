@@ -75,6 +75,65 @@ struct D2DTheme {
 };
 
 // Helper to create color from hex
+// TEMP perf instrumentation for issue #44 — remove before release
+#include <cstdio>
+inline void tintaPerfLog(const char* what, double ms) {
+    static FILE* perfFile = nullptr;
+    if (!perfFile) {
+        char path[MAX_PATH];
+        GetTempPathA(MAX_PATH, path);
+        strcat_s(path, "tinta-perf.log");
+        fopen_s(&perfFile, path, "a");
+    }
+    if (perfFile) { fprintf(perfFile, "%s: %.1f ms\n", what, ms); fflush(perfFile); }
+}
+inline double g_perfAnalyzeMs = 0; inline int g_perfAnalyzeN = 0;
+inline double g_perfInlineMs = 0;  inline int g_perfInlineN = 0;
+inline double g_perfCreateMs = 0;  inline int g_perfCreateN = 0;
+inline double g_perfTableMs = 0;   inline int g_perfTableN = 0;
+inline double g_perfSetupMs = 0;   inline int g_perfSetupN = 0;
+inline double g_perfLoopMs = 0;    inline int g_perfLoopN = 0;
+inline double g_perfMermaidMs = 0; inline int g_perfMermaidN = 0;
+struct TintaPerfAccum {
+    double* acc; int* n; LARGE_INTEGER t0;
+    TintaPerfAccum(double* a, int* c) : acc(a), n(c) { QueryPerformanceCounter(&t0); }
+    ~TintaPerfAccum() {
+        LARGE_INTEGER t1, f;
+        QueryPerformanceCounter(&t1); QueryPerformanceFrequency(&f);
+        *acc += (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+        (*n)++;
+    }
+};
+inline void tintaPerfDump(const char* tag) {
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+        "%s breakdown: analyze %d/%.0fms | inline %d/%.0fms | createLayout %d/%.0fms | table %d/%.0fms | setup %d/%.0fms | loop %d/%.0fms | mermaid %d/%.0fms",
+        tag, g_perfAnalyzeN, g_perfAnalyzeMs, g_perfInlineN, g_perfInlineMs,
+        g_perfCreateN, g_perfCreateMs, g_perfTableN, g_perfTableMs,
+        g_perfSetupN, g_perfSetupMs, g_perfLoopN, g_perfLoopMs,
+        g_perfMermaidN, g_perfMermaidMs);
+    tintaPerfLog(buf, 0.0);
+    g_perfAnalyzeMs = g_perfInlineMs = g_perfCreateMs = g_perfTableMs = 0;
+    g_perfAnalyzeN = g_perfInlineN = g_perfCreateN = g_perfTableN = 0;
+    g_perfSetupMs = g_perfLoopMs = g_perfMermaidMs = 0;
+    g_perfSetupN = g_perfLoopN = g_perfMermaidN = 0;
+}
+struct TintaPerfTimer {
+    const char* name;
+    double threshold;
+    LARGE_INTEGER t0;
+    TintaPerfTimer(const char* n, double thresholdMs = 20.0) : name(n), threshold(thresholdMs) {
+        QueryPerformanceCounter(&t0);
+    }
+    ~TintaPerfTimer() {
+        LARGE_INTEGER t1, f;
+        QueryPerformanceCounter(&t1);
+        QueryPerformanceFrequency(&f);
+        double ms = (t1.QuadPart - t0.QuadPart) * 1000.0 / f.QuadPart;
+        if (ms >= threshold) tintaPerfLog(name, ms);
+    }
+};
+
 inline D2D1_COLOR_F hexColor(uint32_t hex, float alpha = 1.0f) {
     return D2D1::ColorF(
         ((hex >> 16) & 0xFF) / 255.0f,
