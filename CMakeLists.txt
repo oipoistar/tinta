@@ -49,6 +49,7 @@ set(SOURCES
     src/editor.cpp
     src/mermaid.cpp
     src/document.cpp
+    src/inline_style.cpp
 )
 
 set(HEADERS
@@ -67,6 +68,7 @@ set(HEADERS
     include/editor.h
     include/mermaid.h
     include/document.h
+    include/inline_style.h
 )
 
 # Windows resource file (icon)
@@ -119,6 +121,20 @@ if(BUILD_TESTING)
     )
     target_link_libraries(document_tests PRIVATE md4c)
     add_test(NAME document_types COMMAND document_tests)
+
+    add_executable(inline_style_tests
+        tests/inline_style_tests.cpp
+        src/inline_style.cpp
+        src/markdown.cpp
+        src/themes.cpp
+    )
+    target_include_directories(inline_style_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${md4c_SOURCE_DIR}/src
+    )
+    target_link_libraries(inline_style_tests PRIVATE md4c d2d1 dwrite windowscodecs)
+    target_compile_definitions(inline_style_tests PRIVATE UNICODE _UNICODE)
+    add_test(NAME inline_styles COMMAND inline_style_tests)
 endif()
 
 # Install

@@ -1,4 +1,5 @@
 #include "render.h"
+#include "inline_style.h"
 #include "utils.h"
 #include "syntax.h"
 #include "search.h"
@@ -18,6 +19,8 @@
 namespace {
 constexpr float kHugeWidth = 100000.0f;
 constexpr float kLineBucketTolerance = 5.0f;
+// Horizontal padding drawn around an inline `code` pill
+constexpr float kCodeSpanPadding = 4.0f;
 
 struct LayoutInfo {
     IDWriteTextLayout* layout = nullptr;
@@ -342,15 +345,24 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         app.linkRects.push_back(lr);
     };
 
-    for (const auto& elem : elements) {
-        IDWriteTextFormat* format = baseFormat;
-        D2D1_COLOR_F color = baseColor;
-        std::string linkUrl = baseLinkUrl;
-        bool isLink = !baseLinkUrl.empty();
-        bool hasBg = false;
-        bool hasStrike = false;
-        D2D1_COLOR_F bgColor{};
-        float drawYOffset = 0.0f;
+    InlineStyle rootStyle;
+    rootStyle.format = baseFormat;
+    rootStyle.color = baseColor;
+    rootStyle.linkUrl = baseLinkUrl;
+    rootStyle.isLink = !baseLinkUrl.empty();
+    std::vector<StyledRun> runs;
+    flattenInline(app, elements, rootStyle, lineHeight, runs);
+
+    for (const auto& run : runs) {
+        const ElementPtr& elem = run.elem;
+        IDWriteTextFormat* format = run.style.format;
+        D2D1_COLOR_F color = run.style.color;
+        const std::string& linkUrl = run.style.linkUrl;
+        bool isLink = run.style.isLink;
+        bool hasBg = run.style.hasBg;
+        bool hasStrike = run.style.hasStrike;
+        D2D1_COLOR_F bgColor = run.style.bgColor;
+        float drawYOffset = run.style.drawYOffset;
 
         std::wstring text;
 
@@ -359,72 +371,12 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 text = toWide(elem->text);
                 break;
 
-            case ElementType::Strong:
-                format = app.boldFormat;
-                for (const auto& child : elem->children) {
-                    if (child->type == ElementType::Text) {
-                        text += toWide(child->text);
-                    }
-                }
-                break;
-
-            case ElementType::Emphasis:
-                format = app.italicFormat;
-                for (const auto& child : elem->children) {
-                    if (child->type == ElementType::Text) {
-                        text += toWide(child->text);
-                    }
-                }
-                break;
-
-            case ElementType::Strikethrough:
-                hasStrike = true;
-                for (const auto& child : elem->children) {
-                    if (child->type == ElementType::Text) {
-                        text += toWide(child->text);
-                    }
-                }
-                break;
-
-            case ElementType::Highlight:
-                // ==text== renders on a marker-pen background
-                hasBg = true;
-                bgColor = app.theme.isDark
-                    ? D2D1::ColorF(0.98f, 0.80f, 0.25f, 0.28f)
-                    : D2D1::ColorF(1.00f, 0.88f, 0.20f, 0.45f);
-                for (const auto& child : elem->children) {
-                    if (child->type == ElementType::Text) {
-                        text += toWide(child->text);
-                    }
-                }
-                break;
-
-            case ElementType::Superscript:
-                // Small text; NEAR alignment already sits it at the top of the line
-                format = app.supSubFormat ? app.supSubFormat : baseFormat;
-                for (const auto& child : elem->children) {
-                    if (child->type == ElementType::Text) {
-                        text += toWide(child->text);
-                    }
-                }
-                break;
-
-            case ElementType::Subscript:
-                format = app.supSubFormat ? app.supSubFormat : baseFormat;
-                drawYOffset = lineHeight * 0.38f;
-                for (const auto& child : elem->children) {
-                    if (child->type == ElementType::Text) {
-                        text += toWide(child->text);
-                    }
-                }
-                break;
-
             case ElementType::Code: {
-                format = app.codeFormat;
-                color = app.theme.code;
+                format = inlineCodeFormat(app, run.style.bold, run.style.italic);
+                if (!isLink) color = app.theme.code;
                 for (const auto& child : elem->children) {
                     if (child->type == ElementType::Text) {
-                        text = toWide(child->text);
+                        text += toWide(child->text);
                     }
                 }
 
@@ -437,7 +389,9 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                     y += lineHeight;
                 }
 
-                app.layoutRects.push_back({D2D1::RectF(x - 2, y, x + textWidth + 4, y + lineHeight),
+                app.layoutRects.push_back({D2D1::RectF(x - 2, y,
+                                                      x + textWidth + kCodeSpanPadding,
+                                                      y + lineHeight),
                                            app.theme.codeBackground});
 
                 float codeFontHeight = format->GetFontSize() * 1.2f;
@@ -448,20 +402,13 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                            codeDocStart, text.length(), true);
 
                 app.docText += text;
-                x += textWidth + spaceWidth;
+                if (isLink) addLinkSegment(x, x + textWidth, y, linkUrl, color);
+                // Advance by the pill's own padding only: the surrounding text
+                // already carries the source's spacing, so a full space width
+                // here would double it and shove a following comma off the span
+                x += textWidth + kCodeSpanPadding;
                 continue;
             }
-
-            case ElementType::Link:
-                color = app.theme.link;
-                linkUrl = elem->url;
-                isLink = true;
-                for (const auto& child : elem->children) {
-                    if (child->type == ElementType::Text) {
-                        text += toWide(child->text);
-                    }
-                }
-                break;
 
             case ElementType::SoftBreak:
                 text = L" ";
@@ -565,9 +512,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
             }
 
             default:
-                layoutInlineContent(app, elem->children, x, y,
-                                    maxWidth - (x - startX), format, color, linkUrl);
-                continue;
+                continue;  // flattenInline only ever hands us leaves
         }
 
         if (text.empty()) continue;
