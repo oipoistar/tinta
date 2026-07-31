@@ -67,6 +67,10 @@ void updateTextFormats(App& app) {
     if (app.codeFormat) { app.codeFormat->Release(); app.codeFormat = nullptr; }
     if (app.boldFormat) { app.boldFormat->Release(); app.boldFormat = nullptr; }
     if (app.italicFormat) { app.italicFormat->Release(); app.italicFormat = nullptr; }
+    if (app.boldItalicFormat) { app.boldItalicFormat->Release(); app.boldItalicFormat = nullptr; }
+    if (app.codeBoldFormat) { app.codeBoldFormat->Release(); app.codeBoldFormat = nullptr; }
+    if (app.codeItalicFormat) { app.codeItalicFormat->Release(); app.codeItalicFormat = nullptr; }
+    if (app.codeBoldItalicFormat) { app.codeBoldItalicFormat->Release(); app.codeBoldItalicFormat = nullptr; }
     if (app.supSubFormat) { app.supSubFormat->Release(); app.supSubFormat = nullptr; }
     for (auto& fmt : app.headingFormats) {
         if (fmt) { fmt->Release(); fmt = nullptr; }
@@ -100,6 +104,24 @@ void updateTextFormats(App& app) {
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
         fontSize, L"en-us", &app.italicFormat);
 
+    // Inline spans nest, so every weight/style combination needs a format:
+    // ***both***, **`code`**, *`code`*
+    app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
+        fontSize, L"en-us", &app.boldItalicFormat);
+
+    app.dwriteFactory->CreateTextFormat(codeFont, nullptr,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        codeSize, L"en-us", &app.codeBoldFormat);
+
+    app.dwriteFactory->CreateTextFormat(codeFont, nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
+        codeSize, L"en-us", &app.codeItalicFormat);
+
+    app.dwriteFactory->CreateTextFormat(codeFont, nullptr,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
+        codeSize, L"en-us", &app.codeBoldItalicFormat);
+
     // Small format for ^superscript^ / ~subscript~ spans
     app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
@@ -120,6 +142,10 @@ void updateTextFormats(App& app) {
     if (app.codeFormat) app.codeFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     if (app.boldFormat) app.boldFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     if (app.italicFormat) app.italicFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    if (app.boldItalicFormat) app.boldItalicFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    if (app.codeBoldFormat) app.codeBoldFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    if (app.codeItalicFormat) app.codeItalicFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    if (app.codeBoldItalicFormat) app.codeBoldItalicFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     if (app.supSubFormat) app.supSubFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     for (auto* fmt : app.headingFormats) {
         if (fmt) fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);

@@ -156,6 +156,11 @@ struct App {
     IDWriteTextFormat* codeFormat = nullptr;
     IDWriteTextFormat* boldFormat = nullptr;
     IDWriteTextFormat* italicFormat = nullptr;
+    // Nested inline spans: **bold *italic***, **`code`**, *`code`*
+    IDWriteTextFormat* boldItalicFormat = nullptr;
+    IDWriteTextFormat* codeBoldFormat = nullptr;
+    IDWriteTextFormat* codeItalicFormat = nullptr;
+    IDWriteTextFormat* codeBoldItalicFormat = nullptr;
     IDWriteTextFormat* headingFormats[6] = {};
 
     // Overlay text formats (cached)
@@ -561,6 +566,10 @@ struct App {
         if (codeFormat) { codeFormat->Release(); codeFormat = nullptr; }
         if (boldFormat) { boldFormat->Release(); boldFormat = nullptr; }
         if (italicFormat) { italicFormat->Release(); italicFormat = nullptr; }
+        if (boldItalicFormat) { boldItalicFormat->Release(); boldItalicFormat = nullptr; }
+        if (codeBoldFormat) { codeBoldFormat->Release(); codeBoldFormat = nullptr; }
+        if (codeItalicFormat) { codeItalicFormat->Release(); codeItalicFormat = nullptr; }
+        if (codeBoldItalicFormat) { codeBoldItalicFormat->Release(); codeBoldItalicFormat = nullptr; }
         for (auto& fmt : headingFormats) {
             if (fmt) { fmt->Release(); fmt = nullptr; }
         }
