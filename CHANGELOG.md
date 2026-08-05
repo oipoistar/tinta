@@ -1,5 +1,18 @@
 # Changelog
 
+## [v2.4.5] - 2026-08-05
+
+### Added
+- Folder browser: click the path at the top to turn it into an edit box with everything selected — paste a path and press Enter to jump anywhere; a folder path browses there, a file path opens the file. Explorer's quoted "Copy as path" output and environment variables like `%USERPROFILE%` are handled (#52)
+- Folder browser: new +folder and +file buttons create items in the browsed directory; a new file (`.md` added automatically when no extension is given) opens straight into edit mode for immediate note-taking (#52)
+
+### Fixed
+- Nested inline spans render completely: `` `code` `` inside **bold** or a link, *italic* inside bold, and strikethrough/highlight inside emphasis previously vanished from the page; each combination now renders with its merged style, including bold/italic monospace faces (#51)
+- Chinese text renders with Microsoft YaHei UI instead of Japanese font variants: the font fallback is now split by Unicode range (kana → Japanese fonts, Hangul → Malgun Gothic, shared ideographs → Chinese-first), fixing wrong glyph shapes and visually heavier strokes (#48)
+
+### Changed
+- Inline code spans no longer add a stray space after the pill — a comma following `` `code` `` now sits next to it (#51)
+
 ## [v2.4.2] - 2026-07-30
 
 ### Fixed
