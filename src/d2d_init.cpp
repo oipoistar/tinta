@@ -379,7 +379,8 @@ bool createRenderTarget(App& app) {
     D2D1_SIZE_U size = D2D1::SizeU(rc.right - rc.left, rc.bottom - rc.top);
 
     D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties();
-    rtProps.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
+    rtProps.type = app.useHardwareRT ? D2D1_RENDER_TARGET_TYPE_DEFAULT
+                                     : D2D1_RENDER_TARGET_TYPE_SOFTWARE;
     rtProps.dpiX = 96.0f;
     rtProps.dpiY = 96.0f;
     rtProps.usage = D2D1_RENDER_TARGET_USAGE_NONE;

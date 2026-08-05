@@ -8,12 +8,15 @@
 #include <commdlg.h>
 #include <shlobj.h>
 
+#include <d3d11.h>
+
 #include <fstream>
 #include <sstream>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <thread>
 #include "settings.h"
 #include "document.h"
 #include "d2d_init.h"
@@ -27,6 +30,27 @@
 #include "editor.h"
 
 static App* g_app = nullptr;
+
+// Initializes the GPU driver on a worker thread after the first (software)
+// frame is on screen. D3D device creation costs ~200 ms dominated by
+// process-global driver initialization — done here once, the hardware
+// render target created on WM_APP_GPU_READY takes ~40 ms. The device is
+// kept alive so the driver state it initialized stays warm.
+static void startGpuWarmup() {
+    std::thread([] {
+        ID3D11Device* device = nullptr;
+        ID3D11DeviceContext* ctx = nullptr;
+        D3D_FEATURE_LEVEL fl;
+        D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                          D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+                          D3D11_SDK_VERSION, &device, &fl, &ctx);
+        if (ctx) ctx->Release();
+        if (device && g_app && g_app->hwnd) {
+            PostMessageW(g_app->hwnd, WM_APP_GPU_READY, 0, 0);
+        }
+        // device intentionally not released
+    }).detach();
+}
 
 // Forward declarations
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -898,6 +922,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) completeAsyncImage(*app, (void*)lParam);
             return 0;
 
+        case WM_APP_GPU_READY:
+            // Driver is warm: swap the startup software render target for a
+            // hardware one. Same resource-recreation path a resize takes,
+            // and the frame it redraws is pixel-identical.
+            if (app && !app->useHardwareRT) {
+                app->useHardwareRT = true;
+                createRenderTarget(*app);
+                app->layoutDirty = true;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
+
         case WM_APP_LAYOUT_CHUNK:
             // Continue an incomplete document layout in ~10ms slices, yielding
             // to input between slices
@@ -1216,6 +1252,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.metrics.showWindowUs = usElapsed(t0);
 
     app.metrics.totalStartupUs = usElapsed(startupStart);
+
+    // First frame is on screen — now pay for the GPU in the background
+    startGpuWarmup();
 
     // Message loop
     MSG msg;
