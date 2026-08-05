@@ -247,8 +247,12 @@ void renderFolderBrowser(App& app) {
         float folderBtnX = fileBtnX - btnGap - btnSize;
         float btnY = headerY + (headerHeight - btnSize) / 2 - dpi(app, 6.0f);
 
+        // Path text, edit box, and buttons all center on the button midline
+        float headerCenterY = btnY + btnSize / 2;
+
         if (app.folderBrowserEditingPath) {
-            drawInputBox(panelX + padding, panelX + panelWidth - padding, headerY - dpi(app, 2.0f));
+            drawInputBox(panelX + padding, panelX + panelWidth - padding,
+                         headerCenterY - boxHeight / 2);
         } else {
             D2D1_COLOR_F headerColor = app.theme.heading;
             headerColor.a = anim;
@@ -272,20 +276,21 @@ void renderFolderBrowser(App& app) {
             // Subtle hover backdrop signals the path is clickable
             bool pathHovered = app.mouseX >= panelX + padding - dpi(app, 4.0f) &&
                                app.mouseX < folderBtnX - dpi(app, 2.0f) &&
-                               app.mouseY >= headerY && app.mouseY <= headerY + headerHeight * 0.6f;
+                               app.mouseY >= btnY && app.mouseY <= btnY + btnSize;
             if (pathHovered) {
                 D2D1_COLOR_F hoverColor = app.theme.accent;
                 hoverColor.a = 0.12f * anim;
                 app.brush->SetColor(hoverColor);
                 app.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(D2D1::RectF(panelX + padding - dpi(app, 4.0f), headerY - dpi(app, 2.0f),
-                                                  folderBtnX - dpi(app, 2.0f), headerY + dpi(app, 22.0f)), 4, 4),
+                    D2D1::RoundedRect(D2D1::RectF(panelX + padding - dpi(app, 4.0f), btnY,
+                                                  folderBtnX - dpi(app, 2.0f), btnY + btnSize), 4, 4),
                     app.brush);
             }
 
             app.brush->SetColor(headerColor);
             app.renderTarget->DrawText(displayPath.c_str(), (UINT32)displayPath.length(), browserFormat,
-                D2D1::RectF(panelX + padding, headerY, folderBtnX - dpi(app, 4.0f), headerY + headerHeight),
+                D2D1::RectF(panelX + padding, headerCenterY - dpi(app, 9.0f),
+                            folderBtnX - dpi(app, 4.0f), headerY + headerHeight),
                 app.brush);
 
             // + folder / + file buttons
