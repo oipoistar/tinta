@@ -20,6 +20,166 @@ static HCURSOR cursorArrow = LoadCursor(nullptr, IDC_ARROW);
 static HCURSOR cursorHand  = LoadCursor(nullptr, IDC_HAND);
 static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
 
+// Loads a document into the viewer and resets per-document state.
+// Shared by the folder browser's item clicks, path input, and new-file flow.
+static bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
+    std::ifstream file(fullPath);
+    if (!file) return false;
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    auto result = parseDocument(app.parser, buffer.str(), fullPath);
+    if (!result.success) return false;
+
+    app.root = result.root;
+    app.parseTimeUs = result.parseTimeUs;
+    int utf8Len = WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    app.currentFile.resize(utf8Len - 1);
+    WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, &app.currentFile[0], utf8Len, nullptr, nullptr);
+    app.scrollY = 0;
+    app.scrollX = 0;
+    app.targetScrollY = 0;
+    app.targetScrollX = 0;
+    app.focusMermaidOnNextLayout = isMermaidDocumentPath(fullPath);
+    app.contentHeight = 0;
+    app.docText.clear();
+    app.docTextLower.clear();
+    app.searchMatches.clear();
+    app.layoutDirty = true;
+    updateFileWriteTime(app);
+    updateWindowTitle(app);
+    return true;
+}
+
+// --- Folder browser path/name input (#52) ---
+
+static void closeFolderBrowserInput(App& app) {
+    app.folderBrowserEditingPath = false;
+    app.folderBrowserNaming = 0;
+    app.folderBrowserInput.clear();
+    app.folderBrowserInputSelectAll = false;
+    app.folderBrowserInputError = false;
+    updateBlinkTimer(app);
+}
+
+// Single-line clipboard text: newlines and tabs become spaces
+static std::wstring clipboardLine(HWND hwnd) {
+    if (!OpenClipboard(hwnd)) return {};
+    std::wstring text;
+    if (HANDLE hData = GetClipboardData(CF_UNICODETEXT)) {
+        if (wchar_t* ptr = (wchar_t*)GlobalLock(hData)) {
+            text = ptr;
+            GlobalUnlock(hData);
+        }
+    }
+    CloseClipboard();
+    for (wchar_t& ch : text) {
+        if (ch == L'\r' || ch == L'\n' || ch == L'\t') ch = L' ';
+    }
+    return text;
+}
+
+// Trims whitespace and the quotes Explorer's "Copy as path" adds
+static std::wstring cleanPathInput(std::wstring s) {
+    auto trim = [](std::wstring& t) {
+        size_t a = t.find_first_not_of(L" ");
+        size_t b = t.find_last_not_of(L" ");
+        t = (a == std::wstring::npos) ? L"" : t.substr(a, b - a + 1);
+    };
+    trim(s);
+    if (s.length() >= 2 && s.front() == L'"' && s.back() == L'"') {
+        s = s.substr(1, s.length() - 2);
+        trim(s);
+    }
+    return s;
+}
+
+// Enter in the path box: a directory browses there, a file opens
+static void commitFolderBrowserPath(App& app) {
+    std::wstring path = cleanPathInput(app.folderBrowserInput);
+    if (path.empty()) {
+        closeFolderBrowserInput(app);
+        return;
+    }
+    wchar_t expanded[MAX_PATH];
+    if (ExpandEnvironmentStringsW(path.c_str(), expanded, MAX_PATH) > 0) {
+        path = expanded;
+    }
+
+    DWORD attrs = GetFileAttributesW(path.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES) {
+        app.folderBrowserInputError = true;
+        return;
+    }
+    if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
+        // Strip a trailing separator (but keep drive roots like C:\)
+        while (path.length() > 3 && (path.back() == L'\\' || path.back() == L'/')) {
+            path.pop_back();
+        }
+        app.folderBrowserPath = path;
+        populateFolderItems(app);
+        closeFolderBrowserInput(app);
+        return;
+    }
+    if (isSupportedDropPath(path) && openDocumentInViewer(app, path)) {
+        closeFolderBrowserInput(app);
+        app.showFolderBrowser = false;
+        app.folderBrowserAnimation = 0;
+    } else {
+        app.folderBrowserInputError = true;
+    }
+}
+
+// Enter in the naming box: creates the file/folder in the browsed directory.
+// A new folder is entered; a new file opens straight into edit mode.
+static void commitFolderBrowserNaming(App& app) {
+    std::wstring name = cleanPathInput(app.folderBrowserInput);
+    if (name.empty()) {
+        closeFolderBrowserInput(app);
+        return;
+    }
+    if (name.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos ||
+        name == L"." || name == L"..") {
+        app.folderBrowserInputError = true;
+        return;
+    }
+
+    bool isFolder = app.folderBrowserNaming == 2;
+    if (!isFolder && name.find(L'.') == std::wstring::npos) {
+        name += L".md";
+    }
+    std::wstring fullPath = app.folderBrowserPath;
+    if (!fullPath.empty() && fullPath.back() != L'\\' && fullPath.back() != L'/') {
+        fullPath += L'\\';
+    }
+    fullPath += name;
+
+    if (isFolder) {
+        if (!CreateDirectoryW(fullPath.c_str(), nullptr)) {
+            app.folderBrowserInputError = true;
+            return;
+        }
+        app.folderBrowserPath = fullPath;
+        populateFolderItems(app);
+        closeFolderBrowserInput(app);
+        return;
+    }
+
+    // CREATE_NEW fails if the file already exists instead of truncating it
+    HANDLE h = CreateFileW(fullPath.c_str(), GENERIC_WRITE, 0, nullptr,
+                           CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        app.folderBrowserInputError = true;
+        return;
+    }
+    CloseHandle(h);
+    if (openDocumentInViewer(app, fullPath)) {
+        closeFolderBrowserInput(app);
+        app.showFolderBrowser = false;
+        app.folderBrowserAnimation = 0;
+        enterEditMode(app);
+    }
+}
+
 // Ctrl+wheel zoom. The scroll anchor scales immediately, but text format
 // recreation (~47 COM objects) + full relayout is applied on the leading
 // tick and then coalesced via TIMER_ZOOM_APPLY while the wheel keeps spinning.
@@ -75,7 +235,8 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             float itemHeight = dpi(app, 28.0f);
             float headerHeight = dpi(app, 48.0f);
             float listHeight = app.height - headerHeight - dpi(app, 20.0f);
-            float totalItemsHeight = app.folderItems.size() * itemHeight;
+            float totalItemsHeight = app.folderItems.size() * itemHeight +
+                (app.folderBrowserNaming != 0 ? itemHeight : 0.0f);
             float maxScroll = std::max(0.0f, totalItemsHeight - listHeight);
             app.folderBrowserScroll = std::max(0.0f, std::min(app.folderBrowserScroll, maxScroll));
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -606,6 +767,58 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
         // Check if click is inside panel
         if (clickX >= panelX && clickX <= panelX + panelWidth) {
+            // Header geometry (must match renderFolderBrowser)
+            float padding = dpi(app, 12.0f);
+            float headerY = padding;
+            float headerHeight = dpi(app, 40.0f);
+            float btnSize = dpi(app, 24.0f);
+            float btnGap = dpi(app, 6.0f);
+            float fileBtnX = panelX + panelWidth - padding - btnSize;
+            float folderBtnX = fileBtnX - btnGap - btnSize;
+            float btnY = headerY + (headerHeight - btnSize) / 2 - dpi(app, 6.0f);
+            bool inHeader = clickY >= headerY && clickY <= headerY + headerHeight;
+
+            // An active input keeps focus when clicked, anything else cancels it
+            if (app.folderBrowserEditingPath || app.folderBrowserNaming != 0) {
+                bool onInput = app.folderBrowserEditingPath
+                    ? inHeader
+                    : (clickY >= headerY + headerHeight + dpi(app, 8.0f) &&
+                       clickY <= headerY + headerHeight + dpi(app, 8.0f) + dpi(app, 28.0f));
+                if (onInput) {
+                    app.folderBrowserInputSelectAll = false;
+                } else {
+                    closeFolderBrowserInput(app);
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+
+            if (inHeader && clickY >= btnY && clickY <= btnY + btnSize &&
+                clickX >= folderBtnX && clickX <= fileBtnX + btnSize) {
+                // + folder / + file buttons: start naming a new item
+                app.folderBrowserNaming = (clickX < folderBtnX + btnSize + btnGap / 2) ? 2 : 1;
+                app.folderBrowserInput.clear();
+                app.folderBrowserInputSelectAll = false;
+                app.folderBrowserInputError = false;
+                app.folderBrowserScroll = 0.0f;
+                updateBlinkTimer(app);
+                resetCursorBlink(app);
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+            if (inHeader) {
+                // Path header becomes an edit box with everything selected,
+                // so click + paste + Enter jumps straight to a new path (#52)
+                app.folderBrowserEditingPath = true;
+                app.folderBrowserInput = app.folderBrowserPath;
+                app.folderBrowserInputSelectAll = true;
+                app.folderBrowserInputError = false;
+                updateBlinkTimer(app);
+                resetCursorBlink(app);
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+
             // Hit-test items
             if (app.hoveredFolderIndex >= 0 && app.hoveredFolderIndex < (int)app.folderItems.size()) {
                 const auto& item = app.folderItems[app.hoveredFolderIndex];
@@ -631,41 +844,16 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                     }
                     fullPath += item.name;
 
-                    // Load the file
-                    std::ifstream file(fullPath);
-                    if (file) {
-                        std::stringstream buffer;
-                        buffer << file.rdbuf();
-                        auto result = parseDocument(app.parser, buffer.str(), fullPath);
-                        if (result.success) {
-                            app.root = result.root;
-                            app.parseTimeUs = result.parseTimeUs;
-                            // Convert wide path to UTF-8 for currentFile
-                            int utf8Len = WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
-                            app.currentFile.resize(utf8Len - 1);
-                            WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, &app.currentFile[0], utf8Len, nullptr, nullptr);
-                            app.scrollY = 0;
-                            app.scrollX = 0;
-                            app.targetScrollY = 0;
-                            app.targetScrollX = 0;
-                            app.focusMermaidOnNextLayout = isMermaidDocumentPath(fullPath);
-                            app.contentHeight = 0;
-                            app.docText.clear();
-                            app.docTextLower.clear();
-                            app.searchMatches.clear();
-                            app.layoutDirty = true;
-                            updateFileWriteTime(app);
-                            updateWindowTitle(app);
-
-                            // Close folder browser after opening file
-                            app.showFolderBrowser = false;
-                            app.folderBrowserAnimation = 0;
-                        }
+                    if (openDocumentInViewer(app, fullPath)) {
+                        // Close folder browser after opening file
+                        app.showFolderBrowser = false;
+                        app.folderBrowserAnimation = 0;
                     }
                 }
             }
         } else {
             // Click outside panel = close browser
+            closeFolderBrowserInput(app);
             app.showFolderBrowser = false;
             app.folderBrowserAnimation = 0;
         }
@@ -809,6 +997,48 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return;
     }
 
+    // Folder browser path/name input captures the keyboard while active
+    // (printable characters arrive separately via WM_CHAR)
+    if (app.showFolderBrowser &&
+        (app.folderBrowserEditingPath || app.folderBrowserNaming != 0)) {
+        if (ctrl && wParam == 'V') {
+            std::wstring pasted = clipboardLine(hwnd);
+            if (!pasted.empty()) {
+                if (app.folderBrowserInputSelectAll) {
+                    app.folderBrowserInput.clear();
+                    app.folderBrowserInputSelectAll = false;
+                }
+                app.folderBrowserInput += pasted;
+                app.folderBrowserInputError = false;
+                resetCursorBlink(app);
+            }
+        } else if (ctrl && wParam == 'A') {
+            if (!app.folderBrowserInput.empty()) app.folderBrowserInputSelectAll = true;
+        } else if (!ctrl) {
+            switch (wParam) {
+                case VK_ESCAPE:
+                    closeFolderBrowserInput(app);
+                    break;
+                case VK_RETURN:
+                    if (app.folderBrowserEditingPath) commitFolderBrowserPath(app);
+                    else commitFolderBrowserNaming(app);
+                    break;
+                case VK_BACK:
+                    if (app.folderBrowserInputSelectAll) {
+                        app.folderBrowserInput.clear();
+                        app.folderBrowserInputSelectAll = false;
+                    } else if (!app.folderBrowserInput.empty()) {
+                        app.folderBrowserInput.pop_back();
+                    }
+                    app.folderBrowserInputError = false;
+                    resetCursorBlink(app);
+                    break;
+            }
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Handle search-specific keys when search is active
     if (app.showSearch && app.searchActive) {
         switch (wParam) {
@@ -932,6 +1162,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 // B to toggle folder browser
                 if (!app.showSearch && !app.showThemeChooser && !app.showToc) {
                     app.showFolderBrowser = !app.showFolderBrowser;
+                    closeFolderBrowserInput(app);
                     if (app.showFolderBrowser) {
                         app.folderBrowserAnimation = 0;
                         // Initialize to directory of current file, or working directory
@@ -1048,6 +1279,22 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
             InvalidateRect(app.hwnd, nullptr, FALSE);
             return;
         }
+    }
+
+    if (app.showFolderBrowser &&
+        (app.folderBrowserEditingPath || app.folderBrowserNaming != 0)) {
+        wchar_t ch = (wchar_t)wParam;
+        if (ch >= 32 && ch != 127) {
+            if (app.folderBrowserInputSelectAll) {
+                app.folderBrowserInput.clear();
+                app.folderBrowserInputSelectAll = false;
+            }
+            app.folderBrowserInput += ch;
+            app.folderBrowserInputError = false;
+            resetCursorBlink(app);
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return;
     }
 
     if (app.showSearch && app.searchActive) {

@@ -226,6 +226,13 @@ struct App {
     int hoveredFolderIndex = -1;
     float folderBrowserScroll = 0.0f;     // Scroll offset for folder list
 
+    // Path header editing + new file/folder creation (#52)
+    bool folderBrowserEditingPath = false;   // Path header is an edit box
+    int folderBrowserNaming = 0;             // 0 = off, 1 = naming a new file, 2 = a new folder
+    std::wstring folderBrowserInput;         // Single-line buffer shared by both inputs
+    bool folderBrowserInputSelectAll = false; // Whole input selected: next keystroke replaces it
+    bool folderBrowserInputError = false;    // Last commit failed (bad path/name): red border
+
     // Help overlay
     bool showHelp = false;
     float helpAnimation = 0.0f;
@@ -610,7 +617,9 @@ inline float documentViewportWidth(const App& app) {
 // app is fully idle between blinks. Call after editMode/search state changes.
 inline void updateBlinkTimer(App& app) {
     if (!app.hwnd) return;
-    if (app.editMode || (app.showSearch && app.searchActive)) {
+    if (app.editMode || (app.showSearch && app.searchActive) ||
+        (app.showFolderBrowser &&
+         (app.folderBrowserEditingPath || app.folderBrowserNaming != 0))) {
         app.cursorBlinkOn = true;
         SetTimer(app.hwnd, TIMER_CURSOR_BLINK, 500, nullptr);
     } else {
