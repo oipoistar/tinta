@@ -170,34 +170,96 @@ void renderFolderBrowser(App& app) {
         float itemHeight = dpi(app, 28.0f);
         float headerHeight = dpi(app, 40.0f);
 
-        // Current path header
+        // Current path header — click converts it to an edit box (#52)
         float headerY = panelY + padding;
-        D2D1_COLOR_F headerColor = app.theme.heading;
-        headerColor.a = anim;
-        app.brush->SetColor(headerColor);
 
-        // Truncate path if too long, keeping the tail (leaf folder) visible:
-        // measure with the actual font instead of estimating character widths,
-        // which breaks down for CJK and other wide scripts
-        std::wstring displayPath = app.folderBrowserPath;
-        float maxPathWidth = panelWidth - padding * 2;
-
-        if (!displayPath.empty() && app.dwriteFactory) {
-            auto textWidth = [&](const std::wstring& s) {
-                float w = 0.0f;
-                IDWriteTextLayout* layout = nullptr;
-                if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(
-                        s.c_str(), (UINT32)s.length(), browserFormat,
-                        1000000.0f, headerHeight, &layout)) && layout) {
-                    DWRITE_TEXT_METRICS metrics;
-                    if (SUCCEEDED(layout->GetMetrics(&metrics))) {
-                        w = metrics.widthIncludingTrailingWhitespace;
-                    }
-                    layout->Release();
+        auto textWidth = [&](const std::wstring& s) {
+            float w = 0.0f;
+            IDWriteTextLayout* layout = nullptr;
+            if (app.dwriteFactory && SUCCEEDED(app.dwriteFactory->CreateTextLayout(
+                    s.c_str(), (UINT32)s.length(), browserFormat,
+                    1000000.0f, headerHeight, &layout)) && layout) {
+                DWRITE_TEXT_METRICS metrics;
+                if (SUCCEEDED(layout->GetMetrics(&metrics))) {
+                    w = metrics.widthIncludingTrailingWhitespace;
                 }
-                return w;
-            };
-            if (textWidth(displayPath) > maxPathWidth) {
+                layout->Release();
+            }
+            return w;
+        };
+
+        D2D1_COLOR_F accentColor = app.theme.accent;
+        accentColor.a = anim;
+        D2D1_COLOR_F errorColor = hexColor(app.theme.isDark ? 0xF85149 : 0xCF222E, anim);
+        float inputPad = dpi(app, 6.0f);
+        float boxHeight = dpi(app, 26.0f);
+
+        // Draws a single-line input box; the text is clipped from the left so
+        // its tail (where typing happens) stays visible, with select-all
+        // highlight and a caret at the end
+        auto drawInputBox = [&](float boxX, float boxRight, float boxY) {
+            D2D1_RECT_F box = D2D1::RectF(boxX, boxY, boxRight, boxY + boxHeight);
+            D2D1_COLOR_F boxBg = app.theme.isDark ? hexColor(0x2A2A30, 0.9f * anim)
+                                                  : hexColor(0xFFFFFF, 0.9f * anim);
+            app.brush->SetColor(boxBg);
+            app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(box, 4, 4), app.brush);
+            app.brush->SetColor(app.folderBrowserInputError ? errorColor : accentColor);
+            app.renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(box, 4, 4), app.brush, 1.0f);
+
+            std::wstring display = app.folderBrowserInput;
+            float maxTextWidth = (boxRight - boxX) - inputPad * 2 - dpi(app, 2.0f);
+            while (!display.empty() && textWidth(display) > maxTextWidth) {
+                display.erase(0, 1);
+            }
+            float shownWidth = textWidth(display);
+            float textY = boxY + (boxHeight - dpi(app, 18.0f)) / 2;
+
+            if (app.folderBrowserInputSelectAll && !display.empty()) {
+                D2D1_COLOR_F selColor = app.theme.accent;
+                selColor.a = 0.35f * anim;
+                app.brush->SetColor(selColor);
+                app.renderTarget->FillRectangle(
+                    D2D1::RectF(boxX + inputPad - 1, boxY + dpi(app, 3.0f),
+                                boxX + inputPad + shownWidth + 1, boxY + boxHeight - dpi(app, 3.0f)),
+                    app.brush);
+            }
+
+            D2D1_COLOR_F inputTextColor = app.theme.text;
+            inputTextColor.a = anim;
+            app.brush->SetColor(inputTextColor);
+            app.renderTarget->DrawText(display.c_str(), (UINT32)display.length(), browserFormat,
+                D2D1::RectF(boxX + inputPad, textY, boxRight - inputPad, boxY + boxHeight),
+                app.brush);
+
+            if (!app.folderBrowserInputSelectAll && app.cursorBlinkOn) {
+                float caretX = boxX + inputPad + shownWidth + 1;
+                app.brush->SetColor(inputTextColor);
+                app.renderTarget->DrawLine(
+                    D2D1::Point2F(caretX, boxY + dpi(app, 4.0f)),
+                    D2D1::Point2F(caretX, boxY + boxHeight - dpi(app, 4.0f)),
+                    app.brush, 1.0f);
+            }
+        };
+
+        float btnSize = dpi(app, 24.0f);
+        float btnGap = dpi(app, 6.0f);
+        float fileBtnX = panelX + panelWidth - padding - btnSize;
+        float folderBtnX = fileBtnX - btnGap - btnSize;
+        float btnY = headerY + (headerHeight - btnSize) / 2 - dpi(app, 6.0f);
+
+        if (app.folderBrowserEditingPath) {
+            drawInputBox(panelX + padding, panelX + panelWidth - padding, headerY - dpi(app, 2.0f));
+        } else {
+            D2D1_COLOR_F headerColor = app.theme.heading;
+            headerColor.a = anim;
+
+            // Truncate path if too long, keeping the tail (leaf folder) visible:
+            // measure with the actual font instead of estimating character widths,
+            // which breaks down for CJK and other wide scripts
+            std::wstring displayPath = app.folderBrowserPath;
+            float maxPathWidth = panelWidth - padding * 2 - (btnSize * 2 + btnGap * 2);
+
+            if (!displayPath.empty() && textWidth(displayPath) > maxPathWidth) {
                 std::wstring tail = displayPath;
                 while (textWidth(L"..." + tail) > maxPathWidth) {
                     size_t sep = tail.find(L'\\', 1);
@@ -206,11 +268,72 @@ void renderFolderBrowser(App& app) {
                 }
                 displayPath = L"..." + tail;
             }
-        }
 
-        app.renderTarget->DrawText(displayPath.c_str(), (UINT32)displayPath.length(), browserFormat,
-            D2D1::RectF(panelX + padding, headerY, panelX + panelWidth - padding, headerY + headerHeight),
-            app.brush);
+            // Subtle hover backdrop signals the path is clickable
+            bool pathHovered = app.mouseX >= panelX + padding - dpi(app, 4.0f) &&
+                               app.mouseX < folderBtnX - dpi(app, 2.0f) &&
+                               app.mouseY >= headerY && app.mouseY <= headerY + headerHeight * 0.6f;
+            if (pathHovered) {
+                D2D1_COLOR_F hoverColor = app.theme.accent;
+                hoverColor.a = 0.12f * anim;
+                app.brush->SetColor(hoverColor);
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(panelX + padding - dpi(app, 4.0f), headerY - dpi(app, 2.0f),
+                                                  folderBtnX - dpi(app, 2.0f), headerY + dpi(app, 22.0f)), 4, 4),
+                    app.brush);
+            }
+
+            app.brush->SetColor(headerColor);
+            app.renderTarget->DrawText(displayPath.c_str(), (UINT32)displayPath.length(), browserFormat,
+                D2D1::RectF(panelX + padding, headerY, folderBtnX - dpi(app, 4.0f), headerY + headerHeight),
+                app.brush);
+
+            // + folder / + file buttons
+            auto drawAddButton = [&](float bx, bool isFolder) {
+                bool hovered = app.mouseX >= bx && app.mouseX <= bx + btnSize &&
+                               app.mouseY >= btnY && app.mouseY <= btnY + btnSize;
+                if (hovered) {
+                    D2D1_COLOR_F hoverColor = app.theme.accent;
+                    hoverColor.a = 0.2f * anim;
+                    app.brush->SetColor(hoverColor);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(D2D1::RectF(bx, btnY, bx + btnSize, btnY + btnSize), 4, 4),
+                        app.brush);
+                }
+                float gx = bx + dpi(app, 3.0f);
+                float gy = btnY + dpi(app, 6.0f);
+                if (isFolder) {
+                    D2D1_COLOR_F folderColor = app.theme.isDark ? hexColor(0xE8A848) : hexColor(0xD4941A);
+                    folderColor.a = anim;
+                    app.brush->SetColor(folderColor);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(D2D1::RectF(gx, gy + dpi(app, 4.0f), gx + dpi(app, 13.0f), gy + dpi(app, 13.0f)), 2, 2),
+                        app.brush);
+                    app.renderTarget->FillRectangle(
+                        D2D1::RectF(gx, gy + dpi(app, 2.0f), gx + dpi(app, 6.0f), gy + dpi(app, 5.0f)),
+                        app.brush);
+                } else {
+                    D2D1_COLOR_F fileColor = app.theme.text;
+                    fileColor.a = 0.6f * anim;
+                    app.brush->SetColor(fileColor);
+                    app.renderTarget->DrawRoundedRectangle(
+                        D2D1::RoundedRect(D2D1::RectF(gx + dpi(app, 1.0f), gy, gx + dpi(app, 11.0f), gy + dpi(app, 13.0f)), 1, 1),
+                        app.brush, 1.0f);
+                }
+                // Accent "+" badge in the top-right corner of the button
+                float px = bx + btnSize - dpi(app, 7.0f);
+                float py = btnY + dpi(app, 2.0f);
+                app.brush->SetColor(accentColor);
+                app.renderTarget->DrawLine(
+                    D2D1::Point2F(px, py + dpi(app, 3.0f)), D2D1::Point2F(px + dpi(app, 6.0f), py + dpi(app, 3.0f)),
+                    app.brush, 2.0f);
+                app.renderTarget->DrawLine(
+                    D2D1::Point2F(px + dpi(app, 3.0f), py), D2D1::Point2F(px + dpi(app, 3.0f), py + dpi(app, 6.0f)),
+                    app.brush, 2.0f);
+            };
+            drawAddButton(folderBtnX, true);
+            drawAddButton(fileBtnX, false);
+        }
 
         // Divider line
         float dividerY = headerY + headerHeight;
@@ -220,10 +343,12 @@ void renderFolderBrowser(App& app) {
             D2D1::Point2F(panelX + panelWidth - padding, dividerY),
             app.brush, 1.0f);
 
-        // Items list (with scrolling)
+        // Items list (with scrolling); an active naming row occupies the
+        // first slot and the real items shift down beneath it
         float listStartY = dividerY + dpi(app, 8.0f);
         float listHeight = panelHeight - listStartY - padding;
-        float totalItemsHeight = app.folderItems.size() * itemHeight;
+        float namingOffset = app.folderBrowserNaming != 0 ? itemHeight : 0.0f;
+        float totalItemsHeight = app.folderItems.size() * itemHeight + namingOffset;
 
         // Clamp scroll
         float maxScroll = std::max(0.0f, totalItemsHeight - listHeight);
@@ -232,7 +357,7 @@ void renderFolderBrowser(App& app) {
         app.hoveredFolderIndex = -1;
 
         for (size_t i = 0; i < app.folderItems.size(); i++) {
-            float itemY = listStartY + i * itemHeight - app.folderBrowserScroll;
+            float itemY = listStartY + namingOffset + i * itemHeight - app.folderBrowserScroll;
 
             // Skip items outside visible area
             if (itemY + itemHeight < listStartY || itemY > panelHeight - padding) continue;
@@ -294,6 +419,42 @@ void renderFolderBrowser(App& app) {
             app.renderTarget->DrawText(item.name.c_str(), (UINT32)item.name.length(), browserFormat,
                 D2D1::RectF(textX, itemY + dpi(app, 4.0f), panelX + panelWidth - padding, itemY + itemHeight),
                 app.brush);
+        }
+
+        // Naming row for a new file/folder: pinned to the top of the list,
+        // drawn after the items so they scroll underneath it
+        if (app.folderBrowserNaming != 0) {
+            bool isFolder = app.folderBrowserNaming == 2;
+            float rowY = listStartY;
+            float iconX = panelX + padding + dpi(app, 4.0f);
+            float textX = panelX + padding + dpi(app, 26.0f);
+
+            app.brush->SetColor(panelBg);
+            app.renderTarget->FillRectangle(
+                D2D1::RectF(panelX + padding - dpi(app, 4.0f), rowY,
+                            panelX + panelWidth - padding + dpi(app, 4.0f), rowY + itemHeight),
+                app.brush);
+
+            if (isFolder) {
+                D2D1_COLOR_F folderColor = app.theme.isDark ? hexColor(0xE8A848) : hexColor(0xD4941A);
+                folderColor.a = anim;
+                app.brush->SetColor(folderColor);
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(iconX, rowY + dpi(app, 10.0f), iconX + dpi(app, 16.0f), rowY + dpi(app, 22.0f)), 2, 2),
+                    app.brush);
+                app.renderTarget->FillRectangle(
+                    D2D1::RectF(iconX, rowY + dpi(app, 8.0f), iconX + dpi(app, 8.0f), rowY + dpi(app, 11.0f)),
+                    app.brush);
+            } else {
+                D2D1_COLOR_F fileColor = app.theme.text;
+                fileColor.a = 0.6f * anim;
+                app.brush->SetColor(fileColor);
+                app.renderTarget->DrawRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(iconX + dpi(app, 2.0f), rowY + dpi(app, 6.0f), iconX + dpi(app, 14.0f), rowY + dpi(app, 22.0f)), 1, 1),
+                    app.brush, 1.0f);
+            }
+
+            drawInputBox(textX, panelX + panelWidth - padding, rowY + dpi(app, 1.0f));
         }
 
         // Scrollbar if needed
