@@ -11,6 +11,8 @@
 
 #include <windowsx.h>
 #include <shellapi.h>
+#include <cwctype>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -877,6 +879,41 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     }
 }
 
+// Resolves an Obsidian [[wiki link]] target against the current file's
+// folder and opens it: the name as written, then with .md / .markdown
+// appended, then a case-insensitive scan of the directory listing.
+static void openWikiLink(App& app, const std::string& target) {
+    if (app.editMode || app.currentFile.empty()) return;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::wstring wideTarget = toWide(target);
+    fs::path dir = fs::path(toWide(app.currentFile)).parent_path();
+
+    auto tryOpen = [&](const fs::path& p) {
+        return fs::exists(p, ec) && !fs::is_directory(p, ec) &&
+               openDocumentInViewer(app, p.wstring());
+    };
+    if (tryOpen(dir / wideTarget)) return;
+    if (tryOpen(dir / (wideTarget + L".md"))) return;
+    if (tryOpen(dir / (wideTarget + L".markdown"))) return;
+
+    auto lower = [](std::wstring s) {
+        for (auto& c : s) c = (wchar_t)std::towlower(c);
+        return s;
+    };
+    std::wstring want = lower(wideTarget);
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        if (!entry.is_regular_file(ec)) continue;
+        std::wstring stem = lower(entry.path().stem().wstring());
+        std::wstring name = lower(entry.path().filename().wstring());
+        if (stem == want || name == want) {
+            if (openDocumentInViewer(app, entry.path().wstring())) return;
+        }
+    }
+    // Target doesn't exist: leave the document as-is (a viewer doesn't
+    // create notes the way Obsidian would)
+}
+
 // Task checkbox under the mouse, or nullptr (viewer mode only)
 static const App::TaskRect* taskRectAt(const App& app) {
     if (app.editMode) return nullptr;
@@ -1221,7 +1258,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 app.hasSelection = false;
             } else if (!app.hoveredLink.empty()) {
                 // It was just a click on a link
-                handleLinkClick(app);
+                if (app.hoveredLink.rfind("wiki:", 0) == 0) {
+                    openWikiLink(app, app.hoveredLink.substr(5));
+                } else {
+                    handleLinkClick(app);
+                }
                 app.hasSelection = false;
             } else {
                 app.hasSelection = false;
