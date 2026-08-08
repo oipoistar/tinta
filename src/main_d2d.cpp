@@ -197,8 +197,9 @@ render_document:
         app.drawCalls++;
     }
 
-    ID2D1StrokeStyle* dashedStrokeStyle = nullptr;
-    if (std::any_of(
+    // Dashed stroke is a factory object: create once, reuse every frame
+    if (!app.dashedStrokeStyle &&
+        std::any_of(
             app.layoutConnectors.begin(), app.layoutConnectors.end(),
             [](const App::LayoutConnector& connector) { return connector.dashed; })) {
         D2D1_STROKE_STYLE_PROPERTIES properties = {
@@ -211,8 +212,9 @@ render_document:
             0.0f,
         };
         app.d2dFactory->CreateStrokeStyle(
-            properties, nullptr, 0, &dashedStrokeStyle);
+            properties, nullptr, 0, &app.dashedStrokeStyle);
     }
+    ID2D1StrokeStyle* dashedStrokeStyle = app.dashedStrokeStyle;
 
     for (const auto& connector : app.layoutConnectors) {
         if (connector.bounds.bottom < viewportTop - cullMargin ||
@@ -265,39 +267,49 @@ render_document:
             }
         }
     }
-    if (dashedStrokeStyle) dashedStrokeStyle->Release();
-
-    auto drawPolygon = [&](const D2D1_POINT_2F* points, size_t count,
-                           const App::LayoutShape& shape) {
+    // Draws a cached polygon geometry (built lazily in local space) at the
+    // shape's screen position via a translation transform
+    auto drawPolygon = [&](const D2D1_POINT_2F* localPoints, size_t count,
+                           App::LayoutShape& shape) {
         if (count < 3) return;
 
-        ID2D1PathGeometry* geometry = nullptr;
-        if (FAILED(app.d2dFactory->CreatePathGeometry(&geometry)) || !geometry) return;
-
-        ID2D1GeometrySink* sink = nullptr;
-        if (SUCCEEDED(geometry->Open(&sink)) && sink) {
-            sink->BeginFigure(points[0], D2D1_FIGURE_BEGIN_FILLED);
-            sink->AddLines(points + 1, static_cast<UINT32>(count - 1));
-            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-            sink->Close();
-            sink->Release();
-
-            if (shape.fill.a > 0.0f) {
-                app.brush->SetColor(shape.fill);
-                app.renderTarget->FillGeometry(geometry, app.brush);
-                app.drawCalls++;
-            }
-            if (shape.stroke.a > 0.0f && shape.strokeWidth > 0.0f) {
-                app.brush->SetColor(shape.stroke);
-                app.renderTarget->DrawGeometry(
-                    geometry, app.brush, shape.strokeWidth);
-                app.drawCalls++;
+        if (!shape.geometry) {
+            ID2D1PathGeometry* geometry = nullptr;
+            if (FAILED(app.d2dFactory->CreatePathGeometry(&geometry)) || !geometry) return;
+            ID2D1GeometrySink* sink = nullptr;
+            if (SUCCEEDED(geometry->Open(&sink)) && sink) {
+                sink->BeginFigure(localPoints[0], D2D1_FIGURE_BEGIN_FILLED);
+                sink->AddLines(localPoints + 1, static_cast<UINT32>(count - 1));
+                sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+                sink->Close();
+                sink->Release();
+                shape.geometry = geometry;
+            } else {
+                geometry->Release();
+                return;
             }
         }
-        geometry->Release();
+
+        D2D1_MATRIX_3X2_F previous;
+        app.renderTarget->GetTransform(&previous);
+        app.renderTarget->SetTransform(
+            D2D1::Matrix3x2F::Translation(shape.rect.left - app.scrollX,
+                                          shape.rect.top - app.scrollY) * previous);
+        if (shape.fill.a > 0.0f) {
+            app.brush->SetColor(shape.fill);
+            app.renderTarget->FillGeometry(shape.geometry, app.brush);
+            app.drawCalls++;
+        }
+        if (shape.stroke.a > 0.0f && shape.strokeWidth > 0.0f) {
+            app.brush->SetColor(shape.stroke);
+            app.renderTarget->DrawGeometry(
+                shape.geometry, app.brush, shape.strokeWidth);
+            app.drawCalls++;
+        }
+        app.renderTarget->SetTransform(previous);
     };
 
-    for (const auto& shape : app.layoutShapes) {
+    for (auto& shape : app.layoutShapes) {
         if (shape.rect.bottom < viewportTop - cullMargin ||
             shape.rect.top > viewportBottom + cullMargin ||
             shape.rect.right < viewportLeft - cullMargin ||
@@ -312,28 +324,29 @@ render_document:
             shape.rect.bottom - app.scrollY);
 
         if (shape.type == App::LayoutShapeType::Diamond) {
-            float centerX = (rect.left + rect.right) * 0.5f;
-            float centerY = (rect.top + rect.bottom) * 0.5f;
+            float w = shape.rect.right - shape.rect.left;
+            float h = shape.rect.bottom - shape.rect.top;
             D2D1_POINT_2F points[] = {
-                D2D1::Point2F(centerX, rect.top),
-                D2D1::Point2F(rect.right, centerY),
-                D2D1::Point2F(centerX, rect.bottom),
-                D2D1::Point2F(rect.left, centerY),
+                D2D1::Point2F(w * 0.5f, 0),
+                D2D1::Point2F(w, h * 0.5f),
+                D2D1::Point2F(w * 0.5f, h),
+                D2D1::Point2F(0, h * 0.5f),
             };
             drawPolygon(points, 4, shape);
             continue;
         }
 
         if (shape.type == App::LayoutShapeType::Hexagon) {
-            float inset = (rect.right - rect.left) * 0.18f;
-            float centerY = (rect.top + rect.bottom) * 0.5f;
+            float w = shape.rect.right - shape.rect.left;
+            float h = shape.rect.bottom - shape.rect.top;
+            float inset = w * 0.18f;
             D2D1_POINT_2F points[] = {
-                D2D1::Point2F(rect.left + inset, rect.top),
-                D2D1::Point2F(rect.right - inset, rect.top),
-                D2D1::Point2F(rect.right, centerY),
-                D2D1::Point2F(rect.right - inset, rect.bottom),
-                D2D1::Point2F(rect.left + inset, rect.bottom),
-                D2D1::Point2F(rect.left, centerY),
+                D2D1::Point2F(inset, 0),
+                D2D1::Point2F(w - inset, 0),
+                D2D1::Point2F(w, h * 0.5f),
+                D2D1::Point2F(w - inset, h),
+                D2D1::Point2F(inset, h),
+                D2D1::Point2F(0, h * 0.5f),
             };
             drawPolygon(points, 6, shape);
             continue;
@@ -810,6 +823,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app && app->d2dFactory) {
                 app->width = LOWORD(lParam);
                 app->height = HIWORD(lParam);
+                app->clearEditorLineLayoutCache();
                 // Resize the target in place: device resources (image and
                 // diagram bitmaps) stay valid, unlike a full recreation
                 if (!app->renderTarget ||
@@ -913,6 +927,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 } else {
                     KillTimer(hwnd, TIMER_NOTIFICATION);
                 }
+            }
+            if (wParam == TIMER_IMAGE_REFLOW && app) {
+                // One relayout for however many images arrived since armed
+                KillTimer(hwnd, TIMER_IMAGE_REFLOW);
+                app->layoutDirty = true;
+                InvalidateRect(hwnd, nullptr, FALSE);
             }
             if (wParam == TIMER_ZOOM_APPLY && app) {
                 if (app->zoomFactor != app->appliedZoomFactor) {

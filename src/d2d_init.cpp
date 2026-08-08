@@ -61,6 +61,8 @@ void applyTheme(App& app, int themeIndex) {
 }
 
 void updateTextFormats(App& app) {
+    // Editor line layouts hold the old format/size
+    app.clearEditorLineLayoutCache();
     // Release existing formats
     if (app.textFormat) { app.textFormat->Release(); app.textFormat = nullptr; }
     if (app.headingFormat) { app.headingFormat->Release(); app.headingFormat = nullptr; }

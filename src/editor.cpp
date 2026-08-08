@@ -60,6 +60,20 @@ static IDWriteTextLayout* createEditorLineLayout(const App& app, size_t lineStar
     return layout;
 }
 
+// Paint-path variant: returns a cached layout owned by the cache — callers
+// must NOT release it. The cache is cleared on any text/format/width change.
+static IDWriteTextLayout* cachedEditorLineLayout(App& app, size_t lineStart, size_t lineLen) {
+    auto it = app.editorLineLayoutCache.find(lineStart);
+    if (it != app.editorLineLayoutCache.end()) {
+        if (it->second.len == lineLen) return it->second.layout;
+        if (it->second.layout) it->second.layout->Release();
+        app.editorLineLayoutCache.erase(it);
+    }
+    IDWriteTextLayout* layout = createEditorLineLayout(app, lineStart, lineLen);
+    app.editorLineLayoutCache[lineStart] = {layout, lineLen};
+    return layout;
+}
+
 // Caret x,y within a (possibly wrapped) line layout for the caret placed
 // before column `col`
 static void editorCaretXY(IDWriteTextLayout* layout, size_t col, float& x, float& y) {
@@ -118,6 +132,7 @@ static size_t editorNextCharEnd(const App& app, size_t pos) {
 static void rebuildEditorRowMetrics(App& app);
 
 void rebuildLineStarts(App& app) {
+    app.clearEditorLineLayoutCache();
     app.editorLineStarts.clear();
     app.editorLineStarts.push_back(0);
     for (size_t i = 0; i < app.editorText.size(); i++) {
@@ -676,6 +691,7 @@ void exitEditMode(App& app) {
     }
 
     app.editMode = false;
+    app.clearEditorLineLayoutCache();
     app.editorText.clear();
     app.editorLineStarts.clear();
     app.undoStack.clear();
@@ -960,6 +976,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             }
             case 'P': {
                 app.editorShowPreview = !app.editorShowPreview;
+                app.clearEditorLineLayoutCache();
                 if (app.editorShowPreview) {
                     // Re-parse so the preview catches up with edits made
                     // while it was hidden
@@ -979,6 +996,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             }
             case 'W': {
                 app.editorWordWrap = !app.editorWordWrap;
+                app.clearEditorLineLayoutCache();
                 app.editorDesiredCol = -1;
                 app.editorDesiredX = -1.0f;
                 rebuildEditorRowMetrics(app);
@@ -1451,6 +1469,7 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
         float dx = (float)x - app.separatorDragStartX;
         float newRatio = app.separatorDragStartRatio + dx / app.width;
         app.editorSplitRatio = std::max(0.2f, std::min(0.8f, newRatio));
+        app.clearEditorLineLayoutCache();
         app.layoutDirty = true;
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
@@ -1557,7 +1576,7 @@ static void renderEditorWrapped(App& app, float editorWidth) {
 
         size_t lineStart = app.editorLineStarts[i];
         size_t lineLen = getLineLength(app, i);
-        IDWriteTextLayout* lineLayout = createEditorLineLayout(app, lineStart, lineLen);
+        IDWriteTextLayout* lineLayout = cachedEditorLineLayout(app, lineStart, lineLen);
 
         // Line number on the first visual row of the line
         wchar_t lineNum[16];
@@ -1629,7 +1648,6 @@ static void renderEditorWrapped(App& app, float editorWidth) {
                 app.brush);
         }
 
-        if (lineLayout) lineLayout->Release();
     }
 
     app.editorContentHeight = padding * 2 + app.editorTotalRows * lineHeight;
@@ -1710,7 +1728,7 @@ void renderEditor(App& app, float editorWidth) {
         // One DirectWrite layout per visible line: reused for highlight
         // metrics and drawing so overlays always match the actual glyphs
         // (CJK and other full-width characters are wider than charWidth)
-        IDWriteTextLayout* lineLayout = createEditorLineLayout(app, lineStart, lineLen);
+        IDWriteTextLayout* lineLayout = cachedEditorLineLayout(app, lineStart, lineLen);
 
         // Line number
         wchar_t lineNum[16];
@@ -1780,7 +1798,6 @@ void renderEditor(App& app, float editorWidth) {
                 D2D1::Point2F(gutterWidth + padding, lineY), lineLayout, app.brush);
         }
 
-        if (lineLayout) lineLayout->Release();
     }
 
     // Cursor (blink state driven by TIMER_CURSOR_BLINK)
@@ -1789,9 +1806,8 @@ void renderEditor(App& app, float editorWidth) {
         size_t curCol = getColFromPos(app, app.editorCursorPos);
         size_t curLineStart = app.editorLineStarts[curLine];
         size_t curLineLen = getLineLength(app, curLine);
-        IDWriteTextLayout* curLayout = createEditorLineLayout(app, curLineStart, curLineLen);
+        IDWriteTextLayout* curLayout = cachedEditorLineLayout(app, curLineStart, curLineLen);
         float curX = gutterWidth + padding + editorColToX(app, curLayout, std::min(curCol, curLineLen));
-        if (curLayout) curLayout->Release();
         float curY = padding + curLine * lineHeight - app.editorScrollY;
 
         app.brush->SetColor(app.theme.text);
