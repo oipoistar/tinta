@@ -990,3 +990,166 @@ void renderHelpOverlay(App& app) {
             app.brush);
     }
 }
+
+// --- Right-click context menu ---
+//
+// Drawn in the current theme like the folder browser and theme chooser.
+// Every entry shows its keyboard shortcut, so the menu doubles as
+// discoverable documentation for the single-key commands.
+
+namespace {
+
+struct ContextMenuEntry {
+    const wchar_t* label;
+    const wchar_t* shortcut;
+    bool separatorAfter;
+};
+
+const ContextMenuEntry CTX_ENTRIES[CTX_ITEM_COUNT] = {
+    { L"Copy",               L"Ctrl+C", false },
+    { L"Select All",         L"Ctrl+A", true  },
+    { L"Edit",               L":",      false },
+    { L"Search",             L"F",      false },
+    { L"Table of Contents",  L"Tab",    true  },
+    { L"Browse Files",       L"B",      false },
+    { L"Reveal in Explorer", L"",       true  },
+    { L"Theme",              L"T",      false },
+    { L"Help",               L"?",      false },
+};
+
+float ctxItemHeight(const App& app) { return dpi(app, 30.0f); }
+float ctxSeparatorHeight(const App& app) { return dpi(app, 9.0f); }
+float ctxWidth(const App& app) { return dpi(app, 210.0f); }
+float ctxPadding(const App& app) { return dpi(app, 6.0f); }
+
+float ctxTotalHeight(const App& app) {
+    float h = ctxPadding(app) * 2;
+    for (const auto& entry : CTX_ENTRIES) {
+        h += ctxItemHeight(app);
+        if (entry.separatorAfter) h += ctxSeparatorHeight(app);
+    }
+    return h;
+}
+
+// Top y of the item at `index` relative to the menu top
+float ctxItemTop(const App& app, int index) {
+    float y = ctxPadding(app);
+    for (int i = 0; i < index; i++) {
+        y += ctxItemHeight(app);
+        if (CTX_ENTRIES[i].separatorAfter) y += ctxSeparatorHeight(app);
+    }
+    return y;
+}
+
+} // namespace
+
+bool contextMenuItemEnabled(const App& app, int item) {
+    switch (item) {
+        case CTX_COPY:   return app.hasSelection && !app.selectedText.empty();
+        case CTX_REVEAL: return !app.currentFile.empty();
+        default:         return item >= 0 && item < CTX_ITEM_COUNT;
+    }
+}
+
+int contextMenuItemAt(const App& app, float x, float y) {
+    if (x < app.contextMenuX || x > app.contextMenuX + ctxWidth(app)) return -1;
+    float rel = y - app.contextMenuY;
+    for (int i = 0; i < CTX_ITEM_COUNT; i++) {
+        float top = ctxItemTop(app, i);
+        if (rel >= top && rel < top + ctxItemHeight(app)) return i;
+    }
+    return -1;
+}
+
+void openContextMenu(App& app, float x, float y) {
+    float w = ctxWidth(app);
+    float h = ctxTotalHeight(app);
+    app.contextMenuX = std::max(0.0f, std::min(x, (float)app.width - w));
+    app.contextMenuY = std::max(0.0f, std::min(y, (float)app.height - h));
+    app.showContextMenu = true;
+    app.hoveredContextMenuItem = -1;
+    app.contextMenuAnimation = 0.0f;
+}
+
+void renderContextMenu(App& app) {
+    if (app.contextMenuAnimation < 1.0f) {
+        float prev = app.contextMenuAnimation;
+        app.contextMenuAnimation = std::min(1.0f, app.contextMenuAnimation + 0.25f);
+        if (app.contextMenuAnimation != prev)
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+    float anim = app.contextMenuAnimation;
+
+    IDWriteTextFormat* format = app.folderBrowserFormat;
+    if (!format) return;
+
+    float x = app.contextMenuX;
+    float y = app.contextMenuY;
+    float w = ctxWidth(app);
+    float h = ctxTotalHeight(app);
+
+    D2D1_COLOR_F panelBg = app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
+                                            : hexColor(0xF8F8F8, 0.97f);
+    D2D1_COLOR_F borderColor = app.theme.isDark ? hexColor(0x3A3A40, 0.9f)
+                                                : hexColor(0xC8C8C8, 0.9f);
+    app.brush->SetColor(panelBg);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6, 6), app.brush);
+    app.brush->SetColor(borderColor);
+    app.renderTarget->DrawRoundedRectangle(
+        D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6, 6), app.brush, 1.0f);
+
+    app.hoveredContextMenuItem = contextMenuItemAt(app, app.mouseX, app.mouseY);
+
+    float pad = ctxPadding(app);
+    float itemH = ctxItemHeight(app);
+    float inset = dpi(app, 12.0f);
+    for (int i = 0; i < CTX_ITEM_COUNT; i++) {
+        float top = y + ctxItemTop(app, i);
+        bool enabled = contextMenuItemEnabled(app, i);
+
+        if (i == app.hoveredContextMenuItem && enabled) {
+            D2D1_COLOR_F hoverColor = app.theme.accent;
+            hoverColor.a = 0.18f * anim;
+            app.brush->SetColor(hoverColor);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(
+                    D2D1::RectF(x + pad, top, x + w - pad, top + itemH), 4, 4),
+                app.brush);
+        }
+
+        D2D1_COLOR_F textColor = app.theme.text;
+        textColor.a = (enabled ? 1.0f : 0.35f) * anim;
+        app.brush->SetColor(textColor);
+        float textY = top + (itemH - dpi(app, 18.0f)) / 2;
+        app.renderTarget->DrawText(
+            CTX_ENTRIES[i].label, (UINT32)wcslen(CTX_ENTRIES[i].label), format,
+            D2D1::RectF(x + inset, textY, x + w - inset, top + itemH), app.brush);
+
+        if (CTX_ENTRIES[i].shortcut[0]) {
+            IDWriteTextLayout* hint = nullptr;
+            app.dwriteFactory->CreateTextLayout(
+                CTX_ENTRIES[i].shortcut, (UINT32)wcslen(CTX_ENTRIES[i].shortcut),
+                format, 1000.0f, itemH, &hint);
+            if (hint) {
+                DWRITE_TEXT_METRICS metrics{};
+                hint->GetMetrics(&metrics);
+                D2D1_COLOR_F hintColor = app.theme.text;
+                hintColor.a = 0.4f * anim;
+                app.brush->SetColor(hintColor);
+                app.renderTarget->DrawTextLayout(
+                    D2D1::Point2F(x + w - inset - metrics.width, textY),
+                    hint, app.brush);
+                hint->Release();
+            }
+        }
+
+        if (CTX_ENTRIES[i].separatorAfter) {
+            float sepY = top + itemH + ctxSeparatorHeight(app) * 0.5f;
+            app.brush->SetColor(borderColor);
+            app.renderTarget->DrawLine(
+                D2D1::Point2F(x + pad, sepY), D2D1::Point2F(x + w - pad, sepY),
+                app.brush, 1.0f);
+        }
+    }
+}
