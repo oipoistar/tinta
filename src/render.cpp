@@ -124,6 +124,11 @@ static void rollbackTo(App& app, const LayoutSnapshot& s) {
             app.layoutTextRuns[i].layout->Release();
         }
     }
+    for (size_t i = s.shapes; i < app.layoutShapes.size(); i++) {
+        if (app.layoutShapes[i].geometry) {
+            app.layoutShapes[i].geometry->Release();
+        }
+    }
     app.layoutTextRuns.resize(s.textRuns);
     app.layoutRects.resize(s.rects);
     app.layoutLines.resize(s.lines);
@@ -523,13 +528,16 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
 
         // Measure the whole element once: cluster metrics give every break
         // unit's width without creating one IDWriteTextLayout per unit.
+        // The measurement layout is kept alive: when the element ends up as
+        // a single segment (no wrap — the common case), it IS the segment's
+        // layout and no second CreateTextLayout happens.
         std::vector<float> cumW(text.length() + 1, -1.0f);
         std::vector<bool> isBoundary(text.length() + 1, false);
         cumW[0] = 0.0f;
         isBoundary[0] = true;
         isBoundary[text.length()] = true;
+        LayoutInfo measureInfo = createLayout(app, text, format, lineHeight, app.bodyTypography);
         {
-            LayoutInfo measureInfo = createLayout(app, text, format, lineHeight, app.bodyTypography);
             if (measureInfo.layout) {
                 UINT32 clusterCount = 0;
                 measureInfo.layout->GetClusterMetrics(nullptr, 0, &clusterCount);
@@ -549,7 +557,6 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                         }
                     }
                 }
-                measureInfo.layout->Release();
             }
             // Fill positions that fall inside clusters (break opportunities
             // never land there)
@@ -572,7 +579,21 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
             segOpen = false;
             if (segEnd <= segStart) { segWords.clear(); return; }
             std::wstring_view segText(text.data() + segStart, segEnd - segStart);
-            LayoutInfo info = createLayout(app, segText, format, lineHeight, app.bodyTypography);
+
+            // Single-segment element: the measurement layout already shaped
+            // exactly this text (a space-only tail draws nothing) — hand it
+            // over instead of shaping a second time
+            bool coversAll = segStart == 0 && measureInfo.layout != nullptr;
+            for (size_t i = segEnd; coversAll && i < text.length(); i++) {
+                if (text[i] != L' ') coversAll = false;
+            }
+            LayoutInfo info;
+            if (coversAll) {
+                info = measureInfo;
+                measureInfo.layout = nullptr;
+            } else {
+                info = createLayout(app, segText, format, lineHeight, app.bodyTypography);
+            }
             float segWidth = widthOf(segStart, segEnd);
             if (hasBg) {
                 app.layoutRects.push_back({
@@ -679,6 +700,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
             pos = bp;
         }
         flushSegment(lastWordEnd);
+        if (measureInfo.layout) measureInfo.layout->Release();
 
         app.docText += text;
 
@@ -1730,6 +1752,11 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
     std::vector<float> colWidths(colCount, minColWidth);
     std::vector<float> rowHeights(rows.size(), lineHeight + cellPadding * 2);
     std::vector<std::vector<int>> cellAligns(rows.size(), std::vector<int>(colCount, 0));
+    // Per-cell natural width + plain-text flag: a simple cell that fits its
+    // final column is exactly one line tall, so the height-measuring trial
+    // layout in pass 1b can be skipped for it entirely
+    std::vector<std::vector<float>> cellNatural(rows.size(), std::vector<float>(colCount, 0.0f));
+    std::vector<std::vector<uint8_t>> cellSimple(rows.size(), std::vector<uint8_t>(colCount, 0));
 
     for (size_t r = 0; r < rows.size(); r++) {
         const auto& row = rows[r];
@@ -1763,6 +1790,9 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
             }
             float needed = textWidth + cellPadding * 2 + 6.0f * scale;
             if (needed > colWidths[c]) colWidths[c] = needed;
+            cellNatural[r][c] = needed;
+            cellSimple[r][c] = cell->children.size() == 1 &&
+                               cell->children[0]->type == ElementType::Text;
         }
     }
 
@@ -1827,6 +1857,10 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
         for (size_t c = 0; c < row->children.size() && c < (size_t)colCount; c++) {
             const auto& cell = row->children[c];
             if (cell->children.empty()) continue;
+
+            // A plain-text cell whose natural width fits the column is one
+            // line tall — no trial layout needed (the common case)
+            if (cellSimple[r][c] && cellNatural[r][c] <= colWidths[c]) continue;
 
             float cellW = colWidths[c] - cellPadding * 2;
             LayoutSnapshot snap = takeSnapshot(app);
@@ -2182,9 +2216,10 @@ void completeAsyncImage(App& app, void* asyncResult) {
     app.imageCache[result->src] = entry;
     delete result;
 
-    // Reflow with the real image dimensions
-    app.layoutDirty = true;
-    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
+    // Reflow with the real image dimensions — but coalesced: several images
+    // finishing close together (the common case when a document loads) get
+    // one relayout on the timer instead of a full document layout each
+    if (app.hwnd) SetTimer(app.hwnd, TIMER_IMAGE_REFLOW, 60, nullptr);
 }
 
 void ensureLayoutComplete(App& app) {

@@ -31,6 +31,7 @@ inline int64_t usElapsed(Clock::time_point start) {
 #define TIMER_CURSOR_BLINK 3
 #define TIMER_NOTIFICATION 4
 #define TIMER_ZOOM_APPLY 5
+#define TIMER_IMAGE_REFLOW 6
 
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
@@ -134,6 +135,25 @@ struct App {
     // The warm-up thread flips this and the target is recreated on
     // WM_APP_GPU_READY, after the first frame is already on screen.
     bool useHardwareRT = false;
+
+    // Cached dashed stroke for mermaid edges (factory object: created once,
+    // survives render-target recreation)
+    ID2D1StrokeStyle* dashedStrokeStyle = nullptr;
+
+    // Editor paint-path line layouts, keyed by line start offset. Cleared on
+    // any text/format/width/wrap change; between changes the 500 ms cursor
+    // blink and idle repaints stop reshaping every visible line.
+    struct EditorCachedLayout {
+        IDWriteTextLayout* layout = nullptr;
+        size_t len = 0;
+    };
+    std::unordered_map<size_t, EditorCachedLayout> editorLineLayoutCache;
+    void clearEditorLineLayoutCache() {
+        for (auto& [start, entry] : editorLineLayoutCache) {
+            if (entry.layout) entry.layout->Release();
+        }
+        editorLineLayoutCache.clear();
+    }
     ID2D1SolidColorBrush* brush = nullptr;
     ID2D1DeviceContext* deviceContext = nullptr;  // For color emoji rendering
 
@@ -389,6 +409,10 @@ struct App {
         D2D1_COLOR_F stroke{};
         float strokeWidth = 1.0f;
         float radius = 0.0f;
+        // Cached polygon outline in LOCAL space (origin = rect top-left),
+        // built lazily on first draw. Local space keeps it valid across the
+        // exterior-lane x-shift that moves rects after layout.
+        ID2D1PathGeometry* geometry = nullptr;
     };
     struct LayoutConnector {
         std::vector<D2D1_POINT_2F> points;
@@ -528,6 +552,11 @@ struct App {
                 run.layout->Release();
             }
         }
+        for (auto& shape : layoutShapes) {
+            if (shape.geometry) {
+                shape.geometry->Release();
+            }
+        }
         layoutTextRuns.clear();
         layoutRects.clear();
         layoutLines.clear();
@@ -574,6 +603,7 @@ struct App {
         releaseImageCache();
         if (wicFactory) { wicFactory->Release(); wicFactory = nullptr; }
         if (brush) { brush->Release(); brush = nullptr; }
+        if (dashedStrokeStyle) { dashedStrokeStyle->Release(); dashedStrokeStyle = nullptr; }
         if (deviceContext) { deviceContext->Release(); deviceContext = nullptr; }
         if (renderTarget) { renderTarget->Release(); renderTarget = nullptr; }
         if (fontFallback) { fontFallback->Release(); fontFallback = nullptr; }
