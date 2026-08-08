@@ -24,6 +24,11 @@ enum ContextMenuItem {
     CTX_ITEM_COUNT
 };
 void renderContextMenu(App& app);
+
+// Folder-wide search results beside the search bar; the toggle button sits
+// at the bar's right edge (geometry shared with input hit-testing)
+void renderFolderSearchResults(App& app);
+bool folderSearchToggleAt(const App& app, float x, float y);
 // Opens at (x, y) client coordinates, clamped so the menu stays on screen
 void openContextMenu(App& app, float x, float y);
 // Item index under the point, or -1 (separators and gaps count as none)

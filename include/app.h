@@ -32,6 +32,7 @@ inline int64_t usElapsed(Clock::time_point start) {
 #define TIMER_NOTIFICATION 4
 #define TIMER_ZOOM_APPLY 5
 #define TIMER_IMAGE_REFLOW 6
+#define TIMER_FOLDER_SEARCH 7
 
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
@@ -44,6 +45,10 @@ inline int64_t usElapsed(Clock::time_point start) {
 // software render target used for the instant first paint is then swapped
 // for a hardware one (cheap now that the driver is warm)
 #define WM_APP_GPU_READY (WM_APP + 3)
+
+// Posted by the folder-search worker with its scan results
+// (lParam = FolderScanMsg*, ownership transfers to the handler)
+#define WM_APP_FOLDER_SEARCH (WM_APP + 4)
 
 // Startup metrics
 struct StartupMetrics {
@@ -122,6 +127,8 @@ struct Settings {
     bool followSystemTheme = false;
     int lightThemeIndex = 0;   // Paper
     int darkThemeIndex = 5;    // Midnight
+    // Search results from sibling markdown files in the search overlay
+    bool folderSearchEnabled = true;
 };
 
 // Application state
@@ -370,6 +377,28 @@ struct App {
     };
     std::vector<SearchMatch> searchMatches;
     bool overText = false;
+
+    // Folder-wide search: sibling .md files matching the current query,
+    // filled by a worker thread and shown beside the search bar
+    bool folderSearchEnabled = true;
+    int folderSearchGeneration = 0;
+    struct FolderMatch {
+        std::wstring snippet;
+        size_t matchStart = 0;
+        size_t matchLen = 0;
+    };
+    struct FolderFileResult {
+        std::wstring fileName;
+        std::wstring fullPath;
+        std::vector<FolderMatch> matches;  // first few only
+        int totalMatches = 0;
+    };
+    std::vector<FolderFileResult> folderResults;
+    struct FolderResultHit {
+        D2D1_RECT_F rect{};
+        int fileIndex = -1;
+    };
+    std::vector<FolderResultHit> folderResultHits;  // rebuilt each paint
 
     // Text selection
     bool selecting = false;
