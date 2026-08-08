@@ -305,6 +305,27 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
 
+    // Context menu open: hover tracks menu items only — document hover
+    // (code-block copy button, link underline) stays suppressed underneath
+    if (app.showContextMenu) {
+        bool repaint = false;
+        int item = contextMenuItemAt(app, (float)app.mouseX, (float)app.mouseY);
+        if (item != app.hoveredContextMenuItem) {
+            app.hoveredContextMenuItem = item;
+            repaint = true;
+        }
+        if (app.hoveredCodeBlock != -1) {
+            app.hoveredCodeBlock = -1;
+            repaint = true;
+        }
+        if (!app.hoveredLink.empty()) {
+            app.hoveredLink.clear();
+            repaint = true;
+        }
+        if (repaint) InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Help overlay scrollbar dragging
     if (app.helpScrollbarDragging) {
         float maxScroll = std::max(0.0f, app.helpContentHeight - app.helpVisibleHeight);
@@ -550,6 +571,10 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
                 app.selectedText.clear();
                 extractText(app.root, app.selectedText);
                 app.hasSelection = true;
+                // Equal coords are the renderer's select-all signal; a stale
+                // drag range would re-extract the old selection every frame
+                app.selStartX = app.selEndX = 0;
+                app.selStartY = app.selEndY = 0;
             }
             break;
         case CTX_EDIT:
@@ -1213,6 +1238,10 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.selectedText.clear();
                     extractText(app.root, app.selectedText);
                     app.hasSelection = true;
+                    // Equal coords signal select-all to the renderer; clear
+                    // any drag range so it doesn't overwrite the selection
+                    app.selStartX = app.selEndX = 0;
+                    app.selStartY = app.selEndY = 0;
                 }
                 break;
             }
