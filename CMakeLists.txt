@@ -94,6 +94,7 @@ target_link_libraries(tinta PRIVATE
     ole32
     imm32
     d3d11
+    dwmapi
 )
 
 target_compile_definitions(tinta PRIVATE UNICODE _UNICODE

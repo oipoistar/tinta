@@ -2,6 +2,46 @@
 #include "utils.h"
 
 #include <objbase.h>
+#include <dwmapi.h>
+
+// Older SDK headers may lack these
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#ifndef DWMWA_TEXT_COLOR
+#define DWMWA_TEXT_COLOR 36
+#endif
+
+void applyWindowChrome(App& app) {
+    if (!app.hwnd) return;
+
+    auto toColorref = [](const D2D1_COLOR_F& c) {
+        return RGB((BYTE)(c.r * 255.0f + 0.5f),
+                   (BYTE)(c.g * 255.0f + 0.5f),
+                   (BYTE)(c.b * 255.0f + 0.5f));
+    };
+
+    // Windows 10 fallback: at least pick the right caption variant
+    BOOL dark = app.theme.isDark ? TRUE : FALSE;
+    DwmSetWindowAttribute(app.hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                          &dark, sizeof(dark));
+
+    // Windows 11: exact theme colors (silently rejected on older builds)
+    COLORREF caption = toColorref(app.theme.background);
+    DwmSetWindowAttribute(app.hwnd, DWMWA_CAPTION_COLOR,
+                          &caption, sizeof(caption));
+    DwmSetWindowAttribute(app.hwnd, DWMWA_BORDER_COLOR,
+                          &caption, sizeof(caption));
+    COLORREF text = toColorref(app.theme.text);
+    DwmSetWindowAttribute(app.hwnd, DWMWA_TEXT_COLOR,
+                          &text, sizeof(text));
+}
 
 bool initD2D(App& app) {
     auto t0 = Clock::now();
@@ -53,6 +93,9 @@ void applyTheme(App& app, int themeIndex) {
     } else {
         updateTextFormats(app);
     }
+
+    // Title bar follows the theme
+    applyWindowChrome(app);
 
     // Force a redraw
     if (app.hwnd) {
