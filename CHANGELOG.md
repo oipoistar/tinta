@@ -1,5 +1,25 @@
 # Changelog
 
+## [v2.5.1] - 2026-08-09
+
+The notes release — honestly a 2.6's worth of features, but they landed right after v2.5.0 and needed real-world testing before earning a version of their own.
+
+### Added
+- Right-click context menu: Copy / Select All, Edit, Search, Table of Contents, Browse Files, Reveal in Explorer, Theme, and Help — theme-drawn, with every entry showing its keyboard shortcut (#62)
+- Follow Windows theme: an opt-in toggle in the theme chooser switches between a preferred light and preferred dark theme when Windows changes mode
+- Zen mode: F11 for borderless fullscreen with a centered ~80-character reading column; Esc restores the window exactly
+- Clickable task lists: `- [ ]` / `- [x]` render as real checkboxes, and clicking one updates the file on disk
+- Obsidian wiki links: `[[Note]]` and `[[Note|alias]]` navigate to sibling notes, resolved case-insensitively
+- Frontmatter properties: the YAML block is hidden (it used to render as a giant heading, #61) and its title/tags show as a subtle chip strip instead
+- Folder-wide search: while searching, sibling markdown files are scanned in the background and matches appear in a side panel with highlighted snippets — click one to open that file at the match; a folder button on the search bar disables the feature
+- The title bar and window border follow the theme instead of the stock white chrome (Windows 11; dark caption fallback on Windows 10)
+
+### Fixed
+- YAML frontmatter no longer renders as a setext heading (#61)
+- Select All now works when text is already selected (also fixed for Ctrl+A)
+- Finishing a text selection on top of a code block no longer loses the selection
+- Menu actions opening the TOC or theme chooser are no longer closed by their own click
+
 ## [v2.5.0] - 2026-08-06
 
 The performance release: Tinta now opens in about 130 ms — 2.6× faster than v2.4.5.
