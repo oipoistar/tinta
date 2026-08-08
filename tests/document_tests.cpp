@@ -1,5 +1,6 @@
 #include "document.h"
 
+#include <functional>
 #include <iostream>
 
 namespace {
@@ -109,6 +110,42 @@ int main() {
         check(hardBreaks == 3, "all three <br> variants become hard breaks");
         check(literalBr == 0, "no literal <br> text remains");
     }
+
+    // YAML frontmatter is hidden instead of rendering as a setext heading (#61)
+    auto fm = parseDocument(parser,
+        "---\ntitle: 'Barometer'\naliases:\ntags: [Barometer]\n---\n\n"
+        "[Link](https://example.com)\n", "notes.md");
+    check(fm.success, "frontmatter document parses");
+    if (fm.success) {
+        bool sawHeading = false, sawTitleText = false;
+        std::function<void(const qmd::ElementPtr&)> walk = [&](const qmd::ElementPtr& e) {
+            if (e->type == qmd::ElementType::Heading) sawHeading = true;
+            if (e->type == qmd::ElementType::Text &&
+                e->text.find("title:") != std::string::npos) sawTitleText = true;
+            for (const auto& ch : e->children) walk(ch);
+        };
+        walk(fm.root);
+        check(!sawHeading, "frontmatter does not become a heading");
+        check(!sawTitleText, "frontmatter keys are not rendered");
+        bool sawLink = false;
+        std::function<void(const qmd::ElementPtr&)> findLink = [&](const qmd::ElementPtr& e) {
+            if (e->type == qmd::ElementType::Link) sawLink = true;
+            for (const auto& ch : e->children) findLink(ch);
+        };
+        findLink(fm.root);
+        check(sawLink, "content after frontmatter renders");
+    }
+    auto unclosed = parseDocument(parser, "---\ntitle: x\nno closing fence\n", "notes.md");
+    check(unclosed.success && !unclosed.root->children.empty(),
+          "unclosed fence renders as ordinary markdown");
+    auto hrDoc = parseDocument(parser, "para\n\n---\n\nafter\n", "notes.md");
+    bool hrSurvives = false;
+    if (hrDoc.success) {
+        for (const auto& ch : hrDoc.root->children) {
+            if (ch->type == qmd::ElementType::HorizontalRule) hrSurvives = true;
+        }
+    }
+    check(hrSurvives, "a mid-document --- is still a horizontal rule");
 
     auto markdown = parseDocument(parser, "# Heading\n", "notes.md");
     check(markdown.success, "Markdown document still parses");

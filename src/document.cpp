@@ -102,10 +102,50 @@ bool isSupportedDropPath(std::wstring_view path) {
     return isSupportedDocumentPath(path) || hasExtension(path, std::wstring_view(L".txt"));
 }
 
+// YAML frontmatter at the start of a file would otherwise render as a giant
+// setext heading — the closing --- promotes the block above it (#61). The
+// block is blanked in a copy rather than removed so byte offsets stay
+// aligned with the raw source for edit-preview sync and scroll anchors.
+// Only a block opened by --- on the very first line and closed by --- or
+// ... counts; an unclosed fence renders as ordinary markdown.
+static bool blankFrontmatter(const std::string& content, std::string& out) {
+    size_t start = 0;
+    if (content.compare(0, 3, "\xEF\xBB\xBF") == 0) start = 3;
+
+    auto isDelimiter = [&](size_t lineStart, size_t lineEnd, char c) {
+        size_t len = lineEnd - lineStart;
+        if (len > 0 && content[lineStart + len - 1] == '\r') len--;
+        return len == 3 && content[lineStart] == c &&
+               content[lineStart + 1] == c && content[lineStart + 2] == c;
+    };
+
+    size_t firstEol = content.find('\n', start);
+    if (firstEol == std::string::npos) return false;
+    if (!isDelimiter(start, firstEol, '-')) return false;
+
+    size_t pos = firstEol + 1;
+    while (pos <= content.size()) {
+        size_t eol = content.find('\n', pos);
+        size_t lineEnd = (eol == std::string::npos) ? content.size() : eol;
+        if (isDelimiter(pos, lineEnd, '-') || isDelimiter(pos, lineEnd, '.')) {
+            out = content;
+            for (size_t i = start; i < lineEnd; i++) {
+                if (out[i] != '\n' && out[i] != '\r') out[i] = ' ';
+            }
+            return true;
+        }
+        if (eol == std::string::npos) break;
+        pos = eol + 1;
+    }
+    return false;
+}
+
 qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
                                const std::string& content,
                                std::string_view path) {
     if (isMermaidDocumentPath(path)) return createMermaidDocument(content);
+    std::string cleaned;
+    if (blankFrontmatter(content, cleaned)) return parser.parse(cleaned);
     return parser.parse(content);
 }
 
@@ -113,5 +153,7 @@ qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
                                const std::string& content,
                                std::wstring_view path) {
     if (isMermaidDocumentPath(path)) return createMermaidDocument(content);
+    std::string cleaned;
+    if (blankFrontmatter(content, cleaned)) return parser.parse(cleaned);
     return parser.parse(content);
 }
