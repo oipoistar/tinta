@@ -445,6 +445,14 @@ struct App {
         bool directed = true;
         bool dashed = false;
     };
+    // Clickable task checkboxes (document coordinates)
+    struct TaskRect {
+        D2D1_RECT_F rect{};
+        size_t markOffset = SIZE_MAX;  // source offset of the [x]/[ ] mark char
+        bool checked = false;
+    };
+    std::vector<TaskRect> taskRects;
+
     std::vector<LayoutTextRun> layoutTextRuns;
     std::vector<LayoutRect> layoutRects;
     std::vector<LayoutLine> layoutLines;
@@ -585,6 +593,7 @@ struct App {
         layoutShapes.clear();
         layoutConnectors.clear();
         layoutBitmaps.clear();
+        taskRects.clear();
         linkRects.clear();
         codeBlocks.clear();
         textRects.clear();

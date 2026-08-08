@@ -877,6 +877,54 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     }
 }
 
+// Task checkbox under the mouse, or nullptr (viewer mode only)
+static const App::TaskRect* taskRectAt(const App& app) {
+    if (app.editMode) return nullptr;
+    float docX = (app.mouseX - documentViewportX(app)) + app.scrollX;
+    float docY = app.mouseY + app.scrollY;
+    for (const auto& task : app.taskRects) {
+        if (docX >= task.rect.left && docX <= task.rect.right &&
+            docY >= task.rect.top && docY <= task.rect.bottom) {
+            return &task;
+        }
+    }
+    return nullptr;
+}
+
+// Flips a - [ ] / - [x] mark in the file on disk. Parse offsets were
+// computed on CR-stripped text, so the position is remapped against the
+// raw bytes; the neighbors are verified so a file that changed since the
+// last layout is left alone. The file watcher then reloads the view.
+static void toggleTaskOnDisk(App& app, HWND hwnd, size_t markOffset, bool wasChecked) {
+    if (app.currentFile.empty()) return;
+    std::wstring widePath = toWide(app.currentFile);
+    std::ifstream in(widePath, std::ios::binary);
+    if (!in) return;
+    std::string disk((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+
+    size_t translated = 0, diskPos = std::string::npos;
+    for (size_t i = 0; i < disk.size(); i++) {
+        if (disk[i] == '\r') continue;
+        if (translated == markOffset) { diskPos = i; break; }
+        translated++;
+    }
+    if (diskPos == std::string::npos || diskPos == 0 || diskPos + 1 >= disk.size()) return;
+    char c = disk[diskPos];
+    bool checked = (c == 'x' || c == 'X');
+    if (disk[diskPos - 1] != '[' || disk[diskPos + 1] != ']' ||
+        checked != wasChecked || (!checked && c != ' ')) {
+        return;
+    }
+    disk[diskPos] = checked ? ' ' : 'x';
+
+    std::ofstream out(widePath, std::ios::binary | std::ios::trunc);
+    if (!out) return;
+    out.write(disk.data(), (std::streamsize)disk.size());
+    out.close();
+    handleFileWatchTimer(app, hwnd);  // reload immediately instead of on the timer
+}
+
 // True when (mouseX, mouseY) is on the hovered code block's copy button
 static bool codeCopyButtonAt(const App& app, int mouseX, int mouseY) {
     if (app.hoveredCodeBlock < 0 ||
@@ -1167,6 +1215,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             int dy = abs(app.mouseY - app.lastClickY);
             if (dx > 5 || dy > 5) {
                 app.hasSelection = true;
+            } else if (const App::TaskRect* task = taskRectAt(app)) {
+                // Click on a task checkbox: flip the mark in the file
+                toggleTaskOnDisk(app, hwnd, task->markOffset, task->checked);
+                app.hasSelection = false;
             } else if (!app.hoveredLink.empty()) {
                 // It was just a click on a link
                 handleLinkClick(app);
