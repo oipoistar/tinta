@@ -553,6 +553,16 @@ static void closeContextMenu(App& app) {
     app.hoveredContextMenuItem = -1;
 }
 
+static void closeSearchIfOpen(App& app) {
+    if (!app.showSearch) return;
+    app.showSearch = false;
+    app.searchActive = false;
+    app.searchQuery.clear();
+    app.searchMatches.clear();
+    app.searchAnimation = 0;
+    updateBlinkTimer(app);
+}
+
 static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
     switch (item) {
         case CTX_COPY:
@@ -578,9 +588,11 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             }
             break;
         case CTX_EDIT:
+            closeSearchIfOpen(app);
             enterEditMode(app);
             break;
         case CTX_SEARCH:
+            if (app.showSearch) { app.searchActive = true; break; }
             app.showSearch = true;
             app.searchActive = true;
             app.searchAnimation = 0;
@@ -591,6 +603,7 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             updateBlinkTimer(app);
             break;
         case CTX_TOC:
+            closeSearchIfOpen(app);
             ensureLayoutComplete(app);
             app.showToc = true;
             app.tocAnimation = 0;
@@ -598,6 +611,7 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             app.hoveredTocIndex = -1;
             break;
         case CTX_BROWSE:
+            closeSearchIfOpen(app);
             app.showFolderBrowser = true;
             closeFolderBrowserInput(app);
             app.folderBrowserAnimation = 0;
@@ -623,10 +637,12 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             }
             break;
         case CTX_THEME:
+            closeSearchIfOpen(app);
             app.showThemeChooser = true;
             app.themeChooserAnimation = 0;
             break;
         case CTX_HELP:
+            closeSearchIfOpen(app);
             app.showHelp = true;
             app.helpAnimation = 0;
             break;
@@ -634,8 +650,9 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
 }
 
 void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
-    // Viewer mode only, and never on top of another overlay
-    if (app.editMode || app.showSearch || app.showThemeChooser || app.showToc ||
+    // Viewer mode only, and never on top of a modal overlay. The search
+    // bar is fine — it shares the viewport rather than covering it.
+    if (app.editMode || app.showThemeChooser || app.showToc ||
         app.showFolderBrowser || app.showHelp) {
         return;
     }
@@ -860,6 +877,25 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     }
 }
 
+// True when (mouseX, mouseY) is on the hovered code block's copy button
+static bool codeCopyButtonAt(const App& app, int mouseX, int mouseY) {
+    if (app.hoveredCodeBlock < 0 ||
+        app.hoveredCodeBlock >= (int)app.codeBlocks.size()) {
+        return false;
+    }
+    const auto& cb = app.codeBlocks[app.hoveredCodeBlock];
+    float previewOffsetX = documentViewportX(app);
+    float docX = (mouseX - previewOffsetX) + app.scrollX;
+    float docY = mouseY + app.scrollY;
+    float btnW = dpi(app, 52.0f);
+    float btnH = dpi(app, 26.0f);
+    float btnPad = 8.0f * app.contentScale * app.zoomFactor;
+    float btnX = cb.bounds.right - btnW - btnPad;
+    float btnY = cb.bounds.top + btnPad;
+    return docX >= btnX && docX <= btnX + btnW &&
+           docY >= btnY && docY <= btnY + btnH;
+}
+
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Release belonging to a context-menu item click: already handled
     if (app.swallowNextMouseUp) {
@@ -1072,27 +1108,17 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     } else if (app.hScrollbarDragging) {
         app.hScrollbarDragging = false;
         InvalidateRect(hwnd, nullptr, FALSE);
-    } else if (app.hoveredCodeBlock >= 0 && app.hoveredCodeBlock < (int)app.codeBlocks.size()) {
-        // Check if click was on the copy button (top-right corner of code block)
-        const auto& cb = app.codeBlocks[app.hoveredCodeBlock];
-        float previewOffsetX = documentViewportX(app);
-        float clickDocX = (app.mouseX - previewOffsetX) + app.scrollX;
-        float clickDocY = app.mouseY + app.scrollY;
-        float btnW = dpi(app, 52.0f);
-        float btnH = dpi(app, 26.0f);
-        float btnPad = 8.0f * app.contentScale * app.zoomFactor;
-        float btnX = cb.bounds.right - btnW - btnPad;
-        float btnY = cb.bounds.top + btnPad;
-        if (clickDocX >= btnX && clickDocX <= btnX + btnW &&
-            clickDocY >= btnY && clickDocY <= btnY + btnH) {
-            copyToClipboard(hwnd, app.codeBlocks[app.hoveredCodeBlock].codeText);
-            app.showCopiedNotification = true;
-            app.copiedNotificationStart = std::chrono::steady_clock::now();
-            startNotificationTimer(app);
-            app.hoveredCodeBlock = -1;
-            app.selecting = false;
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
+    } else if (codeCopyButtonAt(app, app.mouseX, app.mouseY)) {
+        // Releasing anywhere else on a code block must NOT consume the
+        // mouse-up: a drag selection ending on the block would never
+        // finalize, stay "selecting", and follow the next mouse move
+        copyToClipboard(hwnd, app.codeBlocks[app.hoveredCodeBlock].codeText);
+        app.showCopiedNotification = true;
+        app.copiedNotificationStart = std::chrono::steady_clock::now();
+        startNotificationTimer(app);
+        app.hoveredCodeBlock = -1;
+        app.selecting = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
     } else if (app.selecting) {
         // Finalize selection based on mode
         if (app.selectionMode == App::SelectionMode::Word ||
@@ -1190,6 +1216,15 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     break;
             }
         }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
+    // An open context menu takes Esc before any overlay
+    if (app.showContextMenu && wParam == VK_ESCAPE) {
+        app.showContextMenu = false;
+        app.contextMenuAnimation = 0;
+        app.hoveredContextMenuItem = -1;
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
