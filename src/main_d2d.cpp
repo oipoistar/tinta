@@ -794,6 +794,7 @@ render_document:
     if (app.showSearch && !app.editMode) renderSearchOverlay(app);
     if (app.showFolderBrowser) renderFolderBrowser(app);
     if (app.showToc) renderToc(app);
+    if (app.showContextMenu) renderContextMenu(app);
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
 
@@ -950,6 +951,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // A background image download finished: swap it into the cache
             // and reflow (handler takes ownership of the result)
             if (app) completeAsyncImage(*app, (void*)lParam);
+            return 0;
+
+        case WM_CONTEXTMENU:
+            if (app) handleContextMenu(*app, hwnd, lParam);
             return 0;
 
         case WM_APP_GPU_READY:

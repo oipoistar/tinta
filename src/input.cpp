@@ -7,6 +7,7 @@
 #include "d2d_init.h"
 #include "settings.h"
 #include "render.h"
+#include "overlays.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -197,6 +198,11 @@ static void applyZoomDelta(App& app, float delta) {
 }
 
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    if (app.showContextMenu) {
+        app.showContextMenu = false;
+        app.contextMenuAnimation = 0;
+        app.hoveredContextMenuItem = -1;
+    }
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
 
@@ -517,7 +523,126 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     }
 }
 
+
+// --- Right-click context menu ---
+
+static void closeContextMenu(App& app) {
+    app.showContextMenu = false;
+    app.contextMenuAnimation = 0.0f;
+    app.hoveredContextMenuItem = -1;
+}
+
+static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
+    switch (item) {
+        case CTX_COPY:
+            if (app.hasSelection && !app.selectedText.empty()) {
+                copyToClipboard(hwnd, app.selectedText);
+                app.hasSelection = false;
+                app.selectedText.clear();
+                app.showCopiedNotification = true;
+                app.copiedNotificationAlpha = 1.0f;
+                app.copiedNotificationStart = std::chrono::steady_clock::now();
+                startNotificationTimer(app);
+            }
+            break;
+        case CTX_SELECT_ALL:
+            if (app.root) {
+                app.selectedText.clear();
+                extractText(app.root, app.selectedText);
+                app.hasSelection = true;
+            }
+            break;
+        case CTX_EDIT:
+            enterEditMode(app);
+            break;
+        case CTX_SEARCH:
+            app.showSearch = true;
+            app.searchActive = true;
+            app.searchAnimation = 0;
+            app.searchQuery.clear();
+            app.searchMatches.clear();
+            app.searchCurrentIndex = 0;
+            app.searchJustOpened = false;
+            updateBlinkTimer(app);
+            break;
+        case CTX_TOC:
+            ensureLayoutComplete(app);
+            app.showToc = true;
+            app.tocAnimation = 0;
+            app.tocScroll = 0;
+            app.hoveredTocIndex = -1;
+            break;
+        case CTX_BROWSE:
+            app.showFolderBrowser = true;
+            closeFolderBrowserInput(app);
+            app.folderBrowserAnimation = 0;
+            if (!app.currentFile.empty()) {
+                app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
+            } else {
+                wchar_t cwd[MAX_PATH];
+                if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
+                    app.folderBrowserPath = cwd;
+                }
+            }
+            populateFolderItems(app);
+            break;
+        case CTX_REVEAL:
+            if (!app.currentFile.empty()) {
+                std::wstring widePath = toWide(app.currentFile);
+                wchar_t fullPath[MAX_PATH];
+                if (GetFullPathNameW(widePath.c_str(), MAX_PATH, fullPath, nullptr)) {
+                    std::wstring params = L"/select,\"" + std::wstring(fullPath) + L"\"";
+                    ShellExecuteW(nullptr, L"open", L"explorer.exe", params.c_str(),
+                                  nullptr, SW_SHOWNORMAL);
+                }
+            }
+            break;
+        case CTX_THEME:
+            app.showThemeChooser = true;
+            app.themeChooserAnimation = 0;
+            break;
+        case CTX_HELP:
+            app.showHelp = true;
+            app.helpAnimation = 0;
+            break;
+    }
+}
+
+void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
+    // Viewer mode only, and never on top of another overlay
+    if (app.editMode || app.showSearch || app.showThemeChooser || app.showToc ||
+        app.showFolderBrowser || app.showHelp) {
+        return;
+    }
+
+    POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+    if (pt.x == -1 && pt.y == -1) {
+        // Keyboard menu key: open near the viewport center
+        pt.x = app.width / 2;
+        pt.y = app.height / 2;
+    } else {
+        ScreenToClient(hwnd, &pt);
+    }
+    openContextMenu(app, (float)pt.x, (float)pt.y);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Context menu: a click lands on an item or dismisses the menu; either
+    // way the click is consumed
+    if (app.showContextMenu) {
+        int clickX = GET_X_LPARAM(lParam);
+        int clickY = GET_Y_LPARAM(lParam);
+        int item = contextMenuItemAt(app, (float)clickX, (float)clickY);
+        closeContextMenu(app);
+        app.swallowNextMouseUp = true;
+        if (item >= 0 && contextMenuItemEnabled(app, item)) {
+            invokeContextMenuAction(app, hwnd, item);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Edit mode: route to editor or preview
     if (app.editMode) {
         int x = GET_X_LPARAM(lParam);
@@ -711,6 +836,11 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 }
 
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Release belonging to a context-menu item click: already handled
+    if (app.swallowNextMouseUp) {
+        app.swallowNextMouseUp = false;
+        return;
+    }
     // Help scrollbar release
     if (app.helpScrollbarDragging) {
         app.helpScrollbarDragging = false;
@@ -1129,8 +1259,11 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     } else {
         switch (wParam) {
             case VK_ESCAPE:
-                // Priority: Help > Search > FolderBrowser > TOC > Theme chooser > Quit
-                if (app.showHelp) {
+                // Priority: ContextMenu > Help > Search > FolderBrowser > TOC > Theme chooser > Quit
+                if (app.showContextMenu) {
+                    app.showContextMenu = false;
+                    app.contextMenuAnimation = 0;
+                } else if (app.showHelp) {
                     app.showHelp = false;
                     app.helpAnimation = 0;
                 } else if (app.showSearch) {
