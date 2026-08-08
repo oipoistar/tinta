@@ -117,6 +117,11 @@ struct Settings {
     bool hasAskedFileAssociation = false;
     bool editorShowPreview = true;
     bool editorWordWrap = false;
+    // Auto theme: follow the Windows light/dark preference with a preferred
+    // theme for each mode
+    bool followSystemTheme = false;
+    int lightThemeIndex = 0;   // Paper
+    int darkThemeIndex = 5;    // Midnight
 };
 
 // Application state
@@ -236,6 +241,9 @@ struct App {
     bool zoomApplyPending = false;   // TIMER_ZOOM_APPLY armed to coalesce zoom ticks
     bool darkMode = true;
     bool showStats = false;
+    bool followSystemTheme = false;
+    int lightThemeIndex = 0;
+    int darkThemeIndex = 5;
     int currentThemeIndex = 5;  // Default to "Midnight" (first dark theme)
     D2DTheme theme = THEMES[5];
 

@@ -1068,6 +1068,28 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         float cardHeight = (panelHeight - dpi(app, 130.0f)) / 5;
         float cardPadding = dpi(app, 8.0f);
 
+        // "Follow Windows" toggle (label + switch, must match render geometry)
+        {
+            float togW = dpi(app, 34.0f);
+            float togH = dpi(app, 18.0f);
+            float togX = panelX + panelWidth - dpi(app, 30.0f) - togW;
+            float togY = panelY + dpi(app, 24.0f);
+            if (clickX >= togX - dpi(app, 130.0f) && clickX <= togX + togW &&
+                clickY >= togY - dpi(app, 4.0f) && clickY <= togY + togH + dpi(app, 4.0f)) {
+                app.followSystemTheme = !app.followSystemTheme;
+                if (app.followSystemTheme) {
+                    // Adopt the current theme as this mode's preference, then
+                    // snap to whatever the system mode wants
+                    if (app.theme.isDark) app.darkThemeIndex = app.currentThemeIndex;
+                    else app.lightThemeIndex = app.currentThemeIndex;
+                    PostMessageW(hwnd, WM_SETTINGCHANGE, 0,
+                                 (LPARAM)L"ImmersiveColorSet");
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+        }
+
         int clickedTheme = -1;
         for (int i = 0; i < THEME_COUNT; i++) {
             const D2DTheme& t = THEMES[i];
@@ -1090,6 +1112,12 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
         if (clickedTheme >= 0) {
             applyTheme(app, clickedTheme);
+            // While auto mode is on, picking a card records it as the
+            // preference for that card's light/dark class
+            if (app.followSystemTheme) {
+                if (THEMES[clickedTheme].isDark) app.darkThemeIndex = clickedTheme;
+                else app.lightThemeIndex = clickedTheme;
+            }
             app.showThemeChooser = false;
             app.themeChooserAnimation = 0;
         }

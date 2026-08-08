@@ -56,6 +56,22 @@ static void startGpuWarmup() {
     }).detach();
 }
 
+// Windows light/dark preference (Settings > Personalization > Colors)
+static bool systemPrefersLight() {
+    DWORD value = 1, size = sizeof(value);
+    if (RegGetValueW(HKEY_CURRENT_USER,
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+            L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS) {
+        return true;
+    }
+    return value != 0;
+}
+
+// The theme the auto mode wants right now
+static int autoThemeIndex(const App& app) {
+    return systemPrefersLight() ? app.lightThemeIndex : app.darkThemeIndex;
+}
+
 // Forward declarations
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void render(App& app);
@@ -837,6 +853,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             return 0;
 
+        case WM_SETTINGCHANGE:
+            // Windows switched light/dark mode
+            if (app && app->followSystemTheme && lParam &&
+                wcscmp((const wchar_t*)lParam, L"ImmersiveColorSet") == 0) {
+                int want = autoThemeIndex(*app);
+                if (want != app->currentThemeIndex) {
+                    applyTheme(*app, want);
+                }
+            }
+            return 0;
+
         case WM_DPICHANGED:
             if (app) {
                 UINT dpi = HIWORD(wParam);
@@ -996,6 +1023,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.zoomFactor = app->zoomFactor;
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
+                settings.followSystemTheme = app->followSystemTheme;
+                settings.lightThemeIndex = app->lightThemeIndex;
+                settings.darkThemeIndex = app->darkThemeIndex;
 
                 // Get window placement for position/size/maximized state
                 WINDOWPLACEMENT wp = {};
@@ -1095,8 +1125,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     // Load saved settings
     Settings savedSettings = loadSettings();
-    app.currentThemeIndex = savedSettings.themeIndex;
-    app.theme = THEMES[savedSettings.themeIndex];
+    app.followSystemTheme = savedSettings.followSystemTheme;
+    app.lightThemeIndex = savedSettings.lightThemeIndex;
+    app.darkThemeIndex = savedSettings.darkThemeIndex;
+    int startTheme = app.followSystemTheme ? autoThemeIndex(app)
+                                           : savedSettings.themeIndex;
+    app.currentThemeIndex = startTheme;
+    app.theme = THEMES[startTheme];
     app.darkMode = app.theme.isDark;
     app.zoomFactor = savedSettings.zoomFactor;
     app.editorShowPreview = savedSettings.editorShowPreview;
