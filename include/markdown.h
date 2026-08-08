@@ -36,6 +36,8 @@ enum class ElementType {
     HardBreak,
     Ruby,
     RubyText,
+    // Synthetic first block built from YAML frontmatter (title + tags)
+    Properties,
     // Obsidian/Typora inline extensions (parsed in a post-pass)
     Highlight,     // ==text==
     Superscript,   // ^text^

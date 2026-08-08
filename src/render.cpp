@@ -2014,10 +2014,53 @@ static void layoutHorizontalRule(App& app, float& y, float indent, float maxWidt
     y += 16 * scale;
 }
 
+// Frontmatter properties strip: the title as muted text and the tags as
+// small #chips, one row above the document (wrapping when needed)
+static void layoutProperties(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+    float scale = app.contentScale * app.zoomFactor;
+    IDWriteTextFormat* chipFormat = app.supSubFormat ? app.supSubFormat : app.textFormat;
+    float chipH = 22.0f * scale;
+    float padX = 8.0f * scale;
+    float gap = 6.0f * scale;
+    float x = indent;
+
+    auto chip = [&](const std::wstring& text, D2D1_COLOR_F textColor, bool pill) {
+        LayoutInfo info = createLayout(app, text, chipFormat, chipH, app.bodyTypography);
+        float w = info.width;
+        if (x + w + padX * 2 > indent + maxWidth && x > indent) {
+            x = indent;
+            y += chipH + gap;
+        }
+        if (pill) {
+            D2D1_COLOR_F bgc = app.theme.codeBackground;
+            app.layoutRects.push_back({D2D1::RectF(x, y, x + w + padX * 2, y + chipH), bgc});
+        }
+        float textY = y + (chipH - info.height) / 2;
+        D2D1_POINT_2F pos = D2D1::Point2F(x + (pill ? padX : 0), textY);
+        D2D1_RECT_F bounds = D2D1::RectF(pos.x, y, pos.x + w, y + chipH);
+        addTextRun(app, std::move(info), pos, bounds, textColor, 0, 0, false);
+        x += w + (pill ? padX * 2 : 0) + gap;
+    };
+
+    if (!elem->text.empty()) {
+        D2D1_COLOR_F titleColor = app.theme.text;
+        titleColor.a = 0.65f;
+        chip(toWide(elem->text), titleColor, false);
+    }
+    for (const auto& tag : elem->children) {
+        if (tag->type != ElementType::Text || tag->text.empty()) continue;
+        chip(L"#" + toWide(tag->text), app.theme.accent, true);
+    }
+    y += chipH + 14.0f * scale;
+}
+
 static void layoutElement(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     if (!elem) return;
 
     switch (elem->type) {
+        case ElementType::Properties:
+            layoutProperties(app, elem, y, indent, maxWidth);
+            break;
         case ElementType::Paragraph:
             layoutParagraph(app, elem, y, indent, maxWidth);
             break;
