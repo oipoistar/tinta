@@ -367,10 +367,16 @@ bool createRenderTarget(App& app) {
         app.brush = nullptr;
     }
 
-    // D2D bitmaps are tied to the render target, so invalidate cached images
-    for (auto& [key, entry] : app.imageCache) {
-        if (entry.bitmap) { entry.bitmap->Release(); entry.bitmap = nullptr; }
-        entry.failed = false;  // retry on next layout
+    // D2D bitmaps are tied to the render target, so cached images must go.
+    // Entries are ERASED, not just nulled: getOrLoadImage returns any
+    // existing entry as-is, so a kept-but-empty entry would render as the
+    // alt-text placeholder forever instead of reloading. In-flight
+    // downloads keep their entry — the arriving result creates its bitmap
+    // on whatever target exists then.
+    for (auto it = app.imageCache.begin(); it != app.imageCache.end();) {
+        if (it->second.bitmap) { it->second.bitmap->Release(); it->second.bitmap = nullptr; }
+        if (it->second.pending) { ++it; }
+        else { it = app.imageCache.erase(it); }
     }
 
     RECT rc;

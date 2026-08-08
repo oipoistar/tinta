@@ -34,8 +34,10 @@ static App* g_app = nullptr;
 // Initializes the GPU driver on a worker thread after the first (software)
 // frame is on screen. D3D device creation costs ~200 ms dominated by
 // process-global driver initialization — done here once, the hardware
-// render target created on WM_APP_GPU_READY takes ~40 ms. The device is
-// kept alive so the driver state it initialized stays warm.
+// render target created on WM_APP_GPU_READY takes ~40 ms. The warm-up
+// device is held only until that target exists (its own device keeps the
+// driver initialized), then released — it pins tens of MB otherwise.
+static ID3D11Device* g_warmupDevice = nullptr;
 static void startGpuWarmup() {
     std::thread([] {
         ID3D11Device* device = nullptr;
@@ -46,9 +48,11 @@ static void startGpuWarmup() {
                           D3D11_SDK_VERSION, &device, &fl, &ctx);
         if (ctx) ctx->Release();
         if (device && g_app && g_app->hwnd) {
+            g_warmupDevice = device;
             PostMessageW(g_app->hwnd, WM_APP_GPU_READY, 0, 0);
+        } else if (device) {
+            device->Release();
         }
-        // device intentionally not released
     }).detach();
 }
 
@@ -806,7 +810,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app && app->d2dFactory) {
                 app->width = LOWORD(lParam);
                 app->height = HIWORD(lParam);
-                createRenderTarget(*app);
+                // Resize the target in place: device resources (image and
+                // diagram bitmaps) stay valid, unlike a full recreation
+                if (!app->renderTarget ||
+                    FAILED(app->renderTarget->Resize(
+                        D2D1::SizeU(app->width, app->height)))) {
+                    createRenderTarget(*app);
+                }
                 app->layoutDirty = true;
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
@@ -924,13 +934,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_APP_GPU_READY:
             // Driver is warm: swap the startup software render target for a
-            // hardware one. Same resource-recreation path a resize takes,
-            // and the frame it redraws is pixel-identical.
+            // hardware one. The recreated target's own device keeps the
+            // driver initialized, so the warm-up device can go.
             if (app && !app->useHardwareRT) {
                 app->useHardwareRT = true;
                 createRenderTarget(*app);
                 app->layoutDirty = true;
                 InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            if (g_warmupDevice) {
+                g_warmupDevice->Release();
+                g_warmupDevice = nullptr;
             }
             return 0;
 
