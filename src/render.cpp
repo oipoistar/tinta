@@ -101,7 +101,7 @@ static void addTextRun(App& app, LayoutInfo&& info, const D2D1_POINT_2F& pos,
 
 struct LayoutSnapshot {
     size_t textRuns, rects, lines, shapes, connectors;
-    size_t links, textRects, lineBuckets, docTextLen;
+    size_t links, textRects, lineBuckets, docTextLen, tasks;
 };
 
 static LayoutSnapshot takeSnapshot(App& app) {
@@ -114,7 +114,8 @@ static LayoutSnapshot takeSnapshot(App& app) {
         app.linkRects.size(),
         app.textRects.size(),
         app.lineBuckets.size(),
-        app.docText.size()
+        app.docText.size(),
+        app.taskRects.size()
     };
 }
 
@@ -138,6 +139,7 @@ static void rollbackTo(App& app, const LayoutSnapshot& s) {
     app.textRects.resize(s.textRects);
     app.lineBuckets.resize(s.lineBuckets);
     app.docText.resize(s.docTextLen);
+    app.taskRects.resize(s.tasks);
 }
 
 static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
@@ -183,6 +185,10 @@ static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
         auto& b = app.lineBuckets[i];
         b.minX += dx;
         b.maxX += dx;
+    }
+    for (size_t i = from.tasks; i < app.taskRects.size(); i++) {
+        app.taskRects[i].rect.left += dx;
+        app.taskRects[i].rect.right += dx;
     }
 }
 
@@ -1465,13 +1471,47 @@ static void layoutList(App& app, const ElementPtr& elem, float& y, float indent,
     for (const auto& child : elem->children) {
         if (child->type != ElementType::ListItem) continue;
 
-        std::wstring marker = elem->ordered ?
-            std::to_wstring(itemNum++) + L"." : L"\x2022";
+        if (child->isTask) {
+            // Task item: a clickable checkbox replaces the bullet
+            float box = 15.0f * scale;
+            float boxX = indent + 1.0f * scale;
+            float boxY = y + 4.0f * scale;
+            D2D1_RECT_F boxRect = D2D1::RectF(boxX, boxY, boxX + box, boxY + box);
+            if (child->taskChecked) {
+                app.layoutRects.push_back({boxRect, app.theme.accent});
+                D2D1_COLOR_F mark = app.theme.isDark
+                    ? D2D1::ColorF(0.08f, 0.08f, 0.10f) : D2D1::ColorF(1, 1, 1);
+                app.layoutLines.push_back({
+                    D2D1::Point2F(boxX + box * 0.24f, boxY + box * 0.52f),
+                    D2D1::Point2F(boxX + box * 0.44f, boxY + box * 0.74f),
+                    mark, 2.0f * scale});
+                app.layoutLines.push_back({
+                    D2D1::Point2F(boxX + box * 0.44f, boxY + box * 0.74f),
+                    D2D1::Point2F(boxX + box * 0.78f, boxY + box * 0.28f),
+                    mark, 2.0f * scale});
+            } else {
+                D2D1_COLOR_F edge = app.theme.blockquoteBorder;
+                float w = 1.2f * scale;
+                app.layoutLines.push_back({{boxX, boxY}, {boxX + box, boxY}, edge, w});
+                app.layoutLines.push_back({{boxX, boxY + box}, {boxX + box, boxY + box}, edge, w});
+                app.layoutLines.push_back({{boxX, boxY}, {boxX, boxY + box}, edge, w});
+                app.layoutLines.push_back({{boxX + box, boxY}, {boxX + box, boxY + box}, edge, w});
+            }
+            if (child->taskMarkOffset != SIZE_MAX) {
+                app.taskRects.push_back({
+                    D2D1::RectF(boxX - 4 * scale, boxY - 4 * scale,
+                                boxX + box + 4 * scale, boxY + box + 4 * scale),
+                    child->taskMarkOffset, child->taskChecked});
+            }
+        } else {
+            std::wstring marker = elem->ordered ?
+                std::to_wstring(itemNum++) + L"." : L"\x2022";
 
-        LayoutInfo info = createLayout(app, marker, app.textFormat, 24.0f, app.bodyTypography);
-        D2D1_POINT_2F pos = D2D1::Point2F(indent, y);
-        D2D1_RECT_F bounds = D2D1::RectF(indent, y, indent + listIndent, y + 24);
-        addTextRun(app, std::move(info), pos, bounds, app.theme.text, 0, 0, false);
+            LayoutInfo info = createLayout(app, marker, app.textFormat, 24.0f, app.bodyTypography);
+            D2D1_POINT_2F pos = D2D1::Point2F(indent, y);
+            D2D1_RECT_F bounds = D2D1::RectF(indent, y, indent + listIndent, y + 24);
+            addTextRun(app, std::move(info), pos, bounds, app.theme.text, 0, 0, false);
+        }
 
         bool hasBlockChildren = false;
         for (const auto& itemChild : child->children) {

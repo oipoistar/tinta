@@ -56,6 +56,9 @@ struct Element {
     int level = 0;            // for headings (1-6)
     bool ordered = false;     // for lists
     int start = 1;            // for ordered lists
+    bool isTask = false;      // list item is a - [ ] / - [x] task
+    bool taskChecked = false;
+    size_t taskMarkOffset = SIZE_MAX;  // byte offset of the mark char in the source
     std::string language;     // for code blocks
     int align = 0;            // for table cells (0=default, 1=left, 2=center, 3=right)
     int col_count = 0;        // for tables (number of columns)

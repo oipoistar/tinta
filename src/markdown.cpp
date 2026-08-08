@@ -110,9 +110,16 @@ static int enterBlockCallback(MD_BLOCKTYPE type, void* detail, void* userdata) {
             break;
         }
 
-        case MD_BLOCK_LI:
+        case MD_BLOCK_LI: {
             elem = std::make_shared<Element>(ElementType::ListItem);
+            auto* li = static_cast<MD_BLOCK_LI_DETAIL*>(detail);
+            if (li && li->is_task) {
+                elem->isTask = true;
+                elem->taskChecked = (li->task_mark == 'x' || li->task_mark == 'X');
+                elem->taskMarkOffset = li->task_mark_offset;
+            }
             break;
+        }
 
         case MD_BLOCK_HR:
             elem = std::make_shared<Element>(ElementType::HorizontalRule);
