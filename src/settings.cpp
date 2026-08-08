@@ -38,6 +38,9 @@ void saveSettings(const Settings& settings) {
     file << "hasAskedFileAssociation=" << (settings.hasAskedFileAssociation ? 1 : 0) << "\n";
     file << "editorShowPreview=" << (settings.editorShowPreview ? 1 : 0) << "\n";
     file << "editorWordWrap=" << (settings.editorWordWrap ? 1 : 0) << "\n";
+    file << "followSystemTheme=" << (settings.followSystemTheme ? 1 : 0) << "\n";
+    file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
+    file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
 }
 
 Settings loadSettings() {
@@ -74,6 +77,14 @@ Settings loadSettings() {
         } else if (key == "windowHeight") {
             int h = std::stoi(value);
             if (h >= 200) settings.windowHeight = h;
+        } else if (key == "followSystemTheme") {
+            settings.followSystemTheme = (value == "1");
+        } else if (key == "lightThemeIndex") {
+            int idx = std::stoi(value);
+            if (idx >= 0 && idx < THEME_COUNT) settings.lightThemeIndex = idx;
+        } else if (key == "darkThemeIndex") {
+            int idx = std::stoi(value);
+            if (idx >= 0 && idx < THEME_COUNT) settings.darkThemeIndex = idx;
         } else if (key == "windowMaximized") {
             settings.windowMaximized = (value == "1");
         } else if (key == "hasAskedFileAssociation") {

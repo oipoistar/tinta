@@ -666,6 +666,35 @@ void renderThemeChooser(App& app) {
             D2D1::RectF(panelX, panelY + dpi(app, 15.0f), panelX + panelWidth, panelY + dpi(app, 55.0f)), app.brush);
     }
 
+    // "Follow Windows" toggle, top-right of the panel. While it's on, picking
+    // a light card sets the light-mode preference and a dark card the dark
+    // one — the OS switch then flips between the two automatically.
+    if (app.folderBrowserFormat) {
+        float togW = dpi(app, 34.0f);
+        float togH = dpi(app, 18.0f);
+        float togX = panelX + panelWidth - dpi(app, 30.0f) - togW;
+        float togY = panelY + dpi(app, 24.0f);
+        bool on = app.followSystemTheme;
+
+        D2D1_COLOR_F trackColor = on ? hexColor(0x3FB950, 0.9f * anim)
+                                     : hexColor(0x4A4A52, 0.9f * anim);
+        app.brush->SetColor(trackColor);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(togX, togY, togX + togW, togY + togH),
+                              togH / 2, togH / 2), app.brush);
+        float knobR = togH / 2 - dpi(app, 2.0f);
+        float knobX = on ? togX + togW - togH / 2 : togX + togH / 2;
+        app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
+        app.renderTarget->FillEllipse(
+            D2D1::Ellipse(D2D1::Point2F(knobX, togY + togH / 2), knobR, knobR),
+            app.brush);
+
+        app.brush->SetColor(D2D1::ColorF(1, 1, 1, 0.75f * anim));
+        app.renderTarget->DrawText(L"Follow Windows", 14, app.folderBrowserFormat,
+            D2D1::RectF(togX - dpi(app, 130.0f), togY + dpi(app, 1.0f),
+                        togX - dpi(app, 8.0f), togY + togH), app.brush);
+    }
+
     // Theme grid - 2 columns, 5 rows
     float gridStartY = panelY + dpi(app, 75.0f);
     float cardWidth = (panelWidth - dpi(app, 60.0f)) / 2;  // 2 columns with padding
