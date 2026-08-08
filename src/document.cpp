@@ -140,12 +140,112 @@ static bool blankFrontmatter(const std::string& content, std::string& out) {
     return false;
 }
 
+// Pulls title and tags out of the (blanked) frontmatter region for the
+// properties strip. Minimal YAML: `key: value`, inline `[a, b]` lists,
+// and indented `- item` block lists under tags/aliases.
+static void extractFrontmatterProps(const std::string& content, size_t regionEnd,
+                                    std::string& title, std::vector<std::string>& tags) {
+    auto trim = [](std::string s) {
+        size_t a = s.find_first_not_of(" \t\r");
+        size_t b = s.find_last_not_of(" \t\r");
+        return (a == std::string::npos) ? std::string() : s.substr(a, b - a + 1);
+    };
+    auto unquote = [&](std::string s) {
+        s = trim(std::move(s));
+        if (s.size() >= 2 && ((s.front() == '\'' && s.back() == '\'') ||
+                              (s.front() == '"' && s.back() == '"'))) {
+            s = s.substr(1, s.size() - 2);
+        }
+        return s;
+    };
+    auto addList = [&](const std::string& value, std::vector<std::string>& out) {
+        std::string v = trim(value);
+        if (v.size() >= 2 && v.front() == '[' && v.back() == ']') {
+            v = v.substr(1, v.size() - 2);
+        }
+        size_t pos = 0;
+        while (pos <= v.size()) {
+            size_t comma = v.find(',', pos);
+            std::string item = unquote(v.substr(pos, comma == std::string::npos
+                                                        ? std::string::npos : comma - pos));
+            if (!item.empty()) out.push_back(item);
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+    };
+
+    bool inTagList = false;
+    size_t pos = 0;
+    while (pos < regionEnd) {
+        size_t eol = content.find('\n', pos);
+        if (eol == std::string::npos || eol > regionEnd) eol = regionEnd;
+        std::string line = content.substr(pos, eol - pos);
+        pos = eol + 1;
+
+        std::string trimmed = trim(line);
+        if (inTagList) {
+            if (trimmed.rfind("- ", 0) == 0) {
+                std::string item = unquote(trimmed.substr(2));
+                if (!item.empty()) tags.push_back(item);
+                continue;
+            }
+            inTagList = false;
+        }
+        size_t colon = trimmed.find(':');
+        if (colon == std::string::npos) continue;
+        std::string key = trim(trimmed.substr(0, colon));
+        std::string value = trim(trimmed.substr(colon + 1));
+        if (key == "title") {
+            title = unquote(value);
+        } else if (key == "tags") {
+            if (value.empty()) inTagList = true;
+            else addList(value, tags);
+        }
+    }
+}
+
+// Builds the synthetic Properties block and inserts it as the first child
+static void insertProperties(qmd::ParseResult& result,
+                             const std::string& content) {
+    if (!result.success || !result.root) return;
+    // The frontmatter region ends at the first closing delimiter line;
+    // blankFrontmatter validated it exists, so a cheap re-scan suffices
+    size_t firstEol = content.find('\n');
+    size_t regionEnd = content.find("\n---", firstEol);
+    size_t regionEndDots = content.find("\n...", firstEol);
+    if (regionEndDots != std::string::npos &&
+        (regionEnd == std::string::npos || regionEndDots < regionEnd)) {
+        regionEnd = regionEndDots;
+    }
+    if (regionEnd == std::string::npos) return;
+
+    std::string title;
+    std::vector<std::string> tags;
+    extractFrontmatterProps(content, regionEnd, title, tags);
+    if (title.empty() && tags.empty()) return;
+
+    auto props = std::make_shared<qmd::Element>(qmd::ElementType::Properties);
+    props->parent = result.root.get();
+    props->text = title;
+    for (const auto& tag : tags) {
+        auto chip = std::make_shared<qmd::Element>(qmd::ElementType::Text);
+        chip->text = tag;
+        chip->parent = props.get();
+        props->children.push_back(std::move(chip));
+    }
+    result.root->children.insert(result.root->children.begin(), std::move(props));
+}
+
 qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
                                const std::string& content,
                                std::string_view path) {
     if (isMermaidDocumentPath(path)) return createMermaidDocument(content);
     std::string cleaned;
-    if (blankFrontmatter(content, cleaned)) return parser.parse(cleaned);
+    if (blankFrontmatter(content, cleaned)) {
+        auto result = parser.parse(cleaned);
+        insertProperties(result, content);
+        return result;
+    }
     return parser.parse(content);
 }
 
@@ -154,6 +254,10 @@ qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
                                std::wstring_view path) {
     if (isMermaidDocumentPath(path)) return createMermaidDocument(content);
     std::string cleaned;
-    if (blankFrontmatter(content, cleaned)) return parser.parse(cleaned);
+    if (blankFrontmatter(content, cleaned)) {
+        auto result = parser.parse(cleaned);
+        insertProperties(result, content);
+        return result;
+    }
     return parser.parse(content);
 }
