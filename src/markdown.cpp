@@ -492,6 +492,73 @@ static void splitInlineExtensions(const ElementPtr& parent) {
     if (changed) parent->children = std::move(rebuilt);
 }
 
+// Obsidian [[wiki links]]: [[Target]] and [[Target|shown text]] become
+// Link elements with a wiki: scheme URL; the click handler resolves the
+// target against the current file's folder. Runs after the extension
+// splitter, skipping code the same way.
+static void splitWikiLinks(const ElementPtr& parent) {
+    if (parent->type == ElementType::Code ||
+        parent->type == ElementType::CodeBlock ||
+        parent->type == ElementType::MermaidDiagram ||
+        parent->type == ElementType::Link) {
+        return;
+    }
+
+    std::vector<ElementPtr> rebuilt;
+    bool changed = false;
+    for (auto& child : parent->children) {
+        if (child->type != ElementType::Text) {
+            splitWikiLinks(child);
+            rebuilt.push_back(child);
+            continue;
+        }
+
+        const std::string& text = child->text;
+        size_t cursor = 0;
+        bool any = false;
+        while (true) {
+            size_t open = text.find("[[", cursor);
+            if (open == std::string::npos) break;
+            size_t close = text.find("]]", open + 2);
+            if (close == std::string::npos) break;
+            std::string inner = text.substr(open + 2, close - open - 2);
+            if (inner.empty() || inner.find('\n') != std::string::npos) {
+                cursor = open + 2;
+                continue;
+            }
+            std::string target = inner, shown = inner;
+            size_t pipe = inner.find('|');
+            if (pipe != std::string::npos) {
+                target = inner.substr(0, pipe);
+                shown = inner.substr(pipe + 1);
+            }
+            if (target.empty() || shown.empty()) {
+                cursor = open + 2;
+                continue;
+            }
+            any = true;
+            if (open > cursor) {
+                rebuilt.push_back(makeTextElement(text.substr(cursor, open - cursor), parent.get()));
+            }
+            auto link = std::make_shared<Element>(ElementType::Link);
+            link->parent = parent.get();
+            link->url = "wiki:" + target;
+            link->children.push_back(makeTextElement(shown, link.get()));
+            rebuilt.push_back(std::move(link));
+            cursor = close + 2;
+        }
+        if (!any) {
+            rebuilt.push_back(child);
+            continue;
+        }
+        changed = true;
+        if (cursor < text.size()) {
+            rebuilt.push_back(makeTextElement(text.substr(cursor), parent.get()));
+        }
+    }
+    if (changed) parent->children = std::move(rebuilt);
+}
+
 } // namespace
 
 MarkdownParser::MarkdownParser() = default;
@@ -543,6 +610,7 @@ ParseResult MarkdownParser::parse(const std::string& markdown) {
 
     ctx.flushText();
     splitInlineExtensions(ctx.root);
+    splitWikiLinks(ctx.root);
     detectGitHubAlerts(ctx.root);
     result.root = ctx.root;
     result.success = true;
