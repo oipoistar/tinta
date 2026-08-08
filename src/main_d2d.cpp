@@ -1258,6 +1258,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // Get DPI using per-monitor aware API
     app.contentScale = GetDpiForWindow(app.hwnd) / 96.0f;
 
+    // Theme the native title bar before the window is ever shown
+    applyWindowChrome(app);
+
     // Initialize D2D
     if (!initD2D(app)) {
         MessageBoxW(nullptr, L"Failed to initialize Direct2D", L"Error", MB_OK);
