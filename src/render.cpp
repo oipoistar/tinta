@@ -2110,6 +2110,12 @@ bool layoutBegin(App& app) {
 
     app.layoutIndent = 40.0f * scale;
     app.layoutMaxWidth = layoutWidth - app.layoutIndent * 2;
+    // Zen mode: a centered reading column instead of the full width
+    if (app.zenMode) {
+        float column = std::min(app.layoutMaxWidth, 760.0f * scale);
+        app.layoutIndent = (layoutWidth - column) / 2.0f;
+        app.layoutMaxWidth = column;
+    }
     app.layoutCursorY = 20.0f * scale;
     app.layoutNextBlock = 0;
     app.layoutComplete = false;

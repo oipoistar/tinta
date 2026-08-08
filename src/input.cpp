@@ -1185,6 +1185,29 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     app.selecting = false;
 }
 
+// Zen mode: borderless fullscreen + centered reading column (F11)
+static void toggleZenMode(App& app, HWND hwnd) {
+    app.zenMode = !app.zenMode;
+    if (app.zenMode) {
+        app.zenRestorePlacement.length = sizeof(WINDOWPLACEMENT);
+        GetWindowPlacement(hwnd, &app.zenRestorePlacement);
+        MONITORINFO mi = { sizeof(mi) };
+        GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+        SetWindowLongW(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                     mi.rcMonitor.right - mi.rcMonitor.left,
+                     mi.rcMonitor.bottom - mi.rcMonitor.top,
+                     SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    } else {
+        SetWindowLongW(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+        SetWindowPlacement(hwnd, &app.zenRestorePlacement);
+        SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    }
+    app.layoutDirty = true;
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     float pageSize = app.height * 0.8f;
     float maxScroll = std::max(0.0f, app.contentHeight - app.height);
@@ -1374,9 +1397,14 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 } else if (app.showThemeChooser) {
                     app.showThemeChooser = false;
                     app.themeChooserAnimation = 0;
+                } else if (app.zenMode) {
+                    toggleZenMode(app, hwnd);
                 } else {
                     PostQuitMessage(0);
                 }
+                break;
+            case VK_F11:
+                toggleZenMode(app, hwnd);
                 break;
             case 'Q':
                 if (!app.showThemeChooser && !app.showSearch && !app.showFolderBrowser && !app.showToc) {

@@ -241,6 +241,9 @@ struct App {
     bool zoomApplyPending = false;   // TIMER_ZOOM_APPLY armed to coalesce zoom ticks
     bool darkMode = true;
     bool showStats = false;
+    // Zen mode: borderless fullscreen with a centered reading column (F11)
+    bool zenMode = false;
+    WINDOWPLACEMENT zenRestorePlacement{};
     bool followSystemTheme = false;
     int lightThemeIndex = 0;
     int darkThemeIndex = 5;
