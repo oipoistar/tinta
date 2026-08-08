@@ -807,7 +807,10 @@ render_document:
     }
 
     // Render overlays (search overlay handled separately for edit mode)
-    if (app.showSearch && !app.editMode) renderSearchOverlay(app);
+    if (app.showSearch && !app.editMode) {
+        renderSearchOverlay(app);
+        renderFolderSearchResults(app);
+    }
     if (app.showFolderBrowser) renderFolderBrowser(app);
     if (app.showToc) renderToc(app);
     if (app.showContextMenu) renderContextMenu(app);
@@ -956,6 +959,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     KillTimer(hwnd, TIMER_NOTIFICATION);
                 }
             }
+            if (wParam == TIMER_FOLDER_SEARCH && app) {
+                KillTimer(hwnd, TIMER_FOLDER_SEARCH);
+                startFolderSearchScan(*app);
+            }
             if (wParam == TIMER_IMAGE_REFLOW && app) {
                 // One relayout for however many images arrived since armed
                 KillTimer(hwnd, TIMER_IMAGE_REFLOW);
@@ -982,6 +989,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_CONTEXTMENU:
             if (app) handleContextMenu(*app, hwnd, lParam);
+            return 0;
+
+        case WM_APP_FOLDER_SEARCH:
+            // Folder search worker finished (handler takes ownership)
+            if (app) completeFolderSearch(*app, (void*)lParam);
             return 0;
 
         case WM_APP_GPU_READY:
@@ -1026,6 +1038,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
+                settings.folderSearchEnabled = app->folderSearchEnabled;
 
                 // Get window placement for position/size/maximized state
                 WINDOWPLACEMENT wp = {};
@@ -1128,6 +1141,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.followSystemTheme = savedSettings.followSystemTheme;
     app.lightThemeIndex = savedSettings.lightThemeIndex;
     app.darkThemeIndex = savedSettings.darkThemeIndex;
+    app.folderSearchEnabled = savedSettings.folderSearchEnabled;
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;

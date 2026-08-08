@@ -3,16 +3,131 @@
 #include "render.h"
 
 #include <algorithm>
+#include <cwctype>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <thread>
 
 namespace {
 constexpr size_t kNoTextRect = std::numeric_limits<size_t>::max();
+
+struct FolderScanMsg {
+    int generation = 0;
+    std::vector<App::FolderFileResult> files;
+};
+
+std::wstring utf8ToWideString(const std::string& bytes) {
+    if (bytes.empty()) return {};
+    int len = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), (int)bytes.size(), nullptr, 0);
+    if (len <= 0) return {};
+    std::wstring wide((size_t)len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.data(), (int)bytes.size(), wide.data(), len);
+    return wide;
+}
+}
+
+void clearFolderSearch(App& app) {
+    app.folderSearchGeneration++;   // orphan any scan in flight
+    app.folderResults.clear();
+    app.folderResultHits.clear();
+    if (app.hwnd) KillTimer(app.hwnd, TIMER_FOLDER_SEARCH);
+}
+
+void startFolderSearchScan(App& app) {
+    if (app.editMode || !app.folderSearchEnabled || !app.showSearch ||
+        app.searchQuery.empty() || app.currentFile.empty()) {
+        return;
+    }
+    int generation = ++app.folderSearchGeneration;
+    std::wstring queryLower = toLower(app.searchQuery);
+    std::filesystem::path current(toWide(app.currentFile));
+    std::filesystem::path dir = current.parent_path();
+    std::wstring currentName = current.filename().wstring();
+    HWND hwnd = app.hwnd;
+
+    std::thread([generation, queryLower, dir, currentName, hwnd] {
+        auto* msg = new FolderScanMsg{generation, {}};
+        std::error_code ec;
+        int scanned = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+            if (msg->files.size() >= 12 || scanned >= 200) break;
+            if (!entry.is_regular_file(ec)) continue;
+            std::wstring ext = entry.path().extension().wstring();
+            for (auto& c : ext) c = (wchar_t)std::towlower(c);
+            if (ext != L".md" && ext != L".markdown") continue;
+            if (_wcsicmp(entry.path().filename().c_str(), currentName.c_str()) == 0) continue;
+            if (entry.file_size(ec) > 1024 * 1024) continue;
+            scanned++;
+
+            std::ifstream file(entry.path(), std::ios::binary);
+            if (!file) continue;
+            std::string bytes((std::istreambuf_iterator<char>(file)),
+                              std::istreambuf_iterator<char>());
+            std::wstring content = utf8ToWideString(bytes);
+            std::wstring lower = content;
+            for (auto& c : lower) c = (wchar_t)std::towlower(c);
+
+            App::FolderFileResult result;
+            size_t pos = 0;
+            while ((pos = lower.find(queryLower, pos)) != std::wstring::npos) {
+                result.totalMatches++;
+                if (result.matches.size() < 3) {
+                    size_t lineStart = content.rfind(L'\n', pos);
+                    lineStart = (lineStart == std::wstring::npos) ? 0 : lineStart + 1;
+                    size_t lineEnd = content.find(L'\n', pos);
+                    if (lineEnd == std::wstring::npos) lineEnd = content.size();
+                    size_t snipStart = pos > lineStart + 40 ? pos - 40 : lineStart;
+                    size_t snipEnd = std::min(lineEnd, pos + queryLower.size() + 70);
+                    App::FolderMatch m;
+                    m.snippet = content.substr(snipStart, snipEnd - snipStart);
+                    for (auto& c : m.snippet) {
+                        if (c == L'\r' || c == L'\t') c = L' ';
+                    }
+                    m.matchStart = pos - snipStart;
+                    m.matchLen = queryLower.size();
+                    result.matches.push_back(std::move(m));
+                }
+                pos += queryLower.size();
+            }
+            if (result.totalMatches > 0) {
+                result.fileName = entry.path().filename().wstring();
+                result.fullPath = entry.path().wstring();
+                msg->files.push_back(std::move(result));
+            }
+        }
+        if (!PostMessageW(hwnd, WM_APP_FOLDER_SEARCH, 0, (LPARAM)msg)) delete msg;
+    }).detach();
+}
+
+void completeFolderSearch(App& app, void* results) {
+    auto* msg = static_cast<FolderScanMsg*>(results);
+    if (!msg) return;
+    if (msg->generation != app.folderSearchGeneration ||
+        !app.showSearch || app.editMode || !app.folderSearchEnabled) {
+        delete msg;
+        return;
+    }
+    app.folderResults = std::move(msg->files);
+    app.folderResultHits.clear();
+    delete msg;
+    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 void performSearch(App& app) {
     app.searchMatches.clear();
     app.searchCurrentIndex = 0;
     app.searchMatchCursor = 0;
+
+    // Folder-wide results follow the query, debounced on a timer so fast
+    // typing doesn't spawn a scan per keystroke
+    if (!app.editMode && app.folderSearchEnabled && app.hwnd) {
+        if (app.searchQuery.empty()) {
+            clearFolderSearch(app);
+        } else if (!app.currentFile.empty()) {
+            SetTimer(app.hwnd, TIMER_FOLDER_SEARCH, 250, nullptr);
+        }
+    }
 
     if (app.searchQuery.empty() || !app.root) return;
 

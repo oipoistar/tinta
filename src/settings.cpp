@@ -41,6 +41,7 @@ void saveSettings(const Settings& settings) {
     file << "followSystemTheme=" << (settings.followSystemTheme ? 1 : 0) << "\n";
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
+    file << "folderSearchEnabled=" << (settings.folderSearchEnabled ? 1 : 0) << "\n";
 }
 
 Settings loadSettings() {
@@ -77,6 +78,8 @@ Settings loadSettings() {
         } else if (key == "windowHeight") {
             int h = std::stoi(value);
             if (h >= 200) settings.windowHeight = h;
+        } else if (key == "folderSearchEnabled") {
+            settings.folderSearchEnabled = (value == "1");
         } else if (key == "followSystemTheme") {
             settings.followSystemTheme = (value == "1");
         } else if (key == "lightThemeIndex") {

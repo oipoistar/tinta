@@ -562,6 +562,7 @@ static void closeSearchIfOpen(App& app) {
     app.searchQuery.clear();
     app.searchMatches.clear();
     app.searchAnimation = 0;
+    clearFolderSearch(app);
     updateBlinkTimer(app);
 }
 
@@ -699,6 +700,41 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             return;
         }
         // Fall through for preview pane clicks
+    }
+
+    // Folder search: the bar's toggle button and result-panel clicks
+    if (app.showSearch && !app.editMode) {
+        float clickX = (float)GET_X_LPARAM(lParam);
+        float clickY = (float)GET_Y_LPARAM(lParam);
+        if (folderSearchToggleAt(app, clickX, clickY)) {
+            app.folderSearchEnabled = !app.folderSearchEnabled;
+            if (!app.folderSearchEnabled) {
+                clearFolderSearch(app);
+            } else {
+                performSearch(app);  // re-arms the scan timer
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        for (const auto& hit : app.folderResultHits) {
+            if (clickX >= hit.rect.left && clickX <= hit.rect.right &&
+                clickY >= hit.rect.top && clickY <= hit.rect.bottom &&
+                hit.fileIndex >= 0 && hit.fileIndex < (int)app.folderResults.size()) {
+                // Open the file and land on the first match of the same query
+                if (openDocumentInViewer(app, app.folderResults[hit.fileIndex].fullPath)) {
+                    app.folderResults.clear();
+                    app.folderResultHits.clear();
+                    ensureLayoutComplete(app);
+                    performSearch(app);
+                    if (!app.searchMatches.empty()) {
+                        app.searchCurrentIndex = 0;
+                        scrollToCurrentMatch(app);
+                    }
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+        }
     }
 
     // Help overlay: check scrollbar click
@@ -1383,6 +1419,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 app.searchQuery.clear();
                 app.searchMatches.clear();
                 app.searchAnimation = 0;
+                clearFolderSearch(app);
                 updateBlinkTimer(app);
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
@@ -1480,6 +1517,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.searchQuery.clear();
                     app.searchMatches.clear();
                     app.searchAnimation = 0;
+                    clearFolderSearch(app);
                     updateBlinkTimer(app);
                 } else if (app.showFolderBrowser) {
                     app.showFolderBrowser = false;

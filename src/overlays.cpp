@@ -1184,3 +1184,184 @@ void renderContextMenu(App& app) {
         }
     }
 }
+
+// --- Folder-wide search results ---
+//
+// Sibling markdown files matching the search query, shown as a panel under
+// the right end of the search bar: filename, a few highlighted snippet
+// lines each, and a +N counter. Clicking a file opens it at the match.
+
+namespace {
+
+// The toggle button hangs off the right edge of the search bar
+void folderToggleGeometry(const App& app, float& btnX, float& btnY, float& btnSize) {
+    float barWidth = std::min(dpi(app, 500.0f), app.width - dpi(app, 40.0f));
+    float barHeight = dpi(app, 44.0f);
+    float barX = ((float)app.width - barWidth) / 2;
+    float barY = dpi(app, 20.0f);
+    btnSize = dpi(app, 30.0f);
+    btnX = barX + barWidth + dpi(app, 8.0f);
+    btnY = barY + (barHeight - btnSize) / 2;
+}
+
+} // namespace
+
+bool folderSearchToggleAt(const App& app, float x, float y) {
+    if (!app.showSearch || app.editMode) return false;
+    float btnX, btnY, btnSize;
+    folderToggleGeometry(app, btnX, btnY, btnSize);
+    return x >= btnX && x <= btnX + btnSize && y >= btnY && y <= btnY + btnSize;
+}
+
+void renderFolderSearchResults(App& app) {
+    float anim = app.searchAnimation;
+    IDWriteTextFormat* fmt = app.folderBrowserFormat;
+
+    // Toggle button (always drawn with the bar so the feature is discoverable)
+    {
+        float btnX, btnY, btnSize;
+        folderToggleGeometry(app, btnX, btnY, btnSize);
+        D2D1_COLOR_F btnBg = app.theme.isDark ? hexColor(0x1E1E22, 0.95f * anim)
+                                              : hexColor(0xFFFFFF, 0.95f * anim);
+        app.brush->SetColor(btnBg);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(btnX, btnY, btnX + btnSize, btnY + btnSize),
+                              dpi(app, 6.0f), dpi(app, 6.0f)), app.brush);
+        D2D1_COLOR_F folderColor = app.folderSearchEnabled
+            ? app.theme.accent
+            : (app.theme.isDark ? hexColor(0x5A5A62) : hexColor(0xB0B0B6));
+        folderColor.a = anim;
+        app.brush->SetColor(folderColor);
+        float gx = btnX + dpi(app, 7.0f);
+        float gy = btnY + dpi(app, 9.0f);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(gx, gy + dpi(app, 3.0f), gx + dpi(app, 16.0f), gy + dpi(app, 13.0f)), 2, 2),
+            app.brush);
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(gx, gy, gx + dpi(app, 7.0f), gy + dpi(app, 4.0f)), app.brush);
+        if (!app.folderSearchEnabled) {
+            // Slash = disabled
+            D2D1_COLOR_F slash = app.theme.isDark ? hexColor(0xF85149, anim) : hexColor(0xCF222E, anim);
+            app.brush->SetColor(slash);
+            app.renderTarget->DrawLine(
+                D2D1::Point2F(btnX + dpi(app, 6.0f), btnY + btnSize - dpi(app, 6.0f)),
+                D2D1::Point2F(btnX + btnSize - dpi(app, 6.0f), btnY + dpi(app, 6.0f)),
+                app.brush, 2.0f);
+        }
+    }
+
+    app.folderResultHits.clear();
+    if (!app.folderSearchEnabled || app.folderResults.empty() ||
+        app.searchQuery.empty() || !fmt) {
+        return;
+    }
+
+    float panelW = std::min(dpi(app, 460.0f), app.width * 0.35f);
+    float panelX = app.width - panelW - dpi(app, 16.0f);
+    float panelY = dpi(app, 20.0f) + dpi(app, 44.0f) + dpi(app, 12.0f);
+    float pad = dpi(app, 12.0f);
+    float headerH = dpi(app, 24.0f);
+    float lineH = dpi(app, 20.0f);
+    float moreH = dpi(app, 16.0f);
+    float sectionGap = dpi(app, 10.0f);
+    float maxBottom = app.height - dpi(app, 20.0f);
+
+    // Height first, so the panel can be drawn before its content
+    float contentH = pad;
+    size_t shownFiles = 0;
+    for (const auto& file : app.folderResults) {
+        float sectionH = headerH + file.matches.size() * lineH +
+            ((size_t)file.totalMatches > file.matches.size() ? moreH : 0.0f) + sectionGap;
+        if (panelY + contentH + sectionH + pad > maxBottom) break;
+        contentH += sectionH;
+        shownFiles++;
+    }
+    if (shownFiles == 0) return;
+    contentH += pad - sectionGap;
+
+    D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(
+        D2D1::RectF(panelX, panelY, panelX + panelW, panelY + contentH),
+        dpi(app, 8.0f), dpi(app, 8.0f));
+    D2D1_COLOR_F panelBg = app.theme.isDark ? hexColor(0x18181C, 0.96f * anim)
+                                            : hexColor(0xFCFCFC, 0.97f * anim);
+    app.brush->SetColor(panelBg);
+    app.renderTarget->FillRoundedRectangle(panel, app.brush);
+    D2D1_COLOR_F borderColor = app.theme.isDark ? hexColor(0x3A3A40, 0.8f * anim)
+                                                : hexColor(0xC8C8C8, 0.8f * anim);
+    app.brush->SetColor(borderColor);
+    app.renderTarget->DrawRoundedRectangle(panel, app.brush, 1.0f);
+
+    float rowY = panelY + pad;
+    for (size_t i = 0; i < shownFiles; i++) {
+        const auto& file = app.folderResults[i];
+        float sectionTop = rowY;
+
+        D2D1_COLOR_F nameColor = app.theme.accent;
+        nameColor.a = anim;
+        app.brush->SetColor(nameColor);
+        app.renderTarget->DrawText(
+            file.fileName.c_str(), (UINT32)file.fileName.length(), fmt,
+            D2D1::RectF(panelX + pad, rowY, panelX + panelW - pad, rowY + headerH),
+            app.brush);
+        rowY += headerH;
+
+        for (const auto& match : file.matches) {
+            // Highlight behind the matched substring
+            std::wstring prefix = match.snippet.substr(0, match.matchStart);
+            std::wstring matched = match.snippet.substr(match.matchStart, match.matchLen);
+            float prefixW = prefix.empty() ? 0.0f : measureText(app, prefix, fmt);
+            float matchW = matched.empty() ? 0.0f : measureText(app, matched, fmt);
+            float textX = panelX + pad;
+            float availW = panelW - pad * 2;
+            if (prefixW + matchW > availW) {
+                // Keep the match visible: drop the head of the prefix
+                while (!prefix.empty() && prefixW + matchW > availW * 0.7f) {
+                    prefix.erase(0, 8);
+                    prefixW = prefix.empty() ? 0.0f : measureText(app, prefix, fmt);
+                }
+            }
+            D2D1_COLOR_F hl = app.theme.accent;
+            hl.a = 0.28f * anim;
+            app.brush->SetColor(hl);
+            app.renderTarget->FillRectangle(
+                D2D1::RectF(textX + prefixW, rowY + dpi(app, 1.0f),
+                            textX + prefixW + matchW, rowY + lineH - dpi(app, 1.0f)),
+                app.brush);
+
+            std::wstring shown = prefix + match.snippet.substr(match.matchStart);
+            D2D1_COLOR_F snippetColor = app.theme.text;
+            snippetColor.a = 0.85f * anim;
+            app.brush->SetColor(snippetColor);
+            app.renderTarget->DrawText(
+                shown.c_str(), (UINT32)shown.length(), fmt,
+                D2D1::RectF(textX, rowY + dpi(app, 1.0f), textX + availW, rowY + lineH),
+                app.brush);
+            rowY += lineH;
+        }
+
+        if ((size_t)file.totalMatches > file.matches.size()) {
+            wchar_t more[32];
+            swprintf_s(more, L"+%d more", file.totalMatches - (int)file.matches.size());
+            D2D1_COLOR_F moreColor = app.theme.text;
+            moreColor.a = 0.45f * anim;
+            app.brush->SetColor(moreColor);
+            app.renderTarget->DrawText(more, (UINT32)wcslen(more), fmt,
+                D2D1::RectF(panelX + pad, rowY, panelX + panelW - pad, rowY + moreH),
+                app.brush);
+            rowY += moreH;
+        }
+
+        app.folderResultHits.push_back({
+            D2D1::RectF(panelX, sectionTop, panelX + panelW, rowY), (int)i});
+
+        if (i + 1 < shownFiles) {
+            app.brush->SetColor(borderColor);
+            app.renderTarget->DrawLine(
+                D2D1::Point2F(panelX + pad, rowY + sectionGap / 2),
+                D2D1::Point2F(panelX + panelW - pad, rowY + sectionGap / 2),
+                app.brush, 1.0f);
+        }
+        rowY += sectionGap;
+    }
+}
+
