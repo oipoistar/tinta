@@ -1,5 +1,20 @@
 # Changelog
 
+## [v2.5.0] - 2026-08-06
+
+The performance release: Tinta now opens in about 130 ms — 2.6× faster than v2.4.5.
+
+### Performance
+- Instant first paint: the first frame renders on a software target (~20 ms) while the GPU driver initializes in the background (~200 ms, previously paid before anything appeared); the render target is upgraded to hardware invisibly once the driver is warm. Measured startup: 348.8 ms → 133.4 ms
+- Documents lay out ~28% faster: inline elements that fit on one line no longer shape their text twice, and plain table cells that fit their column skip the trial height measurement
+- Several images finishing their downloads close together now trigger one reflow instead of one per image
+- Cursor blink in edit mode no longer re-shapes every visible line — editor idle CPU dropped to zero
+- Mermaid diagrams stopped recreating stroke styles and node outline geometries on every frame
+- Window resizing keeps all rendered resources instead of rebuilding them per size change
+
+### Fixed
+- Images no longer turn into their alt-text placeholders after resizing the window (long-standing) or shortly after opening a document (introduced with the startup work, never released)
+
 ## [v2.4.5] - 2026-08-05
 
 ### Added
