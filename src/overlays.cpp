@@ -1069,6 +1069,8 @@ void openContextMenu(App& app, float x, float y) {
     app.showContextMenu = true;
     app.hoveredContextMenuItem = -1;
     app.contextMenuAnimation = 0.0f;
+    app.hoveredCodeBlock = -1;
+    app.hoveredLink.clear();
 }
 
 void renderContextMenu(App& app) {
