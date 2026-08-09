@@ -34,6 +34,12 @@ static bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     auto result = parseDocument(app.parser, buffer.str(), fullPath);
     if (!result.success) return false;
 
+    // Reading position memory (#77): keep the old document's position,
+    // resume the new one's
+    if (!app.currentFile.empty()) {
+        persistReadingPosition(app.currentFile, app.scrollY);
+    }
+
     app.root = result.root;
     app.parseTimeUs = result.parseTimeUs;
     int utf8Len = WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
@@ -43,6 +49,7 @@ static bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     app.scrollX = 0;
     app.targetScrollY = 0;
     app.targetScrollX = 0;
+    app.pendingScrollRestore = findReadingPosition(loadSettings(), app.currentFile);
     app.focusMermaidOnNextLayout = isMermaidDocumentPath(fullPath);
     app.contentHeight = 0;
     app.docText.clear();
@@ -238,6 +245,31 @@ static void applyZoomDelta(App& app, float delta) {
     }
 }
 
+// Maps a pressed key through the user keymap ([Keys] in settings.ini): a
+// remapped key becomes the built-in default the switches below expect, and
+// a default key the user moved elsewhere is swallowed. Non-action keys pass
+// through untouched. (#77)
+static WPARAM translateActionKey(App& app, WPARAM key, bool isChar) {
+    auto norm = [&](unsigned k) {
+        return isChar ? (unsigned)towupper((wint_t)k) : k;
+    };
+    unsigned pressed = norm((unsigned)key);
+    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+        if (KEY_ACTIONS[i].isChar != isChar) continue;
+        if (norm(app.keymap[i]) == pressed) {
+            return (WPARAM)KEY_ACTIONS[i].defaultKey;
+        }
+    }
+    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+        if (KEY_ACTIONS[i].isChar != isChar) continue;
+        if (norm(KEY_ACTIONS[i].defaultKey) == pressed &&
+            norm(app.keymap[i]) != pressed) {
+            return 0;  // default key rebound elsewhere: swallow
+        }
+    }
+    return key;
+}
+
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Print preview: the wheel flips pages
     if (app.showPrintPreview) {
@@ -261,21 +293,23 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         return;
     }
 
-    // Edit mode: route scroll to editor or preview based on mouse X
+    // Edit mode: the wheel scrolls the editor from either pane — the preview
+    // follows through the scroll-anchor sync, so the panes cannot drift
+    // apart and both sides always respond (#77)
     if (app.editMode) {
         float sepX = app.editorShowPreview
             ? app.width * app.editorSplitRatio
             : static_cast<float>(app.width);
-        if (app.mouseX < sepX) {
-            if (ctrl) {
-                applyZoomDelta(app, delta);
-                InvalidateRect(hwnd, nullptr, FALSE);
-            } else {
-                handleEditorMouseWheel(app, hwnd, delta);
-            }
+        if (ctrl && app.mouseX < sepX) {
+            applyZoomDelta(app, delta);
+            InvalidateRect(hwnd, nullptr, FALSE);
             return;
         }
-        // Fall through to normal scroll for preview pane
+        if (!ctrl) {
+            handleEditorMouseWheel(app, hwnd, delta);
+            return;
+        }
+        // Ctrl over the preview pane: fall through to document zoom
     }
 
     // Handle folder browser scroll (not when Ctrl is held — that's zoom)
@@ -1624,6 +1658,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 break;
         }
     } else {
+        wParam = translateActionKey(app, wParam, false);
         switch (wParam) {
             case VK_ESCAPE:
                 // Priority: ContextMenu > Help > Search > FolderBrowser > TOC > Theme chooser > Quit
@@ -1781,7 +1816,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
 
     // ':' to enter edit mode, '?' to toggle help — when no overlay is active
     if (!app.showSearch && !app.showFolderBrowser && !app.showToc && !app.showThemeChooser) {
-        wchar_t ch = (wchar_t)wParam;
+        wchar_t ch = (wchar_t)translateActionKey(app, wParam, true);
         if (ch == L':' && !app.showHelp) {
             enterEditMode(app);
             return;

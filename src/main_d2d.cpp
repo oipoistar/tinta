@@ -97,8 +97,14 @@ void render(App& app) {
             // (the viewport is zero-width, so laying out now would be wasted
             // work against a nonsense max width)
         } else if (app.editMode) {
-            // Edit mode needs complete scroll anchors for preview sync
-            layoutDocument(app);
+            // The preview streams in like the viewer: visible region first,
+            // the rest in background chunks. The anchor sync clamps to
+            // whatever is laid out and self-corrects as chunks land, so
+            // entering edit mode no longer blocks on a full layout (#77)
+            layoutDocumentViewportFirst(app);
+            if (!app.layoutComplete) {
+                PostMessage(app.hwnd, WM_APP_LAYOUT_CHUNK, 0, 0);
+            }
         } else {
             // Lay out the visible region first so this frame presents
             // immediately; the rest continues in WM_APP_LAYOUT_CHUNK slices
@@ -190,6 +196,15 @@ void render(App& app) {
     app.drawCalls++;
 
 render_document:
+
+    // Apply a saved reading position once the layout can reach it (#77)
+    if (app.pendingScrollRestore >= 0.0f &&
+        (app.layoutComplete ||
+         app.contentHeight >= app.pendingScrollRestore + app.height)) {
+        app.scrollY = app.pendingScrollRestore;
+        app.targetScrollY = app.pendingScrollRestore;
+        app.pendingScrollRestore = -1.0f;
+    }
 
     // Clamp scroll values
     float documentWidth = documentViewportWidth(app);
@@ -1056,6 +1071,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
+                if (!app->currentFile.empty()) {
+                    rememberReadingPosition(settings, app->currentFile, app->scrollY);
+                }
 
                 // Get window placement for position/size/maximized state
                 WINDOWPLACEMENT wp = {};
@@ -1167,6 +1185,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.zoomFactor = savedSettings.zoomFactor;
     app.editorShowPreview = savedSettings.editorShowPreview;
     app.editorWordWrap = savedSettings.editorWordWrap;
+    applyKeymap(app, savedSettings);
 
     // Parse command line
     std::string inputFile;
@@ -1357,6 +1376,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     }
 
     app.metrics.fileLoadUs = usElapsed(t0);
+
+    // Resume the saved reading position (#77); new-file windows start in the
+    // editor at the top instead
+    if (!startInEditMode && !app.currentFile.empty()) {
+        app.pendingScrollRestore = findReadingPosition(savedSettings, app.currentFile);
+    }
 
     // Set window title with filename
     updateWindowTitle(app);

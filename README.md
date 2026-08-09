@@ -103,6 +103,33 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Ctrl+W` | Toggle word wrap (in edit mode) |
 | `Q` | Quit |
 
+## Customization
+
+Settings live in a plain INI file at `%APPDATA%\Tinta\settings.ini` (theme,
+zoom, window placement, word wrap, and more — written on exit). The `[Keys]`
+section lets you remap the single-key shortcuts: change a value and restart
+Tinta. Accepted values are letters, digits, `Tab`, `Space`, `F1`–`F12`, or
+any single character.
+
+```ini
+[Keys]
+search=F
+browse=B
+toc=Tab
+theme=T
+stats=S
+quit=Q
+newfile=N
+zen=F11
+scrollup=K
+scrolldown=J
+edit=:
+help=?
+```
+
+Ctrl combos (save, print, copy, word wrap…) are fixed. The help overlay and
+context menu show whatever keys are currently bound.
+
 ## Building
 
 Requires Windows with Visual Studio 2019+ and CMake 3.15+.

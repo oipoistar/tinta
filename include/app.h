@@ -129,6 +129,11 @@ struct Settings {
     int darkThemeIndex = 5;    // Midnight
     // Search results from sibling markdown files in the search overlay
     bool folderSearchEnabled = true;
+    // Reading positions: most-recent-first, capped (#77)
+    struct ReadingPosition { std::string path; float scrollY; };
+    std::vector<ReadingPosition> readingPositions;
+    // [Keys] overrides from settings.ini: action name -> key name (#77)
+    std::vector<std::pair<std::string, std::string>> keyOverrides;
 };
 
 // Application state
@@ -303,6 +308,16 @@ struct App {
     bool helpScrollbarDragging = false;
     float helpScrollbarDragStartY = 0;
     float helpScrollbarDragStartScroll = 0;
+
+    // Resolved single-key bindings, indexed like KEY_ACTIONS (#77).
+    // Filled by applyKeymap from settings; slots beyond the action count
+    // stay zero.
+    unsigned keymap[16] = {};
+
+    // Reading position restore (#77): applied once enough of the document is
+    // laid out for the target to be reachable (chunked layout grows
+    // contentHeight, so applying immediately would clamp to a partial height)
+    float pendingScrollRestore = -1.0f;
 
     // Print preview overlay. While it is open the document is held in print
     // layout — width, theme, zoom and scroll are hijacked by enterPrintLayout —
@@ -583,6 +598,7 @@ struct App {
     std::wstring editorText;
     bool editorDirty = false;
     std::vector<size_t> editorLineStarts;
+    float editorScrollX = 0.0f;  // horizontal scroll, non-wrap mode only (#77)
 
     // Editor view options (persisted)
     bool editorShowPreview = true;
