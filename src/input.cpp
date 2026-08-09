@@ -1496,10 +1496,8 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     if (ctrl) {
         switch (wParam) {
             case 'P':
-                // Print (viewer mode; Ctrl+P in edit mode toggles the preview)
-                if (!app.editMode) {
-                    printDocument(app);
-                }
+                // Print (edit mode handles its own Ctrl+P in the editor path)
+                printDocument(app);
                 break;
             case 'A': {
                 // Select All - extract all text from document

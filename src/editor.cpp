@@ -5,6 +5,7 @@
 #include "render.h"
 #include "d2d_init.h"
 #include "search.h"
+#include "print.h"
 
 #include <fstream>
 #include <sstream>
@@ -975,6 +976,15 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 return;
             }
             case 'P': {
+                // Print the document as currently edited, saved or not
+                editorReparse(app);
+                printDocument(app);
+                app.clearEditorLineLayoutCache();
+                app.editorRowMetricsWidth = -1.0f;
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+            case 'E': {
                 app.editorShowPreview = !app.editorShowPreview;
                 app.clearEditorLineLayoutCache();
                 if (app.editorShowPreview) {
@@ -984,8 +994,8 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 app.editorRowMetricsWidth = -1.0f;  // pane width changed
                 app.editorNotificationMsg = app.editorShowPreview
-                    ? L"Preview shown (Ctrl+P to hide)"
-                    : L"Preview hidden (Ctrl+P to show)";
+                    ? L"Preview shown (Ctrl+E to hide)"
+                    : L"Preview hidden (Ctrl+E to show)";
                 app.showEditModeNotification = true;
                 app.editModeNotificationAlpha = 1.0f;
                 app.editModeNotificationStart = std::chrono::steady_clock::now();

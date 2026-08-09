@@ -914,7 +914,7 @@ void renderHelpOverlay(App& app) {
     const HelpEntry editEntries[] = {
         {L":",             L"Enter edit mode"},
         {L"Ctrl+S",       L"Save (in edit mode)"},
-        {L"Ctrl+P",       L"Show / hide preview pane"},
+        {L"Ctrl+E",       L"Show / hide preview pane"},
         {L"Ctrl+W",       L"Toggle word wrap"},
         {L"ESC ESC",      L"Exit edit mode"},
     };
@@ -922,6 +922,7 @@ void renderHelpOverlay(App& app) {
     const HelpEntry generalEntries[] = {
         {L"Ctrl+A",       L"Select all text"},
         {L"Ctrl+C",       L"Copy selection"},
+        {L"Ctrl+P",       L"Print / PDF"},
         {L"ESC",          L"Close overlay / Quit"},
         {L"Q",            L"Quit"},
     };
