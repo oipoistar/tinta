@@ -97,8 +97,14 @@ void render(App& app) {
             // (the viewport is zero-width, so laying out now would be wasted
             // work against a nonsense max width)
         } else if (app.editMode) {
-            // Edit mode needs complete scroll anchors for preview sync
-            layoutDocument(app);
+            // The preview streams in like the viewer: visible region first,
+            // the rest in background chunks. The anchor sync clamps to
+            // whatever is laid out and self-corrects as chunks land, so
+            // entering edit mode no longer blocks on a full layout (#77)
+            layoutDocumentViewportFirst(app);
+            if (!app.layoutComplete) {
+                PostMessage(app.hwnd, WM_APP_LAYOUT_CHUNK, 0, 0);
+            }
         } else {
             // Lay out the visible region first so this frame presents
             // immediately; the rest continues in WM_APP_LAYOUT_CHUNK slices
