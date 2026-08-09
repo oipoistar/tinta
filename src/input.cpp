@@ -1084,7 +1084,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         return;
     }
 
-    // Print preview: only the two buttons are clickable
+    // Print preview: buttons and format chips
     if (app.showPrintPreview) {
         float mx = (float)GET_X_LPARAM(lParam);
         float my = (float)GET_Y_LPARAM(lParam);
@@ -1093,8 +1093,22 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         };
         if (hit(app.printPreviewPrintBtn)) {
             printPreviewConfirm(app, hwnd);
-        } else if (hit(app.printPreviewCancelBtn)) {
+            return;
+        }
+        if (hit(app.printPreviewCancelBtn)) {
             closePrintPreview(app, hwnd);
+            return;
+        }
+        for (int i = 0; i < PRINT_PAPER_COUNT; i++) {
+            if (hit(app.printPreviewPaperBtn[i])) {
+                printPreviewSetFormat(app, i, app.printPreviewLandscape);
+                return;
+            }
+        }
+        if (hit(app.printPreviewOrientBtn[0])) {
+            printPreviewSetFormat(app, app.printPreviewPaper, false);
+        } else if (hit(app.printPreviewOrientBtn[1])) {
+            printPreviewSetFormat(app, app.printPreviewPaper, true);
         }
         return;
     }

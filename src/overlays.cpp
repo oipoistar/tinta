@@ -1,6 +1,7 @@
 #include "overlays.h"
 #include "utils.h"
 #include "d2d_init.h"
+#include "print.h"
 
 #include <chrono>
 #include <algorithm>
@@ -1439,6 +1440,49 @@ void renderPrintPreview(App& app) {
         app.renderTarget->DrawText(label, (UINT32)wcslen(label), uiFmt,
             D2D1::RectF(0, 0, w, topBarH), app.brush);
     }
+
+    // Format chips: paper sizes top-left, orientation top-right. The active
+    // chip fills with the accent color.
+    auto drawChip = [&](const D2D1_RECT_F& rect, const wchar_t* text, bool active) {
+        float cr = 5.0f * ui;
+        if (active) {
+            app.brush->SetColor(th.accent);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(rect, cr, cr), app.brush);
+        } else {
+            D2D1_COLOR_F bc = th.text;
+            bc.a = 0.35f;
+            app.brush->SetColor(bc);
+            app.renderTarget->DrawRoundedRectangle(
+                D2D1::RoundedRect(rect, cr, cr), app.brush, 1.0f);
+        }
+        if (uiFmt) {
+            app.brush->SetColor(active ? D2D1::ColorF(1.0f, 1.0f, 1.0f) : th.text);
+            uiFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            app.renderTarget->DrawText(text, (UINT32)wcslen(text), uiFmt, rect, app.brush);
+        }
+    };
+
+    float chipH = 26.0f * ui;
+    float chipY = (topBarH - chipH) / 2.0f;
+    float chipGap = 8.0f * ui;
+    float paperW = 64.0f * ui;
+    float px2 = 24.0f * ui;
+    for (int i = 0; i < PRINT_PAPER_COUNT; i++) {
+        D2D1_RECT_F rect = D2D1::RectF(px2, chipY, px2 + paperW, chipY + chipH);
+        app.printPreviewPaperBtn[i] = rect;
+        drawChip(rect, PRINT_PAPERS[i].name, i == app.printPreviewPaper);
+        px2 += paperW + chipGap;
+    }
+    float orientW = 88.0f * ui;
+    D2D1_RECT_F landR = D2D1::RectF(w - 24.0f * ui - orientW, chipY,
+                                    w - 24.0f * ui, chipY + chipH);
+    D2D1_RECT_F portR = D2D1::RectF(landR.left - chipGap - orientW, chipY,
+                                    landR.left - chipGap, chipY + chipH);
+    app.printPreviewOrientBtn[0] = portR;
+    app.printPreviewOrientBtn[1] = landR;
+    drawChip(portR, L"Portrait", !app.printPreviewLandscape);
+    drawChip(landR, L"Landscape", app.printPreviewLandscape);
 
     // Buttons, bottom right
     float btnH = 34.0f * ui;

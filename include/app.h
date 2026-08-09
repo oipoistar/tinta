@@ -323,8 +323,18 @@ struct App {
     float printPreviewFit = 1.0f;             // page DIPs -> screen pixels
     std::vector<uint8_t> printPreviewPixels;  // current page, premultiplied BGRA
     unsigned printPreviewPxW = 0, printPreviewPxH = 0;
+    int printPreviewPaper = -1;               // index into PRINT_PAPERS (-1: detect)
+    bool printPreviewLandscape = false;
     D2D1_RECT_F printPreviewPrintBtn{};       // hit rects (set during render)
     D2D1_RECT_F printPreviewCancelBtn{};
+    D2D1_RECT_F printPreviewPaperBtn[4]{};
+    D2D1_RECT_F printPreviewOrientBtn[2]{};   // 0 portrait, 1 landscape
+
+    // Blocks wider than the printable area (mermaid diagrams, wide tables)
+    // are shrunk uniformly to fit the margins when printing; each band is a
+    // vertical slice of the document drawn at `scale` about its own top-left
+    struct PrintShrinkBand { float top, bottom, scale; };
+    std::vector<PrintShrinkBand> printShrinkBands;
 
     // Table of contents overlay
     bool showToc = false;

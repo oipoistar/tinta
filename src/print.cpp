@@ -9,6 +9,7 @@
 #include <wincodec.h>
 #include <winspool.h>
 
+#include <algorithm>
 #include <cstring>
 
 #include <cmath>
@@ -37,9 +38,10 @@ D2DTheme printTheme() {
 
 using SavedView = App::PrintSavedView;
 
-// Re-layouts the document at page-content width, 96 DPI, zoom 1, in the
-// print palette. Restores everything in leavePrintLayout.
-void enterPrintLayout(App& app, float contentWidthDips, SavedView& saved) {
+// Saves the screen view state and switches to the print palette at 96 DPI,
+// zoom 1. layoutAtPrintWidth does the actual re-layout; leavePrintLayout
+// restores everything.
+void enterPrintLayout(App& app, SavedView& saved) {
     saved.width = app.width;
     saved.height = app.height;
     saved.contentScale = app.contentScale;
@@ -51,14 +53,91 @@ void enterPrintLayout(App& app, float contentWidthDips, SavedView& saved) {
     saved.targetScrollY = app.targetScrollY;
     saved.theme = app.theme;
 
-    app.width = (int)contentWidthDips;
-    app.height = 4000;  // layout does not clip vertically; any tall value
     app.contentScale = 1.0f;
     app.zoomFactor = 1.0f;
     app.theme = printTheme();
     updateTextFormats(app);
+}
+
+// Blocks wider than the printable area cannot reflow (mermaid diagrams and
+// tables have fixed layouts), so they print shrunk to fit the margins. Each
+// overflowing primitive seeds a vertical band that grows to swallow every
+// primitive it overlaps — the whole diagram or table scales together about
+// its own top-left, leaving whitespace below rather than moving later
+// content (pagination keeps using the unscaled bounds).
+void computeShrinkBands(App& app, float contentW) {
+    app.printShrinkBands.clear();
+    const float eps = 0.5f;
+
+    struct Item { float top, bottom, right; };
+    std::vector<Item> items;
+    items.reserve(app.layoutRects.size() + app.layoutLines.size() +
+                  app.layoutConnectors.size() + app.layoutShapes.size() +
+                  app.layoutBitmaps.size() + app.layoutTextRuns.size());
+    for (const auto& r : app.layoutRects)
+        items.push_back({r.rect.top, r.rect.bottom, r.rect.right});
+    for (const auto& l : app.layoutLines)
+        items.push_back({std::min(l.p1.y, l.p2.y), std::max(l.p1.y, l.p2.y),
+                         std::max(l.p1.x, l.p2.x)});
+    for (const auto& c : app.layoutConnectors)
+        items.push_back({c.bounds.top, c.bounds.bottom, c.bounds.right});
+    for (const auto& s : app.layoutShapes)
+        items.push_back({s.rect.top, s.rect.bottom, s.rect.right});
+    for (const auto& b : app.layoutBitmaps)
+        items.push_back({b.destRect.top, b.destRect.bottom, b.destRect.right});
+    for (const auto& t : app.layoutTextRuns)
+        items.push_back({t.bounds.top, t.bounds.bottom, t.bounds.right});
+
+    // Seed bands from overflowing items
+    struct Band { float top, bottom, right; };
+    std::vector<Band> bands;
+    for (const auto& it : items) {
+        if (it.right <= contentW + eps) continue;
+        bands.push_back({it.top, it.bottom, it.right});
+    }
+    if (bands.empty()) return;
+
+    // Grow bands over everything they vertically overlap, then merge bands
+    // that grew into each other; repeat until stable
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (auto& b : bands) {
+            for (const auto& it : items) {
+                if (it.bottom <= b.top + eps || it.top >= b.bottom - eps) continue;
+                if (it.top < b.top)       { b.top = it.top;       changed = true; }
+                if (it.bottom > b.bottom) { b.bottom = it.bottom; changed = true; }
+                if (it.right > b.right)   { b.right = it.right;   changed = true; }
+            }
+        }
+        std::sort(bands.begin(), bands.end(),
+                  [](const Band& a, const Band& b) { return a.top < b.top; });
+        for (size_t i = 0; i + 1 < bands.size();) {
+            if (bands[i + 1].top < bands[i].bottom - eps) {
+                bands[i].bottom = std::max(bands[i].bottom, bands[i + 1].bottom);
+                bands[i].right = std::max(bands[i].right, bands[i + 1].right);
+                bands.erase(bands.begin() + i + 1);
+                changed = true;
+            } else {
+                i++;
+            }
+        }
+    }
+
+    for (const auto& b : bands) {
+        float scale = std::max(0.1f, contentW / b.right);
+        app.printShrinkBands.push_back({b.top, b.bottom, scale});
+    }
+}
+
+// Re-layouts the document at page-content width and finds the oversized
+// blocks that need shrinking
+void layoutAtPrintWidth(App& app, float contentWidthDips) {
+    app.width = (int)contentWidthDips;
+    app.height = 4000;  // layout does not clip vertically; any tall value
     app.layoutDirty = true;
     ensureLayoutComplete(app);
+    computeShrinkBands(app, contentWidthDips);
 }
 
 void leavePrintLayout(App& app, const SavedView& saved) {
@@ -97,6 +176,9 @@ std::vector<float> computePageBreaks(const App& app, float pageContentH) {
             for (const auto& line : app.lineBuckets) consider(line.top, line.bottom);
             for (const auto& bmp : app.layoutBitmaps) consider(bmp.destRect.top, bmp.destRect.bottom);
             for (const auto& shape : app.layoutShapes) consider(shape.rect.top, shape.rect.bottom);
+            // Shrink bands page-break as a unit: a scaled diagram split
+            // across pages would render discontinuously
+            for (const auto& band : app.printShrinkBands) consider(band.top, band.bottom);
             if (adjusted == proposed) break;
             proposed = adjusted;
         }
@@ -129,29 +211,54 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
     float dx = offsetX;
     float dy = offsetY - yStart;
 
+    // Oversized blocks draw scaled about their band's top-left; the band
+    // transform composes with whatever transform the caller set (the
+    // preview rasterizer scales the whole page to display resolution)
+    D2D1_MATRIX_3X2_F baseTransform;
+    dc->GetTransform(&baseTransform);
+    auto applyBand = [&](float top, float bottom) {
+        for (const auto& band : app.printShrinkBands) {
+            if (top >= band.top - 0.5f && bottom <= band.bottom + 0.5f) {
+                dc->SetTransform(
+                    D2D1::Matrix3x2F::Scale(band.scale, band.scale,
+                        D2D1::Point2F(dx, band.top + dy)) * baseTransform);
+                return true;
+            }
+        }
+        return false;
+    };
+    auto resetBand = [&](bool wasBanded) {
+        if (wasBanded) dc->SetTransform(baseTransform);
+    };
+
     for (const auto& rect : app.layoutRects) {
         if (!inRange(rect.rect.top, rect.rect.bottom)) continue;
+        bool banded = applyBand(rect.rect.top, rect.rect.bottom);
         brush->SetColor(rect.color);
         dc->FillRectangle(
             D2D1::RectF(rect.rect.left + dx, rect.rect.top + dy,
                         rect.rect.right + dx, rect.rect.bottom + dy),
             brush);
+        resetBand(banded);
     }
 
     for (const auto& line : app.layoutLines) {
         float top = std::min(line.p1.y, line.p2.y);
         float bottom = std::max(line.p1.y, line.p2.y);
         if (!inRange(top, bottom)) continue;
+        bool banded = applyBand(top, bottom);
         brush->SetColor(line.color);
         dc->DrawLine(D2D1::Point2F(line.p1.x + dx, line.p1.y + dy),
                      D2D1::Point2F(line.p2.x + dx, line.p2.y + dy),
                      brush, line.stroke);
+        resetBand(banded);
     }
 
     // Mermaid connectors (with arrowheads and dashing)
     for (const auto& connector : app.layoutConnectors) {
         if (!inRange(connector.bounds.top, connector.bounds.bottom)) continue;
         if (connector.points.size() < 2) continue;
+        bool banded = applyBand(connector.bounds.top, connector.bounds.bottom);
         brush->SetColor(connector.color);
         for (size_t i = 1; i < connector.points.size(); i++) {
             const auto& from = connector.points[i - 1];
@@ -182,6 +289,7 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
                              brush, connector.stroke);
             }
         }
+        resetBand(banded);
     }
 
     // Mermaid node shapes
@@ -210,24 +318,21 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
 
     for (const auto& shape : app.layoutShapes) {
         if (!inRange(shape.rect.top, shape.rect.bottom)) continue;
+        bool banded = applyBand(shape.rect.top, shape.rect.bottom);
         D2D1_RECT_F r = D2D1::RectF(shape.rect.left + dx, shape.rect.top + dy,
                                     shape.rect.right + dx, shape.rect.bottom + dy);
         if (shape.type == App::LayoutShapeType::Diamond) {
             float cx = (r.left + r.right) * 0.5f, cy = (r.top + r.bottom) * 0.5f;
             D2D1_POINT_2F pts[] = {{cx, r.top}, {r.right, cy}, {cx, r.bottom}, {r.left, cy}};
             fillStrokePolygon(pts, 4, shape);
-            continue;
-        }
-        if (shape.type == App::LayoutShapeType::Hexagon) {
+        } else if (shape.type == App::LayoutShapeType::Hexagon) {
             float inset = (r.right - r.left) * 0.18f;
             float cy = (r.top + r.bottom) * 0.5f;
             D2D1_POINT_2F pts[] = {{r.left + inset, r.top}, {r.right - inset, r.top},
                                    {r.right, cy}, {r.right - inset, r.bottom},
                                    {r.left + inset, r.bottom}, {r.left, cy}};
             fillStrokePolygon(pts, 6, shape);
-            continue;
-        }
-        if (shape.type == App::LayoutShapeType::Ellipse) {
+        } else if (shape.type == App::LayoutShapeType::Ellipse) {
             D2D1_ELLIPSE e = D2D1::Ellipse(
                 D2D1::Point2F((r.left + r.right) * 0.5f, (r.top + r.bottom) * 0.5f),
                 (r.right - r.left) * 0.5f, (r.bottom - r.top) * 0.5f);
@@ -236,10 +341,8 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
                 brush->SetColor(shape.stroke);
                 dc->DrawEllipse(e, brush, shape.strokeWidth);
             }
-            continue;
-        }
-        if (shape.type == App::LayoutShapeType::RoundedRectangle ||
-            shape.type == App::LayoutShapeType::Stadium) {
+        } else if (shape.type == App::LayoutShapeType::RoundedRectangle ||
+                   shape.type == App::LayoutShapeType::Stadium) {
             float radius = shape.type == App::LayoutShapeType::Stadium
                 ? (r.bottom - r.top) * 0.5f : shape.radius;
             D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, radius, radius);
@@ -248,32 +351,37 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
                 brush->SetColor(shape.stroke);
                 dc->DrawRoundedRectangle(rr, brush, shape.strokeWidth);
             }
-            continue;
+        } else {
+            if (shape.fill.a > 0.0f) { brush->SetColor(shape.fill); dc->FillRectangle(r, brush); }
+            if (shape.stroke.a > 0.0f && shape.strokeWidth > 0.0f) {
+                brush->SetColor(shape.stroke);
+                dc->DrawRectangle(r, brush, shape.strokeWidth);
+            }
         }
-        if (shape.fill.a > 0.0f) { brush->SetColor(shape.fill); dc->FillRectangle(r, brush); }
-        if (shape.stroke.a > 0.0f && shape.strokeWidth > 0.0f) {
-            brush->SetColor(shape.stroke);
-            dc->DrawRectangle(r, brush, shape.strokeWidth);
-        }
+        resetBand(banded);
     }
 
     // Images
     for (const auto& bmp : app.layoutBitmaps) {
         if (!bmp.bitmap) continue;
         if (!inRange(bmp.destRect.top, bmp.destRect.bottom)) continue;
+        bool banded = applyBand(bmp.destRect.top, bmp.destRect.bottom);
         dc->DrawBitmap(bmp.bitmap,
             D2D1::RectF(bmp.destRect.left + dx, bmp.destRect.top + dy,
                         bmp.destRect.right + dx, bmp.destRect.bottom + dy),
             1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        resetBand(banded);
     }
 
     // Text
     for (const auto& run : app.layoutTextRuns) {
         if (!run.layout) continue;
         if (!inRange(run.bounds.top, run.bounds.bottom)) continue;
+        bool banded = applyBand(run.bounds.top, run.bounds.bottom);
         brush->SetColor(run.color);
         dc->DrawTextLayout(D2D1::Point2F(run.pos.x + dx, run.pos.y + dy),
                            run.layout, brush);
+        resetBand(banded);
     }
 }
 
@@ -385,7 +493,8 @@ int renderPages(App& app, const PageGeometry& geo, EmitFn emitPage) {
     if (!device) return -1;
 
     SavedView saved{};
-    enterPrintLayout(app, geo.contentW, saved);
+    enterPrintLayout(app, saved);
+    layoutAtPrintWidth(app, geo.contentW);
 
     std::vector<float> breaks = computePageBreaks(app, geo.contentH);
     breaks.push_back(app.contentHeight + 1.0f);  // final page sentinel
@@ -437,7 +546,28 @@ bool printDocument(App& app) {
     pd.lStructSize = sizeof(pd);
     pd.hwndOwner = app.hwnd;
     pd.Flags = PD_RETURNDC | PD_NOPAGENUMS | PD_NOSELECTION | PD_USEDEVMODECOPIESANDCOLLATE;
+
+    // Preset the preview's paper and orientation; whatever the user picks
+    // in the dialog still wins (the geometry is re-read from the DC)
+    if (app.printPreviewPaper >= 0) {
+        pd.hDevMode = GlobalAlloc(GHND, sizeof(DEVMODEW));
+        if (pd.hDevMode) {
+            auto* dm = (DEVMODEW*)GlobalLock(pd.hDevMode);
+            if (dm) {
+                dm->dmSize = sizeof(DEVMODEW);
+                dm->dmSpecVersion = DM_SPECVERSION;
+                dm->dmFields = DM_ORIENTATION | DM_PAPERSIZE;
+                dm->dmOrientation = app.printPreviewLandscape
+                    ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT;
+                dm->dmPaperSize = PRINT_PAPERS[app.printPreviewPaper].dmPaper;
+                GlobalUnlock(pd.hDevMode);
+            }
+        }
+    }
+
     if (!PrintDlgW(&pd) || !pd.hDC) {
+        if (pd.hDevMode) GlobalFree(pd.hDevMode);
+        if (pd.hDevNames) GlobalFree(pd.hDevNames);
         return false;  // cancelled
     }
 
@@ -500,19 +630,20 @@ bool printDocument(App& app) {
     return ok;
 }
 
-void openPrintPreview(App& app, HWND hwnd) {
-    if (app.showPrintPreview || !app.root || !app.deviceContext) return;
-    if (app.editMode) {
-        editorReparse(app);  // include unsaved edits in the preview and printout
-    }
+// Lays out, paginates, fits and rasterizes for the currently selected
+// paper format. Assumes enterPrintLayout has already run.
+static void refreshPreviewLayout(App& app) {
+    const PrintPaper& paper = PRINT_PAPERS[app.printPreviewPaper];
+    float pageW = app.printPreviewLandscape ? paper.h : paper.w;
+    float pageH = app.printPreviewLandscape ? paper.w : paper.h;
+    app.printPreviewPageW = pageW;
+    app.printPreviewPageH = pageH;
+    float contentW = pageW - kPageMarginDips * 2;
+    float contentH = pageH - kPageMarginDips * 2;
 
-    PageGeometry geo = defaultPageGeometry();
-    app.printPreviewPageW = geo.pageW;
-    app.printPreviewPageH = geo.pageH;
+    layoutAtPrintWidth(app, contentW);
 
-    enterPrintLayout(app, geo.contentW, app.printSaved);
-
-    std::vector<float> breaks = computePageBreaks(app, geo.contentH);
+    std::vector<float> breaks = computePageBreaks(app, contentH);
     app.printPreviewBounds.clear();
     app.printPreviewBounds.push_back(0.0f);
     for (float b : breaks) app.printPreviewBounds.push_back(b);
@@ -523,14 +654,58 @@ void openPrintPreview(App& app, HWND hwnd) {
     float availW = app.printSaved.width - 80.0f * ui;
     float availH = app.printSaved.height - 130.0f * ui;
     app.printPreviewFit = std::max(0.05f,
-        std::min(availW / geo.pageW, availH / geo.pageH));
-    app.printPreviewPxW = (unsigned)(geo.pageW * app.printPreviewFit);
-    app.printPreviewPxH = (unsigned)(geo.pageH * app.printPreviewFit);
+        std::min(availW / pageW, availH / pageH));
+    app.printPreviewPxW = (unsigned)(pageW * app.printPreviewFit);
+    app.printPreviewPxH = (unsigned)(pageH * app.printPreviewFit);
 
+    int pageCount = (int)app.printPreviewBounds.size() - 1;
+    app.printPreviewPage = std::max(0, std::min(app.printPreviewPage, pageCount - 1));
+    rasterizePreviewPage(app, app.printPreviewPage);
+}
+
+// First open: start from the default printer's paper, matched to the
+// closest offered format
+static void detectDefaultFormat(App& app) {
+    PageGeometry geo = defaultPageGeometry();
+    bool landscape = geo.pageW > geo.pageH;
+    float w = landscape ? geo.pageH : geo.pageW;
+    float h = landscape ? geo.pageW : geo.pageH;
+    int best = 0;
+    float bestDiff = 1e9f;
+    for (int i = 0; i < PRINT_PAPER_COUNT; i++) {
+        float diff = std::fabs(w - PRINT_PAPERS[i].w) + std::fabs(h - PRINT_PAPERS[i].h);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+    }
+    app.printPreviewPaper = best;
+    app.printPreviewLandscape = landscape;
+}
+
+void openPrintPreview(App& app, HWND hwnd) {
+    if (app.showPrintPreview || !app.root || !app.deviceContext) return;
+    if (app.editMode) {
+        editorReparse(app);  // include unsaved edits in the preview and printout
+    }
+    if (app.printPreviewPaper < 0) detectDefaultFormat(app);
+
+    enterPrintLayout(app, app.printSaved);
     app.printPreviewPage = 0;
-    rasterizePreviewPage(app, 0);
+    refreshPreviewLayout(app);
     app.showPrintPreview = true;
     InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void printPreviewSetFormat(App& app, int paper, bool landscape) {
+    paper = std::max(0, std::min(paper, PRINT_PAPER_COUNT - 1));
+    if (!app.showPrintPreview) {
+        app.printPreviewPaper = paper;
+        app.printPreviewLandscape = landscape;
+        return;
+    }
+    if (paper == app.printPreviewPaper && landscape == app.printPreviewLandscape) return;
+    app.printPreviewPaper = paper;
+    app.printPreviewLandscape = landscape;
+    refreshPreviewLayout(app);
+    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 void closePrintPreview(App& app, HWND hwnd) {
