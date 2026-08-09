@@ -53,6 +53,43 @@ static bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     return true;
 }
 
+// Spawns a second Tinta window, offset from this one, showing the given
+// document in edit mode (#74: creating a note no longer replaces the
+// document you were reading)
+static void launchDocumentWindow(const std::wstring& fullPath) {
+    wchar_t exePath[MAX_PATH];
+    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) return;
+    std::wstring params = L"--cascade --edit \"" + fullPath + L"\"";
+    ShellExecuteW(nullptr, L"open", exePath, params.c_str(), nullptr, SW_SHOWNORMAL);
+}
+
+// N key / context menu: open the folder browser with the new-file naming
+// row already active
+static void startNewFileFlow(App& app, HWND hwnd) {
+    if (!app.showFolderBrowser) {
+        app.showFolderBrowser = true;
+        app.folderBrowserAnimation = 0;
+        if (!app.currentFile.empty()) {
+            app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
+        } else {
+            wchar_t cwd[MAX_PATH];
+            if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
+                app.folderBrowserPath = cwd;
+            }
+        }
+        populateFolderItems(app);
+    }
+    app.folderBrowserNaming = 1;  // new file
+    app.folderBrowserInput.clear();
+    app.folderBrowserInputSelectAll = false;
+    app.folderBrowserInputError = false;
+    app.folderInputJustOpened = true;
+    app.folderBrowserScroll = 0.0f;
+    updateBlinkTimer(app);
+    resetCursorBlink(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 // --- Folder browser path/name input (#52) ---
 
 static void closeFolderBrowserInput(App& app) {
@@ -175,12 +212,13 @@ static void commitFolderBrowserNaming(App& app) {
         return;
     }
     CloseHandle(h);
-    if (openDocumentInViewer(app, fullPath)) {
-        closeFolderBrowserInput(app);
-        app.showFolderBrowser = false;
-        app.folderBrowserAnimation = 0;
-        enterEditMode(app);
-    }
+    // The new note opens in its own window, offset from this one, so the
+    // document being read stays exactly where it is (#74)
+    closeFolderBrowserInput(app);
+    app.showFolderBrowser = false;
+    app.folderBrowserAnimation = 0;
+    launchDocumentWindow(fullPath);
+    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 // Ctrl+wheel zoom. The scroll anchor scales immediately, but text format
@@ -589,6 +627,10 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
                 app.selStartX = app.selEndX = 0;
                 app.selStartY = app.selEndY = 0;
             }
+            break;
+        case CTX_NEW:
+            closeSearchIfOpen(app);
+            startNewFileFlow(app, hwnd);
             break;
         case CTX_EDIT:
             closeSearchIfOpen(app);
@@ -1542,6 +1584,12 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     PostQuitMessage(0);
                 }
                 break;
+            case 'N':
+                // New file: folder browser with the naming row active (#74)
+                if (!app.showSearch && !app.showThemeChooser && !app.showToc) {
+                    startNewFileFlow(app, hwnd);
+                }
+                break;
             case 'B':
                 // B to toggle folder browser
                 if (!app.showSearch && !app.showThemeChooser && !app.showToc) {
@@ -1667,6 +1715,11 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
 
     if (app.showFolderBrowser &&
         (app.folderBrowserEditingPath || app.folderBrowserNaming != 0)) {
+        if (app.folderInputJustOpened) {
+            // The keystroke that opened this input must not type into it
+            app.folderInputJustOpened = false;
+            return;
+        }
         wchar_t ch = (wchar_t)wParam;
         if (ch >= 32 && ch != 127) {
             if (app.folderBrowserInputSelectAll) {
