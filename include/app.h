@@ -591,6 +591,7 @@ struct App {
     std::wstring editorText;
     bool editorDirty = false;
     std::vector<size_t> editorLineStarts;
+    float editorScrollX = 0.0f;  // horizontal scroll, non-wrap mode only (#77)
 
     // Editor view options (persisted)
     bool editorShowPreview = true;

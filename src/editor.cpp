@@ -509,6 +509,25 @@ static void editorEnsureCursorVisible(App& app) {
         app.editorScrollY = cursorY + lineHeight * 2 - app.height;
     }
     app.editorScrollY = std::max(0.0f, app.editorScrollY);
+
+    // Horizontal caret-follow: long unwrapped lines scroll sideways instead
+    // of disappearing under the pane separator (#77)
+    if (app.editorWordWrap) {
+        app.editorScrollX = 0.0f;
+    } else {
+        IDWriteTextLayout* layout = createEditorLineLayout(
+            app, app.editorLineStarts[line], getLineLength(app, line));
+        float cx = 0, cy = 0;
+        editorCaretXY(layout, app.editorCursorPos - app.editorLineStarts[line], cx, cy);
+        if (layout) layout->Release();
+        float viewW = editorTextMaxWidth(app) - dpi(app, 12.0f);  // caret + scrollbar slack
+        float margin = dpi(app, 8.0f);
+        if (cx < app.editorScrollX + margin) {
+            app.editorScrollX = std::max(0.0f, cx - margin);
+        } else if (cx > app.editorScrollX + viewW) {
+            app.editorScrollX = cx - viewW;
+        }
+    }
 }
 
 // --- Editor search ---
@@ -680,6 +699,7 @@ void enterEditMode(App& app) {
     app.editorCursorPos = 0;
     app.editorDesiredCol = -1;
     app.editorScrollY = 0;
+    app.editorScrollX = 0;
     app.editorHasSelection = false;
     app.editorDirty = false;
     app.undoStack.clear();
@@ -1350,7 +1370,8 @@ void editorPositionImeWindow(App& app, HWND hwnd) {
 
     COMPOSITIONFORM cf{};
     cf.dwStyle = CFS_POINT;
-    cf.ptCurrentPos.x = (LONG)(gutterWidth + padding + xOff);
+    cf.ptCurrentPos.x = (LONG)(gutterWidth + padding + xOff -
+                               (app.editorWordWrap ? 0.0f : app.editorScrollX));
     cf.ptCurrentPos.y = (LONG)(lineTop + yOff - app.editorScrollY + lineHeight);
     ImmSetCompositionWindow(himc, &cf);
     ImmReleaseContext(hwnd, himc);
@@ -1385,6 +1406,7 @@ static size_t editorPosFromClick(App& app, int x, int y) {
 
     float gutterWidth = dpi(app, 48.0f);
     float adjustedX = (float)x - gutterWidth - padding;
+    if (!app.editorWordWrap) adjustedX += app.editorScrollX;
     if (lineLen == 0) return lineStart;
     if (adjustedX <= 0.0f && !app.editorWordWrap) return lineStart;
     adjustedX = std::max(0.0f, adjustedX);
@@ -1549,6 +1571,12 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
 }
 
 void handleEditorMouseWheel(App& app, HWND hwnd, float delta) {
+    // Shift+wheel pans long unwrapped lines horizontally (#77)
+    if (!app.editorWordWrap && (GetKeyState(VK_SHIFT) & 0x8000)) {
+        app.editorScrollX = std::max(0.0f, app.editorScrollX - delta * dpi(app, 60.0f));
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
     app.editorScrollY -= delta * dpi(app, 60.0f);
     app.editorScrollY = std::max(0.0f, app.editorScrollY);
     float maxScroll = std::max(0.0f, app.editorContentHeight - app.height);
@@ -1756,6 +1784,9 @@ void renderEditor(App& app, float editorWidth) {
 
     // Gutter width for line numbers
     float gutterWidth = dpi(app, 48.0f);
+    // Text origin shifts left as the pane scrolls horizontally; the gutter
+    // is repainted after the text so lines slide underneath it (#77)
+    float textBase = gutterWidth + padding - app.editorScrollX;
 
     // Search match scanning index (both sorted by position, so we advance together)
     size_t searchScanIdx = 0;
@@ -1780,26 +1811,17 @@ void renderEditor(App& app, float editorWidth) {
         // (CJK and other full-width characters are wider than charWidth)
         IDWriteTextLayout* lineLayout = cachedEditorLineLayout(app, lineStart, lineLen);
 
-        // Line number
-        wchar_t lineNum[16];
-        swprintf(lineNum, 16, L"%d", i + 1);
-        D2D1_COLOR_F gutterColor = app.theme.text;
-        gutterColor.a = 0.3f;
-        app.brush->SetColor(gutterColor);
-        app.renderTarget->DrawText(lineNum, (UINT32)wcslen(lineNum), app.editorTextFormat,
-            D2D1::RectF(dpi(app, 4.0f), lineY, gutterWidth - dpi(app, 4.0f), lineY + lineHeight), app.brush);
-
         // Selection highlight on this line
         if (app.editorHasSelection && selMax > lineStart && selMin < lineStart + lineLen + 1) {
             size_t hlStart = (selMin > lineStart) ? selMin - lineStart : 0;
             size_t hlEnd = std::min(selMax - lineStart, lineLen + 1);
-            float hlX1 = gutterWidth + padding + editorColToX(app, lineLayout, hlStart);
+            float hlX1 = textBase + editorColToX(app, lineLayout, hlStart);
             float hlX2;
             if (hlEnd > lineLen) {
                 // Selection includes the newline: extend one char past line end
-                hlX2 = gutterWidth + padding + editorColToX(app, lineLayout, lineLen) + charWidth;
+                hlX2 = textBase + editorColToX(app, lineLayout, lineLen) + charWidth;
             } else {
-                hlX2 = gutterWidth + padding + editorColToX(app, lineLayout, hlEnd);
+                hlX2 = textBase + editorColToX(app, lineLayout, hlEnd);
             }
             app.brush->SetColor(D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f));
             app.renderTarget->FillRectangle(
@@ -1820,8 +1842,8 @@ void renderEditor(App& app, float editorWidth) {
                 size_t overlapStart = std::max(lineStart, m.startPos);
                 size_t overlapEnd = std::min(lineEnd, mEnd);
                 if (overlapStart < overlapEnd) {
-                    float hlX1 = gutterWidth + padding + editorColToX(app, lineLayout, overlapStart - lineStart);
-                    float hlX2 = gutterWidth + padding + editorColToX(app, lineLayout, overlapEnd - lineStart);
+                    float hlX1 = textBase + editorColToX(app, lineLayout, overlapStart - lineStart);
+                    float hlX2 = textBase + editorColToX(app, lineLayout, overlapEnd - lineStart);
 
                     bool isCurrent = ((int)si == app.editorSearchCurrentIndex);
                     if (isCurrent) {
@@ -1845,7 +1867,7 @@ void renderEditor(App& app, float editorWidth) {
         if (lineLayout) {
             app.brush->SetColor(app.theme.text);
             app.renderTarget->DrawTextLayout(
-                D2D1::Point2F(gutterWidth + padding, lineY), lineLayout, app.brush);
+                D2D1::Point2F(textBase, lineY), lineLayout, app.brush);
         }
 
     }
@@ -1857,12 +1879,27 @@ void renderEditor(App& app, float editorWidth) {
         size_t curLineStart = app.editorLineStarts[curLine];
         size_t curLineLen = getLineLength(app, curLine);
         IDWriteTextLayout* curLayout = cachedEditorLineLayout(app, curLineStart, curLineLen);
-        float curX = gutterWidth + padding + editorColToX(app, curLayout, std::min(curCol, curLineLen));
+        float curX = textBase + editorColToX(app, curLayout, std::min(curCol, curLineLen));
         float curY = padding + curLine * lineHeight - app.editorScrollY;
 
         app.brush->SetColor(app.theme.text);
         app.renderTarget->FillRectangle(
             D2D1::RectF(curX, curY, curX + dpi(app, 2.0f), curY + lineHeight), app.brush);
+    }
+
+    // Gutter last: horizontally scrolled text slides under it
+    app.brush->SetColor(app.theme.background);
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(0, 0, gutterWidth, (float)app.height), app.brush);
+    D2D1_COLOR_F gutterColor = app.theme.text;
+    gutterColor.a = 0.3f;
+    app.brush->SetColor(gutterColor);
+    for (int i = firstVisible; i <= lastVisible && i < (int)app.editorLineStarts.size(); i++) {
+        float lineY = padding + i * lineHeight - app.editorScrollY;
+        wchar_t lineNum[16];
+        swprintf(lineNum, 16, L"%d", i + 1);
+        app.renderTarget->DrawText(lineNum, (UINT32)wcslen(lineNum), app.editorTextFormat,
+            D2D1::RectF(dpi(app, 4.0f), lineY, gutterWidth - dpi(app, 4.0f), lineY + lineHeight), app.brush);
     }
 
     // Update content height for scrolling
