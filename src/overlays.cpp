@@ -941,7 +941,10 @@ void renderHelpOverlay(App& app) {
         return lineH + sectionHeaderExtra + entryCount * lineH + sectionGap;
     };
     float footerH = dpi(app, 35.0f);
-    float totalContentHeight = sectionHeight(6) + sectionHeight(7) + sectionHeight(3) + sectionHeight(4) + footerH;
+    float totalContentHeight = sectionHeight((int)_countof(navEntries)) +
+                               sectionHeight((int)_countof(overlayEntries)) +
+                               sectionHeight((int)_countof(editEntries)) +
+                               sectionHeight((int)_countof(generalEntries)) + footerH;
 
     // Scrollable area
     float contentTopY = titleBottomY + dpi(app, 10.0f);
@@ -992,10 +995,10 @@ void renderHelpOverlay(App& app) {
         y += sectionGap;
     };
 
-    drawSection(L"NAVIGATION", navEntries, 6);
-    drawSection(L"VIEW", overlayEntries, 7);
-    drawSection(L"EDITING", editEntries, 3);
-    drawSection(L"GENERAL", generalEntries, 4);
+    drawSection(L"NAVIGATION", navEntries, (int)_countof(navEntries));
+    drawSection(L"VIEW", overlayEntries, (int)_countof(overlayEntries));
+    drawSection(L"EDITING", editEntries, (int)_countof(editEntries));
+    drawSection(L"GENERAL", generalEntries, (int)_countof(generalEntries));
 
     // Footer hint
     normalFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
