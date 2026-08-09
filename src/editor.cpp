@@ -663,6 +663,17 @@ void enterEditMode(App& app) {
         }
     }
 
+    // Build the line→byte-offset table against the raw content so the
+    // preview scroll sync works immediately on entry: the anchors from the
+    // entry parse carry offsets into this exact byte stream (\r\n included),
+    // and until now the table only existed after the first reparse — which
+    // is why the panes stopped responding to each other right after ':'
+    app.editorLineByteOffsets.clear();
+    app.editorLineByteOffsets.push_back(0);
+    for (size_t i = 0; i < content.size(); i++) {
+        if (content[i] == '\n') app.editorLineByteOffsets.push_back(i + 1);
+    }
+
     app.editorText = std::move(normalized);
 
     rebuildLineStarts(app);

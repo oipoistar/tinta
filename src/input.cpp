@@ -268,21 +268,23 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         return;
     }
 
-    // Edit mode: route scroll to editor or preview based on mouse X
+    // Edit mode: the wheel scrolls the editor from either pane — the preview
+    // follows through the scroll-anchor sync, so the panes cannot drift
+    // apart and both sides always respond (#77)
     if (app.editMode) {
         float sepX = app.editorShowPreview
             ? app.width * app.editorSplitRatio
             : static_cast<float>(app.width);
-        if (app.mouseX < sepX) {
-            if (ctrl) {
-                applyZoomDelta(app, delta);
-                InvalidateRect(hwnd, nullptr, FALSE);
-            } else {
-                handleEditorMouseWheel(app, hwnd, delta);
-            }
+        if (ctrl && app.mouseX < sepX) {
+            applyZoomDelta(app, delta);
+            InvalidateRect(hwnd, nullptr, FALSE);
             return;
         }
-        // Fall through to normal scroll for preview pane
+        if (!ctrl) {
+            handleEditorMouseWheel(app, hwnd, delta);
+            return;
+        }
+        // Ctrl over the preview pane: fall through to document zoom
     }
 
     // Handle folder browser scroll (not when Ctrl is held — that's zoom)
