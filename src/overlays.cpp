@@ -1037,6 +1037,7 @@ struct ContextMenuEntry {
 const ContextMenuEntry CTX_ENTRIES[CTX_ITEM_COUNT] = {
     { L"Copy",               L"Ctrl+C", false },
     { L"Select All",         L"Ctrl+A", true  },
+    { L"New File",           L"N",      false },
     { L"Edit",               L":",      false },
     { L"Search",             L"F",      false },
     { L"Table of Contents",  L"Tab",    true  },

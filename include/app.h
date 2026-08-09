@@ -279,6 +279,7 @@ struct App {
     int folderBrowserNaming = 0;             // 0 = off, 1 = naming a new file, 2 = a new folder
     std::wstring folderBrowserInput;         // Single-line buffer shared by both inputs
     bool folderBrowserInputSelectAll = false; // Whole input selected: next keystroke replaces it
+    bool folderInputJustOpened = false;      // Swallow the WM_CHAR of the key that opened it
     bool folderBrowserInputError = false;    // Last commit failed (bad path/name): red border
 
     // Right-click context menu overlay

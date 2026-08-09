@@ -1155,6 +1155,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     std::string inputFile;
     bool lightMode = false;
     bool forceRegister = false;
+    bool cascadeWindow = false;   // offset from the saved position (new-file windows)
+    bool startInEditMode = false; // open straight into the editor
 
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -1166,6 +1168,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             app.showStats = true;
         } else if (arg == L"/register" || arg == L"--register") {
             forceRegister = true;
+        } else if (arg == L"--cascade") {
+            cascadeWindow = true;
+        } else if (arg == L"--edit") {
+            startInEditMode = true;
         } else if (arg[0] != L'-' && arg[0] != L'/') {
             // Convert to UTF-8
             int len = WideCharToMultiByte(CP_UTF8, 0, arg.c_str(), -1, nullptr, 0, nullptr, nullptr);
@@ -1241,6 +1247,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
                 windowY = CW_USEDEFAULT;
             }
         }
+    }
+
+    // A window spawned for a newly created document steps down-right from
+    // the saved position so it does not cover the window that spawned it
+    if (cascadeWindow && windowX != CW_USEDEFAULT && windowY != CW_USEDEFAULT) {
+        windowX += 40;
+        windowY += 40;
     }
 
     app.hwnd = CreateWindowExW(
@@ -1343,6 +1356,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.metrics.showWindowUs = usElapsed(t0);
 
     app.metrics.totalStartupUs = usElapsed(startupStart);
+
+    // New-file windows open straight into the editor
+    if (startInEditMode) {
+        enterEditMode(app);
+    }
 
     // First frame is on screen — now pay for the GPU in the background
     startGpuWarmup();
