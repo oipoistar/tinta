@@ -645,6 +645,24 @@ void enterEditMode(App& app) {
             normalized += app.editorText[i];
         }
     }
+    // Map the current reading position to a source line so the editor opens
+    // where the user was, not at the top (#77). Anchors carry UTF-8 source
+    // offsets; count newlines in the raw content to get the line number
+    // (unaffected by the \r\n normalization below).
+    size_t targetLine = 0;
+    if (app.scrollY > 1.0f && !app.scrollAnchors.empty()) {
+        size_t lo = 0, hi = app.scrollAnchors.size();
+        while (lo + 1 < hi) {
+            size_t mid = (lo + hi) / 2;
+            if (app.scrollAnchors[mid].renderedY <= app.scrollY) lo = mid;
+            else hi = mid;
+        }
+        size_t srcOffset = std::min(app.scrollAnchors[lo].sourceOffset, content.size());
+        for (size_t i = 0; i < srcOffset; i++) {
+            if (content[i] == '\n') targetLine++;
+        }
+    }
+
     app.editorText = std::move(normalized);
 
     rebuildLineStarts(app);
@@ -660,6 +678,21 @@ void enterEditMode(App& app) {
     app.editMode = true;
     app.escPressedOnce = false;
     app.confirmExitPending = false;
+
+    // Resume at the reading position rather than the top (#77)
+    if (targetLine > 0 && targetLine < app.editorLineStarts.size()) {
+        app.editorCursorPos = app.editorLineStarts[targetLine];
+        float lineHeight = app.editorTextFormat
+            ? app.editorTextFormat->GetFontSize() * 1.5f : 20.0f;
+        float row = (float)targetLine;
+        if (app.editorWordWrap) {
+            ensureEditorRowMetrics(app);
+            if (targetLine < app.editorRowStarts.size()) {
+                row = (float)app.editorRowStarts[targetLine];
+            }
+        }
+        app.editorScrollY = std::max(0.0f, row * lineHeight);
+    }
 
     // Disable file watch while editing
     KillTimer(app.hwnd, 1); // TIMER_FILE_WATCH = 1

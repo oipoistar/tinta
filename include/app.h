@@ -129,6 +129,9 @@ struct Settings {
     int darkThemeIndex = 5;    // Midnight
     // Search results from sibling markdown files in the search overlay
     bool folderSearchEnabled = true;
+    // Reading positions: most-recent-first, capped (#77)
+    struct ReadingPosition { std::string path; float scrollY; };
+    std::vector<ReadingPosition> readingPositions;
 };
 
 // Application state
@@ -303,6 +306,11 @@ struct App {
     bool helpScrollbarDragging = false;
     float helpScrollbarDragStartY = 0;
     float helpScrollbarDragStartScroll = 0;
+
+    // Reading position restore (#77): applied once enough of the document is
+    // laid out for the target to be reachable (chunked layout grows
+    // contentHeight, so applying immediately would clamp to a partial height)
+    float pendingScrollRestore = -1.0f;
 
     // Print preview overlay. While it is open the document is held in print
     // layout — width, theme, zoom and scroll are hijacked by enterPrintLayout —

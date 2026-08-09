@@ -191,6 +191,15 @@ void render(App& app) {
 
 render_document:
 
+    // Apply a saved reading position once the layout can reach it (#77)
+    if (app.pendingScrollRestore >= 0.0f &&
+        (app.layoutComplete ||
+         app.contentHeight >= app.pendingScrollRestore + app.height)) {
+        app.scrollY = app.pendingScrollRestore;
+        app.targetScrollY = app.pendingScrollRestore;
+        app.pendingScrollRestore = -1.0f;
+    }
+
     // Clamp scroll values
     float documentWidth = documentViewportWidth(app);
     float maxScrollX = std::max(0.0f, app.contentWidth - documentWidth);
@@ -1056,6 +1065,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
+                if (!app->currentFile.empty()) {
+                    rememberReadingPosition(settings, app->currentFile, app->scrollY);
+                }
 
                 // Get window placement for position/size/maximized state
                 WINDOWPLACEMENT wp = {};
@@ -1357,6 +1369,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     }
 
     app.metrics.fileLoadUs = usElapsed(t0);
+
+    // Resume the saved reading position (#77); new-file windows start in the
+    // editor at the top instead
+    if (!startInEditMode && !app.currentFile.empty()) {
+        app.pendingScrollRestore = findReadingPosition(savedSettings, app.currentFile);
+    }
 
     // Set window title with filename
     updateWindowTitle(app);

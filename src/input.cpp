@@ -34,6 +34,12 @@ static bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     auto result = parseDocument(app.parser, buffer.str(), fullPath);
     if (!result.success) return false;
 
+    // Reading position memory (#77): keep the old document's position,
+    // resume the new one's
+    if (!app.currentFile.empty()) {
+        persistReadingPosition(app.currentFile, app.scrollY);
+    }
+
     app.root = result.root;
     app.parseTimeUs = result.parseTimeUs;
     int utf8Len = WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
@@ -43,6 +49,7 @@ static bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     app.scrollX = 0;
     app.targetScrollY = 0;
     app.targetScrollX = 0;
+    app.pendingScrollRestore = findReadingPosition(loadSettings(), app.currentFile);
     app.focusMermaidOnNextLayout = isMermaidDocumentPath(fullPath);
     app.contentHeight = 0;
     app.docText.clear();

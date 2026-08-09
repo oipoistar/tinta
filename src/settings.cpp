@@ -42,6 +42,41 @@ void saveSettings(const Settings& settings) {
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
     file << "folderSearchEnabled=" << (settings.folderSearchEnabled ? 1 : 0) << "\n";
+
+    if (!settings.readingPositions.empty()) {
+        file << "[Positions]\n";
+        for (const auto& pos : settings.readingPositions) {
+            // Windows paths cannot contain '|'
+            file << "pos=" << pos.scrollY << "|" << pos.path << "\n";
+        }
+    }
+}
+
+void rememberReadingPosition(Settings& settings, const std::string& path, float scrollY) {
+    if (path.empty()) return;
+    auto& list = settings.readingPositions;
+    for (size_t i = 0; i < list.size(); i++) {
+        if (_stricmp(list[i].path.c_str(), path.c_str()) == 0) {
+            list.erase(list.begin() + i);
+            break;
+        }
+    }
+    list.insert(list.begin(), {path, scrollY});
+    if (list.size() > 50) list.resize(50);
+}
+
+void persistReadingPosition(const std::string& path, float scrollY) {
+    if (path.empty()) return;
+    Settings settings = loadSettings();
+    rememberReadingPosition(settings, path, scrollY);
+    saveSettings(settings);
+}
+
+float findReadingPosition(const Settings& settings, const std::string& path) {
+    for (const auto& pos : settings.readingPositions) {
+        if (_stricmp(pos.path.c_str(), path.c_str()) == 0) return pos.scrollY;
+    }
+    return -1.0f;
 }
 
 Settings loadSettings() {
@@ -96,8 +131,19 @@ Settings loadSettings() {
             settings.editorShowPreview = (value == "1");
         } else if (key == "editorWordWrap") {
             settings.editorWordWrap = (value == "1");
+        } else if (key == "pos") {
+            size_t sep = value.find('|');
+            if (sep != std::string::npos && sep + 1 < value.size()) {
+                try {
+                    float y = std::stof(value.substr(0, sep));
+                    if (y >= 0.0f) {
+                        settings.readingPositions.push_back({value.substr(sep + 1), y});
+                    }
+                } catch (...) {}
+            }
         }
     }
+    if (settings.readingPositions.size() > 50) settings.readingPositions.resize(50);
     return settings;
 }
 
