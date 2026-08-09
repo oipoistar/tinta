@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "render.h"
 #include "overlays.h"
+#include "print.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -631,6 +632,10 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
         case CTX_NEW:
             closeSearchIfOpen(app);
             startNewFileFlow(app, hwnd);
+            break;
+        case CTX_PRINT:
+            closeSearchIfOpen(app);
+            printDocument(app);
             break;
         case CTX_EDIT:
             closeSearchIfOpen(app);
@@ -1490,6 +1495,12 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 
     if (ctrl) {
         switch (wParam) {
+            case 'P':
+                // Print (viewer mode; Ctrl+P in edit mode toggles the preview)
+                if (!app.editMode) {
+                    printDocument(app);
+                }
+                break;
             case 'A': {
                 // Select All - extract all text from document
                 if (app.root) {

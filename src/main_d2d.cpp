@@ -28,6 +28,7 @@
 #include "overlays.h"
 #include "input.h"
 #include "editor.h"
+#include "print.h"
 
 static App* g_app = nullptr;
 
@@ -1157,6 +1158,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     bool forceRegister = false;
     bool cascadeWindow = false;   // offset from the saved position (new-file windows)
     bool startInEditMode = false; // open straight into the editor
+    std::wstring printPagesDir;   // debug: render print pages as PNGs and exit
 
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -1172,6 +1174,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             cascadeWindow = true;
         } else if (arg == L"--edit") {
             startInEditMode = true;
+        } else if (arg == L"--printpages" && i + 1 < argc) {
+            printPagesDir = argv[++i];
         } else if (arg[0] != L'-' && arg[0] != L'/') {
             // Convert to UTF-8
             int len = WideCharToMultiByte(CP_UTF8, 0, arg.c_str(), -1, nullptr, 0, nullptr, nullptr);
@@ -1360,6 +1364,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // New-file windows open straight into the editor
     if (startInEditMode) {
         enterEditMode(app);
+    }
+
+    // Debug: rasterize the print pagination to PNGs and exit
+    if (!printPagesDir.empty()) {
+        int pages = printDebugPages(app, printPagesDir);
+        wchar_t msg[64];
+        swprintf_s(msg, L"printpages: %d", pages);
+        OutputDebugStringW(msg);
+        return pages > 0 ? 0 : 1;
     }
 
     // First frame is on screen — now pay for the GPU in the background

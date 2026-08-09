@@ -15,6 +15,7 @@ enum ContextMenuItem {
     CTX_COPY = 0,
     CTX_SELECT_ALL,
     CTX_NEW,
+    CTX_PRINT,
     CTX_EDIT,
     CTX_SEARCH,
     CTX_TOC,
