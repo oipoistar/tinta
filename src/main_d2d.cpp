@@ -83,6 +83,14 @@ void render(App& app) {
     app.renderTarget->BeginDraw();
     app.drawCalls = 0;
 
+    // Print preview replaces the whole frame: the document is in print
+    // layout while it is open, so the normal paths would draw nonsense
+    if (app.showPrintPreview) {
+        renderPrintPreview(app);
+        app.renderTarget->EndDraw();
+        return;
+    }
+
     if (app.layoutDirty) {
         if (app.editMode && !app.editorShowPreview) {
             // Preview hidden: defer document layout until it's shown again
@@ -842,6 +850,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_SIZE:
             if (app && app->d2dFactory) {
+                // The preview's geometry is stale after a resize: restore
+                // the document at the new size and close the overlay
+                if (app->showPrintPreview) {
+                    app->printSaved.width = LOWORD(lParam);
+                    app->printSaved.height = HIWORD(lParam);
+                    closePrintPreview(*app, hwnd);
+                }
                 app->width = LOWORD(lParam);
                 app->height = HIWORD(lParam);
                 app->clearEditorLineLayoutCache();
@@ -870,6 +885,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_DPICHANGED:
             if (app) {
+                if (app->showPrintPreview) closePrintPreview(*app, hwnd);
                 UINT dpi = HIWORD(wParam);
                 app->contentScale = dpi / 96.0f;
 

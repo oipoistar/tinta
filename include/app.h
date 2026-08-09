@@ -304,6 +304,28 @@ struct App {
     float helpScrollbarDragStartY = 0;
     float helpScrollbarDragStartScroll = 0;
 
+    // Print preview overlay. While it is open the document is held in print
+    // layout — width, theme, zoom and scroll are hijacked by enterPrintLayout —
+    // and the real screen state lives in printSaved. Screen dimensions and UI
+    // scale must therefore be read from printSaved, not app.width/contentScale.
+    struct PrintSavedView {
+        int width = 0, height = 0;
+        float contentScale = 1.0f, zoomFactor = 1.0f, appliedZoomFactor = 1.0f;
+        float scrollX = 0, scrollY = 0, targetScrollX = 0, targetScrollY = 0;
+        D2DTheme theme{};
+    };
+    bool showPrintPreview = false;
+    PrintSavedView printSaved;
+    std::vector<float> printPreviewBounds;    // page boundaries in doc Y (pages + 1)
+    int printPreviewPage = 0;
+    float printPreviewPageW = 794.0f;         // page size in DIPs (A4 fallback)
+    float printPreviewPageH = 1123.0f;
+    float printPreviewFit = 1.0f;             // page DIPs -> screen pixels
+    std::vector<uint8_t> printPreviewPixels;  // current page, premultiplied BGRA
+    unsigned printPreviewPxW = 0, printPreviewPxH = 0;
+    D2D1_RECT_F printPreviewPrintBtn{};       // hit rects (set during render)
+    D2D1_RECT_F printPreviewCancelBtn{};
+
     // Table of contents overlay
     bool showToc = false;
     float tocAnimation = 0.0f;  // 0 to 1 for slide-in from right

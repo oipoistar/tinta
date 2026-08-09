@@ -1371,3 +1371,114 @@ void renderFolderSearchResults(App& app) {
     }
 }
 
+
+// --- Print preview ---
+//
+// Replaces the whole frame while open: the document itself is re-laid-out
+// at page width in the print palette, so the normal render paths would draw
+// nonsense underneath. Chrome is styled with the SAVED screen theme and
+// scale — app.theme and app.contentScale hold the print palette and 1.0
+// while the preview is active, so dpi(app, ...) cannot be used here.
+
+void renderPrintPreview(App& app) {
+    const auto& sv = app.printSaved;
+    float w = (float)sv.width, h = (float)sv.height;
+    float ui = sv.contentScale;
+    const D2DTheme& th = sv.theme;
+
+    app.brush->SetColor(th.background);
+    app.renderTarget->FillRectangle(D2D1::RectF(0, 0, w, h), app.brush);
+
+    float topBarH = 52.0f * ui;
+    float bottomBarH = 64.0f * ui;
+
+    // Current page, uploaded from the CPU rasterization. Preview repaints
+    // are interaction-driven, so the per-paint upload cost is irrelevant.
+    if (!app.printPreviewPixels.empty() && app.printPreviewPxW && app.printPreviewPxH) {
+        ID2D1Bitmap* bmp = nullptr;
+        app.renderTarget->CreateBitmap(
+            D2D1::SizeU(app.printPreviewPxW, app.printPreviewPxH),
+            app.printPreviewPixels.data(), app.printPreviewPxW * 4,
+            D2D1::BitmapProperties(D2D1::PixelFormat(
+                DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)),
+            &bmp);
+        if (bmp) {
+            float pw = (float)app.printPreviewPxW, ph = (float)app.printPreviewPxH;
+            float px = (w - pw) / 2.0f;
+            float py = topBarH + (h - topBarH - bottomBarH - ph) / 2.0f;
+            for (int i = 3; i >= 1; i--) {  // soft shadow ring
+                app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.06f * i));
+                app.renderTarget->DrawRectangle(
+                    D2D1::RectF(px - i, py - i, px + pw + i, py + ph + i),
+                    app.brush, 1.5f);
+            }
+            app.renderTarget->DrawBitmap(bmp,
+                D2D1::RectF(px, py, px + pw, py + ph),
+                1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            bmp->Release();
+        }
+    }
+
+    IDWriteTextFormat* uiFmt = nullptr;
+    IDWriteTextFormat* btnFmt = nullptr;
+    app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        13.0f * ui, L"en-us", &uiFmt);
+    app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        13.0f * ui, L"en-us", &btnFmt);
+
+    int pageCount = (int)app.printPreviewBounds.size() - 1;
+    if (uiFmt) {
+        uiFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        uiFmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        wchar_t label[64];
+        swprintf_s(label, L"Print preview \x2014 page %d of %d",
+                   app.printPreviewPage + 1, pageCount > 0 ? pageCount : 1);
+        app.brush->SetColor(th.text);
+        app.renderTarget->DrawText(label, (UINT32)wcslen(label), uiFmt,
+            D2D1::RectF(0, 0, w, topBarH), app.brush);
+    }
+
+    // Buttons, bottom right
+    float btnH = 34.0f * ui;
+    float printW = 110.0f * ui, cancelW = 90.0f * ui;
+    float gap = 12.0f * ui, margin = 24.0f * ui;
+    float by = h - bottomBarH + (bottomBarH - btnH) / 2.0f;
+    D2D1_RECT_F printR = D2D1::RectF(w - margin - printW, by, w - margin, by + btnH);
+    D2D1_RECT_F cancelR = D2D1::RectF(printR.left - gap - cancelW, by,
+                                      printR.left - gap, by + btnH);
+    app.printPreviewPrintBtn = printR;
+    app.printPreviewCancelBtn = cancelR;
+
+    float r = 6.0f * ui;
+    app.brush->SetColor(th.accent);
+    app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(printR, r, r), app.brush);
+    D2D1_COLOR_F borderC = th.text;
+    borderC.a = 0.4f;
+    app.brush->SetColor(borderC);
+    app.renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(cancelR, r, r), app.brush, 1.0f);
+
+    if (btnFmt) {
+        btnFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        btnFmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        app.brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
+        app.renderTarget->DrawText(L"Print\x2026", 6, btnFmt, printR, app.brush);
+        app.brush->SetColor(th.text);
+        app.renderTarget->DrawText(L"Cancel", 6, btnFmt, cancelR, app.brush);
+    }
+
+    // Hint, bottom left
+    if (uiFmt) {
+        uiFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        D2D1_COLOR_F hintC = th.text;
+        hintC.a = 0.5f;
+        app.brush->SetColor(hintC);
+        const wchar_t* hint = L"Scroll or PgUp/PgDn to flip pages \x2022 Enter to print \x2022 Esc to close";
+        app.renderTarget->DrawText(hint, (UINT32)wcslen(hint), uiFmt,
+            D2D1::RectF(margin, h - bottomBarH, cancelR.left - gap, h), app.brush);
+    }
+
+    if (uiFmt) uiFmt->Release();
+    if (btnFmt) btnFmt->Release();
+}

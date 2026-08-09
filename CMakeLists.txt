@@ -98,6 +98,7 @@ target_link_libraries(tinta PRIVATE
     d3d11
     dwmapi
     comdlg32
+    winspool
 )
 
 target_compile_definitions(tinta PRIVATE UNICODE _UNICODE

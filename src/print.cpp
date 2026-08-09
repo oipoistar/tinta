@@ -1,11 +1,15 @@
 #include "print.h"
 #include "render.h"
 #include "d2d_init.h"
+#include "editor.h"
 #include "utils.h"
 
 #include <commdlg.h>
 #include <documenttarget.h>
 #include <wincodec.h>
+#include <winspool.h>
+
+#include <cstring>
 
 #include <cmath>
 #include <string>
@@ -31,12 +35,7 @@ D2DTheme printTheme() {
     return t;
 }
 
-struct SavedView {
-    int width, height;
-    float contentScale, zoomFactor, appliedZoomFactor;
-    float scrollX, scrollY, targetScrollX, targetScrollY;
-    D2DTheme theme;
-};
+using SavedView = App::PrintSavedView;
 
 // Re-layouts the document at page-content width, 96 DPI, zoom 1, in the
 // print palette. Restores everything in leavePrintLayout.
@@ -283,6 +282,98 @@ struct PageGeometry {
     float contentW, contentH;    // inside the margins
 };
 
+// Paper size of the default printer, for previewing before the dialog runs.
+// printDocument re-reads the size from whatever printer is finally picked.
+PageGeometry defaultPageGeometry() {
+    PageGeometry geo{794.0f, 1123.0f, 0.0f, 0.0f};  // A4 fallback
+    wchar_t printer[256];
+    DWORD len = 256;
+    if (GetDefaultPrinterW(printer, &len)) {
+        HDC dc = CreateDCW(L"WINSPOOL", printer, nullptr, nullptr);
+        if (dc) {
+            float dpiX = (float)GetDeviceCaps(dc, LOGPIXELSX);
+            float dpiY = (float)GetDeviceCaps(dc, LOGPIXELSY);
+            float w = GetDeviceCaps(dc, PHYSICALWIDTH) * 96.0f / dpiX;
+            float h = GetDeviceCaps(dc, PHYSICALHEIGHT) * 96.0f / dpiY;
+            if (w >= 200 && h >= 200) {
+                geo.pageW = w;
+                geo.pageH = h;
+            }
+            DeleteDC(dc);
+        }
+    }
+    geo.contentW = geo.pageW - kPageMarginDips * 2;
+    geo.contentH = geo.pageH - kPageMarginDips * 2;
+    return geo;
+}
+
+// Rasterizes one page of the active print layout into the preview pixel
+// buffer at display resolution (page DIPs scaled by printPreviewFit), so
+// the preview stays crisp instead of downscaling a 96-DPI rendering.
+bool rasterizePreviewPage(App& app, int page) {
+    int pageCount = (int)app.printPreviewBounds.size() - 1;
+    if (page < 0 || page >= pageCount || !app.deviceContext) return false;
+    UINT pxW = app.printPreviewPxW, pxH = app.printPreviewPxH;
+    if (pxW == 0 || pxH == 0) return false;
+
+    ID2D1Device* device = nullptr;
+    app.deviceContext->GetDevice(&device);
+    if (!device) return false;
+    ID2D1DeviceContext* dc = nullptr;
+    device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc);
+    device->Release();
+    if (!dc) return false;
+
+    D2D1_BITMAP_PROPERTIES1 targetProps = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    D2D1_BITMAP_PROPERTIES1 stagingProps = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    ID2D1Bitmap1* target = nullptr;
+    ID2D1Bitmap1* staging = nullptr;
+    dc->CreateBitmap(D2D1::SizeU(pxW, pxH), nullptr, 0, &targetProps, &target);
+    dc->CreateBitmap(D2D1::SizeU(pxW, pxH), nullptr, 0, &stagingProps, &staging);
+
+    bool ok = false;
+    if (target && staging) {
+        dc->SetTarget(target);
+        dc->BeginDraw();
+        dc->SetTransform(D2D1::Matrix3x2F::Scale(app.printPreviewFit, app.printPreviewFit));
+        dc->Clear(D2D1::ColorF(1.0f, 1.0f, 1.0f));
+        ID2D1SolidColorBrush* brush = nullptr;
+        dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
+        if (brush) {
+            drawDocumentRange(app, dc, brush,
+                              app.printPreviewBounds[page],
+                              app.printPreviewBounds[page + 1],
+                              kPageMarginDips, kPageMarginDips);
+            brush->Release();
+        }
+        dc->SetTransform(D2D1::Matrix3x2F::Identity());
+        if (SUCCEEDED(dc->EndDraw())) {
+            D2D1_POINT_2U zero{0, 0};
+            D2D1_RECT_U all{0, 0, pxW, pxH};
+            D2D1_MAPPED_RECT mapped{};
+            if (SUCCEEDED(staging->CopyFromBitmap(&zero, target, &all)) &&
+                SUCCEEDED(staging->Map(D2D1_MAP_OPTIONS_READ, &mapped))) {
+                app.printPreviewPixels.resize((size_t)pxW * pxH * 4);
+                for (UINT row = 0; row < pxH; row++) {
+                    memcpy(app.printPreviewPixels.data() + (size_t)row * pxW * 4,
+                           mapped.bits + (size_t)row * mapped.pitch,
+                           (size_t)pxW * 4);
+                }
+                staging->Unmap();
+                ok = true;
+            }
+        }
+    }
+    if (staging) staging->Release();
+    if (target) target->Release();
+    dc->Release();
+    return ok;
+}
+
 // Runs layout + pagination + per-page drawing. emitPage receives a closed
 // command list per page. Returns page count, or -1 on failure.
 template <typename EmitFn>
@@ -407,6 +498,70 @@ bool printDocument(App& app) {
     }
     target->Release();
     return ok;
+}
+
+void openPrintPreview(App& app, HWND hwnd) {
+    if (app.showPrintPreview || !app.root || !app.deviceContext) return;
+    if (app.editMode) {
+        editorReparse(app);  // include unsaved edits in the preview and printout
+    }
+
+    PageGeometry geo = defaultPageGeometry();
+    app.printPreviewPageW = geo.pageW;
+    app.printPreviewPageH = geo.pageH;
+
+    enterPrintLayout(app, geo.contentW, app.printSaved);
+
+    std::vector<float> breaks = computePageBreaks(app, geo.contentH);
+    app.printPreviewBounds.clear();
+    app.printPreviewBounds.push_back(0.0f);
+    for (float b : breaks) app.printPreviewBounds.push_back(b);
+    app.printPreviewBounds.push_back(app.contentHeight + 1.0f);
+
+    // Fit the page between the header and the button bar
+    float ui = app.printSaved.contentScale;
+    float availW = app.printSaved.width - 80.0f * ui;
+    float availH = app.printSaved.height - 130.0f * ui;
+    app.printPreviewFit = std::max(0.05f,
+        std::min(availW / geo.pageW, availH / geo.pageH));
+    app.printPreviewPxW = (unsigned)(geo.pageW * app.printPreviewFit);
+    app.printPreviewPxH = (unsigned)(geo.pageH * app.printPreviewFit);
+
+    app.printPreviewPage = 0;
+    rasterizePreviewPage(app, 0);
+    app.showPrintPreview = true;
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void closePrintPreview(App& app, HWND hwnd) {
+    if (!app.showPrintPreview) return;
+    app.showPrintPreview = false;
+    leavePrintLayout(app, app.printSaved);
+    app.printPreviewPixels.clear();
+    app.printPreviewPixels.shrink_to_fit();
+    app.printPreviewBounds.clear();
+    if (app.editMode) {
+        // Editor line layouts were built against the print-layout formats
+        app.clearEditorLineLayoutCache();
+        app.editorRowMetricsWidth = -1.0f;
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void printPreviewSetPage(App& app, int page) {
+    if (!app.showPrintPreview) return;
+    int pageCount = (int)app.printPreviewBounds.size() - 1;
+    page = std::max(0, std::min(page, pageCount - 1));
+    if (page == app.printPreviewPage) return;
+    app.printPreviewPage = page;
+    rasterizePreviewPage(app, page);
+    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
+void printPreviewConfirm(App& app, HWND hwnd) {
+    if (!app.showPrintPreview) return;
+    closePrintPreview(app, hwnd);
+    printDocument(app);
 }
 
 int printDebugPages(App& app, const std::wstring& outDir) {

@@ -975,15 +975,11 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 return;
             }
-            case 'P': {
-                // Print the document as currently edited, saved or not
-                editorReparse(app);
-                printDocument(app);
-                app.clearEditorLineLayoutCache();
-                app.editorRowMetricsWidth = -1.0f;
-                InvalidateRect(hwnd, nullptr, FALSE);
+            case 'P':
+                // Print preview of the document as currently edited, saved
+                // or not (openPrintPreview re-parses; Ctrl+E is the pane)
+                openPrintPreview(app, hwnd);
                 return;
-            }
             case 'E': {
                 app.editorShowPreview = !app.editorShowPreview;
                 app.clearEditorLineLayoutCache();
