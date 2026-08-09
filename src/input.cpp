@@ -8,6 +8,7 @@
 #include "settings.h"
 #include "render.h"
 #include "overlays.h"
+#include "print.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -238,6 +239,12 @@ static void applyZoomDelta(App& app, float delta) {
 }
 
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Print preview: the wheel flips pages
+    if (app.showPrintPreview) {
+        int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        printPreviewSetPage(app, app.printPreviewPage + (delta < 0 ? 1 : -1));
+        return;
+    }
     if (app.showContextMenu) {
         app.showContextMenu = false;
         app.contextMenuAnimation = 0;
@@ -344,6 +351,10 @@ void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
+
+    // Print preview: no hover states; document hit-testing below would run
+    // against print-layout coordinates anyway
+    if (app.showPrintPreview) return;
 
     // Context menu open: hover tracks menu items only — document hover
     // (code-block copy button, link underline) stays suppressed underneath
@@ -632,6 +643,10 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             closeSearchIfOpen(app);
             startNewFileFlow(app, hwnd);
             break;
+        case CTX_PRINT:
+            closeSearchIfOpen(app);
+            openPrintPreview(app, hwnd);
+            break;
         case CTX_EDIT:
             closeSearchIfOpen(app);
             enterEditMode(app);
@@ -698,7 +713,7 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
     // Viewer mode only, and never on top of a modal overlay. The search
     // bar is fine — it shares the viewport rather than covering it.
     if (app.editMode || app.showThemeChooser || app.showToc ||
-        app.showFolderBrowser || app.showHelp) {
+        app.showFolderBrowser || app.showHelp || app.showPrintPreview) {
         return;
     }
 
@@ -715,6 +730,9 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
 }
 
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Print preview: buttons act on the release; nothing else to press
+    if (app.showPrintPreview) return;
+
     // Context menu: a click lands on an item or dismisses the menu; either
     // way the click is consumed
     if (app.showContextMenu) {
@@ -1065,6 +1083,35 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         app.swallowNextMouseUp = false;
         return;
     }
+
+    // Print preview: buttons and format chips
+    if (app.showPrintPreview) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        auto hit = [&](const D2D1_RECT_F& r) {
+            return mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom;
+        };
+        if (hit(app.printPreviewPrintBtn)) {
+            printPreviewConfirm(app, hwnd);
+            return;
+        }
+        if (hit(app.printPreviewCancelBtn)) {
+            closePrintPreview(app, hwnd);
+            return;
+        }
+        for (int i = 0; i < PRINT_PAPER_COUNT; i++) {
+            if (hit(app.printPreviewPaperBtn[i])) {
+                printPreviewSetFormat(app, i, app.printPreviewLandscape);
+                return;
+            }
+        }
+        if (hit(app.printPreviewOrientBtn[0])) {
+            printPreviewSetFormat(app, app.printPreviewPaper, false);
+        } else if (hit(app.printPreviewOrientBtn[1])) {
+            printPreviewSetFormat(app, app.printPreviewPaper, true);
+        }
+        return;
+    }
     // Help scrollbar release
     if (app.helpScrollbarDragging) {
         app.helpScrollbarDragging = false;
@@ -1384,6 +1431,34 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     float maxScroll = std::max(0.0f, app.contentHeight - app.height);
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
 
+    // Print preview captures the whole keyboard while open
+    if (app.showPrintPreview) {
+        switch (wParam) {
+            case VK_ESCAPE:
+                closePrintPreview(app, hwnd);
+                break;
+            case VK_RETURN:
+                printPreviewConfirm(app, hwnd);
+                break;
+            case 'P':  // a second Ctrl+P also proceeds to the dialog
+                if (ctrl) printPreviewConfirm(app, hwnd);
+                break;
+            case VK_NEXT: case VK_DOWN: case VK_RIGHT: case VK_SPACE: case 'J':
+                printPreviewSetPage(app, app.printPreviewPage + 1);
+                break;
+            case VK_PRIOR: case VK_UP: case VK_LEFT: case 'K':
+                printPreviewSetPage(app, app.printPreviewPage - 1);
+                break;
+            case VK_HOME:
+                printPreviewSetPage(app, 0);
+                break;
+            case VK_END:
+                printPreviewSetPage(app, (int)app.printPreviewBounds.size() - 2);
+                break;
+        }
+        return;
+    }
+
     // Edit mode: Ctrl+C with preview pane selection should copy from preview
     if (app.editMode) {
         if (ctrl && wParam == 'C' && app.hasSelection && !app.selectedText.empty()) {
@@ -1490,6 +1565,11 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 
     if (ctrl) {
         switch (wParam) {
+            case 'P':
+                // Print preview (edit mode handles its own Ctrl+P in the
+                // editor path)
+                openPrintPreview(app, hwnd);
+                break;
             case 'A': {
                 // Select All - extract all text from document
                 if (app.root) {
@@ -1690,6 +1770,9 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 }
 
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
+    // Print preview: all shortcuts are handled as key-downs
+    if (app.showPrintPreview) return;
+
     // Edit mode: ':' enters edit mode, otherwise route to editor
     if (app.editMode) {
         handleEditorCharInput(app, hwnd, wParam);

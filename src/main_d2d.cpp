@@ -28,6 +28,7 @@
 #include "overlays.h"
 #include "input.h"
 #include "editor.h"
+#include "print.h"
 
 static App* g_app = nullptr;
 
@@ -81,6 +82,14 @@ void render(App& app) {
 
     app.renderTarget->BeginDraw();
     app.drawCalls = 0;
+
+    // Print preview replaces the whole frame: the document is in print
+    // layout while it is open, so the normal paths would draw nonsense
+    if (app.showPrintPreview) {
+        renderPrintPreview(app);
+        app.renderTarget->EndDraw();
+        return;
+    }
 
     if (app.layoutDirty) {
         if (app.editMode && !app.editorShowPreview) {
@@ -841,6 +850,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_SIZE:
             if (app && app->d2dFactory) {
+                // The preview's geometry is stale after a resize: restore
+                // the document at the new size and close the overlay
+                if (app->showPrintPreview) {
+                    app->printSaved.width = LOWORD(lParam);
+                    app->printSaved.height = HIWORD(lParam);
+                    closePrintPreview(*app, hwnd);
+                }
                 app->width = LOWORD(lParam);
                 app->height = HIWORD(lParam);
                 app->clearEditorLineLayoutCache();
@@ -869,6 +885,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_DPICHANGED:
             if (app) {
+                if (app->showPrintPreview) closePrintPreview(*app, hwnd);
                 UINT dpi = HIWORD(wParam);
                 app->contentScale = dpi / 96.0f;
 
@@ -1157,6 +1174,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     bool forceRegister = false;
     bool cascadeWindow = false;   // offset from the saved position (new-file windows)
     bool startInEditMode = false; // open straight into the editor
+    std::wstring printPagesDir;   // debug: render print pages as PNGs and exit
 
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -1172,6 +1190,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             cascadeWindow = true;
         } else if (arg == L"--edit") {
             startInEditMode = true;
+        } else if (arg == L"--printpages" && i + 1 < argc) {
+            printPagesDir = argv[++i];
         } else if (arg[0] != L'-' && arg[0] != L'/') {
             // Convert to UTF-8
             int len = WideCharToMultiByte(CP_UTF8, 0, arg.c_str(), -1, nullptr, 0, nullptr, nullptr);
@@ -1360,6 +1380,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // New-file windows open straight into the editor
     if (startInEditMode) {
         enterEditMode(app);
+    }
+
+    // Debug: rasterize the print pagination to PNGs and exit
+    if (!printPagesDir.empty()) {
+        int pages = printDebugPages(app, printPagesDir);
+        wchar_t msg[64];
+        swprintf_s(msg, L"printpages: %d", pages);
+        OutputDebugStringW(msg);
+        return pages > 0 ? 0 : 1;
     }
 
     // First frame is on screen — now pay for the GPU in the background

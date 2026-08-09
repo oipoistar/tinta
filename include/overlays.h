@@ -8,6 +8,8 @@ void renderFolderBrowser(App& app);
 void renderToc(App& app);
 void renderThemeChooser(App& app);
 void renderHelpOverlay(App& app);
+// Full-frame print preview; render() short-circuits to this while it is open
+void renderPrintPreview(App& app);
 
 // Right-click context menu: theme-drawn like the other overlays.
 // Item indices are shared between rendering and input handling.
@@ -15,6 +17,7 @@ enum ContextMenuItem {
     CTX_COPY = 0,
     CTX_SELECT_ALL,
     CTX_NEW,
+    CTX_PRINT,
     CTX_EDIT,
     CTX_SEARCH,
     CTX_TOC,

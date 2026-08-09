@@ -50,6 +50,7 @@ set(SOURCES
     src/mermaid.cpp
     src/document.cpp
     src/inline_style.cpp
+    src/print.cpp
 )
 
 set(HEADERS
@@ -69,6 +70,7 @@ set(HEADERS
     include/mermaid.h
     include/document.h
     include/inline_style.h
+    include/print.h
 )
 
 # Windows resource file (icon)
@@ -95,6 +97,8 @@ target_link_libraries(tinta PRIVATE
     imm32
     d3d11
     dwmapi
+    comdlg32
+    winspool
 )
 
 target_compile_definitions(tinta PRIVATE UNICODE _UNICODE

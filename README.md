@@ -65,7 +65,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **10 beautiful themes** - 5 light and 5 dark themes to choose from
 - **Hardware-accelerated** - Smooth text rendering via DirectWrite
 - **Word wrap** - Optional soft wrap in the editor (Ctrl+W)
-- **Focused editing** - Hide the preview pane while writing (Ctrl+P)
+- **Focused editing** - Hide the preview pane while writing (Ctrl+E)
 - **Native Mermaid flowcharts** - Render `.mmd` files and fenced `mermaid` blocks without a web engine
 - **Rich tables** - Tables with bold, italic, code, and clickable links in cells
 - **Folder browser** - Press B to browse and open Markdown or Mermaid files
@@ -98,7 +98,8 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `:` | Enter edit mode |
 | `ESC` `ESC` | Exit edit mode |
 | `Ctrl+S` | Save (in edit mode) |
-| `Ctrl+P` | Show/hide preview pane (in edit mode) |
+| `Ctrl+P` | Print / export to PDF |
+| `Ctrl+E` | Show/hide preview pane (in edit mode) |
 | `Ctrl+W` | Toggle word wrap (in edit mode) |
 | `Q` | Quit |
 
