@@ -1,5 +1,26 @@
 # Changelog
 
+## [v2.6.0] - 2026-08-09
+
+The vacation release: print and PDF export plus a round of community-requested polish, shipped before the maintainer disappears for a few weeks.
+
+### Added
+- Print and PDF export: Ctrl+P (or right-click → Print / PDF) opens a print preview — flip through the paginated pages, pick A4/Letter/Legal/A3 and portrait/landscape, then print to any installed printer; choosing "Microsoft Print to PDF" produces the PDF. Output is vector text with fonts embedded by the print pipeline, including CJK, always in a clean light palette on a white page. No PDF library, zero binary growth (#74)
+- Mermaid diagrams and tables wider than the printable area are scaled down to fit inside the margins instead of being cut off at the edge
+- Creating a new document no longer replaces the one you are reading: it opens in its own window, slightly offset, straight into edit mode; N is the new-file shortcut (#74)
+- Reading position memory: documents reopen where you left off (last 50 files, kept in settings.ini), and entering edit mode resumes at the reading position instead of the top (#77)
+- Editor horizontal scroll: with word wrap off, the view follows the caret into long lines and Shift+wheel pans sideways — long lines used to vanish under the pane separator with no way to reach them (#77)
+- Remappable shortcuts: settings.ini gains a self-documenting `[Keys]` section covering every single-key action — change a value and restart; the help overlay and context menu relabel themselves to your bindings (#77)
+
+### Changed
+- Print takes Ctrl+P everywhere (the universal Windows convention); the edit-mode preview pane toggle moved to Ctrl+E, the same key Obsidian uses
+- The settings file at `%APPDATA%\Tinta\settings.ini` is now documented in the README
+
+### Fixed
+- Editor/preview scroll sync no longer gets lost: scrolling the preview pane was overwritten every frame by the one-way sync, and sync was dead until the first edit after entering edit mode — the wheel now drives both panes from either side (#77)
+- Entering edit mode with `:` is instant on large documents: the transition no longer blocks on a full synchronous layout; the preview streams in viewport-first like the viewer (#77)
+- The help overlay showed a truncated shortcut list: hardcoded per-section row counts had silently dropped Ctrl+W and ESC ESC from the EDITING section
+
 ## [v2.5.1] - 2026-08-09
 
 The notes release — honestly a 2.6's worth of features, but they landed right after v2.5.0 and needed real-world testing before earning a version of their own.
