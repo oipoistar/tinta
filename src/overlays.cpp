@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "d2d_init.h"
 #include "print.h"
+#include "settings.h"
 
 #include <chrono>
 #include <algorithm>
@@ -893,9 +894,21 @@ void renderHelpOverlay(App& app) {
         const wchar_t* desc;
     };
 
+    // Remappable keys show their current binding ([Keys] in settings.ini)
+    std::wstring kDown = keyLabel(app.keymap[KA_SCROLLDOWN]) + L" / \x2193";
+    std::wstring kUp = keyLabel(app.keymap[KA_SCROLLUP]) + L" / \x2191";
+    std::wstring kSearch = keyLabel(app.keymap[KA_SEARCH]) + L" / Ctrl+F";
+    std::wstring kBrowse = keyLabel(app.keymap[KA_BROWSE]);
+    std::wstring kToc = keyLabel(app.keymap[KA_TOC]);
+    std::wstring kTheme = keyLabel(app.keymap[KA_THEME]);
+    std::wstring kStats = keyLabel(app.keymap[KA_STATS]);
+    std::wstring kHelp = keyLabel(app.keymap[KA_HELP]);
+    std::wstring kEdit = keyLabel(app.keymap[KA_EDIT]);
+    std::wstring kQuit = keyLabel(app.keymap[KA_QUIT]);
+
     const HelpEntry navEntries[] = {
-        {L"J / \x2193",   L"Scroll down"},
-        {L"K / \x2191",   L"Scroll up"},
+        {kDown.c_str(),   L"Scroll down"},
+        {kUp.c_str(),     L"Scroll up"},
         {L"Space / PgDn", L"Page down"},
         {L"PgUp",         L"Page up"},
         {L"Home / End",   L"Jump to start / end"},
@@ -903,17 +916,17 @@ void renderHelpOverlay(App& app) {
     };
 
     const HelpEntry overlayEntries[] = {
-        {L"F / Ctrl+F",   L"Search"},
+        {kSearch.c_str(), L"Search"},
         {L"Enter",        L"Next search match"},
-        {L"B",            L"Toggle folder browser"},
-        {L"Tab",          L"Toggle table of contents"},
-        {L"T",            L"Theme chooser"},
-        {L"S",            L"Toggle stats"},
-        {L"?",            L"This help"},
+        {kBrowse.c_str(), L"Toggle folder browser"},
+        {kToc.c_str(),    L"Toggle table of contents"},
+        {kTheme.c_str(),  L"Theme chooser"},
+        {kStats.c_str(),  L"Toggle stats"},
+        {kHelp.c_str(),   L"This help"},
     };
 
     const HelpEntry editEntries[] = {
-        {L":",             L"Enter edit mode"},
+        {kEdit.c_str(),   L"Enter edit mode"},
         {L"Ctrl+S",       L"Save (in edit mode)"},
         {L"Ctrl+E",       L"Show / hide preview pane"},
         {L"Ctrl+W",       L"Toggle word wrap"},
@@ -925,7 +938,7 @@ void renderHelpOverlay(App& app) {
         {L"Ctrl+C",       L"Copy selection"},
         {L"Ctrl+P",       L"Print / PDF"},
         {L"ESC",          L"Close overlay / Quit"},
-        {L"Q",            L"Quit"},
+        {kQuit.c_str(),   L"Quit"},
     };
 
     float padding = dpi(app, 20.0f);
@@ -1139,6 +1152,20 @@ void renderContextMenu(App& app) {
 
     app.hoveredContextMenuItem = contextMenuItemAt(app, app.mouseX, app.mouseY);
 
+    // Shortcut hints reflect the user keymap ([Keys] in settings.ini)
+    auto shortcutLabel = [&](int item) -> std::wstring {
+        switch (item) {
+            case CTX_NEW:    return keyLabel(app.keymap[KA_NEWFILE]);
+            case CTX_EDIT:   return keyLabel(app.keymap[KA_EDIT]);
+            case CTX_SEARCH: return keyLabel(app.keymap[KA_SEARCH]);
+            case CTX_TOC:    return keyLabel(app.keymap[KA_TOC]);
+            case CTX_BROWSE: return keyLabel(app.keymap[KA_BROWSE]);
+            case CTX_THEME:  return keyLabel(app.keymap[KA_THEME]);
+            case CTX_HELP:   return keyLabel(app.keymap[KA_HELP]);
+            default:         return CTX_ENTRIES[item].shortcut;
+        }
+    };
+
     float pad = ctxPadding(app);
     float itemH = ctxItemHeight(app);
     float inset = dpi(app, 12.0f);
@@ -1164,10 +1191,11 @@ void renderContextMenu(App& app) {
             CTX_ENTRIES[i].label, (UINT32)wcslen(CTX_ENTRIES[i].label), format,
             D2D1::RectF(x + inset, textY, x + w - inset, top + itemH), app.brush);
 
-        if (CTX_ENTRIES[i].shortcut[0]) {
+        std::wstring hintText = shortcutLabel(i);
+        if (!hintText.empty()) {
             IDWriteTextLayout* hint = nullptr;
             app.dwriteFactory->CreateTextLayout(
-                CTX_ENTRIES[i].shortcut, (UINT32)wcslen(CTX_ENTRIES[i].shortcut),
+                hintText.c_str(), (UINT32)hintText.size(),
                 format, 1000.0f, itemH, &hint);
             if (hint) {
                 DWRITE_TEXT_METRICS metrics{};

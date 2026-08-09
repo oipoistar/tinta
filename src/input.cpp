@@ -245,6 +245,31 @@ static void applyZoomDelta(App& app, float delta) {
     }
 }
 
+// Maps a pressed key through the user keymap ([Keys] in settings.ini): a
+// remapped key becomes the built-in default the switches below expect, and
+// a default key the user moved elsewhere is swallowed. Non-action keys pass
+// through untouched. (#77)
+static WPARAM translateActionKey(App& app, WPARAM key, bool isChar) {
+    auto norm = [&](unsigned k) {
+        return isChar ? (unsigned)towupper((wint_t)k) : k;
+    };
+    unsigned pressed = norm((unsigned)key);
+    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+        if (KEY_ACTIONS[i].isChar != isChar) continue;
+        if (norm(app.keymap[i]) == pressed) {
+            return (WPARAM)KEY_ACTIONS[i].defaultKey;
+        }
+    }
+    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+        if (KEY_ACTIONS[i].isChar != isChar) continue;
+        if (norm(KEY_ACTIONS[i].defaultKey) == pressed &&
+            norm(app.keymap[i]) != pressed) {
+            return 0;  // default key rebound elsewhere: swallow
+        }
+    }
+    return key;
+}
+
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Print preview: the wheel flips pages
     if (app.showPrintPreview) {
@@ -1633,6 +1658,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 break;
         }
     } else {
+        wParam = translateActionKey(app, wParam, false);
         switch (wParam) {
             case VK_ESCAPE:
                 // Priority: ContextMenu > Help > Search > FolderBrowser > TOC > Theme chooser > Quit
@@ -1790,7 +1816,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
 
     // ':' to enter edit mode, '?' to toggle help — when no overlay is active
     if (!app.showSearch && !app.showFolderBrowser && !app.showToc && !app.showThemeChooser) {
-        wchar_t ch = (wchar_t)wParam;
+        wchar_t ch = (wchar_t)translateActionKey(app, wParam, true);
         if (ch == L':' && !app.showHelp) {
             enterEditMode(app);
             return;

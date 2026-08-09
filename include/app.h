@@ -132,6 +132,8 @@ struct Settings {
     // Reading positions: most-recent-first, capped (#77)
     struct ReadingPosition { std::string path; float scrollY; };
     std::vector<ReadingPosition> readingPositions;
+    // [Keys] overrides from settings.ini: action name -> key name (#77)
+    std::vector<std::pair<std::string, std::string>> keyOverrides;
 };
 
 // Application state
@@ -306,6 +308,11 @@ struct App {
     bool helpScrollbarDragging = false;
     float helpScrollbarDragStartY = 0;
     float helpScrollbarDragStartScroll = 0;
+
+    // Resolved single-key bindings, indexed like KEY_ACTIONS (#77).
+    // Filled by applyKeymap from settings; slots beyond the action count
+    // stay zero.
+    unsigned keymap[16] = {};
 
     // Reading position restore (#77): applied once enough of the document is
     // laid out for the target to be reachable (chunked layout grows

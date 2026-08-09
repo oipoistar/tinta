@@ -1185,6 +1185,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.zoomFactor = savedSettings.zoomFactor;
     app.editorShowPreview = savedSettings.editorShowPreview;
     app.editorWordWrap = savedSettings.editorWordWrap;
+    applyKeymap(app, savedSettings);
 
     // Parse command line
     std::string inputFile;

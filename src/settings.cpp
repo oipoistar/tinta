@@ -43,11 +43,65 @@ void saveSettings(const Settings& settings) {
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
     file << "folderSearchEnabled=" << (settings.folderSearchEnabled ? 1 : 0) << "\n";
 
+    // Remappable keys, written with every save so the section documents
+    // itself: change a value, restart Tinta
+    file << "[Keys]\n";
+    file << "; single letters/digits, Tab, Space, F1-F12, or one character\n";
+    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+        std::string value = keyIniName(KEY_ACTIONS[i].defaultKey);
+        for (const auto& kv : settings.keyOverrides) {
+            if (kv.first == KEY_ACTIONS[i].name) { value = kv.second; break; }
+        }
+        file << KEY_ACTIONS[i].name << "=" << value << "\n";
+    }
+
     if (!settings.readingPositions.empty()) {
         file << "[Positions]\n";
         for (const auto& pos : settings.readingPositions) {
             // Windows paths cannot contain '|'
             file << "pos=" << pos.scrollY << "|" << pos.path << "\n";
+        }
+    }
+}
+
+// "G" -> 'G', "Tab"/"Space"/"F1".."F12" -> VK code, ":" -> ':'; 0 = invalid
+static unsigned parseKeyName(const std::string& value) {
+    if (value.empty()) return 0;
+    if (value.size() == 1) return (unsigned)toupper((unsigned char)value[0]);
+    std::string lower;
+    for (char c : value) lower += (char)tolower((unsigned char)c);
+    if (lower == "tab") return VK_TAB;
+    if (lower == "space") return VK_SPACE;
+    if (lower.size() >= 2 && lower[0] == 'f') {
+        int n = atoi(lower.c_str() + 1);
+        if (n >= 1 && n <= 12) return VK_F1 + n - 1;
+    }
+    return 0;
+}
+
+std::string keyIniName(unsigned key) {
+    if (key == VK_TAB) return "Tab";
+    if (key == VK_SPACE) return "Space";
+    if (key >= VK_F1 && key <= VK_F12) return "F" + std::to_string(key - VK_F1 + 1);
+    return std::string(1, (char)key);
+}
+
+std::wstring keyLabel(unsigned key) {
+    std::string narrow = keyIniName(key);
+    return std::wstring(narrow.begin(), narrow.end());
+}
+
+void applyKeymap(App& app, const Settings& settings) {
+    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+        app.keymap[i] = KEY_ACTIONS[i].defaultKey;
+    }
+    for (const auto& kv : settings.keyOverrides) {
+        for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+            if (kv.first == KEY_ACTIONS[i].name) {
+                unsigned key = parseKeyName(kv.second);
+                if (key) app.keymap[i] = key;
+                break;
+            }
         }
     }
 }
@@ -89,7 +143,7 @@ Settings loadSettings() {
 
     std::string line;
     while (std::getline(file, line)) {
-        if (line.empty() || line[0] == '[') continue;
+        if (line.empty() || line[0] == '[' || line[0] == ';') continue;
 
         size_t eq = line.find('=');
         if (eq == std::string::npos) continue;
@@ -140,6 +194,13 @@ Settings loadSettings() {
                         settings.readingPositions.push_back({value.substr(sep + 1), y});
                     }
                 } catch (...) {}
+            }
+        } else {
+            for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+                if (key == KEY_ACTIONS[i].name) {
+                    settings.keyOverrides.push_back({key, value});
+                    break;
+                }
             }
         }
     }
