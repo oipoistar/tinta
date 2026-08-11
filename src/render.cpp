@@ -3,6 +3,7 @@
 #include "syntax.h"
 #include "search.h"
 #include "mermaid.h"
+#include "i18n.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1453,16 +1454,20 @@ static void layoutBlockquote(App& app, const ElementPtr& elem, float& y, float i
 
     // GitHub alert callouts: accent-colored bar plus a bold title line.
     // Colors are github.com's light/dark alert accents, picked by theme.
+    // The emoji prefix is fixed; the trailing word is translated at render
+    // time via the i18n key, so the array stores prefix + key instead of a
+    // pre-baked title string.
     static const struct {
-        const wchar_t* title;
+        const wchar_t* prefix;  // emoji glyph(s) + two spaces
+        const char* key;        // i18n key for the trailing word
         uint32_t light;
         uint32_t dark;
     } ALERT_STYLES[] = {
-        {L"\u24D8  Note",            0x0969DA, 0x4493F8},  // circled info
-        {L"\U0001F4A1\uFE0E  Tip",   0x1A7F37, 0x3FB950},  // bulb, text presentation
-        {L"\u2757\uFE0E  Important", 0x8250DF, 0xAB7DF8},  // exclamation
-        {L"\u26A0\uFE0E  Warning",   0x9A6700, 0xD29922},  // warning triangle
-        {L"\u26D4\uFE0E  Caution",   0xCF222E, 0xF85149},  // no-entry
+        {L"\u24D8  ",            "alert.note",      0x0969DA, 0x4493F8},  // circled info
+        {L"\U0001F4A1\uFE0E  ", "alert.tip",       0x1A7F37, 0x3FB950},  // bulb, text presentation
+        {L"\u2757\uFE0E  ",     "alert.important", 0x8250DF, 0xAB7DF8},  // exclamation
+        {L"\u26A0\uFE0E  ",     "alert.warning",   0x9A6700, 0xD29922},  // warning triangle
+        {L"\u26D4\uFE0E  ",     "alert.caution",   0xCF222E, 0xF85149},  // no-entry
     };
 
     D2D1_COLOR_F barColor = app.theme.blockquoteBorder;
@@ -1470,7 +1475,7 @@ static void layoutBlockquote(App& app, const ElementPtr& elem, float& y, float i
         const auto& style = ALERT_STYLES[elem->alertKind - 1];
         barColor = hexColor(app.theme.isDark ? style.dark : style.light);
 
-        std::wstring title = style.title;
+        std::wstring title = style.prefix + std::wstring(tr(app, style.key));
         LayoutInfo info = createLayout(app, title, app.textFormat, 24.0f, app.bodyTypography);
         if (info.layout) {
             DWRITE_TEXT_RANGE range = {0, (UINT32)title.length()};
@@ -1708,8 +1713,9 @@ static void layoutImage(App& app, const ElementPtr& elem, float& y, float indent
     auto& entry = getOrLoadImage(app, elem->url);
 
     if (entry.failed || !entry.bitmap) {
-        // Render alt text as placeholder
-        std::wstring altText = L"[image";
+        // Render alt text as placeholder. Only the word "image" is translated;
+        // the bracket/separator punctuation stays locale-neutral.
+        std::wstring altText = L"[" + std::wstring(tr(app, "image.placeholder"));
         std::wstring alt;
         std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
             if (!e) return;

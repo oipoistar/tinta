@@ -7,6 +7,7 @@
 #include "d2d_init.h"
 #include "settings.h"
 #include "render.h"
+#include "i18n.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -321,6 +322,14 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         // Only invalidate when mouse is over the panel (hover tracking needed)
         if (inPanel)
             InvalidateRect(hwnd, nullptr, FALSE);
+    } else if (app.showLanguageChooser) {
+        // Hand cursor over a language row, arrow otherwise
+        if (app.hoveredLanguageIndex >= 0) {
+            SetCursor(cursorHand);
+        } else {
+            SetCursor(cursorArrow);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
     } else if (app.scrollbarHovered || app.scrollbarDragging ||
         app.hScrollbarHovered || app.hScrollbarDragging) {
         SetCursor(cursorArrow);
@@ -407,7 +416,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     }
 
     // If theme chooser, folder browser, or TOC is open, don't start selection - just record for click handling
-    if (app.showThemeChooser || app.showFolderBrowser || app.showToc) {
+    if (app.showThemeChooser || app.showFolderBrowser || app.showToc || app.showLanguageChooser) {
         return;
     }
 
@@ -723,6 +732,52 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         return;
     }
 
+    // Language chooser click handling
+    if (app.showLanguageChooser) {
+        int clickX = GET_X_LPARAM(lParam);
+        int clickY = GET_Y_LPARAM(lParam);
+
+        // Replicate the layout from renderLanguageChooser
+        float panelWidth = std::min(dpi(app, 420.0f), (float)app.width - dpi(app, 80.0f));
+        float panelHeight = std::min(dpi(app, 460.0f), (float)app.height - dpi(app, 80.0f));
+        float panelX = (app.width - panelWidth) / 2;
+        float panelY = (app.height - panelHeight) / 2;
+        float padding = dpi(app, 20.0f);
+        float listTopY = panelY + dpi(app, 80.0f);
+        float listBottomY = panelY + panelHeight - dpi(app, 50.0f);
+        float rowWidth = panelWidth - padding * 2;
+        float rowHeight = std::min(dpi(app, 70.0f), (listBottomY - listTopY) / LANG_COUNT);
+        float rowX = panelX + padding;
+        float innerPad = dpi(app, 6.0f);
+
+        int clickedLang = -1;
+        for (int i = 0; i < LANG_COUNT; i++) {
+            float rowY = listTopY + i * rowHeight;
+            float innerX = rowX + innerPad;
+            float innerY = rowY + innerPad;
+            float innerW = rowWidth - innerPad * 2;
+            float innerH = rowHeight - innerPad * 2;
+            if (clickX >= innerX && clickX <= innerX + innerW &&
+                clickY >= innerY && clickY <= innerY + innerH) {
+                clickedLang = i;
+                break;
+            }
+        }
+
+        if (clickedLang >= 0) {
+            applyLanguage(app, clickedLang);
+            // Persist immediately so the choice survives crashes / power loss.
+            Settings s = loadSettings();
+            s.languageIndex = clickedLang;
+            saveSettings(s);
+        }
+        // Always close after a click (inside selects, outside cancels)
+        app.showLanguageChooser = false;
+        app.languageChooserAnimation = 0;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     if (app.scrollbarDragging) {
         app.scrollbarDragging = false;
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -899,7 +954,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     } else {
         switch (wParam) {
             case VK_ESCAPE:
-                // Priority: Help > Search > FolderBrowser > TOC > Theme chooser > Quit
+                // Priority: Help > Search > FolderBrowser > TOC > Theme/Language chooser > Quit
                 if (app.showHelp) {
                     app.showHelp = false;
                     app.helpAnimation = 0;
@@ -919,18 +974,21 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 } else if (app.showThemeChooser) {
                     app.showThemeChooser = false;
                     app.themeChooserAnimation = 0;
+                } else if (app.showLanguageChooser) {
+                    app.showLanguageChooser = false;
+                    app.languageChooserAnimation = 0;
                 } else {
                     PostQuitMessage(0);
                 }
                 break;
             case 'Q':
-                if (!app.showThemeChooser && !app.showSearch && !app.showFolderBrowser && !app.showToc) {
+                if (!app.showThemeChooser && !app.showSearch && !app.showFolderBrowser && !app.showToc && !app.showLanguageChooser) {
                     PostQuitMessage(0);
                 }
                 break;
             case 'B':
                 // B to toggle folder browser
-                if (!app.showSearch && !app.showThemeChooser && !app.showToc) {
+                if (!app.showSearch && !app.showThemeChooser && !app.showToc && !app.showLanguageChooser) {
                     app.showFolderBrowser = !app.showFolderBrowser;
                     if (app.showFolderBrowser) {
                         app.folderBrowserAnimation = 0;
@@ -949,7 +1007,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 break;
             case VK_TAB:
-                if (!app.showSearch && !app.showThemeChooser && !app.showFolderBrowser) {
+                if (!app.showSearch && !app.showThemeChooser && !app.showFolderBrowser && !app.showLanguageChooser) {
                     app.showToc = !app.showToc;
                     if (app.showToc) {
                         ensureLayoutComplete(app);  // headings list is built during layout
@@ -961,7 +1019,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 break;
             case 'T':
-                if (!app.showSearch) {
+                if (!app.showSearch && !app.showLanguageChooser) {
                     app.showThemeChooser = !app.showThemeChooser;
                     if (app.showThemeChooser) {
                         app.themeChooserAnimation = 0;
@@ -969,9 +1027,19 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 InvalidateRect(hwnd, nullptr, FALSE);
                 break;
+            case 'L':
+                // L to toggle the language chooser
+                if (!app.showSearch && !app.showThemeChooser && !app.showFolderBrowser && !app.showToc) {
+                    app.showLanguageChooser = !app.showLanguageChooser;
+                    if (app.showLanguageChooser) {
+                        app.languageChooserAnimation = 0;
+                    }
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+                break;
             case 'F':
                 // F to open search (when not in search mode)
-                if (!app.showSearch && !app.showThemeChooser) {
+                if (!app.showSearch && !app.showThemeChooser && !app.showLanguageChooser) {
                     app.showSearch = true;
                     app.searchActive = true;
                     app.searchAnimation = 0;
@@ -1034,7 +1102,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
     }
 
     // ':' to enter edit mode, '?' to toggle help — when no overlay is active
-    if (!app.showSearch && !app.showFolderBrowser && !app.showToc && !app.showThemeChooser) {
+    if (!app.showSearch && !app.showFolderBrowser && !app.showToc && !app.showThemeChooser && !app.showLanguageChooser) {
         wchar_t ch = (wchar_t)wParam;
         if (ch == L':' && !app.showHelp) {
             enterEditMode(app);

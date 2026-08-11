@@ -63,6 +63,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 
 - **Lightning-fast startup** - Direct2D rendering, no web engine overhead
 - **10 beautiful themes** - 5 light and 5 dark themes to choose from
+- **Multilingual UI** - English, Simplified Chinese, Japanese, and Korean; follows your system language or override with `L` (press `L` to switch)
 - **Hardware-accelerated** - Smooth text rendering via DirectWrite
 - **Word wrap** - Optional soft wrap in the editor (Ctrl+W)
 - **Focused editing** - Hide the preview pane while writing (Ctrl+P)
@@ -88,6 +89,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Enter` | Next search match |
 | `ESC` | Close overlay / Quit |
 | `T` | Open theme chooser |
+| `L` | Open language chooser |
 | `S` | Toggle stats overlay |
 | `Ctrl+C` | Copy selected text (or all if none selected) |
 | `Ctrl+A` | Select all text |

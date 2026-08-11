@@ -49,6 +49,7 @@ set(SOURCES
     src/editor.cpp
     src/mermaid.cpp
     src/document.cpp
+    src/i18n.cpp
 )
 
 set(HEADERS
@@ -67,6 +68,7 @@ set(HEADERS
     include/editor.h
     include/mermaid.h
     include/document.h
+    include/i18n.h
 )
 
 # Windows resource file (icon)

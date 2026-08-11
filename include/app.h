@@ -18,6 +18,7 @@
 #include <chrono>
 
 #include "markdown.h"
+#include "i18n.h"
 
 using namespace qmd;
 
@@ -111,6 +112,7 @@ struct Settings {
     bool hasAskedFileAssociation = false;
     bool editorShowPreview = true;
     bool editorWordWrap = false;
+    int languageIndex = LANG_INDEX_DEFAULT;  // -1 = follow system, 0..N-1 = explicit
 };
 
 // Application state
@@ -203,11 +205,21 @@ struct App {
     bool showStats = false;
     int currentThemeIndex = 5;  // Default to "Midnight" (first dark theme)
     D2DTheme theme = THEMES[5];
+    int currentLanguageIndex = LANG_INDEX_EN;  // Runtime effective language
 
     // Theme chooser overlay
     bool showThemeChooser = false;
     int hoveredThemeIndex = -1;
     float themeChooserAnimation = 0.0f;  // 0 to 1 for fade in
+
+    // Language chooser overlay
+    bool showLanguageChooser = false;
+    int hoveredLanguageIndex = -1;
+    float languageChooserAnimation = 0.0f;  // 0 to 1 for fade in
+    // Cached text formats (built lazily by ensureLanguageFormats)
+    IDWriteTextFormat* languageTitleFormat = nullptr;
+    IDWriteTextFormat* languageNativeFormat = nullptr;
+    IDWriteTextFormat* languageSubtitleFormat = nullptr;
 
     // Folder browser overlay
     bool showFolderBrowser = false;
@@ -531,6 +543,9 @@ struct App {
         if (tocFormatBold) { tocFormatBold->Release(); tocFormatBold = nullptr; }
         if (supSubFormat) { supSubFormat->Release(); supSubFormat = nullptr; }
         if (editorTextFormat) { editorTextFormat->Release(); editorTextFormat = nullptr; }
+        if (languageTitleFormat) { languageTitleFormat->Release(); languageTitleFormat = nullptr; }
+        if (languageNativeFormat) { languageNativeFormat->Release(); languageNativeFormat = nullptr; }
+        if (languageSubtitleFormat) { languageSubtitleFormat->Release(); languageSubtitleFormat = nullptr; }
         for (auto& fmt : themePreviewFormats) {
             if (fmt.name) { fmt.name->Release(); fmt.name = nullptr; }
             if (fmt.preview) { fmt.preview->Release(); fmt.preview = nullptr; }

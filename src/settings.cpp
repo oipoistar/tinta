@@ -1,5 +1,6 @@
 #include "settings.h"
 #include "document.h"
+#include "i18n.h"
 
 #include <windows.h>
 #include <shlobj.h>
@@ -38,6 +39,7 @@ void saveSettings(const Settings& settings) {
     file << "hasAskedFileAssociation=" << (settings.hasAskedFileAssociation ? 1 : 0) << "\n";
     file << "editorShowPreview=" << (settings.editorShowPreview ? 1 : 0) << "\n";
     file << "editorWordWrap=" << (settings.editorWordWrap ? 1 : 0) << "\n";
+    file << "languageIndex=" << settings.languageIndex << "\n";
 }
 
 Settings loadSettings() {
@@ -82,6 +84,10 @@ Settings loadSettings() {
             settings.editorShowPreview = (value == "1");
         } else if (key == "editorWordWrap") {
             settings.editorWordWrap = (value == "1");
+        } else if (key == "languageIndex") {
+            // Accept any integer; LANG_INDEX_DEFAULT (-1) means follow system.
+            // Out-of-range positive values are clamped elsewhere at load time.
+            settings.languageIndex = std::stoi(value);
         }
     }
     return settings;
@@ -206,16 +212,18 @@ void openDefaultAppsSettings() {
     ShellExecuteW(nullptr, L"open", L"ms-settings:defaultapps", nullptr, nullptr, SW_SHOWNORMAL);
 }
 
-void askAndRegisterFileAssociation(Settings& settings) {
+void askAndRegisterFileAssociation(Settings& settings, int langIndex) {
     if (isRunningPackaged()) return;
+    // Resolve the effective language: explicit choice wins, otherwise detect.
+    int lang = (langIndex >= 0 && langIndex < LANG_COUNT) ? langIndex : detectSystemLanguage();
     if (settings.hasAskedFileAssociation) {
         if (hasRegisteredFileAssociation(L".md") &&
             !hasRegisteredFileAssociation(L".mmd") &&
             !registerFileAssociation()) {
             MessageBoxW(
                 nullptr,
-                L"Failed to add the .mmd file association. Run tinta.exe /register to try again.",
-                L"Tinta - File Association",
+                tr(lang, "fileassoc.add_mmd_failed_body"),
+                tr(lang, "fileassoc.title"),
                 MB_OK | MB_ICONWARNING);
         }
         return;
@@ -223,25 +231,20 @@ void askAndRegisterFileAssociation(Settings& settings) {
 
     int result = MessageBoxW(
         nullptr,
-        L"Would you like to set Tinta as the default viewer for Markdown and Mermaid files?\n\n"
-        L"Windows will open Settings where you can select Tinta.",
-        L"Tinta - File Association",
+        tr(lang, "fileassoc.ask_body"),
+        tr(lang, "fileassoc.title"),
         MB_YESNO | MB_ICONQUESTION
     );
 
     if (result == IDYES) {
         if (registerFileAssociation()) {
             MessageBoxW(nullptr,
-                       L"Tinta has been registered.\n\n"
-                       L"In the Settings window that opens:\n"
-                       L"1. Search for '.md' or '.mmd'\n"
-                       L"2. Click on the current default app\n"
-                       L"3. Select 'Tinta' from the list",
-                       L"Almost done!", MB_OK | MB_ICONINFORMATION);
+                       tr(lang, "fileassoc.done_body"),
+                       tr(lang, "fileassoc.done_title"), MB_OK | MB_ICONINFORMATION);
             openDefaultAppsSettings();
         } else {
-            MessageBoxW(nullptr, L"Failed to register file association. Try running as administrator.",
-                       L"Error", MB_OK | MB_ICONWARNING);
+            MessageBoxW(nullptr, tr(lang, "fileassoc.register_failed_body"),
+                       tr(lang, "error.title"), MB_OK | MB_ICONWARNING);
         }
     }
 

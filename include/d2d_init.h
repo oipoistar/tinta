@@ -5,9 +5,11 @@
 
 bool initD2D(App& app);
 void applyTheme(App& app, int themeIndex);
+void applyLanguage(App& app, int langIndex);
 void updateTextFormats(App& app);
 void updateOverlayFormats(App& app);
 void ensureThemePreviewFormats(App& app);
+void ensureLanguageFormats(App& app);
 void createTypography(App& app);
 bool createRenderTarget(App& app);
 

@@ -1,9 +1,11 @@
 #include "utils.h"
 #include "render.h"
+#include "i18n.h"
 
 #include <windows.h>
 #include <shellapi.h>
 #include <algorithm>
+#include <cstdio>
 
 std::wstring toWide(const std::string& str) {
     if (str.empty()) return L"";
@@ -132,14 +134,18 @@ void findLineRects(const App& app, float y, float& lineLeft, float& lineRight,
 }
 
 void updateWindowTitle(App& app) {
-    std::wstring title = L"Tinta";
-    if (!app.currentFile.empty()) {
+    std::wstring title;
+    if (app.currentFile.empty()) {
+        title = tr(app, "title.no_file");
+    } else {
         std::wstring wpath = toWide(app.currentFile);
         size_t lastSep = wpath.find_last_of(L"\\/");
-        if (lastSep != std::wstring::npos)
-            title = L"Tinta - " + wpath.substr(lastSep + 1);
-        else
-            title = L"Tinta - " + wpath;
+        std::wstring fname = (lastSep != std::wstring::npos) ? wpath.substr(lastSep + 1) : wpath;
+        // title.plain is "Tinta - %1$s" (and identical across current locales,
+        // but routed through tr() so the format can differ per language later).
+        wchar_t buf[MAX_PATH + 32];
+        swprintf_s(buf, tr(app, "title.plain"), fname.c_str());
+        title = buf;
     }
     SetWindowTextW(app.hwnd, title.c_str());
 }

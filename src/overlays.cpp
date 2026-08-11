@@ -1,6 +1,7 @@
 #include "overlays.h"
 #include "utils.h"
 #include "d2d_init.h"
+#include "i18n.h"
 
 #include <chrono>
 #include <algorithm>
@@ -78,7 +79,8 @@ void renderSearchOverlay(App& app) {
             D2D1_COLOR_F placeholderColor = app.theme.text;
             placeholderColor.a = 0.4f * anim;
             app.brush->SetColor(placeholderColor);
-            app.renderTarget->DrawText(L"Search...", 9, searchTextFormat,
+            const wchar_t* ph = tr(app, "search.placeholder");
+            app.renderTarget->DrawText(ph, (UINT32)wcslen(ph), searchTextFormat,
                 D2D1::RectF(textX, barY + dpi(app, 12.0f), textX + textWidth, barY + barHeight), app.brush);
         } else {
             // Actual search query
@@ -112,15 +114,16 @@ void renderSearchOverlay(App& app) {
 
         // Match count
         if (!app.searchQuery.empty()) {
-            wchar_t countText[32];
+            wchar_t countText[64];
             size_t matchCount = app.editMode ? app.editorSearchMatches.size() : app.searchMatches.size();
             int currentIdx = app.editMode ? app.editorSearchCurrentIndex : app.searchCurrentIndex;
             if (matchCount == 0) {
-                wcscpy_s(countText, L"No matches");
+                const wchar_t* nm = tr(app, "search.no_matches");
+                wcscpy_s(countText, nm);
                 // Red color for no matches
                 app.brush->SetColor(D2D1::ColorF(0.9f, 0.3f, 0.3f, anim));
             } else {
-                swprintf_s(countText, L"%d of %zu", currentIdx + 1, matchCount);
+                swprintf_s(countText, tr(app, "search.match_count"), currentIdx + 1, matchCount);
                 D2D1_COLOR_F countColor = app.theme.text;
                 countColor.a = 0.7f * anim;
                 app.brush->SetColor(countColor);
@@ -355,7 +358,7 @@ void renderToc(App& app) {
         D2D1_COLOR_F headerColor = app.theme.heading;
         headerColor.a = anim;
         app.brush->SetColor(headerColor);
-        app.renderTarget->DrawText(L"Contents", 8, tocBold,
+        app.renderTarget->DrawText(tr(app, "toc.title"), (UINT32)wcslen(tr(app, "toc.title")), tocBold,
             D2D1::RectF(panelX + padding, headerY, panelX + panelWidth - padding, headerY + headerHeight),
             app.brush);
 
@@ -376,7 +379,8 @@ void renderToc(App& app) {
             D2D1_COLOR_F dimColor = app.theme.text;
             dimColor.a = 0.5f * anim;
             app.brush->SetColor(dimColor);
-            app.renderTarget->DrawText(L"No headings", 11, tocNormal,
+            const wchar_t* nh = tr(app, "toc.empty");
+            app.renderTarget->DrawText(nh, (UINT32)wcslen(nh), tocNormal,
                 D2D1::RectF(panelX + padding, listStartY + dpi(app, 8.0f), panelX + panelWidth - padding, listStartY + dpi(app, 40.0f)),
                 app.brush);
         } else {
@@ -496,7 +500,8 @@ void renderThemeChooser(App& app) {
     if (titleFormat) {
         titleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
-        app.renderTarget->DrawText(L"Choose Theme", 12, titleFormat,
+        const wchar_t* themeTitle = tr(app, "theme.chooser.title");
+        app.renderTarget->DrawText(themeTitle, (UINT32)wcslen(themeTitle), titleFormat,
             D2D1::RectF(panelX, panelY + dpi(app, 15.0f), panelX + panelWidth, panelY + dpi(app, 55.0f)), app.brush);
     }
 
@@ -636,13 +641,164 @@ void renderThemeChooser(App& app) {
         app.brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, anim));
 
         // Light themes header
-        app.renderTarget->DrawText(L"LIGHT THEMES", 12, headerFormat,
+        const wchar_t* lightHdr = tr(app, "theme.chooser.light");
+        app.renderTarget->DrawText(lightHdr, (UINT32)wcslen(lightHdr), headerFormat,
             D2D1::RectF(panelX + dpi(app, 20.0f), gridStartY - dpi(app, 20.0f), panelX + dpi(app, 20.0f) + cardWidth, gridStartY - dpi(app, 5.0f)), app.brush);
 
         // Dark themes header
-        app.renderTarget->DrawText(L"DARK THEMES", 11, headerFormat,
+        const wchar_t* darkHdr = tr(app, "theme.chooser.dark");
+        app.renderTarget->DrawText(darkHdr, (UINT32)wcslen(darkHdr), headerFormat,
             D2D1::RectF(panelX + dpi(app, 40.0f) + cardWidth, gridStartY - dpi(app, 20.0f), panelX + dpi(app, 40.0f) + cardWidth * 2, gridStartY - dpi(app, 5.0f)), app.brush);
     }
+}
+
+void renderLanguageChooser(App& app) {
+    // Animate in
+    if (app.languageChooserAnimation < 1.0f) {
+        float prev = app.languageChooserAnimation;
+        app.languageChooserAnimation = std::min(1.0f, app.languageChooserAnimation + 0.15f);
+        if (app.languageChooserAnimation != prev)
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+    float anim = app.languageChooserAnimation;
+
+    // Build the per-row native-name format lazily on first open.
+    ensureLanguageFormats(app);
+
+    // Semi-transparent backdrop
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.85f * anim));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
+
+    // Panel dimensions — narrow single-column list (4 items)
+    float panelWidth = std::min(dpi(app, 420.0f), app.width - dpi(app, 40.0f));
+    float panelHeight = std::min(dpi(app, 460.0f), app.height - dpi(app, 40.0f));
+    float panelX = (app.width - panelWidth) / 2;
+    float panelY = (app.height - panelHeight) / 2 + (1 - anim) * dpi(app, 50.0f);
+
+    // Panel background
+    D2D1_ROUNDED_RECT panelRect = D2D1::RoundedRect(
+        D2D1::RectF(panelX, panelY, panelX + panelWidth, panelY + panelHeight),
+        dpi(app, 16.0f), dpi(app, 16.0f));
+    app.brush->SetColor(hexColor(0x1A1A1E, 0.98f * anim));
+    app.renderTarget->FillRoundedRectangle(panelRect, app.brush);
+
+    // Border
+    app.brush->SetColor(hexColor(0x3A3A40, 0.6f * anim));
+    app.renderTarget->DrawRoundedRectangle(panelRect, app.brush, 1.0f);
+
+    // Title
+    IDWriteTextFormat* titleFormat = app.languageTitleFormat;
+    if (titleFormat) {
+        titleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
+        const wchar_t* title = tr(app, "lang.chooser.title");
+        app.renderTarget->DrawText(title, (UINT32)wcslen(title), titleFormat,
+            D2D1::RectF(panelX, panelY + dpi(app, 20.0f), panelX + panelWidth, panelY + dpi(app, 65.0f)), app.brush);
+    }
+
+    IDWriteTextFormat* nativeFmt = app.languageNativeFormat;
+    IDWriteTextFormat* subtitleFmt = app.languageSubtitleFormat;
+    if (!nativeFmt || !subtitleFmt) return;
+
+    // Single-column list of all languages
+    float padding = dpi(app, 20.0f);
+    float listTopY = panelY + dpi(app, 80.0f);
+    float listBottomY = panelY + panelHeight - dpi(app, 50.0f);
+    float rowWidth = panelWidth - padding * 2;
+    float rowHeight = std::min(dpi(app, 70.0f), (listBottomY - listTopY) / LANG_COUNT);
+    float rowX = panelX + padding;
+
+    app.hoveredLanguageIndex = -1;
+
+    for (int i = 0; i < LANG_COUNT; i++) {
+        float rowY = listTopY + i * rowHeight;
+        float innerPad = dpi(app, 6.0f);
+        float innerX = rowX + innerPad;
+        float innerY = rowY + innerPad;
+        float innerW = rowWidth - innerPad * 2;
+        float innerH = rowHeight - innerPad * 2;
+
+        bool isHovered = (app.mouseX >= innerX && app.mouseX <= innerX + innerW &&
+                          app.mouseY >= innerY && app.mouseY <= innerY + innerH);
+        bool isSelected = (i == app.currentLanguageIndex);
+
+        if (isHovered) {
+            app.hoveredLanguageIndex = i;
+        }
+
+        // Row background + selection/hover glow
+        D2D1_ROUNDED_RECT rowRect = D2D1::RoundedRect(
+            D2D1::RectF(innerX, innerY, innerX + innerW, innerY + innerH),
+            dpi(app, 8.0f), dpi(app, 8.0f));
+
+        if (isSelected || isHovered) {
+            float glowSize = isSelected ? 3.0f : 2.0f;
+            D2D1_ROUNDED_RECT glowRect = D2D1::RoundedRect(
+                D2D1::RectF(innerX - glowSize, innerY - glowSize,
+                            innerX + innerW + glowSize, innerY + innerH + glowSize),
+                dpi(app, 10.0f), dpi(app, 10.0f));
+            D2D1_COLOR_F glowColor = app.theme.accent;
+            glowColor.a = (isSelected ? 0.8f : 0.5f) * anim;
+            app.brush->SetColor(glowColor);
+            app.renderTarget->DrawRoundedRectangle(glowRect, app.brush, 2.0f);
+        }
+
+        D2D1_COLOR_F rowBg = hexColor(0x262630, 0.6f * anim);
+        app.brush->SetColor(rowBg);
+        app.renderTarget->FillRoundedRectangle(rowRect, app.brush);
+
+        // Native language name (left-aligned, large)
+        nativeFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        D2D1_COLOR_F nameColor = D2D1::ColorF(1, 1, 1, anim);
+        app.brush->SetColor(nameColor);
+        const wchar_t* nativeName = LANGUAGES[i].nativeName;
+        app.renderTarget->DrawText(nativeName, (UINT32)wcslen(nativeName), nativeFmt,
+            D2D1::RectF(innerX + dpi(app, 16.0f), innerY + dpi(app, 10.0f),
+                        innerX + innerW - dpi(app, 40.0f), innerY + dpi(app, 38.0f)),
+            app.brush);
+
+        // English subtitle below
+        subtitleFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        D2D1_COLOR_F subColor = D2D1::ColorF(0.6f, 0.6f, 0.6f, anim);
+        app.brush->SetColor(subColor);
+        const wchar_t* engName = LANGUAGES[i].englishName;
+        app.renderTarget->DrawText(engName, (UINT32)wcslen(engName), subtitleFmt,
+            D2D1::RectF(innerX + dpi(app, 16.0f), innerY + dpi(app, 38.0f),
+                        innerX + innerW - dpi(app, 16.0f), innerY + dpi(app, 58.0f)),
+            app.brush);
+
+        // Checkmark for the selected language
+        if (isSelected) {
+            D2D1_COLOR_F checkColor = app.theme.accent;
+            checkColor.a = anim;
+            app.brush->SetColor(checkColor);
+            float cx = innerX + innerW - dpi(app, 20.0f);
+            float cy = innerY + innerH / 2.0f;
+            app.renderTarget->DrawLine(
+                D2D1::Point2F(cx - dpi(app, 6.0f), cy),
+                D2D1::Point2F(cx - dpi(app, 2.0f), cy + dpi(app, 4.0f)),
+                app.brush, dpi(app, 2.0f));
+            app.renderTarget->DrawLine(
+                D2D1::Point2F(cx - dpi(app, 2.0f), cy + dpi(app, 4.0f)),
+                D2D1::Point2F(cx + dpi(app, 6.0f), cy - dpi(app, 4.0f)),
+                app.brush, dpi(app, 2.0f));
+        }
+
+        // Row border
+        D2D1_COLOR_F borderColor = hexColor(0x404040, 0.5f * anim);
+        app.brush->SetColor(borderColor);
+        app.renderTarget->DrawRoundedRectangle(rowRect, app.brush, 1.0f);
+    }
+
+    // Footer hint
+    subtitleFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    app.brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, anim));
+    const wchar_t* footer = tr(app, "lang.chooser.footer");
+    app.renderTarget->DrawText(footer, (UINT32)wcslen(footer), subtitleFmt,
+        D2D1::RectF(panelX, panelY + panelHeight - dpi(app, 38.0f),
+                    panelX + panelWidth, panelY + panelHeight - dpi(app, 12.0f)),
+        app.brush);
 }
 
 void renderHelpOverlay(App& app) {
@@ -683,7 +839,8 @@ void renderHelpOverlay(App& app) {
     if (titleFormat) {
         titleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
-        app.renderTarget->DrawText(L"Keyboard Shortcuts", 18, titleFormat,
+        const wchar_t* helpTitle = tr(app, "help.title");
+        app.renderTarget->DrawText(helpTitle, (UINT32)wcslen(helpTitle), titleFormat,
             D2D1::RectF(panelX, panelY + dpi(app, 15.0f), panelX + panelWidth, titleBottomY), app.brush);
     }
 
@@ -698,37 +855,37 @@ void renderHelpOverlay(App& app) {
     };
 
     const HelpEntry navEntries[] = {
-        {L"J / \x2193",   L"Scroll down"},
-        {L"K / \x2191",   L"Scroll up"},
-        {L"Space / PgDn", L"Page down"},
-        {L"PgUp",         L"Page up"},
-        {L"Home / End",   L"Jump to start / end"},
-        {L"Ctrl+Scroll",  L"Zoom in / out"},
+        {L"J / \x2193",   tr(app, "help.nav.scroll_down")},
+        {L"K / \x2191",   tr(app, "help.nav.scroll_up")},
+        {L"Space / PgDn", tr(app, "help.nav.page_down")},
+        {L"PgUp",         tr(app, "help.nav.page_up")},
+        {L"Home / End",   tr(app, "help.nav.jump_start_end")},
+        {L"Ctrl+Scroll",  tr(app, "help.nav.zoom")},
     };
 
     const HelpEntry overlayEntries[] = {
-        {L"F / Ctrl+F",   L"Search"},
-        {L"Enter",        L"Next search match"},
-        {L"B",            L"Toggle folder browser"},
-        {L"Tab",          L"Toggle table of contents"},
-        {L"T",            L"Theme chooser"},
-        {L"S",            L"Toggle stats"},
-        {L"?",            L"This help"},
+        {L"F / Ctrl+F",   tr(app, "help.view.search")},
+        {L"Enter",        tr(app, "help.view.next_match")},
+        {L"B",            tr(app, "help.view.folder_browser")},
+        {L"Tab",          tr(app, "help.view.toc")},
+        {L"T",            tr(app, "help.view.theme")},
+        {L"S",            tr(app, "help.view.stats")},
+        {L"?",            tr(app, "help.view.help")},
     };
 
     const HelpEntry editEntries[] = {
-        {L":",             L"Enter edit mode"},
-        {L"Ctrl+S",       L"Save (in edit mode)"},
-        {L"Ctrl+P",       L"Show / hide preview pane"},
-        {L"Ctrl+W",       L"Toggle word wrap"},
-        {L"ESC ESC",      L"Exit edit mode"},
+        {L":",             tr(app, "help.edit.enter_edit")},
+        {L"Ctrl+S",       tr(app, "help.edit.save")},
+        {L"Ctrl+P",       tr(app, "help.edit.preview")},
+        {L"Ctrl+W",       tr(app, "help.edit.word_wrap")},
+        {L"ESC ESC",      tr(app, "help.edit.exit_edit")},
     };
 
     const HelpEntry generalEntries[] = {
-        {L"Ctrl+A",       L"Select all text"},
-        {L"Ctrl+C",       L"Copy selection"},
-        {L"ESC",          L"Close overlay / Quit"},
-        {L"Q",            L"Quit"},
+        {L"Ctrl+A",       tr(app, "help.general.select_all")},
+        {L"Ctrl+C",       tr(app, "help.general.copy")},
+        {L"ESC",          tr(app, "help.general.close")},
+        {L"Q",            tr(app, "help.general.quit")},
     };
 
     float padding = dpi(app, 20.0f);
@@ -796,15 +953,16 @@ void renderHelpOverlay(App& app) {
         y += sectionGap;
     };
 
-    drawSection(L"NAVIGATION", navEntries, 6);
-    drawSection(L"VIEW", overlayEntries, 7);
-    drawSection(L"EDITING", editEntries, 3);
-    drawSection(L"GENERAL", generalEntries, 4);
+    drawSection(tr(app, "help.section.navigation"), navEntries, 6);
+    drawSection(tr(app, "help.section.view"), overlayEntries, 7);
+    drawSection(tr(app, "help.section.editing"), editEntries, 3);
+    drawSection(tr(app, "help.section.general"), generalEntries, 4);
 
     // Footer hint
     normalFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     app.brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, anim));
-    app.renderTarget->DrawText(L"Press ESC or ? to close", 23, normalFmt,
+    const wchar_t* helpFooter = tr(app, "help.footer");
+    app.renderTarget->DrawText(helpFooter, (UINT32)wcslen(helpFooter), normalFmt,
         D2D1::RectF(panelX, y, panelX + panelWidth, y + lineH), app.brush);
 
     app.renderTarget->PopAxisAlignedClip();

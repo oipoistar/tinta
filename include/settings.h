@@ -8,6 +8,6 @@ void saveSettings(const Settings& settings);
 Settings loadSettings();
 bool registerFileAssociation();
 void openDefaultAppsSettings();
-void askAndRegisterFileAssociation(Settings& settings);
+void askAndRegisterFileAssociation(Settings& settings, int langIndex);
 
 #endif // TINTA_SETTINGS_H

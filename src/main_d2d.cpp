@@ -18,6 +18,7 @@
 #include "document.h"
 #include "d2d_init.h"
 #include "utils.h"
+#include "i18n.h"
 #include "syntax.h"
 #include "search.h"
 #include "render.h"
@@ -440,7 +441,8 @@ render_document:
                 app.theme.isDark ? 0.9f : 0.15f,
                 1.0f));
             IDWriteTextLayout* btnLayout = nullptr;
-            app.dwriteFactory->CreateTextLayout(L"Copy", 4, app.codeFormat,
+            const wchar_t* copyLabel = tr(app, "codeblock.copy");
+            app.dwriteFactory->CreateTextLayout(copyLabel, (UINT32)wcslen(copyLabel), app.codeFormat,
                 btnW, btnH, &btnLayout);
             if (btnLayout) {
                 btnLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
@@ -693,17 +695,22 @@ render_document:
                 D2D1::RoundedRect(D2D1::RectF(pillX, pillY, pillX + copyWidth, pillY + copyHeight), 13, 13),
                 app.brush);
 
-            // Cache the "Copied!" text layout and metrics across frames
+            // Cache the "Copied!" text layout and metrics across frames.
+            // The cache keys on language so switching languages rebuilds it.
             static IDWriteTextLayout* cachedCopyLayout = nullptr;
             static float cachedTextOffsetX = 0, cachedTextOffsetY = 0;
-            if (!cachedCopyLayout) {
-                app.dwriteFactory->CreateTextLayout(L"Copied!", 7,
+            static int cachedCopyLang = -1;
+            if (!cachedCopyLayout || cachedCopyLang != app.currentLanguageIndex) {
+                if (cachedCopyLayout) { cachedCopyLayout->Release(); cachedCopyLayout = nullptr; }
+                const wchar_t* copiedText = tr(app, "codeblock.copied");
+                app.dwriteFactory->CreateTextLayout(copiedText, (UINT32)wcslen(copiedText),
                     app.textFormat, copyWidth, copyHeight, &cachedCopyLayout);
                 if (cachedCopyLayout) {
                     DWRITE_TEXT_METRICS m;
                     cachedCopyLayout->GetMetrics(&m);
                     cachedTextOffsetX = (copyWidth - m.width) / 2;
                     cachedTextOffsetY = (copyHeight - m.height) / 2;
+                    cachedCopyLang = app.currentLanguageIndex;
                 }
             }
             if (cachedCopyLayout) {
@@ -721,17 +728,19 @@ render_document:
     // Draw stats
     if (app.showStats) {
         wchar_t stats[512];
-        swprintf(stats, 512,
-            L"Parse: %zu us | Layout: %zu us | Draw calls: %zu\n"
-            L"Startup: %.1fms (Win: %.1f | D2D: %.1f | DWrite: %.1f | File: %.1f)",
-            app.parseTimeUs,
-            app.layoutTimeUs,
-            app.drawCalls,
+        // Two positional-format lines (see i18n: stats.line1 / stats.line2).
+        // Compose them into one buffer so the overlay renders a single block.
+        wchar_t line1[256];
+        wchar_t line2[256];
+        swprintf_s(line1, 256, tr(app, "stats.line1"),
+            app.parseTimeUs, app.layoutTimeUs, app.drawCalls);
+        swprintf_s(line2, 256, tr(app, "stats.line2"),
             app.metrics.totalStartupUs / 1000.0,
             app.metrics.windowInitUs / 1000.0,
             app.metrics.d2dInitUs / 1000.0,
             app.metrics.dwriteInitUs / 1000.0,
             app.metrics.fileLoadUs / 1000.0);
+        swprintf_s(stats, 512, L"%ls\n%ls", line1, line2);
 
         float statsWidth = dpi(app, 600.0f);
         float statsHeight = dpi(app, 50.0f);
@@ -754,6 +763,7 @@ render_document:
     if (app.showFolderBrowser) renderFolderBrowser(app);
     if (app.showToc) renderToc(app);
     if (app.showThemeChooser) renderThemeChooser(app);
+    if (app.showLanguageChooser) renderLanguageChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
 
     // Close edit mode split view clipping
@@ -921,6 +931,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.zoomFactor = app->zoomFactor;
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
+                settings.languageIndex = app->currentLanguageIndex;
 
                 // Get window placement for position/size/maximized state
                 WINDOWPLACEMENT wp = {};
@@ -1026,6 +1037,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.zoomFactor = savedSettings.zoomFactor;
     app.editorShowPreview = savedSettings.editorShowPreview;
     app.editorWordWrap = savedSettings.editorWordWrap;
+    // Language: explicit user choice wins; otherwise follow the system UI.
+    app.currentLanguageIndex = (savedSettings.languageIndex >= 0 && savedSettings.languageIndex < LANG_COUNT)
+        ? savedSettings.languageIndex
+        : detectSystemLanguage();
 
     // Parse command line
     std::string inputFile;
@@ -1055,22 +1070,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     if (forceRegister) {
         if (registerFileAssociation()) {
             MessageBoxW(nullptr,
-                       L"Tinta has been registered.\n\n"
-                       L"In the Settings window that opens:\n"
-                       L"1. Search for '.md' or '.mmd'\n"
-                       L"2. Click on the current default app\n"
-                       L"3. Select 'Tinta' from the list",
-                       L"Almost done!", MB_OK | MB_ICONINFORMATION);
+                       tr(app, "fileassoc.done_body"),
+                       tr(app, "fileassoc.done_title"), MB_OK | MB_ICONINFORMATION);
             openDefaultAppsSettings();
         } else {
-            MessageBoxW(nullptr, L"Failed to register file association. Try running as administrator.",
-                       L"Error", MB_OK | MB_ICONWARNING);
+            MessageBoxW(nullptr, tr(app, "fileassoc.register_failed_body"),
+                       tr(app, "error.title"), MB_OK | MB_ICONWARNING);
         }
         return 0;  // Exit after registering
     }
 
     // Ask about file association on first run
-    askAndRegisterFileAssociation(savedSettings);
+    askAndRegisterFileAssociation(savedSettings, app.currentLanguageIndex);
 
     if (lightMode) {
         app.currentThemeIndex = 0;  // Paper (first light theme)
@@ -1136,7 +1147,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     // Initialize D2D
     if (!initD2D(app)) {
-        MessageBoxW(nullptr, L"Failed to initialize Direct2D", L"Error", MB_OK);
+        MessageBoxW(nullptr, tr(app, "error.d2d_init_failed"), tr(app, "error.title"), MB_OK);
         return 1;
     }
 
@@ -1153,7 +1164,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // Create render target
     t0 = Clock::now();
     if (!createRenderTarget(app)) {
-        MessageBoxW(nullptr, L"Failed to create render target", L"Error", MB_OK);
+        MessageBoxW(nullptr, tr(app, "error.render_target_failed"), tr(app, "error.title"), MB_OK);
         return 1;
     }
     app.metrics.renderTargetUs = usElapsed(t0);

@@ -60,6 +60,25 @@ void applyTheme(App& app, int themeIndex) {
     }
 }
 
+void applyLanguage(App& app, int langIndex) {
+    if (langIndex < 0 || langIndex >= LANG_COUNT) return;
+    if (langIndex == app.currentLanguageIndex) {
+        // Nothing to do, but still force a redraw in case the chooser is open
+        if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
+        return;
+    }
+    app.currentLanguageIndex = langIndex;
+
+    // Cached text layouts bake their strings in, so a relayout is required for
+    // document chrome that reads translations (alert titles, image alt-text).
+    // Body text comes from the user's file and is unaffected.
+    app.layoutDirty = true;
+
+    if (app.hwnd) {
+        InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+}
+
 void updateTextFormats(App& app) {
     // Release existing formats
     if (app.textFormat) { app.textFormat->Release(); app.textFormat = nullptr; }
@@ -199,6 +218,16 @@ void updateOverlayFormats(App& app) {
         DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         11.0f * scale, L"en-us", &app.themeHeaderFormat);
 
+    // Language chooser formats (title + native name + English subtitle).
+    // The native-name format is built per-row in renderLanguageChooser so each
+    // language shows in its own font; these two are for the panel chrome.
+    app.dwriteFactory->CreateTextFormat(L"Segoe UI Light", nullptr,
+        DWRITE_FONT_WEIGHT_LIGHT, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        28.0f * scale, L"en-us", &app.languageTitleFormat);
+    app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        11.0f * scale, L"en-us", &app.languageSubtitleFormat);
+
     // Theme preview formats (3 per theme, several distinct font families) are
     // created lazily by ensureThemePreviewFormats when the chooser first opens
     // — they were ~30 CreateTextFormat calls on the startup critical path.
@@ -268,6 +297,17 @@ void ensureThemePreviewFormats(App& app) {
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             10.0f * scale, L"en-us", &app.themePreviewFormats[i].code);
     }
+}
+
+void ensureLanguageFormats(App& app) {
+    // The native-name format is shared across rows (CJK glyphs resolve via the
+    // font fallback chain regardless of the requested family), so one format
+    // suffices. Built lazily so the chooser doesn't pay for it at startup.
+    if (app.languageNativeFormat) return;
+    float scale = app.contentScale;
+    app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        16.0f * scale, L"en-us", &app.languageNativeFormat);
 }
 
 void createTypography(App& app) {

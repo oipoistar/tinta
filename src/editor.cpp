@@ -5,6 +5,7 @@
 #include "render.h"
 #include "d2d_init.h"
 #include "search.h"
+#include "i18n.h"
 
 #include <fstream>
 #include <sstream>
@@ -559,8 +560,10 @@ static void scheduleReparse(App& app) {
         std::wstring wpath = toWide(app.currentFile);
         size_t lastSep = wpath.find_last_of(L"\\/");
         std::wstring fname = (lastSep != std::wstring::npos) ? wpath.substr(lastSep + 1) : wpath;
-        std::wstring title = L"Tinta - * " + fname;
-        SetWindowTextW(app.hwnd, title.c_str());
+        // title.dirty is "Tinta - * %1$s" — routed through tr() for consistency.
+        wchar_t buf[MAX_PATH + 40];
+        swprintf_s(buf, tr(app, "title.dirty"), fname.c_str());
+        SetWindowTextW(app.hwnd, buf);
     }
     // No preview pane — nothing to keep in sync until it's shown again
     if (!app.editorShowPreview) return;
@@ -599,7 +602,7 @@ void editorReparse(App& app) {
 void enterEditMode(App& app) {
     if (app.currentFile.empty()) {
         // Show brief "No file loaded" notification
-        app.editorNotificationMsg = L"No file loaded";
+        app.editorNotificationMsg = tr(app, "toast.no_file");
         app.showEditModeNotification = true;
         app.editModeNotificationAlpha = 1.0f;
         app.editModeNotificationStart = std::chrono::steady_clock::now();
@@ -649,7 +652,7 @@ void enterEditMode(App& app) {
     KillTimer(app.hwnd, 1); // TIMER_FILE_WATCH = 1
 
     // Show notification
-    app.editorNotificationMsg = L"Press ESC twice to exit edit mode";
+    app.editorNotificationMsg = tr(app, "toast.exit_edit_hint");
     app.showEditModeNotification = true;
     app.editModeNotificationAlpha = 1.0f;
     app.editModeNotificationStart = std::chrono::steady_clock::now();
@@ -666,7 +669,7 @@ void exitEditMode(App& app) {
     if (app.editorDirty) {
         // Show in-app prompt instead of modal dialog (avoids ESC key conflict)
         app.confirmExitPending = true;
-        app.editorNotificationMsg = L"Unsaved changes! Y = save & exit, N = discard, ESC = cancel";
+        app.editorNotificationMsg = tr(app, "toast.unsaved_exit");
         app.showEditModeNotification = true;
         app.editModeNotificationAlpha = 1.0f;
         app.editModeNotificationStart = std::chrono::steady_clock::now();
@@ -765,7 +768,7 @@ void saveEditorFile(App& app, HWND hwnd) {
         editorReparse(app);
 
         // Show "Saved!" notification
-        app.editorNotificationMsg = L"Saved!";
+        app.editorNotificationMsg = tr(app, "toast.saved");
         app.showEditModeNotification = true;
         app.editModeNotificationAlpha = 1.0f;
         app.editModeNotificationStart = std::chrono::steady_clock::now();
@@ -778,7 +781,7 @@ void saveEditorFile(App& app, HWND hwnd) {
     } else {
         // Surface the failure — a silent no-op here leaves the document
         // permanently dirty and traps the user in the exit-confirm prompt
-        app.editorNotificationMsg = L"Save failed — file may be locked or read-only";
+        app.editorNotificationMsg = tr(app, "toast.save_failed");
         app.showEditModeNotification = true;
         app.editModeNotificationAlpha = 1.0f;
         app.editModeNotificationStart = std::chrono::steady_clock::now();
@@ -870,7 +873,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         } else if (wParam == VK_ESCAPE) {
             app.confirmExitPending = false;
             app.escPressedOnce = false;
-            app.editorNotificationMsg = L"Exit cancelled";
+            app.editorNotificationMsg = tr(app, "toast.exit_cancelled");
             app.showEditModeNotification = true;
             app.editModeNotificationAlpha = 1.0f;
             app.editModeNotificationStart = std::chrono::steady_clock::now();
@@ -895,7 +898,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         app.lastEscTime = now;
 
         // Show brief hint
-        app.editorNotificationMsg = L"Press ESC again to exit edit mode";
+        app.editorNotificationMsg = tr(app, "toast.exit_confirm");
         app.showEditModeNotification = true;
         app.editModeNotificationAlpha = 1.0f;
         app.editModeNotificationStart = now;
@@ -967,8 +970,8 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 app.editorRowMetricsWidth = -1.0f;  // pane width changed
                 app.editorNotificationMsg = app.editorShowPreview
-                    ? L"Preview shown (Ctrl+P to hide)"
-                    : L"Preview hidden (Ctrl+P to show)";
+                    ? tr(app, "toast.preview_shown")
+                    : tr(app, "toast.preview_hidden");
                 app.showEditModeNotification = true;
                 app.editModeNotificationAlpha = 1.0f;
                 app.editModeNotificationStart = std::chrono::steady_clock::now();
@@ -984,8 +987,8 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 rebuildEditorRowMetrics(app);
                 editorEnsureCursorVisible(app);
                 app.editorNotificationMsg = app.editorWordWrap
-                    ? L"Word wrap on (Ctrl+W to turn off)"
-                    : L"Word wrap off (Ctrl+W to turn on)";
+                    ? tr(app, "toast.wrap_on")
+                    : tr(app, "toast.wrap_off");
                 app.showEditModeNotification = true;
                 app.editModeNotificationAlpha = 1.0f;
                 app.editModeNotificationStart = std::chrono::steady_clock::now();
