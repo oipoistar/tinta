@@ -23,7 +23,7 @@
 
 <br>
 
-Tinta is a **fast, lightweight Markdown and Mermaid viewer for Windows**, built with Direct2D and DirectWrite for hardware-accelerated rendering. A single native executable under 1 MB that opens instantly — no Electron, no web engine, no installer.
+Tinta is a **fast, lightweight Markdown and Mermaid viewer for Windows**, built with Direct2D and DirectWrite for hardware-accelerated rendering. A single native executable of about 1 MB that opens instantly — no Electron, no web engine, no installer.
 
 <p align="center">
   <img src="https://tinta.cc/img/screenshots/paper.png" width="49%" alt="Tinta markdown viewer on Windows — Paper light theme">
@@ -54,7 +54,7 @@ Most markdown apps ship an entire browser to render text. Tinta uses the GPU-acc
 |  | Tinta | Typora | Obsidian | VS Code |
 |---|---|---|---|---|
 | Startup | **~200 ms** | ~1.5 s | ~3 s | ~2 s |
-| Install size | **< 1 MB** | ~90 MB | ~250 MB | ~350 MB |
+| Install size | **~1 MB** | ~90 MB | ~250 MB | ~350 MB |
 | Runtime | **Native Direct2D** | Electron | Electron | Electron |
 
 It's a viewer first: perfect as the double-click default for `.md` and `.mmd` files, for reading documentation and diagrams — with an edit mode when you need it.
