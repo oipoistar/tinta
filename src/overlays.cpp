@@ -1812,3 +1812,296 @@ void renderSettingsOverlay(App& app) {
         D2D1::RectF(px + dpi(app, 24.0f), py + panelH - dpi(app, 32.0f),
                     px + panelW, py + panelH), app.brush);
 }
+
+// --- Theme editor ---
+//
+// Left column: name, base theme, dark flag, six hex color fields with
+// swatches. Right column: the live ink specimen (repainted with the working
+// theme and font on every keystroke) above the system font list, each
+// family drawn in its own face. Fixed panel size keeps the geometry simple.
+
+void renderThemeEditor(App& app) {
+    IDWriteTextFormat* fmt = app.folderBrowserFormat;
+    if (!fmt) return;
+    app.themeEditorHits.clear();
+    const D2DTheme& base = app.theme;      // dialog chrome uses the ACTIVE theme
+    const D2DTheme& work = app.themeEditorTheme;  // specimen uses the WORKING one
+
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.6f));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
+
+    float panelW = dpi(app, 760.0f), panelH = dpi(app, 520.0f);
+    float px = (app.width - panelW) / 2, py = (app.height - panelH) / 2;
+    D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(
+        D2D1::RectF(px, py, px + panelW, py + panelH), dpi(app, 12.0f), dpi(app, 12.0f));
+    D2D1_COLOR_F bg = base.background; bg.a = 0.99f;
+    app.brush->SetColor(bg);
+    app.renderTarget->FillRoundedRectangle(panel, app.brush);
+    D2D1_COLOR_F border = base.text; border.a = 0.25f;
+    app.brush->SetColor(border);
+    app.renderTarget->DrawRoundedRectangle(panel, app.brush, 1.0f);
+
+    if (app.themeTitleFormat) {
+        app.themeTitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        D2D1_COLOR_F tc = base.heading; tc.a = 1.0f;
+        app.brush->SetColor(tc);
+        app.renderTarget->DrawText(L"New theme", 9, app.themeTitleFormat,
+            D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 16.0f),
+                        px + panelW, py + dpi(app, 52.0f)), app.brush);
+    }
+
+    float x0 = px + dpi(app, 24.0f);
+    float colW = dpi(app, 300.0f);
+    float y = py + dpi(app, 64.0f);
+
+    auto inputBox = [&](float bx, float by, float bw, const std::wstring& text,
+                        bool focused, int action) {
+        D2D1_RECT_F r = D2D1::RectF(bx, by, bx + bw, by + dpi(app, 26.0f));
+        D2D1_COLOR_F c = base.text; c.a = focused ? 0.6f : 0.25f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(r, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush,
+            focused ? 1.5f : 1.0f);
+        std::wstring shown = text;
+        if (focused) shown += L"_";
+        c = base.text; c.a = 0.95f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(shown.c_str(), (UINT32)shown.size(), fmt,
+            D2D1::RectF(r.left + dpi(app, 8.0f), r.top + dpi(app, 4.0f),
+                        r.right - dpi(app, 4.0f), r.bottom), app.brush);
+        app.themeEditorHits.push_back({r, action});
+    };
+    auto label = [&](float lx, float ly, const wchar_t* text, float alpha) {
+        D2D1_COLOR_F c = base.text; c.a = alpha;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(text, (UINT32)wcslen(text), fmt,
+            D2D1::RectF(lx, ly, lx + colW, ly + dpi(app, 18.0f)), app.brush);
+    };
+
+    // Name
+    label(x0, y, L"Name", 0.55f);
+    inputBox(x0, y + dpi(app, 20.0f), dpi(app, 276.0f), app.themeEditorName,
+             app.themeEditorField == 6, TE_FIELD_NAME);
+    y += dpi(app, 56.0f);
+
+    // Base theme cycler + dark toggle on one row
+    label(x0, y, L"Based on", 0.55f);
+    {
+        float by = y + dpi(app, 20.0f);
+        D2D1_RECT_F prev = D2D1::RectF(x0, by, x0 + dpi(app, 26.0f), by + dpi(app, 26.0f));
+        D2D1_RECT_F next = D2D1::RectF(x0 + dpi(app, 250.0f), by,
+                                       x0 + dpi(app, 276.0f), by + dpi(app, 26.0f));
+        D2D1_COLOR_F c = base.text; c.a = 0.7f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(L"\x2039", 1, fmt,
+            D2D1::RectF(prev.left + dpi(app, 9.0f), prev.top + dpi(app, 3.0f),
+                        prev.right, prev.bottom), app.brush);
+        app.renderTarget->DrawText(L"\x203A", 1, fmt,
+            D2D1::RectF(next.left + dpi(app, 9.0f), next.top + dpi(app, 3.0f),
+                        next.right, next.bottom), app.brush);
+        const D2DTheme& bt = themeAt(app.themeEditorBase);
+        c = base.text; c.a = 0.95f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(bt.name, (UINT32)wcslen(bt.name), fmt,
+            D2D1::RectF(prev.right + dpi(app, 10.0f), by + dpi(app, 4.0f),
+                        next.left - dpi(app, 6.0f), by + dpi(app, 24.0f)), app.brush);
+        app.themeEditorHits.push_back({prev, TE_BASE_PREV});
+        app.themeEditorHits.push_back({next, TE_BASE_NEXT});
+    }
+    y += dpi(app, 56.0f);
+
+    // Dark flag
+    label(x0, y + dpi(app, 3.0f), L"Dark theme", 0.95f);
+    {
+        float tx = x0 + dpi(app, 242.0f), ty = y;
+        float tw = dpi(app, 34.0f), th = dpi(app, 18.0f);
+        bool on = work.isDark;
+        D2D1_COLOR_F track = on ? base.accent : base.text;
+        track.a = on ? 0.9f : 0.25f;
+        app.brush->SetColor(track);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(tx, ty, tx + tw, ty + th), th / 2, th / 2),
+            app.brush);
+        float knobX = on ? tx + tw - th / 2 : tx + th / 2;
+        app.brush->SetColor(D2D1::ColorF(1, 1, 1, 1));
+        app.renderTarget->FillEllipse(
+            D2D1::Ellipse(D2D1::Point2F(knobX, ty + th / 2),
+                          th / 2 - dpi(app, 2.0f), th / 2 - dpi(app, 2.0f)), app.brush);
+        app.themeEditorHits.push_back({D2D1::RectF(tx - dpi(app, 6.0f), ty - dpi(app, 6.0f),
+                                                   tx + tw + dpi(app, 6.0f), ty + th + dpi(app, 6.0f)),
+                                       TE_DARK});
+    }
+    y += dpi(app, 34.0f);
+
+    // Six color fields
+    static const wchar_t* kColorLabels[6] = {
+        L"Background", L"Text", L"Heading", L"Link", L"Accent", L"Code background"};
+    const D2D1_COLOR_F* slots[6] = {&work.background, &work.text, &work.heading,
+                                    &work.link, &work.accent, &work.codeBackground};
+    for (int i = 0; i < 6; i++) {
+        float ry = y + i * dpi(app, 36.0f);
+        label(x0, ry + dpi(app, 5.0f), kColorLabels[i], 0.95f);
+        inputBox(x0 + dpi(app, 138.0f), ry, dpi(app, 96.0f), app.themeEditorHex[i],
+                 app.themeEditorField == i, TE_FIELD_BG + i);
+        D2D1_RECT_F sw = D2D1::RectF(x0 + dpi(app, 244.0f), ry,
+                                     x0 + dpi(app, 270.0f), ry + dpi(app, 26.0f));
+        app.brush->SetColor(*slots[i]);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(sw, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush);
+        D2D1_COLOR_F c = base.text; c.a = 0.3f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(sw, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush, 1.0f);
+    }
+
+    // ---- Right column: specimen + font list ----
+    float xr = px + dpi(app, 350.0f);
+    float xrw = px + panelW - dpi(app, 24.0f) - xr;
+
+    // Live ink specimen in the working theme + font
+    {
+        D2D1_RECT_F spec = D2D1::RectF(xr, py + dpi(app, 64.0f),
+                                       xr + xrw, py + dpi(app, 218.0f));
+        app.brush->SetColor(work.background);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(spec, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush);
+        D2D1_COLOR_F c = base.text; c.a = 0.2f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(spec, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush, 1.0f);
+
+        const wchar_t* fam = app.themeEditorFont.empty()
+            ? L"Segoe UI" : app.themeEditorFont.c_str();
+        IDWriteTextFormat* h = nullptr; IDWriteTextFormat* b = nullptr;
+        IDWriteTextFormat* m = nullptr;
+        app.dwriteFactory->CreateTextFormat(fam, nullptr, DWRITE_FONT_WEIGHT_BOLD,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, dpi(app, 20.0f),
+            L"en-us", &h);
+        app.dwriteFactory->CreateTextFormat(fam, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, dpi(app, 13.5f),
+            L"en-us", &b);
+        app.dwriteFactory->CreateTextFormat(L"Consolas", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, dpi(app, 12.5f),
+            L"en-us", &m);
+        float sx = spec.left + dpi(app, 18.0f);
+        float sw2 = spec.right - dpi(app, 18.0f) - sx;
+        if (h) {
+            app.brush->SetColor(work.heading);
+            app.renderTarget->DrawText(L"The Quick Brown Fox", 19, h,
+                D2D1::RectF(sx, spec.top + dpi(app, 14.0f), sx + sw2,
+                            spec.top + dpi(app, 44.0f)), app.brush);
+            h->Release();
+        }
+        if (b) {
+            app.brush->SetColor(work.text);
+            const wchar_t* body =
+                L"Body text set in your chosen face, with enough of a line to judge its color and rhythm.";
+            app.renderTarget->DrawText(body, (UINT32)wcslen(body), b,
+                D2D1::RectF(sx, spec.top + dpi(app, 50.0f), sx + sw2,
+                            spec.top + dpi(app, 92.0f)), app.brush);
+            app.brush->SetColor(work.link);
+            app.renderTarget->DrawText(L"A hyperlink,", 12, b,
+                D2D1::RectF(sx, spec.top + dpi(app, 96.0f), sx + dpi(app, 90.0f),
+                            spec.top + dpi(app, 118.0f)), app.brush);
+            app.brush->SetColor(work.accent);
+            app.renderTarget->DrawText(L"an accent,", 10, b,
+                D2D1::RectF(sx + dpi(app, 92.0f), spec.top + dpi(app, 96.0f),
+                            sx + dpi(app, 170.0f), spec.top + dpi(app, 118.0f)), app.brush);
+            b->Release();
+        }
+        if (m) {
+            D2D1_RECT_F pill = D2D1::RectF(sx, spec.top + dpi(app, 122.0f),
+                                           sx + dpi(app, 128.0f), spec.top + dpi(app, 142.0f));
+            app.brush->SetColor(work.codeBackground);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(pill, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush);
+            app.brush->SetColor(work.code);
+            app.renderTarget->DrawText(L"inline_code()", 13, m,
+                D2D1::RectF(pill.left + dpi(app, 8.0f), pill.top + dpi(app, 2.0f),
+                            pill.right, pill.bottom), app.brush);
+            m->Release();
+        }
+    }
+
+    // Font list: every system family, drawn in itself
+    {
+        D2D1_RECT_F list = D2D1::RectF(xr, py + dpi(app, 230.0f),
+                                       xr + xrw, py + panelH - dpi(app, 60.0f));
+        app.themeEditorFontListRect = list;
+        D2D1_COLOR_F c = base.text; c.a = 0.2f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(list, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush, 1.0f);
+        app.renderTarget->PushAxisAlignedClip(list, D2D1_ANTIALIAS_MODE_ALIASED);
+
+        float rowH = dpi(app, 26.0f);
+        float maxScroll = std::max(0.0f,
+            (float)app.systemFontFamilies.size() * rowH - (list.bottom - list.top));
+        app.themeEditorFontScroll = std::max(0.0f, std::min(app.themeEditorFontScroll, maxScroll));
+        int first = (int)(app.themeEditorFontScroll / rowH);
+        int visible = (int)((list.bottom - list.top) / rowH) + 2;
+        for (int i = first; i < first + visible &&
+                            i < (int)app.systemFontFamilies.size(); i++) {
+            float ry = list.top + i * rowH - app.themeEditorFontScroll;
+            const std::wstring& fam = app.systemFontFamilies[i];
+            bool selected = (_wcsicmp(fam.c_str(), app.themeEditorFont.c_str()) == 0);
+            if (selected) {
+                D2D1_COLOR_F hl = base.accent; hl.a = 0.18f;
+                app.brush->SetColor(hl);
+                app.renderTarget->FillRectangle(
+                    D2D1::RectF(list.left + 1, ry, list.right - 1, ry + rowH), app.brush);
+            }
+            IDWriteTextFormat* ff = nullptr;
+            app.dwriteFactory->CreateTextFormat(fam.c_str(), nullptr,
+                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL, dpi(app, 14.0f), L"en-us", &ff);
+            D2D1_COLOR_F tc = base.text; tc.a = selected ? 1.0f : 0.8f;
+            app.brush->SetColor(tc);
+            if (ff) {
+                app.renderTarget->DrawText(fam.c_str(), (UINT32)fam.size(), ff,
+                    D2D1::RectF(list.left + dpi(app, 12.0f), ry + dpi(app, 3.0f),
+                                list.right - dpi(app, 8.0f), ry + rowH), app.brush);
+                ff->Release();
+            }
+            // Clamp the hit rect to the visible list: rows drawn under the
+            // clip must not steal clicks from the buttons below
+            D2D1_RECT_F hr = D2D1::RectF(list.left, std::max(ry, list.top),
+                                         list.right, std::min(ry + rowH, list.bottom));
+            if (hr.bottom > hr.top) {
+                app.themeEditorHits.push_back({hr, TE_FONT_BASE + i});
+            }
+        }
+        app.renderTarget->PopAxisAlignedClip();
+    }
+
+    // Save / Cancel
+    {
+        float bh = dpi(app, 30.0f);
+        float by = py + panelH - dpi(app, 46.0f);
+        D2D1_RECT_F save = D2D1::RectF(px + panelW - dpi(app, 118.0f), by,
+                                       px + panelW - dpi(app, 24.0f), by + bh);
+        D2D1_RECT_F cancel = D2D1::RectF(save.left - dpi(app, 96.0f), by,
+                                         save.left - dpi(app, 12.0f), by + bh);
+        app.brush->SetColor(base.accent);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(save, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush);
+        app.brush->SetColor(D2D1::ColorF(1, 1, 1, 1));
+        fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        app.renderTarget->DrawText(L"Save theme", 10, fmt,
+            D2D1::RectF(save.left, save.top + dpi(app, 6.0f), save.right, save.bottom),
+            app.brush);
+        D2D1_COLOR_F c = base.text; c.a = 0.4f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(cancel, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush, 1.0f);
+        c.a = 0.9f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(L"Cancel", 6, fmt,
+            D2D1::RectF(cancel.left, cancel.top + dpi(app, 6.0f), cancel.right, cancel.bottom),
+            app.brush);
+        fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        app.themeEditorHits.push_back({save, TE_SAVE});
+        app.themeEditorHits.push_back({cancel, TE_CANCEL});
+    }
+}

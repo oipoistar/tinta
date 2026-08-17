@@ -841,6 +841,7 @@ render_document:
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
     if (app.showSettings) renderSettingsOverlay(app);
+    if (app.showThemeEditor) renderThemeEditor(app);
 
     // Close edit mode split view clipping
     if (app.editMode) {

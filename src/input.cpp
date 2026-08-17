@@ -245,6 +245,76 @@ static void applyZoomDelta(App& app, float delta) {
     }
 }
 
+// --- Theme editor helpers ---
+
+static std::wstring colorToHexW(const D2D1_COLOR_F& c) {
+    wchar_t buf[8];
+    swprintf_s(buf, L"%02X%02X%02X",
+               (int)(c.r * 255.0f + 0.5f), (int)(c.g * 255.0f + 0.5f),
+               (int)(c.b * 255.0f + 0.5f));
+    return buf;
+}
+
+static bool hexToColorW(const std::wstring& s, D2D1_COLOR_F& out) {
+    if (s.size() != 6) return false;
+    unsigned v = 0;
+    for (wchar_t ch : s) {
+        v <<= 4;
+        if (ch >= L'0' && ch <= L'9') v |= (unsigned)(ch - L'0');
+        else if (ch >= L'a' && ch <= L'f') v |= (unsigned)(ch - L'a' + 10);
+        else if (ch >= L'A' && ch <= L'F') v |= (unsigned)(ch - L'A' + 10);
+        else return false;
+    }
+    out = hexColor(v);
+    return true;
+}
+
+// The six editable slots, in TE_FIELD_* / themeEditorHex order
+static D2D1_COLOR_F* themeEditorSlot(App& app, int field) {
+    D2DTheme& t = app.themeEditorTheme;
+    switch (field) {
+        case 0: return &t.background;
+        case 1: return &t.text;
+        case 2: return &t.heading;
+        case 3: return &t.link;
+        case 4: return &t.accent;
+        case 5: return &t.codeBackground;
+    }
+    return nullptr;
+}
+
+// Copies a base theme's colors into the working copy and refreshes the
+// hex field strings (name and focus are preserved)
+static void themeEditorAdoptBase(App& app, int baseIndex) {
+    app.themeEditorBase = baseIndex;
+    const D2DTheme& bt = themeAt(baseIndex);
+    app.themeEditorTheme = bt;
+    app.themeEditorFont = bt.fontFamily;
+    for (int i = 0; i < 6; i++) {
+        app.themeEditorHex[i] = colorToHexW(*themeEditorSlot(app, i));
+    }
+}
+
+static void openThemeEditor(App& app) {
+    enumerateSystemFontFamilies(app);
+    themeEditorAdoptBase(app, app.currentThemeIndex);
+    app.themeEditorName = L"My theme";
+    app.themeEditorField = 6;  // name focused first
+    app.themeEditorFontScroll = 0.0f;
+    app.showSettings = false;
+    app.showThemeEditor = true;
+    InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
+static void closeThemeEditor(App& app, bool backToSettings) {
+    app.showThemeEditor = false;
+    if (backToSettings) {
+        app.showSettings = true;
+        app.settingsAnimation = 1.0f;  // no re-animation on return
+    }
+    InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
 // Reading-width sliders: map a mouse X onto the stored track rect (#82)
 static void settingsSliderApply(App& app, int which, float mx) {
     const D2D1_RECT_F& track =
@@ -290,7 +360,7 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.themeChooserAnimation = 0;
             break;
         case SET_NEW_THEME:
-            // Theme editor arrives in the next commit; the chip is wired
+            openThemeEditor(app);
             break;
         case SET_OPEN_INI:
             ShellExecuteW(nullptr, L"open", getSettingsPath().c_str(),
@@ -339,6 +409,19 @@ static WPARAM translateActionKey(App& app, WPARAM key, bool isChar) {
 }
 
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Theme editor: wheel scrolls the font list
+    if (app.showThemeEditor) {
+        float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+        const D2D1_RECT_F& list = app.themeEditorFontListRect;
+        if (app.mouseX >= list.left && app.mouseX <= list.right &&
+            app.mouseY >= list.top && app.mouseY <= list.bottom) {
+            app.themeEditorFontScroll -= delta * dpi(app, 78.0f);
+            if (app.themeEditorFontScroll < 0) app.themeEditorFontScroll = 0;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return;
+    }
+
     // Settings overlay: consume the wheel (nothing scrolls yet)
     if (app.showSettings) return;
 
@@ -460,6 +543,20 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // Print preview: no hover states; document hit-testing below would run
     // against print-layout coordinates anyway
     if (app.showPrintPreview) return;
+
+    // Theme editor: hand over controls, arrow elsewhere
+    if (app.showThemeEditor) {
+        bool overControl = false;
+        for (const auto& hit : app.themeEditorHits) {
+            if (app.mouseX >= hit.first.left && app.mouseX <= hit.first.right &&
+                app.mouseY >= hit.first.top && app.mouseY <= hit.first.bottom) {
+                overControl = true;
+                break;
+            }
+        }
+        SetCursor(LoadCursorW(nullptr, overControl ? IDC_HAND : IDC_ARROW));
+        return;
+    }
 
     // Settings: drag a slider if one is held, and show a hand over controls
     // instead of the document's text caret
@@ -843,7 +940,7 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
     // bar is fine — it shares the viewport rather than covering it.
     if (app.editMode || app.showThemeChooser || app.showToc ||
         app.showFolderBrowser || app.showHelp || app.showPrintPreview ||
-        app.showSettings) {
+        app.showSettings || app.showThemeEditor) {
         return;
     }
 
@@ -860,6 +957,9 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
 }
 
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Theme editor: everything acts on the release
+    if (app.showThemeEditor) return;
+
     // Settings: sliders drag from the press; everything else acts on release
     if (app.showSettings) {
         float mx = (float)GET_X_LPARAM(lParam);
@@ -1227,6 +1327,56 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Release belonging to a context-menu item click: already handled
     if (app.swallowNextMouseUp) {
         app.swallowNextMouseUp = false;
+        return;
+    }
+
+    // Theme editor clicks
+    if (app.showThemeEditor) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        for (const auto& hit : app.themeEditorHits) {
+            if (mx < hit.first.left || mx > hit.first.right ||
+                my < hit.first.top || my > hit.first.bottom) continue;
+            int action = hit.second;
+            if (action >= TE_FONT_BASE) {
+                int idx = action - TE_FONT_BASE;
+                if (idx >= 0 && idx < (int)app.systemFontFamilies.size()) {
+                    app.themeEditorFont = app.systemFontFamilies[idx];
+                }
+            } else if (action >= TE_FIELD_BG && action <= TE_FIELD_CODEBG) {
+                app.themeEditorField = action - TE_FIELD_BG;
+            } else if (action == TE_FIELD_NAME) {
+                app.themeEditorField = 6;
+            } else if (action == TE_BASE_PREV || action == TE_BASE_NEXT) {
+                int n = themeCount();
+                int base = app.themeEditorBase + (action == TE_BASE_NEXT ? 1 : n - 1);
+                themeEditorAdoptBase(app, base % n);
+            } else if (action == TE_DARK) {
+                app.themeEditorTheme.isDark = !app.themeEditorTheme.isDark;
+            } else if (action == TE_CANCEL) {
+                closeThemeEditor(app, true);
+                return;
+            } else if (action == TE_SAVE) {
+                std::wstring name = app.themeEditorName.empty()
+                    ? L"My theme" : app.themeEditorName;
+                int idx = saveCustomTheme(app.themeEditorTheme, name,
+                    app.themeEditorFont, themeAt(app.themeEditorBase).codeFontFamily);
+                if (idx >= 0) {
+                    // Preview format cache must grow for the chooser
+                    for (auto& pf : app.themePreviewFormats) {
+                        if (pf.name) { pf.name->Release(); pf.name = nullptr; }
+                        if (pf.preview) { pf.preview->Release(); pf.preview = nullptr; }
+                        if (pf.code) { pf.code->Release(); pf.code = nullptr; }
+                    }
+                    app.themePreviewFormats.clear();
+                    applyTheme(app, idx);
+                }
+                closeThemeEditor(app, false);
+                return;
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
         return;
     }
 
@@ -1797,6 +1947,11 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 break;
         }
     } else {
+        // Theme editor: Esc returns to settings; text arrives via WM_CHAR
+        if (app.showThemeEditor) {
+            if (wParam == VK_ESCAPE) closeThemeEditor(app, true);
+            return;
+        }
         // Settings overlay captures the keyboard while open
         if (app.showSettings) {
             if (wParam == VK_ESCAPE) {
@@ -1955,6 +2110,32 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
     // Print preview: all shortcuts are handled as key-downs
     if (app.showPrintPreview) return;
+
+    // Theme editor: route typing into the focused field
+    if (app.showThemeEditor) {
+        wchar_t ch = (wchar_t)wParam;
+        int f = app.themeEditorField;
+        if (f == 6) {  // name
+            if (ch == 8) {
+                if (!app.themeEditorName.empty()) app.themeEditorName.pop_back();
+            } else if (ch >= 32 && ch != 127 && app.themeEditorName.size() < 24) {
+                app.themeEditorName += ch;
+            }
+        } else if (f >= 0 && f < 6) {  // hex fields
+            std::wstring& hex = app.themeEditorHex[f];
+            if (ch == 8) {
+                if (!hex.empty()) hex.pop_back();
+            } else if (iswxdigit(ch) && hex.size() < 6) {
+                hex += towupper(ch);
+            }
+            D2D1_COLOR_F parsed;
+            if (hexToColorW(hex, parsed)) {
+                *themeEditorSlot(app, f) = parsed;
+            }
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
 
     // Edit mode: ':' enters edit mode, otherwise route to editor
     if (app.editMode) {

@@ -29,6 +29,19 @@ enum SettingsAction {
 };
 void renderSettingsOverlay(App& app);
 
+// Theme editor ("+ New" in settings). Font-list entries encode their
+// absolute family index as TE_FONT_BASE + i; everything else stays < 100.
+enum ThemeEditorAction {
+    TE_NONE = 0,
+    TE_FIELD_BG, TE_FIELD_TEXT, TE_FIELD_HEADING, TE_FIELD_LINK,
+    TE_FIELD_ACCENT, TE_FIELD_CODEBG,   // order matches themeEditorHex[0..5]
+    TE_FIELD_NAME,
+    TE_BASE_PREV, TE_BASE_NEXT,
+    TE_DARK, TE_SAVE, TE_CANCEL,
+    TE_FONT_BASE = 100,
+};
+void renderThemeEditor(App& app);
+
 // Right-click context menu: theme-drawn like the other overlays.
 // Item indices are shared between rendering and input handling.
 enum ContextMenuItem {
