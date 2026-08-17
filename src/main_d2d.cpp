@@ -1083,6 +1083,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
+                settings.browserFocusPath = app->browserFocusPath;
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
                 settings.tocOnLeft = app->tocOnLeft;
@@ -1198,6 +1199,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.lightThemeIndex = savedSettings.lightThemeIndex;
     app.darkThemeIndex = savedSettings.darkThemeIndex;
     app.folderSearchEnabled = savedSettings.folderSearchEnabled;
+    app.browserFocusPath = savedSettings.browserFocusPath;
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;
@@ -1223,6 +1225,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     bool forceRegister = false;
     bool cascadeWindow = false;   // offset from the saved position (new-file windows)
     bool startInEditMode = false; // open straight into the editor
+    bool quickNote = false;       // Ctrl+N: untitled buffer, no backing file
     std::wstring printPagesDir;   // debug: render print pages as PNGs and exit
 
     int argc;
@@ -1239,6 +1242,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             cascadeWindow = true;
         } else if (arg == L"--edit") {
             startInEditMode = true;
+        } else if (arg == L"--new") {
+            quickNote = true;
         } else if (arg == L"--printpages" && i + 1 < argc) {
             printPagesDir = argv[++i];
         } else if (arg[0] != L'-' && arg[0] != L'/') {
@@ -1389,7 +1394,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         return loadDocumentContent(buffer.str(), path);
     };
 
-    if (!inputFile.empty()) {
+    if (quickNote) {
+        // Untitled quick note: an empty document, no backing file
+        loadDocumentContent(std::string(), {});
+    } else if (!inputFile.empty()) {
         if (loadFile(inputFile)) {
             app.currentFile = inputFile;
             app.focusMermaidOnNextLayout = isMermaidDocumentPath(inputFile);
@@ -1433,7 +1441,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.metrics.totalStartupUs = usElapsed(startupStart);
 
     // New-file windows open straight into the editor
-    if (startInEditMode) {
+    if (quickNote) {
+        enterQuickNoteMode(app);
+    } else if (startInEditMode) {
         enterEditMode(app);
     }
 

@@ -28,6 +28,8 @@ void findLineRects(const App& app, float y, float& lineLeft, float& lineRight,
                    float& lineTop, float& lineBottom);
 
 void updateWindowTitle(App& app);
+// Ctrl+N: spawns a second Tinta window on an untitled quick note
+void launchQuickNoteWindow();
 void openUrl(const std::string& url);
 void copyToClipboard(HWND hwnd, const std::wstring& text);
 void extractText(const ElementPtr& elem, std::wstring& out);

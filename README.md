@@ -97,6 +97,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Home/End` | Jump to start/end |
 | `:` | Enter edit mode |
 | `ESC` `ESC` | Exit edit mode |
+| `Ctrl+N` | New quick note — a fresh window, start typing right away; `Ctrl+S` names it via the save dialog |
 | `Ctrl+S` | Save (in edit mode) |
 | `Ctrl+P` | Print / export to PDF |
 | `Ctrl+E` | Show/hide preview pane (in edit mode) |
@@ -129,6 +130,11 @@ help=?
 
 Ctrl combos (save, print, copy, word wrap…) are fixed. The help overlay and
 context menu show whatever keys are currently bound.
+
+Other settings of note: `browserFocusPath=1` makes `B` open the file browser
+with the path box focused and selected, so paste + Enter jumps anywhere
+(also in Settings → General). `tinta --new` starts an untitled quick note
+from the command line.
 
 ## Building
 

@@ -370,6 +370,9 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.folderSearchEnabled = !app.folderSearchEnabled;
             if (!app.folderSearchEnabled) clearFolderSearch(app);
             break;
+        case SET_TOGGLE_BROWSEFOCUS:
+            app.browserFocusPath = !app.browserFocusPath;
+            break;
         case SET_TOGGLE_FOLLOW:
             app.followSystemTheme = !app.followSystemTheme;
             if (app.followSystemTheme) {
@@ -1934,6 +1937,11 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 // editor path)
                 openPrintPreview(app, hwnd);
                 break;
+            case 'N':
+                // Quick note: a fresh window in edit mode on an untitled
+                // buffer; Ctrl+S there opens the classic Save As dialog
+                launchQuickNoteWindow();
+                break;
             case 'A': {
                 // Select All - extract all text from document
                 if (app.root) {
@@ -2075,6 +2083,17 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                             }
                         }
                         populateFolderItems(app);
+                        if (app.browserFocusPath) {
+                            // #81: open with the path box active and
+                            // selected, so paste + Enter jumps anywhere
+                            app.folderBrowserEditingPath = true;
+                            app.folderBrowserInput = app.folderBrowserPath;
+                            app.folderBrowserInputSelectAll = true;
+                            app.folderBrowserInputError = false;
+                            app.folderInputJustOpened = true;
+                            updateBlinkTimer(app);
+                            resetCursorBlink(app);
+                        }
                     }
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }

@@ -1,5 +1,6 @@
 #include "utils.h"
 #include "render.h"
+#include "i18n.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -140,8 +141,19 @@ void updateWindowTitle(App& app) {
             title = L"Tinta - " + wpath.substr(lastSep + 1);
         else
             title = L"Tinta - " + wpath;
+    } else if (app.editMode) {
+        // Quick note (Ctrl+N): no backing file until the first save
+        title = L"Tinta - ";
+        title += tr(app, "title.untitled");
     }
     SetWindowTextW(app.hwnd, title.c_str());
+}
+
+void launchQuickNoteWindow() {
+    wchar_t exePath[MAX_PATH];
+    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) return;
+    ShellExecuteW(nullptr, L"open", exePath, L"--cascade --new", nullptr,
+                  SW_SHOWNORMAL);
 }
 
 void openUrl(const std::string& url) {

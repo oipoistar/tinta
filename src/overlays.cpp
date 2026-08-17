@@ -971,6 +971,7 @@ void renderHelpOverlay(App& app) {
     const HelpEntry generalEntries[] = {
         {L"Ctrl+A",       tr(app, "help.general.select_all")},
         {L"Ctrl+C",       tr(app, "help.general.copy")},
+        {L"Ctrl+N",       tr(app, "help.general.new_note")},
         {L"Ctrl+P",       tr(app, "ctx.print")},
         {L"ESC",          tr(app, "help.general.close")},
         {kQuit.c_str(),   tr(app, "help.general.quit")},
@@ -1829,6 +1830,10 @@ void renderSettingsOverlay(App& app) {
         rowLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.folderSearchEnabled, SET_TOGGLE_FOLDERSEARCH, anim);
+        hairline(); cy += rowH;
+        rowLabel(tr(app, "settings.browse_focus_path"), tr(app, "settings.browse_focus_path.hint"));
+        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+                       app.browserFocusPath, SET_TOGGLE_BROWSEFOCUS, anim);
         hairline(); cy += rowH;
         rowLabel(tr(app, "settings.open_ini"), tr(app, "settings.open_ini.hint"));
         float bx = cx + cw - dpi(app, 60.0f);

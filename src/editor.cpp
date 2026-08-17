@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <imm.h>
+#include <commdlg.h>
 
 #define TIMER_EDITOR_REPARSE 2
 
@@ -595,6 +596,7 @@ static void scheduleReparse(App& app) {
         std::wstring wpath = toWide(app.currentFile);
         size_t lastSep = wpath.find_last_of(L"\\/");
         std::wstring fname = (lastSep != std::wstring::npos) ? wpath.substr(lastSep + 1) : wpath;
+        if (fname.empty()) fname = tr(app, "title.untitled");  // quick note
         std::wstring title = L"Tinta - * " + fname;
         SetWindowTextW(app.hwnd, title.c_str());
     }
@@ -632,27 +634,7 @@ void editorReparse(App& app) {
 
 // --- Mode transitions ---
 
-void enterEditMode(App& app) {
-    if (app.currentFile.empty()) {
-        // Show brief "No file loaded" notification
-        app.editorNotificationMsg = tr(app, "toast.no_file");
-        app.showEditModeNotification = true;
-        app.editModeNotificationAlpha = 1.0f;
-        app.editModeNotificationStart = std::chrono::steady_clock::now();
-        startNotificationTimer(app);
-        InvalidateRect(app.hwnd, nullptr, FALSE);
-        return;
-    }
-
-    // Load raw file content
-    std::wstring widePath = toWide(app.currentFile);
-    std::ifstream file(widePath, std::ios::binary);
-    if (!file) return;
-
-    std::stringstream buf;
-    buf << file.rdbuf();
-    std::string content = buf.str();
-
+static void enterEditModeWithContent(App& app, const std::string& content) {
     app.editorText = fromUtf8(content);
     // Normalize \r\n to \n
     std::wstring normalized;
@@ -743,6 +725,34 @@ void enterEditMode(App& app) {
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
+void enterEditMode(App& app) {
+    if (app.currentFile.empty()) {
+        // Show brief "No file loaded" notification
+        app.editorNotificationMsg = tr(app, "toast.no_file");
+        app.showEditModeNotification = true;
+        app.editModeNotificationAlpha = 1.0f;
+        app.editModeNotificationStart = std::chrono::steady_clock::now();
+        startNotificationTimer(app);
+        InvalidateRect(app.hwnd, nullptr, FALSE);
+        return;
+    }
+
+    // Load raw file content
+    std::wstring widePath = toWide(app.currentFile);
+    std::ifstream file(widePath, std::ios::binary);
+    if (!file) return;
+
+    std::stringstream buf;
+    buf << file.rdbuf();
+    enterEditModeWithContent(app, buf.str());
+}
+
+void enterQuickNoteMode(App& app) {
+    app.currentFile.clear();
+    enterEditModeWithContent(app, std::string());
+    updateWindowTitle(app);  // "Tinta - Untitled" until the first save
+}
+
 void exitEditMode(App& app) {
     if (app.editorDirty) {
         // Show in-app prompt instead of modal dialog (avoids ESC key conflict)
@@ -778,10 +788,18 @@ void exitEditMode(App& app) {
     updateFileWriteTime(app);
     SetTimer(app.hwnd, 1, 500, nullptr); // TIMER_FILE_WATCH = 1
 
-    // Reload file to pick up saved changes
+    // Reload file to pick up saved changes. A discarded untitled quick
+    // note has no file — reset the viewer to an empty document instead of
+    // leaving the discarded text rendered.
     std::wstring widePath = toWide(app.currentFile);
     std::ifstream file(widePath);
-    if (file) {
+    if (app.currentFile.empty()) {
+        auto result = parseDocument(app.parser, std::string(), app.currentFile);
+        if (result.success) {
+            app.root = result.root;
+            app.parseTimeUs = result.parseTimeUs;
+        }
+    } else if (file) {
         std::stringstream buf;
         buf << file.rdbuf();
         auto result = parseDocument(app.parser, buf.str(), app.currentFile);
@@ -801,8 +819,31 @@ void exitEditMode(App& app) {
 
 // --- File save ---
 
+// Classic Save As dialog for untitled quick notes (Ctrl+N). Returns false
+// when the user cancels; on success app.currentFile carries the new path
+// and the note becomes a normal file-backed session.
+static bool promptSaveAsPath(App& app, HWND hwnd) {
+    wchar_t path[MAX_PATH] = L"";
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = L"Markdown (*.md)\0*.md;*.markdown\0"
+                      L"Mermaid (*.mmd)\0*.mmd\0"
+                      L"All files (*.*)\0*.*\0";
+    ofn.lpstrFile = path;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrDefExt = L"md";
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetSaveFileNameW(&ofn)) return false;
+    app.currentFile = toUtf8(path);
+    return true;
+}
+
 void saveEditorFile(App& app, HWND hwnd) {
-    if (app.currentFile.empty()) return;
+    if (app.currentFile.empty()) {
+        // Untitled quick note: name it now; cancel keeps editing untitled
+        if (!promptSaveAsPath(app, hwnd)) return;
+    }
 
     std::string utf8 = toUtf8(app.editorText);
 
@@ -991,6 +1032,9 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         switch (wParam) {
             case 'S':
                 saveEditorFile(app, hwnd);
+                return;
+            case 'N':
+                launchQuickNoteWindow();
                 return;
             case 'Z':
                 editorUndo(app);
