@@ -60,6 +60,17 @@ static IDWriteTextLayout* createEditorLineLayout(const App& app, size_t lineStar
     if (layout && app.editorWordWrap) {
         layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
     }
+    // Language-aware CJK fallback (#48): without this the editor pane falls
+    // back through the system chain and shows Japanese-variant glyphs for
+    // Chinese text (#81 "门") while the preview beside it renders correctly
+    if (layout && app.fontFallback) {
+        IDWriteTextLayout2* layout2 = nullptr;
+        if (SUCCEEDED(layout->QueryInterface(__uuidof(IDWriteTextLayout2),
+                reinterpret_cast<void**>(&layout2)))) {
+            layout2->SetFontFallback(app.fontFallback);
+            layout2->Release();
+        }
+    }
     return layout;
 }
 
