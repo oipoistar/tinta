@@ -42,6 +42,7 @@ void saveSettings(const Settings& settings) {
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
     file << "folderSearchEnabled=" << (settings.folderSearchEnabled ? 1 : 0) << "\n";
+    file << "browserFocusPath=" << (settings.browserFocusPath ? 1 : 0) << "\n";
     file << "readingWidthPct=" << settings.readingWidthPct << "\n";
     file << "zenWidthPct=" << settings.zenWidthPct << "\n";
     file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
@@ -188,6 +189,8 @@ Settings loadSettings() {
             settings.language = (idx >= 0 && idx < 4) ? ids[idx] : "auto";
         } else if (key == "folderSearchEnabled") {
             settings.folderSearchEnabled = (value == "1");
+        } else if (key == "browserFocusPath") {
+            settings.browserFocusPath = (value == "1");
         } else if (key == "followSystemTheme") {
             settings.followSystemTheme = (value == "1");
         } else if (key == "lightThemeIndex") {

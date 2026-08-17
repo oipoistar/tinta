@@ -73,6 +73,7 @@ const Entry kEntries[] = {
 
     { "help.general.select_all",   L"Select all text",              L"\u5168\u9009\u6587\u672C",                          nullptr, nullptr },
     { "help.general.copy",         L"Copy selection",               L"\u590D\u5236\u9009\u4E2D\u5185\u5BB9",              nullptr, nullptr },
+    { "help.general.new_note",     L"New quick note",               L"\u65B0\u5EFA\u5FEB\u901F\u7B14\u8BB0",              nullptr, nullptr },
     { "help.general.close",        L"Close overlay / Quit",         L"\u5173\u95ED\u6D6E\u5C42 / \u9000\u51FA",           nullptr, nullptr },
     { "help.general.quit",         L"Quit",                         L"\u9000\u51FA",                                      nullptr, nullptr },
 
@@ -158,6 +159,8 @@ const Entry kEntries[] = {
     { "title.plain",   L"Tinta - %1$s",            L"Tinta - %1$s",            nullptr, nullptr },
     { "title.dirty",   L"Tinta - * %1$s",           L"Tinta - * %1$s",          nullptr, nullptr },
     { "title.no_file", L"Tinta",                    L"Tinta",                   nullptr, nullptr },
+    // Quick note (Ctrl+N) before its first save
+    { "title.untitled", L"Untitled",                L"\u65E0\u6807\u9898",      nullptr, nullptr },
 
     // ----- GitHub-style alert titles (render.cpp) -----
     // Emoji prefix + variation selector are added by the renderer; we only
@@ -194,6 +197,8 @@ const Entry kEntries[] = {
     { "settings.section.editor", L"Editor", L"\u7F16\u8F91\u5668", nullptr, nullptr },
     { "settings.folder_search", L"Folder search results", L"\u6587\u4EF6\u5939\u641C\u7D22\u7ED3\u679C", nullptr, nullptr },
     { "settings.folder_search.hint", L"Sibling files matched while searching", L"\u641C\u7D22\u65F6\u540C\u65F6\u5339\u914D\u540C\u76EE\u5F55\u7684\u5176\u4ED6\u6587\u4EF6", nullptr, nullptr },
+    { "settings.browse_focus_path", L"Focus path on open", L"\u6253\u5F00\u65F6\u805A\u7126\u8DEF\u5F84\u6846", nullptr, nullptr },
+    { "settings.browse_focus_path.hint", L"B opens the file browser ready to paste a path", L"\u6309 B \u6253\u5F00\u6D4F\u89C8\u5668\u5373\u53EF\u76F4\u63A5\u7C98\u8D34\u8DEF\u5F84", nullptr, nullptr },
     { "settings.open_ini", L"Edit settings.ini", L"\u7F16\u8F91 settings.ini", nullptr, nullptr },
     { "settings.open_ini.hint", L"Keys, positions, and everything else", L"\u5FEB\u6377\u952E\u3001\u9605\u8BFB\u4F4D\u7F6E\u7B49\u5168\u90E8\u914D\u7F6E", nullptr, nullptr },
     { "settings.open_themes_ini", L"Edit themes.ini", L"\u7F16\u8F91 themes.ini", nullptr, nullptr },
@@ -857,6 +862,22 @@ const BuiltinTranslation kBuiltinTranslations[] = {
       L"Voll",
       L"Pleine",
       L"Piena" },
+    { "title.untitled",
+      L"Unbenannt",
+      L"Sans titre",
+      L"Senza titolo" },
+    { "help.general.new_note",
+      L"Neue Schnellnotiz",
+      L"Nouvelle note rapide",
+      L"Nuova nota rapida" },
+    { "settings.browse_focus_path",
+      L"Pfadfeld beim \u00D6ffnen fokussieren",
+      L"Focus sur le chemin \u00E0 l'ouverture",
+      L"Campo percorso attivo all'apertura" },
+    { "settings.browse_focus_path.hint",
+      L"B \u00F6ffnet den Dateibrowser bereit zum Einf\u00FCgen eines Pfads",
+      L"B ouvre l'explorateur pr\u00EAt \u00E0 coller un chemin",
+      L"B apre l'esplora file pronto per incollare un percorso" },
 };
 
 void seedBuiltinOverrides() {

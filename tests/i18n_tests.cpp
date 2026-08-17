@@ -61,6 +61,12 @@ int main() {
     check(std::wstring(tr(de, "title.no_file")) == L"Tinta",
           "untranslated key falls back to English");
 
+    // Quick-note strings (Ctrl+N) ship translated too
+    check(std::wstring(tr(de, "title.untitled")) == L"Unbenannt",
+          "German untitled title");
+    check(std::wstring(tr(it, "help.general.new_note")) == L"Nuova nota rapida",
+          "Italian quick-note help row");
+
     // search.match_count is the one runtime-printf'd string: the fixed
     // argument order (%d current, %zu total) must survive translation
     for (int lang : {de, fr, it}) {

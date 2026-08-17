@@ -146,6 +146,8 @@ struct Settings {
     int darkThemeIndex = 5;    // Midnight
     // Search results from sibling markdown files in the search overlay
     bool folderSearchEnabled = true;
+    // B opens the folder browser with the path box focused (#81)
+    bool browserFocusPath = false;
     // Reading positions: most-recent-first, capped (#77)
     struct ReadingPosition { std::string path; float scrollY; };
     std::vector<ReadingPosition> readingPositions;
@@ -496,6 +498,8 @@ struct App {
     // Folder-wide search: sibling .md files matching the current query,
     // filled by a worker thread and shown beside the search bar
     bool folderSearchEnabled = true;
+    // B opens the folder browser with the path box focused (#81)
+    bool browserFocusPath = false;
     int folderSearchGeneration = 0;
     struct FolderMatch {
         std::wstring snippet;

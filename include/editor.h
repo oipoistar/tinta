@@ -6,6 +6,9 @@
 
 // Mode transitions
 void enterEditMode(App& app);
+// Ctrl+N quick note: edit mode on an untitled empty buffer with no backing
+// file; the first save routes through the classic Save As dialog
+void enterQuickNoteMode(App& app);
 void exitEditMode(App& app);
 
 // Editor input handlers
