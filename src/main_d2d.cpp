@@ -1072,7 +1072,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
-                settings.readingWidth = app->readingWidth;
+                settings.readingWidthPct = app->readingWidthPct;
+                settings.zenWidthPct = app->zenWidthPct;
                 if (!app->currentFile.empty()) {
                     rememberReadingPosition(settings, app->currentFile, app->scrollY);
                 }
@@ -1192,7 +1193,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.zoomFactor = savedSettings.zoomFactor;
     app.editorShowPreview = savedSettings.editorShowPreview;
     app.editorWordWrap = savedSettings.editorWordWrap;
-    app.readingWidth = savedSettings.readingWidth;
+    app.readingWidthPct = savedSettings.readingWidthPct;
+    app.zenWidthPct = savedSettings.zenWidthPct;
     applyKeymap(app, savedSettings);
 
     // Parse command line

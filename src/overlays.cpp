@@ -1730,6 +1730,41 @@ void renderSettingsOverlay(App& app) {
                                    app.brush, 1.0f);
     };
 
+    // Percentage slider: track + accent fill + knob + value label. The
+    // track rect is stored for drag math; the hit rect covers the row.
+    auto slider = [&](float x, float y, float w, int pct, int action, int trackSlot) {
+        float trackH = dpi(app, 4.0f);
+        float knobR = dpi(app, 7.0f);
+        float labelW = dpi(app, 44.0f);
+        float trackW = w - labelW;
+        D2D1_RECT_F track = D2D1::RectF(x, y - trackH / 2, x + trackW, y + trackH / 2);
+        app.settingsSliderTrack[trackSlot] = track;
+        D2D1_COLOR_F c = app.theme.text; c.a = 0.18f * anim;
+        app.brush->SetColor(c);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(track, trackH / 2, trackH / 2), app.brush);
+        float t = (pct - 30) / 70.0f;
+        float fillX = x + trackW * t;
+        c = app.theme.accent; c.a = anim;
+        app.brush->SetColor(c);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(x, track.top, fillX, track.bottom),
+                              trackH / 2, trackH / 2), app.brush);
+        app.renderTarget->FillEllipse(
+            D2D1::Ellipse(D2D1::Point2F(fillX, y), knobR, knobR), app.brush);
+        wchar_t label[8];
+        if (pct >= 100) wcscpy_s(label, L"Full");
+        else swprintf_s(label, L"%d%%", pct);
+        c = app.theme.text; c.a = 0.7f * anim;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(label, (UINT32)wcslen(label), fmt,
+            D2D1::RectF(x + trackW + dpi(app, 12.0f), y - dpi(app, 9.0f),
+                        x + w, y + dpi(app, 12.0f)), app.brush);
+        app.settingsHits.push_back({D2D1::RectF(x - knobR, y - dpi(app, 12.0f),
+                                                x + trackW + knobR, y + dpi(app, 12.0f)),
+                                    action});
+    };
+
     if (app.settingsSection == 0) {  // General
         rowLabel(L"Folder search results", L"Sibling files matched while searching");
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
@@ -1743,14 +1778,14 @@ void renderSettingsOverlay(App& app) {
         bx = cx + cw - dpi(app, 60.0f);
         settingsChip(app, bx, cy + dpi(app, 2.0f), L"Open", false, SET_OPEN_THEMES_INI, anim, fmt);
     } else if (app.settingsSection == 1) {  // Appearance
-        rowLabel(L"Reading width", L"Center the document in a column on wide screens");
-        cy += rowH - dpi(app, 6.0f);
-        float chipX = cx;
-        settingsChip(app, chipX, cy, L"Full", app.readingWidth == 0, SET_WIDTH_FULL, anim, fmt);
-        settingsChip(app, chipX, cy, L"800", app.readingWidth == 800, SET_WIDTH_800, anim, fmt);
-        settingsChip(app, chipX, cy, L"1000", app.readingWidth == 1000, SET_WIDTH_1000, anim, fmt);
-        settingsChip(app, chipX, cy, L"1200", app.readingWidth == 1200, SET_WIDTH_1200, anim, fmt);
-        cy += rowH - dpi(app, 8.0f);
+        rowLabel(L"Reading width \x2014 window", L"Center the document in a column on wide screens");
+        cy += rowH + dpi(app, 6.0f);
+        slider(cx, cy, cw, app.readingWidthPct, SET_SLIDER_READING, 0);
+        cy += dpi(app, 30.0f);
+        rowLabel(L"Reading width \x2014 fullscreen", L"Column used in zen mode (F11)");
+        cy += rowH + dpi(app, 6.0f);
+        slider(cx, cy, cw, app.zenWidthPct, SET_SLIDER_ZEN, 1);
+        cy += dpi(app, 30.0f);
         rowLabel(L"Follow Windows theme", L"Switch light and dark with the system");
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.followSystemTheme, SET_TOGGLE_FOLLOW, anim);

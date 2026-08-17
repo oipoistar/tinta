@@ -151,8 +151,10 @@ struct Settings {
     std::vector<ReadingPosition> readingPositions;
     // [Keys] overrides from settings.ini: action name -> key name (#77)
     std::vector<std::pair<std::string, std::string>> keyOverrides;
-    // Preferred reading column width in DIPs; 0 = use the full window (#82)
-    int readingWidth = 0;
+    // Reading column as a percentage of the window width (#82): 100 = full.
+    // Windowed and fullscreen (zen) modes keep separate preferences.
+    int readingWidthPct = 100;
+    int zenWidthPct = 60;
 };
 
 // Application state
@@ -335,7 +337,10 @@ struct App {
     float settingsAnimation = 0.0f;
     int settingsSection = 0;  // 0 General, 1 Appearance, 2 Editor
     std::vector<std::pair<D2D1_RECT_F, int>> settingsHits;
-    int readingWidth = 0;  // mirrors Settings.readingWidth (#82)
+    int readingWidthPct = 100;  // mirrors Settings (#82); 100 = full width
+    int zenWidthPct = 60;
+    int settingsDragSlider = 0;         // SET_SLIDER_* while dragging, else 0
+    D2D1_RECT_F settingsSliderTrack[2]{};  // 0 window, 1 fullscreen (set in render)
 
     // Resolved single-key bindings, indexed like KEY_ACTIONS (#77).
     // Filled by applyKeymap from settings; slots beyond the action count

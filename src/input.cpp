@@ -245,6 +245,19 @@ static void applyZoomDelta(App& app, float delta) {
     }
 }
 
+// Reading-width sliders: map a mouse X onto the stored track rect (#82)
+static void settingsSliderApply(App& app, int which, float mx) {
+    const D2D1_RECT_F& track =
+        app.settingsSliderTrack[which == SET_SLIDER_ZEN ? 1 : 0];
+    float t = (mx - track.left) / std::max(1.0f, track.right - track.left);
+    int pct = 30 + (int)(t * 70.0f + 0.5f);
+    pct = std::max(30, std::min(100, pct));
+    if (which == SET_SLIDER_ZEN) app.zenWidthPct = pct;
+    else app.readingWidthPct = pct;
+    app.layoutDirty = true;
+    InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
 // Applies one settings-overlay action (id from app.settingsHits)
 static void settingsAction(App& app, HWND hwnd, int action) {
     switch (action) {
@@ -271,10 +284,6 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.editorShowPreview = !app.editorShowPreview;
             app.layoutDirty = true;
             break;
-        case SET_WIDTH_FULL: app.readingWidth = 0; app.layoutDirty = true; break;
-        case SET_WIDTH_800: app.readingWidth = 800; app.layoutDirty = true; break;
-        case SET_WIDTH_1000: app.readingWidth = 1000; app.layoutDirty = true; break;
-        case SET_WIDTH_1200: app.readingWidth = 1200; app.layoutDirty = true; break;
         case SET_OPEN_THEMES:
             app.showSettings = false;
             app.showThemeChooser = true;
@@ -451,6 +460,25 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // Print preview: no hover states; document hit-testing below would run
     // against print-layout coordinates anyway
     if (app.showPrintPreview) return;
+
+    // Settings: drag a slider if one is held, and show a hand over controls
+    // instead of the document's text caret
+    if (app.showSettings) {
+        if (app.settingsDragSlider) {
+            settingsSliderApply(app, app.settingsDragSlider, (float)app.mouseX);
+            return;
+        }
+        bool overControl = false;
+        for (const auto& hit : app.settingsHits) {
+            if (app.mouseX >= hit.first.left && app.mouseX <= hit.first.right &&
+                app.mouseY >= hit.first.top && app.mouseY <= hit.first.bottom) {
+                overControl = true;
+                break;
+            }
+        }
+        SetCursor(LoadCursorW(nullptr, overControl ? IDC_HAND : IDC_ARROW));
+        return;
+    }
 
     // Context menu open: hover tracks menu items only — document hover
     // (code-block copy button, link underline) stays suppressed underneath
@@ -832,8 +860,24 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
 }
 
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
-    // Print preview / settings: controls act on the release
-    if (app.showPrintPreview || app.showSettings) return;
+    // Settings: sliders drag from the press; everything else acts on release
+    if (app.showSettings) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        for (const auto& hit : app.settingsHits) {
+            if ((hit.second == SET_SLIDER_READING || hit.second == SET_SLIDER_ZEN) &&
+                mx >= hit.first.left && mx <= hit.first.right &&
+                my >= hit.first.top && my <= hit.first.bottom) {
+                app.settingsDragSlider = hit.second;
+                SetCapture(hwnd);
+                settingsSliderApply(app, hit.second, mx);
+                return;
+            }
+        }
+        return;
+    }
+    // Print preview: controls act on the release
+    if (app.showPrintPreview) return;
 
     // Context menu: a click lands on an item or dismisses the menu; either
     // way the click is consumed
@@ -1188,6 +1232,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
     // Settings overlay: resolve against the hit rects stored during render
     if (app.showSettings) {
+        if (app.settingsDragSlider) {
+            app.settingsDragSlider = 0;
+            ReleaseCapture();
+            return;
+        }
         float mx = (float)GET_X_LPARAM(lParam);
         float my = (float)GET_Y_LPARAM(lParam);
         for (const auto& hit : app.settingsHits) {
