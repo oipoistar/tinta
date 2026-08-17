@@ -1908,7 +1908,8 @@ void renderSettingsOverlay(App& app) {
             }
             const wchar_t* rowLabel2 = i == 0 ? tr(app, "settings.lang.auto")
                                               : languageNameAt(i - 1);
-            pc = app.theme.text; pc.a = 0.95f * anim;
+            bool translated = i == 0 || languageHasTranslations(i - 1);
+            pc = app.theme.text; pc.a = (translated ? 0.95f : 0.4f) * anim;
             app.brush->SetColor(pc);
             app.renderTarget->DrawText(rowLabel2, (UINT32)wcslen(rowLabel2), fmt,
                 D2D1::RectF(row.left + dpi(app, 10.0f), row.top + dpi(app, 4.0f),

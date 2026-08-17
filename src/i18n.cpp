@@ -360,11 +360,32 @@ std::vector<RuntimeLanguage> g_langs;
 std::unordered_map<std::string,
                    std::unordered_map<std::string, std::wstring>> g_overrides;
 
+// Common languages shown in the dropdown from the start (dimmed until
+// they carry translations). Native names are UTF-8.
+struct SeedLanguage { const char* id; const char* nativeUtf8; };
+const SeedLanguage kSeedLanguages[] = {
+    {"de", "Deutsch"},
+    {"es", "Espa\xc3\xb1ol"},
+    {"fr", "Fran\xc3\xa7" "ais"},
+    {"it", "Italiano"},
+    {"nl", "Nederlands"},
+    {"pl", "Polski"},
+    {"pt", "Portugu\xc3\xaas"},
+    {"ru", "\xd0\xa0\xd1\x83\xd1\x81\xd1\x81\xd0\xba\xd0\xb8\xd0\xb9"},
+    {"tr", "T\xc3\xbcrk\xc3\xa7" "e"},
+    {"zh-tw", "\xe7\xb9\x81\xe9\xab\x94\xe4\xb8\xad\xe6\x96\x87"},
+};
+
+std::wstring langUtf8ToWide(const std::string& s);
+
 void ensureBaseLanguages() {
     if (!g_langs.empty()) return;
     for (int i = 0; i < LANG_COUNT; i++) {
         const char* ids[] = {"en", "zh", "ja", "ko"};
         g_langs.push_back({ids[i], LANGUAGES[i].nativeName, i});
+    }
+    for (const SeedLanguage& seed : kSeedLanguages) {
+        g_langs.push_back({seed.id, langUtf8ToWide(seed.nativeUtf8), -1});
     }
 }
 
@@ -405,22 +426,6 @@ const wchar_t* overrideFor(const std::string& id, const char* key) {
     return kit != oit->second.end() ? kit->second.c_str() : nullptr;
 }
 
-// Common languages seeded into the template. Native names are UTF-8.
-struct SeedLanguage { const char* id; const char* nativeUtf8; };
-const SeedLanguage kSeedLanguages[] = {
-    {"de", "Deutsch"},
-    {"es", "Espa\xc3\xb1ol"},
-    {"fr", "Fran\xc3\xa7" "ais"},
-    {"it", "Italiano"},
-    {"ja", "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e"},
-    {"ko", "\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4"},
-    {"nl", "Nederlands"},
-    {"pl", "Polski"},
-    {"pt", "Portugu\xc3\xaas"},
-    {"ru", "\xd0\xa0\xd1\x83\xd1\x81\xd1\x81\xd0\xba\xd0\xb8\xd0\xb9"},
-    {"tr", "T\xc3\xbcrk\xc3\xa7" "e"},
-    {"zh-tw", "\xe7\xb9\x81\xe9\xab\x94\xe4\xb8\xad\xe6\x96\x87"},
-};
 
 } // namespace
 
@@ -441,6 +446,16 @@ std::string languageIdAt(int index) {
     return g_langs[index].id;
 }
 
+bool languageHasTranslations(int index) {
+    ensureBaseLanguages();
+    if (index < 0 || index >= (int)g_langs.size()) return true;
+    const RuntimeLanguage& lang = g_langs[index];
+    // en and zh ship complete; ja/ko columns are empty until translated
+    if (lang.compiledColumn == 0 || lang.compiledColumn == 1) return true;
+    auto it = g_overrides.find(lang.id);
+    return it != g_overrides.end() && !it->second.empty();
+}
+
 int languageCompiledColumn(int index) {
     ensureBaseLanguages();
     if (index < 0 || index >= (int)g_langs.size()) return 0;
@@ -457,9 +472,9 @@ int languageIndexById(const std::string& rawId) {
 }
 
 void loadLanguageOverrides() {
-    ensureBaseLanguages();
-    g_langs.resize(LANG_COUNT);  // drop ini-registered languages, re-read
+    g_langs.clear();   // rebuild: compiled + seeded roster, then ini extras
     g_overrides.clear();
+    ensureBaseLanguages();
 
     std::wstring path = languagesIniPath();
     if (path.empty()) return;
