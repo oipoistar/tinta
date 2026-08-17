@@ -1086,7 +1086,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
                 settings.tocOnLeft = app->tocOnLeft;
-                settings.languageIndex = app->languageSetting;
+                settings.language = app->languageSetting >= 0
+                    ? languageIdAt(app->languageSetting) : "auto";
                 if (!app->currentFile.empty()) {
                     rememberReadingPosition(settings, app->currentFile, app->scrollY);
                 }
@@ -1210,10 +1211,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.readingWidthPct = savedSettings.readingWidthPct;
     app.zenWidthPct = savedSettings.zenWidthPct;
     app.tocOnLeft = savedSettings.tocOnLeft;
-    app.languageSetting = savedSettings.languageIndex;
-    app.currentLanguageIndex = savedSettings.languageIndex >= 0
-        ? clampLanguageIndex(savedSettings.languageIndex)
-        : detectSystemLanguage();
+    app.languageSetting = savedSettings.language == "auto"
+        ? -1 : languageIndexById(savedSettings.language);
+    app.currentLanguageIndex = app.languageSetting >= 0
+        ? app.languageSetting : detectSystemLanguage();
     applyKeymap(app, savedSettings);
 
     // Parse command line

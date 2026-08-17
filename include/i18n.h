@@ -39,20 +39,21 @@ const wchar_t* tr(const App& app, const char* key);
 // Returns one of the LANG_INDEX_* values (always English as the last resort).
 int detectSystemLanguage();
 
-// Validates / clamps an arbitrary index into the [0, LANG_COUNT) range.
+// Validates / clamps an arbitrary index into the [0, languageCount()) range.
 // Returns LANG_INDEX_EN for out-of-range values.
 int clampLanguageIndex(int index);
 
-// languages.ini override layer: community translations without a compiler.
-// Loaded once at startup; openLanguagesIniFile seeds a commented template
-// listing every key with its English text, then opens it.
+// Dynamic language registry: the compiled languages plus any [section] of
+// %APPDATA%\Tinta\languages.ini that carries translations (name= labels
+// it). Indices are runtime-only — persist the id string, not the index.
+int languageCount();
+const wchar_t* languageNameAt(int index);
+std::string languageIdAt(int index);
+int languageIndexById(const std::string& id);   // -1 when unknown
+int languageCompiledColumn(int index);          // -1 for ini-only languages
 void loadLanguageOverrides();
-void openLanguagesIniFile();
-
-// languages.ini override layer: community translations without a compiler.
-// Loaded once at startup; openLanguagesIniFile seeds a commented template
-// listing every key with its English text, then opens it.
-void loadLanguageOverrides();
+// Seeds a translator template (common-language roster, every key commented
+// with its English text) on first use, then opens the file
 void openLanguagesIniFile();
 
 #endif // TINTA_I18N_H

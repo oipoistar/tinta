@@ -1792,17 +1792,40 @@ void renderSettingsOverlay(App& app) {
 
     if (app.settingsSection == 0) {  // General
         rowLabel(tr(app, "settings.language"), tr(app, "settings.language.hint"));
-        cy += rowH + dpi(app, 2.0f);
         {
-            float lx = cx;
-            settingsChip(app, lx, cy, tr(app, "settings.lang.auto"),
-                         app.languageSetting < 0, SET_LANG_AUTO, anim, fmt);
-            for (int i = 0; i < LANG_COUNT; i++) {
-                settingsChip(app, lx, cy, LANGUAGES[i].nativeName,
-                             app.languageSetting == i, SET_LANG_EN + i, anim, fmt);
-            }
+            // Dropdown value box with a pencil beside it (opens languages.ini)
+            float boxH = dpi(app, 26.0f);
+            float penW = dpi(app, 26.0f);
+            float boxW = dpi(app, 150.0f);
+            float boxX = cx + cw - penW - dpi(app, 8.0f) - boxW;
+            float boxY = cy + dpi(app, 2.0f);
+            D2D1_RECT_F box = D2D1::RectF(boxX, boxY, boxX + boxW, boxY + boxH);
+            app.settingsLangBox = box;
+            D2D1_COLOR_F c = app.theme.text; c.a = (app.settingsLangOpen ? 0.6f : 0.3f) * anim;
+            app.brush->SetColor(c);
+            app.renderTarget->DrawRoundedRectangle(
+                D2D1::RoundedRect(box, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush, 1.0f);
+            std::wstring current = app.languageSetting < 0
+                ? std::wstring(tr(app, "settings.lang.auto"))
+                : std::wstring(languageNameAt(app.languageSetting));
+            current += L"  \x25BE";
+            c = app.theme.text; c.a = 0.95f * anim;
+            app.brush->SetColor(c);
+            app.renderTarget->DrawText(current.c_str(), (UINT32)current.size(), fmt,
+                D2D1::RectF(box.left + dpi(app, 10.0f), box.top + dpi(app, 4.0f),
+                            box.right - dpi(app, 6.0f), box.bottom), app.brush);
+            app.settingsHits.push_back({box, SET_LANG_DROPDOWN});
+
+            D2D1_RECT_F pen = D2D1::RectF(box.right + dpi(app, 8.0f), boxY,
+                                          box.right + dpi(app, 8.0f) + penW, boxY + boxH);
+            c = app.theme.text; c.a = 0.7f * anim;
+            app.brush->SetColor(c);
+            app.renderTarget->DrawText(L"\x270E", 1, fmt,
+                D2D1::RectF(pen.left + dpi(app, 6.0f), pen.top + dpi(app, 4.0f),
+                            pen.right, pen.bottom), app.brush);
+            app.settingsHits.push_back({pen, SET_OPEN_LANGS_INI});
         }
-        cy += rowH - dpi(app, 8.0f);
+        hairline(); cy += rowH;
         rowLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.folderSearchEnabled, SET_TOGGLE_FOLDERSEARCH, anim);
@@ -1856,6 +1879,44 @@ void renderSettingsOverlay(App& app) {
     }
 
     // Footer hint
+    // Language dropdown popup, drawn last so it sits above the rows.
+    // Hit-testing iterates settingsHits in reverse, so these win overlaps.
+    if (app.settingsLangOpen && app.settingsSection == 0) {
+        float itemH = dpi(app, 26.0f);
+        int count = languageCount() + 1;  // Auto + languages
+        D2D1_RECT_F box = app.settingsLangBox;
+        D2D1_RECT_F pop = D2D1::RectF(box.left, box.bottom + dpi(app, 4.0f),
+                                      box.right,
+                                      box.bottom + dpi(app, 4.0f) + itemH * count);
+        D2D1_COLOR_F pc = app.theme.background; pc.a = anim;
+        app.brush->SetColor(pc);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(pop, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush);
+        pc = app.theme.text; pc.a = 0.35f * anim;
+        app.brush->SetColor(pc);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(pop, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush, 1.0f);
+        for (int i = 0; i < count; i++) {
+            float ry = pop.top + i * itemH;
+            D2D1_RECT_F row = D2D1::RectF(pop.left, ry, pop.right, ry + itemH);
+            bool active = (i == 0 && app.languageSetting < 0) ||
+                          (i > 0 && app.languageSetting == i - 1);
+            if (active) {
+                D2D1_COLOR_F hl = app.theme.accent; hl.a = 0.18f * anim;
+                app.brush->SetColor(hl);
+                app.renderTarget->FillRectangle(row, app.brush);
+            }
+            const wchar_t* rowLabel2 = i == 0 ? tr(app, "settings.lang.auto")
+                                              : languageNameAt(i - 1);
+            pc = app.theme.text; pc.a = 0.95f * anim;
+            app.brush->SetColor(pc);
+            app.renderTarget->DrawText(rowLabel2, (UINT32)wcslen(rowLabel2), fmt,
+                D2D1::RectF(row.left + dpi(app, 10.0f), row.top + dpi(app, 4.0f),
+                            row.right - dpi(app, 6.0f), row.bottom), app.brush);
+            app.settingsHits.push_back({row, SET_LANG_PICK_BASE + i});
+        }
+    }
+
     D2D1_COLOR_F fc = app.theme.text; fc.a = 0.4f * anim;
     app.brush->SetColor(fc);
     const wchar_t* footer = tr(app, "settings.footer");

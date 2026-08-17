@@ -223,7 +223,7 @@ const Entry kEntries[] = {
     { "settings.lang.auto", L"Auto", L"\u81EA\u52A8", nullptr, nullptr },
     { "settings.footer", L"Esc to close \u2022 changes apply immediately", L"\u6309 Esc \u5173\u95ED \u2022 \u66F4\u6539\u7ACB\u5373\u751F\u6548", nullptr, nullptr },
     { "settings.open_langs", L"Edit languages.ini", L"\u7F16\u8F91 languages.ini", nullptr, nullptr },
-    { "settings.open_langs.hint", L"Add or fix translations \u2014 ja and ko welcome", L"\u8865\u5145\u6216\u4FEE\u6B63\u7FFB\u8BD1\uFF08\u6B22\u8FCE\u65E5\u8BED\u3001\u97E9\u8BED\uFF09", nullptr, nullptr },
+    { "settings.open_langs.hint", L"Add or fix translations \u2014 more languages welcome", L"\u8865\u5145\u6216\u4FEE\u6B63\u7FFB\u8BD1\uFF08\u6B22\u8FCE\u66F4\u591A\u8BED\u8A00\uFF09", nullptr, nullptr },
     { "settings.full", L"Full", L"\u5168\u5BBD", nullptr, nullptr },
 
 };
@@ -254,16 +254,20 @@ const wchar_t* pick(const Entry* e, int langIndex) {
 } // namespace
 
 namespace {
-const wchar_t* overrideFor(int langIndex, const char* key);
+struct RuntimeLanguage;
+const wchar_t* overrideFor(const std::string& id, const char* key);
 }
 
 const wchar_t* tr(int langIndex, const char* key) {
     if (!key) return L"";
-    if (const wchar_t* o = overrideFor(clampLanguageIndex(langIndex), key)) {
+    langIndex = clampLanguageIndex(langIndex);
+    if (const wchar_t* o = overrideFor(languageIdAt(langIndex), key)) {
         return o;  // languages.ini overrides the compiled table
     }
     const Entry* e = findEntry(key);
-    const wchar_t* v = pick(e, langIndex);
+    // ini-only languages have no compiled column: fall through to English
+    int column = languageCompiledColumn(langIndex);
+    const wchar_t* v = pick(e, column >= 0 ? column : 0);
     if (v) return v;
     // Unknown key: return the key itself so breakage is visible in dev
     // without crashing. Convert char* to a stable wide buffer.
@@ -278,7 +282,7 @@ const wchar_t* tr(const App& app, const char* key) {
 }
 
 int clampLanguageIndex(int index) {
-    return (index >= 0 && index < LANG_COUNT) ? index : LANG_INDEX_EN;
+    return (index >= 0 && index < languageCount()) ? index : LANG_INDEX_EN;
 }
 
 int detectSystemLanguage() {
@@ -311,8 +315,18 @@ int detectSystemLanguage() {
                 if (startsWith(L"zh-hans") || startsWith(L"zh-cn") || startsWith(L"zh-sg")) {
                     return 1;
                 }
+                if (startsWith(L"zh-hant") || startsWith(L"zh-tw") || startsWith(L"zh-hk")) {
+                    int idx = languageIndexById("zh-tw");
+                    if (idx >= 0) return idx;  // translated via languages.ini
+                }
                 if (startsWith(L"ja")) return 2;
                 if (startsWith(L"ko")) return 3;
+                // Languages registered from languages.ini match by prefix
+                for (int li = LANG_COUNT; li < languageCount(); li++) {
+                    std::string id = languageIdAt(li);
+                    std::wstring wid(id.begin(), id.end());
+                    if (startsWith(wid.c_str())) return li;
+                }
                 p += tag.size() + 1;  // skip past the NUL
             }
         }
@@ -320,21 +334,39 @@ int detectSystemLanguage() {
     return LANG_INDEX_EN;
 }
 
-// ---- languages.ini override layer ----
+// ---- Dynamic language registry + languages.ini ----
 //
-// %APPDATA%\Tinta\languages.ini lets anyone fill the ja/ko columns or fix
-// a shipped string without a compiler. Sections name the locale ([ja]),
-// entries are key=value in UTF-8. Lookup order: override -> compiled
-// locale column -> compiled English -> the key itself.
+// The compiled table ships en/zh complete with ja/ko columns; the registry
+// grows at runtime from %APPDATA%\Tinta\languages.ini, where any [section]
+// becomes a selectable language (name= sets its dropdown label) and
+// key=value lines override or fill strings. Lookup order per language:
+// override -> compiled column (if any) -> compiled English -> the key.
 
 #include <shlobj.h>
 #include <shellapi.h>
 #include <fstream>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
-std::unordered_map<std::string, std::wstring> g_overrides[LANG_COUNT];
+struct RuntimeLanguage {
+    std::string id;           // section name, lowercase ("en", "de", "zh-tw")
+    std::wstring nativeName;  // dropdown label
+    int compiledColumn;       // 0..3 into Entry, or -1 for ini-only languages
+};
+
+std::vector<RuntimeLanguage> g_langs;
+std::unordered_map<std::string,
+                   std::unordered_map<std::string, std::wstring>> g_overrides;
+
+void ensureBaseLanguages() {
+    if (!g_langs.empty()) return;
+    for (int i = 0; i < LANG_COUNT; i++) {
+        const char* ids[] = {"en", "zh", "ja", "ko"};
+        g_langs.push_back({ids[i], LANGUAGES[i].nativeName, i});
+    }
+}
 
 std::wstring langUtf8ToWide(const std::string& s) {
     if (s.empty()) return L"";
@@ -355,24 +387,80 @@ std::wstring languagesIniPath() {
     return path + L"\\languages.ini";
 }
 
-int localeIndexFromSection(const std::string& name) {
-    if (name == "en") return 0;
-    if (name == "zh" || name == "zh-cn" || name == "zh-hans") return 1;
-    if (name == "ja" || name == "ja-jp") return 2;
-    if (name == "ko" || name == "ko-kr") return 3;
-    return -1;
+// Section-name aliases onto the compiled languages
+std::string normalizeLanguageId(std::string id) {
+    for (char& c : id) c = (char)tolower((unsigned char)c);
+    if (id == "zh-cn" || id == "zh-hans" || id.rfind("en-", 0) == 0) {
+        return id[0] == 'e' ? "en" : "zh";
+    }
+    if (id == "ja-jp") return "ja";
+    if (id == "ko-kr") return "ko";
+    return id;
 }
 
-const wchar_t* overrideFor(int langIndex, const char* key) {
-    if (langIndex < 0 || langIndex >= LANG_COUNT) return nullptr;
-    auto it = g_overrides[langIndex].find(key);
-    return it != g_overrides[langIndex].end() ? it->second.c_str() : nullptr;
+const wchar_t* overrideFor(const std::string& id, const char* key) {
+    auto oit = g_overrides.find(id);
+    if (oit == g_overrides.end()) return nullptr;
+    auto kit = oit->second.find(key);
+    return kit != oit->second.end() ? kit->second.c_str() : nullptr;
 }
+
+// Common languages seeded into the template. Native names are UTF-8.
+struct SeedLanguage { const char* id; const char* nativeUtf8; };
+const SeedLanguage kSeedLanguages[] = {
+    {"de", "Deutsch"},
+    {"es", "Espa\xc3\xb1ol"},
+    {"fr", "Fran\xc3\xa7" "ais"},
+    {"it", "Italiano"},
+    {"ja", "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e"},
+    {"ko", "\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4"},
+    {"nl", "Nederlands"},
+    {"pl", "Polski"},
+    {"pt", "Portugu\xc3\xaas"},
+    {"ru", "\xd0\xa0\xd1\x83\xd1\x81\xd1\x81\xd0\xba\xd0\xb8\xd0\xb9"},
+    {"tr", "T\xc3\xbcrk\xc3\xa7" "e"},
+    {"zh-tw", "\xe7\xb9\x81\xe9\xab\x94\xe4\xb8\xad\xe6\x96\x87"},
+};
 
 } // namespace
 
+int languageCount() {
+    ensureBaseLanguages();
+    return (int)g_langs.size();
+}
+
+const wchar_t* languageNameAt(int index) {
+    ensureBaseLanguages();
+    if (index < 0 || index >= (int)g_langs.size()) index = 0;
+    return g_langs[index].nativeName.c_str();
+}
+
+std::string languageIdAt(int index) {
+    ensureBaseLanguages();
+    if (index < 0 || index >= (int)g_langs.size()) index = 0;
+    return g_langs[index].id;
+}
+
+int languageCompiledColumn(int index) {
+    ensureBaseLanguages();
+    if (index < 0 || index >= (int)g_langs.size()) return 0;
+    return g_langs[index].compiledColumn;
+}
+
+int languageIndexById(const std::string& rawId) {
+    ensureBaseLanguages();
+    std::string id = normalizeLanguageId(rawId);
+    for (size_t i = 0; i < g_langs.size(); i++) {
+        if (g_langs[i].id == id) return (int)i;
+    }
+    return -1;
+}
+
 void loadLanguageOverrides() {
-    for (auto& map : g_overrides) map.clear();
+    ensureBaseLanguages();
+    g_langs.resize(LANG_COUNT);  // drop ini-registered languages, re-read
+    g_overrides.clear();
+
     std::wstring path = languagesIniPath();
     if (path.empty()) return;
     std::ifstream file(path);
@@ -384,35 +472,46 @@ void loadLanguageOverrides() {
         while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
         if (line.empty() || line[0] == ';' || line[0] == '#') continue;
         if (line.front() == '[' && line.back() == ']') {
-            std::string name = line.substr(1, line.size() - 2);
-            for (char& c : name) c = (char)tolower((unsigned char)c);
-            locale = localeIndexFromSection(name);
+            std::string id = normalizeLanguageId(line.substr(1, line.size() - 2));
+            locale = languageIndexById(id);
+            if (locale < 0 && !id.empty()) {
+                g_langs.push_back({id, langUtf8ToWide(id), -1});
+                locale = (int)g_langs.size() - 1;
+            }
             continue;
         }
         if (locale < 0) continue;
         size_t eq = line.find('=');
         if (eq == std::string::npos || eq == 0) continue;
+        std::string key = line.substr(0, eq);
         std::wstring value = langUtf8ToWide(line.substr(eq + 1));
-        if (!value.empty()) {
-            g_overrides[locale][line.substr(0, eq)] = std::move(value);
+        if (value.empty()) continue;
+        if (key == "name") {
+            g_langs[locale].nativeName = std::move(value);
+        } else {
+            g_overrides[g_langs[locale].id][key] = std::move(value);
         }
     }
 }
 
-// Seeds a translator-friendly template on first open: every key listed
-// under [ja] and [ko], commented out, with the English text as reference.
+// Seeds a translator-friendly template on first open: a roster of common
+// languages, each with its native name and every key commented out with
+// the English text as reference. Any section with translations becomes
+// selectable in Settings after a restart.
 void openLanguagesIniFile() {
     std::wstring path = languagesIniPath();
     if (path.empty()) return;
     if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
         std::ofstream f(path, std::ios::binary);
-        f << "; Tinta UI translations \xe2\x80\x94 UTF-8, key=value under a locale section.\n";
-        f << "; Values here override the built-in strings; missing keys fall back\n";
-        f << "; to the built-in translation, then English. Uncomment a line and\n";
-        f << "; translate the right-hand side, then restart Tinta.\n";
-        f << "; Sections: [en] [zh] [ja] [ko]\n";
-        for (const char* section : {"ja", "ko"}) {
-            f << "\n[" << section << "]\n";
+        f << "; Tinta UI translations \xe2\x80\x94 UTF-8, key=value under a language section.\n";
+        f << "; Uncomment a line, translate the right-hand side, restart Tinta \xe2\x80\x94\n";
+        f << "; the language appears in Settings once it has translations.\n";
+        f << "; name= sets the label shown in the language dropdown.\n";
+        f << "; Values override the built-in strings (sections [en] and [zh] work\n";
+        f << "; too); missing keys fall back to English.\n";
+        for (const SeedLanguage& lang : kSeedLanguages) {
+            f << "\n[" << lang.id << "]\n";
+            f << "name=" << lang.nativeUtf8 << "\n";
             for (const Entry& e : kEntries) {
                 int len = WideCharToMultiByte(CP_UTF8, 0, e.en, -1, nullptr, 0,
                                               nullptr, nullptr);
