@@ -43,4 +43,16 @@ int detectSystemLanguage();
 // Returns LANG_INDEX_EN for out-of-range values.
 int clampLanguageIndex(int index);
 
+// languages.ini override layer: community translations without a compiler.
+// Loaded once at startup; openLanguagesIniFile seeds a commented template
+// listing every key with its English text, then opens it.
+void loadLanguageOverrides();
+void openLanguagesIniFile();
+
+// languages.ini override layer: community translations without a compiler.
+// Loaded once at startup; openLanguagesIniFile seeds a commented template
+// listing every key with its English text, then opens it.
+void loadLanguageOverrides();
+void openLanguagesIniFile();
+
 #endif // TINTA_I18N_H

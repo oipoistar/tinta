@@ -28,6 +28,7 @@ enum SettingsAction {
     SET_OPEN_INI, SET_OPEN_THEMES_INI,
     SET_TOC_LEFT, SET_TOC_RIGHT,
     SET_LANG_AUTO, SET_LANG_EN, SET_LANG_ZH, SET_LANG_JA, SET_LANG_KO,
+    SET_OPEN_LANGS_INI,
 };
 // TOC panel X for the configured side at the current animation state;
 // geometry shared between render and the input hit tests

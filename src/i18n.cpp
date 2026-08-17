@@ -222,6 +222,8 @@ const Entry kEntries[] = {
     { "settings.language.hint", L"Auto follows the Windows display language", L"\u81EA\u52A8 = \u8DDF\u968F Windows \u663E\u793A\u8BED\u8A00", nullptr, nullptr },
     { "settings.lang.auto", L"Auto", L"\u81EA\u52A8", nullptr, nullptr },
     { "settings.footer", L"Esc to close \u2022 changes apply immediately", L"\u6309 Esc \u5173\u95ED \u2022 \u66F4\u6539\u7ACB\u5373\u751F\u6548", nullptr, nullptr },
+    { "settings.open_langs", L"Edit languages.ini", L"\u7F16\u8F91 languages.ini", nullptr, nullptr },
+    { "settings.open_langs.hint", L"Add or fix translations \u2014 ja and ko welcome", L"\u8865\u5145\u6216\u4FEE\u6B63\u7FFB\u8BD1\uFF08\u6B22\u8FCE\u65E5\u8BED\u3001\u97E9\u8BED\uFF09", nullptr, nullptr },
     { "settings.full", L"Full", L"\u5168\u5BBD", nullptr, nullptr },
 
 };
@@ -251,8 +253,15 @@ const wchar_t* pick(const Entry* e, int langIndex) {
 
 } // namespace
 
+namespace {
+const wchar_t* overrideFor(int langIndex, const char* key);
+}
+
 const wchar_t* tr(int langIndex, const char* key) {
     if (!key) return L"";
+    if (const wchar_t* o = overrideFor(clampLanguageIndex(langIndex), key)) {
+        return o;  // languages.ini overrides the compiled table
+    }
     const Entry* e = findEntry(key);
     const wchar_t* v = pick(e, langIndex);
     if (v) return v;
@@ -309,4 +318,112 @@ int detectSystemLanguage() {
         }
     }
     return LANG_INDEX_EN;
+}
+
+// ---- languages.ini override layer ----
+//
+// %APPDATA%\Tinta\languages.ini lets anyone fill the ja/ko columns or fix
+// a shipped string without a compiler. Sections name the locale ([ja]),
+// entries are key=value in UTF-8. Lookup order: override -> compiled
+// locale column -> compiled English -> the key itself.
+
+#include <shlobj.h>
+#include <shellapi.h>
+#include <fstream>
+#include <unordered_map>
+
+namespace {
+
+std::unordered_map<std::string, std::wstring> g_overrides[LANG_COUNT];
+
+std::wstring langUtf8ToWide(const std::string& s) {
+    if (s.empty()) return L"";
+    int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring w(len > 0 ? len - 1 : 0, L'\0');
+    if (len > 1) MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], len);
+    return w;
+}
+
+std::wstring languagesIniPath() {
+    wchar_t appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return L"";
+    }
+    std::wstring path = appData;
+    path += L"\\Tinta";
+    CreateDirectoryW(path.c_str(), nullptr);
+    return path + L"\\languages.ini";
+}
+
+int localeIndexFromSection(const std::string& name) {
+    if (name == "en") return 0;
+    if (name == "zh" || name == "zh-cn" || name == "zh-hans") return 1;
+    if (name == "ja" || name == "ja-jp") return 2;
+    if (name == "ko" || name == "ko-kr") return 3;
+    return -1;
+}
+
+const wchar_t* overrideFor(int langIndex, const char* key) {
+    if (langIndex < 0 || langIndex >= LANG_COUNT) return nullptr;
+    auto it = g_overrides[langIndex].find(key);
+    return it != g_overrides[langIndex].end() ? it->second.c_str() : nullptr;
+}
+
+} // namespace
+
+void loadLanguageOverrides() {
+    for (auto& map : g_overrides) map.clear();
+    std::wstring path = languagesIniPath();
+    if (path.empty()) return;
+    std::ifstream file(path);
+    if (!file) return;
+
+    int locale = -1;
+    std::string line;
+    while (std::getline(file, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+        if (line.front() == '[' && line.back() == ']') {
+            std::string name = line.substr(1, line.size() - 2);
+            for (char& c : name) c = (char)tolower((unsigned char)c);
+            locale = localeIndexFromSection(name);
+            continue;
+        }
+        if (locale < 0) continue;
+        size_t eq = line.find('=');
+        if (eq == std::string::npos || eq == 0) continue;
+        std::wstring value = langUtf8ToWide(line.substr(eq + 1));
+        if (!value.empty()) {
+            g_overrides[locale][line.substr(0, eq)] = std::move(value);
+        }
+    }
+}
+
+// Seeds a translator-friendly template on first open: every key listed
+// under [ja] and [ko], commented out, with the English text as reference.
+void openLanguagesIniFile() {
+    std::wstring path = languagesIniPath();
+    if (path.empty()) return;
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        std::ofstream f(path, std::ios::binary);
+        f << "; Tinta UI translations \xe2\x80\x94 UTF-8, key=value under a locale section.\n";
+        f << "; Values here override the built-in strings; missing keys fall back\n";
+        f << "; to the built-in translation, then English. Uncomment a line and\n";
+        f << "; translate the right-hand side, then restart Tinta.\n";
+        f << "; Sections: [en] [zh] [ja] [ko]\n";
+        for (const char* section : {"ja", "ko"}) {
+            f << "\n[" << section << "]\n";
+            for (const Entry& e : kEntries) {
+                int len = WideCharToMultiByte(CP_UTF8, 0, e.en, -1, nullptr, 0,
+                                              nullptr, nullptr);
+                std::string en(len > 0 ? len - 1 : 0, '\0');
+                if (len > 1) {
+                    WideCharToMultiByte(CP_UTF8, 0, e.en, -1, &en[0], len,
+                                        nullptr, nullptr);
+                }
+                f << ";" << e.key << "=" << en << "\n";
+            }
+        }
+    }
+    ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }

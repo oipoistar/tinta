@@ -399,6 +399,9 @@ static void settingsAction(App& app, HWND hwnd, int action) {
         case SET_OPEN_THEMES_INI:
             openThemesIniFile();
             break;
+        case SET_OPEN_LANGS_INI:
+            openLanguagesIniFile();
+            break;
     }
     InvalidateRect(hwnd, nullptr, FALSE);
 }

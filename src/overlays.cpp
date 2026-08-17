@@ -1814,6 +1814,10 @@ void renderSettingsOverlay(App& app) {
         rowLabel(tr(app, "settings.open_themes_ini"), tr(app, "settings.open_themes_ini.hint"));
         bx = cx + cw - dpi(app, 60.0f);
         settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_THEMES_INI, anim, fmt);
+        hairline(); cy += rowH;
+        rowLabel(tr(app, "settings.open_langs"), tr(app, "settings.open_langs.hint"));
+        bx = cx + cw - dpi(app, 60.0f);
+        settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_LANGS_INI, anim, fmt);
     } else if (app.settingsSection == 1) {  // Appearance
         rowLabel(tr(app, "settings.reading_width_window"), tr(app, "settings.reading_width_window.hint"));
         cy += rowH + dpi(app, 6.0f);

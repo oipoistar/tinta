@@ -1189,6 +1189,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     // Load user themes before settings: saved theme indices may point at them
     loadCustomThemes();
+    loadLanguageOverrides();
 
     // Load saved settings
     Settings savedSettings = loadSettings();
