@@ -27,6 +27,10 @@ enum SettingsAction {
     SET_OPEN_THEMES, SET_NEW_THEME, SET_EDIT_THEME,
     SET_OPEN_INI, SET_OPEN_THEMES_INI,
     SET_TOC_LEFT, SET_TOC_RIGHT,
+    SET_LANG_DROPDOWN, SET_OPEN_LANGS_INI,
+    // Language picks encode as SET_LANG_PICK_BASE + i: 0 = Auto, then the
+    // registry languages in order (the list is dynamic via languages.ini)
+    SET_LANG_PICK_BASE = 1000,
 };
 // TOC panel X for the configured side at the current animation state;
 // geometry shared between render and the input hit tests

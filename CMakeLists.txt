@@ -51,6 +51,7 @@ set(SOURCES
     src/document.cpp
     src/inline_style.cpp
     src/print.cpp
+    src/i18n.cpp
 )
 
 set(HEADERS
@@ -71,6 +72,7 @@ set(HEADERS
     include/document.h
     include/inline_style.h
     include/print.h
+    include/i18n.h
 )
 
 # Windows resource file (icon)

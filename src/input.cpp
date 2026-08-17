@@ -9,6 +9,7 @@
 #include "render.h"
 #include "overlays.h"
 #include "print.h"
+#include "i18n.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -346,6 +347,21 @@ static void settingsSliderApply(App& app, int which, float mx) {
 
 // Applies one settings-overlay action (id from app.settingsHits)
 static void settingsAction(App& app, HWND hwnd, int action) {
+    // Language dropdown picks: 0 = Auto, then the registry languages
+    if (action >= SET_LANG_PICK_BASE) {
+        int pick = action - SET_LANG_PICK_BASE;
+        if (pick == 0) {
+            app.languageSetting = -1;
+            app.currentLanguageIndex = detectSystemLanguage();
+        } else if (pick - 1 < languageCount()) {
+            app.languageSetting = pick - 1;
+            app.currentLanguageIndex = pick - 1;
+        }
+        app.settingsLangOpen = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    if (action != SET_LANG_DROPDOWN) app.settingsLangOpen = false;
     switch (action) {
         case SET_SECTION_GENERAL: app.settingsSection = 0; break;
         case SET_SECTION_APPEARANCE: app.settingsSection = 1; break;
@@ -382,6 +398,9 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             openThemeEditor(app, true);
             break;
         case SET_TOC_LEFT: app.tocOnLeft = true; break;
+        case SET_LANG_DROPDOWN:
+            app.settingsLangOpen = !app.settingsLangOpen;
+            break;
         case SET_TOC_RIGHT: app.tocOnLeft = false; break;
         case SET_OPEN_INI:
             ShellExecuteW(nullptr, L"open", getSettingsPath().c_str(),
@@ -389,6 +408,9 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             break;
         case SET_OPEN_THEMES_INI:
             openThemesIniFile();
+            break;
+        case SET_OPEN_LANGS_INI:
+            openLanguagesIniFile();
             break;
     }
     InvalidateRect(hwnd, nullptr, FALSE);
@@ -1412,12 +1434,17 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         }
         float mx = (float)GET_X_LPARAM(lParam);
         float my = (float)GET_Y_LPARAM(lParam);
-        for (const auto& hit : app.settingsHits) {
-            if (mx >= hit.first.left && mx <= hit.first.right &&
-                my >= hit.first.top && my <= hit.first.bottom) {
-                settingsAction(app, hwnd, hit.second);
+        // Reverse: later-drawn controls (the language popup) sit on top
+        for (auto it = app.settingsHits.rbegin(); it != app.settingsHits.rend(); ++it) {
+            if (mx >= it->first.left && mx <= it->first.right &&
+                my >= it->first.top && my <= it->first.bottom) {
+                settingsAction(app, hwnd, it->second);
                 return;
             }
+        }
+        if (app.settingsLangOpen) {
+            app.settingsLangOpen = false;  // click elsewhere collapses it
+            InvalidateRect(hwnd, nullptr, FALSE);
         }
         return;
     }
