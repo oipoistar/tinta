@@ -143,6 +143,17 @@ if(BUILD_TESTING)
     target_link_libraries(inline_style_tests PRIVATE md4c d2d1 dwrite windowscodecs)
     target_compile_definitions(inline_style_tests PRIVATE UNICODE _UNICODE)
     add_test(NAME inline_styles COMMAND inline_style_tests)
+
+    add_executable(i18n_tests
+        tests/i18n_tests.cpp
+        src/i18n.cpp
+    )
+    target_include_directories(i18n_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(i18n_tests PRIVATE shell32)
+    target_compile_definitions(i18n_tests PRIVATE UNICODE _UNICODE)
+    add_test(NAME i18n COMMAND i18n_tests)
 endif()
 
 # Install

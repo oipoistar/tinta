@@ -1883,7 +1883,15 @@ void renderSettingsOverlay(App& app) {
     // Hit-testing iterates settingsHits in reverse, so these win overlaps.
     if (app.settingsLangOpen && app.settingsSection == 0) {
         float itemH = dpi(app, 26.0f);
-        int count = languageCount() + 1;  // Auto + languages
+        // Auto plus only the languages that actually carry translations;
+        // untranslated roster entries stay out of the list until
+        // languages.ini fills them in.
+        std::vector<int> rows;  // registry indices; -1 = Auto
+        rows.push_back(-1);
+        for (int i = 0; i < languageCount(); i++) {
+            if (languageHasTranslations(i)) rows.push_back(i);
+        }
+        int count = (int)rows.size();
         D2D1_RECT_F box = app.settingsLangBox;
         D2D1_RECT_F pop = D2D1::RectF(box.left, box.bottom + dpi(app, 4.0f),
                                       box.right,
@@ -1896,25 +1904,27 @@ void renderSettingsOverlay(App& app) {
         app.brush->SetColor(pc);
         app.renderTarget->DrawRoundedRectangle(
             D2D1::RoundedRect(pop, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush, 1.0f);
-        for (int i = 0; i < count; i++) {
-            float ry = pop.top + i * itemH;
+        for (int r = 0; r < count; r++) {
+            int lang = rows[r];
+            float ry = pop.top + r * itemH;
             D2D1_RECT_F row = D2D1::RectF(pop.left, ry, pop.right, ry + itemH);
-            bool active = (i == 0 && app.languageSetting < 0) ||
-                          (i > 0 && app.languageSetting == i - 1);
+            bool active = lang < 0 ? app.languageSetting < 0
+                                   : app.languageSetting == lang;
             if (active) {
                 D2D1_COLOR_F hl = app.theme.accent; hl.a = 0.18f * anim;
                 app.brush->SetColor(hl);
                 app.renderTarget->FillRectangle(row, app.brush);
             }
-            const wchar_t* rowLabel2 = i == 0 ? tr(app, "settings.lang.auto")
-                                              : languageNameAt(i - 1);
-            bool translated = i == 0 || languageHasTranslations(i - 1);
-            pc = app.theme.text; pc.a = (translated ? 0.95f : 0.4f) * anim;
+            const wchar_t* rowLabel2 = lang < 0 ? tr(app, "settings.lang.auto")
+                                                : languageNameAt(lang);
+            pc = app.theme.text; pc.a = 0.95f * anim;
             app.brush->SetColor(pc);
             app.renderTarget->DrawText(rowLabel2, (UINT32)wcslen(rowLabel2), fmt,
                 D2D1::RectF(row.left + dpi(app, 10.0f), row.top + dpi(app, 4.0f),
                             row.right - dpi(app, 6.0f), row.bottom), app.brush);
-            app.settingsHits.push_back({row, SET_LANG_PICK_BASE + i});
+            // -1 (Auto) lands on SET_LANG_PICK_BASE; input.cpp decodes
+            // pick - 1 as the registry index, so gaps are fine.
+            app.settingsHits.push_back({row, SET_LANG_PICK_BASE + 1 + lang});
         }
     }
 
