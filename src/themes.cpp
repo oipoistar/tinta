@@ -222,3 +222,219 @@ const D2DTheme THEMES[] = {
 };
 
 const int THEME_COUNT = sizeof(THEMES) / sizeof(THEMES[0]);
+
+// ---- Dynamic theme registry (#82) ----
+//
+// User themes live in %APPDATA%\Tinta\themes.ini as repeated [theme]
+// sections. Every field the editor writes is optional when hand-authored;
+// missing colors fall back to Paper. Example:
+//   [theme]
+//   name=Nordish
+//   dark=1
+//   font=Segoe UI
+//   codefont=Cascadia Mono
+//   background=2E3440
+//   text=D8DEE9
+//   ...
+
+#include <shlobj.h>
+#include <fstream>
+#include <memory>
+#include <sstream>
+#include <vector>
+
+namespace {
+
+std::vector<std::unique_ptr<CustomTheme>> g_customThemes;
+
+std::wstring themesIniPath() {
+    wchar_t appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return L"";
+    }
+    std::wstring path = appData;
+    path += L"\\Tinta";
+    CreateDirectoryW(path.c_str(), nullptr);
+    return path + L"\\themes.ini";
+}
+
+bool parseHexColor(const std::string& value, D2D1_COLOR_F& out) {
+    std::string s = value;
+    if (!s.empty() && s[0] == '#') s = s.substr(1);
+    if (s.size() != 6) return false;
+    unsigned v = 0;
+    for (char c : s) {
+        v <<= 4;
+        if (c >= '0' && c <= '9') v |= (unsigned)(c - '0');
+        else if (c >= 'a' && c <= 'f') v |= (unsigned)(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F') v |= (unsigned)(c - 'A' + 10);
+        else return false;
+    }
+    out = hexColor(v);
+    return true;
+}
+
+std::string colorToHex(const D2D1_COLOR_F& c) {
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02X%02X%02X",
+             (int)(c.r * 255.0f + 0.5f), (int)(c.g * 255.0f + 0.5f),
+             (int)(c.b * 255.0f + 0.5f));
+    return buf;
+}
+
+std::wstring utf8ToWideTheme(const std::string& s) {
+    if (s.empty()) return L"";
+    int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring w(len > 0 ? len - 1 : 0, L'\0');
+    if (len > 1) MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], len);
+    return w;
+}
+
+std::string wideToUtf8Theme(const std::wstring& w) {
+    if (w.empty()) return "";
+    int len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    std::string s(len > 0 ? len - 1 : 0, '\0');
+    if (len > 1) WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, &s[0], len, nullptr, nullptr);
+    return s;
+}
+
+// Repoint the D2DTheme string members at the owned wstrings. Must be called
+// whenever the strings change (they are the backing storage).
+void bindStrings(CustomTheme& ct) {
+    ct.theme.name = ct.name.c_str();
+    ct.theme.fontFamily = ct.fontFamily.c_str();
+    ct.theme.codeFontFamily = ct.codeFontFamily.c_str();
+}
+
+void applyThemeKey(CustomTheme& ct, const std::string& key, const std::string& value) {
+    D2DTheme& t = ct.theme;
+    if (key == "name") ct.name = utf8ToWideTheme(value);
+    else if (key == "font") ct.fontFamily = utf8ToWideTheme(value);
+    else if (key == "codefont") ct.codeFontFamily = utf8ToWideTheme(value);
+    else if (key == "dark") t.isDark = (value == "1");
+    else if (key == "background") parseHexColor(value, t.background);
+    else if (key == "text") parseHexColor(value, t.text);
+    else if (key == "heading") parseHexColor(value, t.heading);
+    else if (key == "link") parseHexColor(value, t.link);
+    else if (key == "code") parseHexColor(value, t.code);
+    else if (key == "codebackground") parseHexColor(value, t.codeBackground);
+    else if (key == "blockquoteborder") parseHexColor(value, t.blockquoteBorder);
+    else if (key == "accent") parseHexColor(value, t.accent);
+    else if (key == "syntaxkeyword") parseHexColor(value, t.syntaxKeyword);
+    else if (key == "syntaxstring") parseHexColor(value, t.syntaxString);
+    else if (key == "syntaxcomment") parseHexColor(value, t.syntaxComment);
+    else if (key == "syntaxnumber") parseHexColor(value, t.syntaxNumber);
+    else if (key == "syntaxfunction") parseHexColor(value, t.syntaxFunction);
+    else if (key == "syntaxtype") parseHexColor(value, t.syntaxType);
+    else if (key == "syntaxcontrolflow") parseHexColor(value, t.syntaxControlFlow);
+}
+
+void writeThemesIni() {
+    std::wstring path = themesIniPath();
+    if (path.empty()) return;
+    std::ofstream file(path);
+    if (!file) return;
+    file << "; User themes. Colors are RRGGBB hex. Restart not required for\n";
+    file << "; themes saved from the editor; hand edits load at next launch.\n";
+    for (const auto& ct : g_customThemes) {
+        const D2DTheme& t = ct->theme;
+        file << "\n[theme]\n";
+        file << "name=" << wideToUtf8Theme(ct->name) << "\n";
+        file << "dark=" << (t.isDark ? 1 : 0) << "\n";
+        file << "font=" << wideToUtf8Theme(ct->fontFamily) << "\n";
+        file << "codefont=" << wideToUtf8Theme(ct->codeFontFamily) << "\n";
+        file << "background=" << colorToHex(t.background) << "\n";
+        file << "text=" << colorToHex(t.text) << "\n";
+        file << "heading=" << colorToHex(t.heading) << "\n";
+        file << "link=" << colorToHex(t.link) << "\n";
+        file << "code=" << colorToHex(t.code) << "\n";
+        file << "codebackground=" << colorToHex(t.codeBackground) << "\n";
+        file << "blockquoteborder=" << colorToHex(t.blockquoteBorder) << "\n";
+        file << "accent=" << colorToHex(t.accent) << "\n";
+        file << "syntaxkeyword=" << colorToHex(t.syntaxKeyword) << "\n";
+        file << "syntaxstring=" << colorToHex(t.syntaxString) << "\n";
+        file << "syntaxcomment=" << colorToHex(t.syntaxComment) << "\n";
+        file << "syntaxnumber=" << colorToHex(t.syntaxNumber) << "\n";
+        file << "syntaxfunction=" << colorToHex(t.syntaxFunction) << "\n";
+        file << "syntaxtype=" << colorToHex(t.syntaxType) << "\n";
+        file << "syntaxcontrolflow=" << colorToHex(t.syntaxControlFlow) << "\n";
+    }
+}
+
+} // namespace
+
+int themeCount() {
+    return THEME_COUNT + (int)g_customThemes.size();
+}
+
+const D2DTheme& themeAt(int index) {
+    if (index >= 0 && index < THEME_COUNT) return THEMES[index];
+    int custom = index - THEME_COUNT;
+    if (custom >= 0 && custom < (int)g_customThemes.size()) {
+        return g_customThemes[custom]->theme;
+    }
+    return THEMES[0];
+}
+
+void loadCustomThemes() {
+    g_customThemes.clear();
+    std::wstring path = themesIniPath();
+    if (path.empty()) return;
+    std::ifstream file(path);
+    if (!file) return;
+
+    std::unique_ptr<CustomTheme> current;
+    auto finalize = [&]() {
+        if (current && !current->name.empty()) {
+            bindStrings(*current);
+            g_customThemes.push_back(std::move(current));
+        }
+        current.reset();
+    };
+
+    std::string line;
+    while (std::getline(file, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
+        if (line.empty() || line[0] == ';') continue;
+        if (line[0] == '[') {
+            finalize();
+            current = std::make_unique<CustomTheme>();
+            current->theme = THEMES[0];  // colors default to Paper
+            current->fontFamily = L"Segoe UI";
+            current->codeFontFamily = L"Consolas";
+            continue;
+        }
+        if (!current) continue;
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        applyThemeKey(*current, line.substr(0, eq), line.substr(eq + 1));
+    }
+    finalize();
+}
+
+int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
+                    const std::wstring& fontFamily,
+                    const std::wstring& codeFontFamily) {
+    if (name.empty()) return -1;
+    CustomTheme* slot = nullptr;
+    int index = -1;
+    for (size_t i = 0; i < g_customThemes.size(); i++) {
+        if (_wcsicmp(g_customThemes[i]->name.c_str(), name.c_str()) == 0) {
+            slot = g_customThemes[i].get();
+            index = THEME_COUNT + (int)i;
+            break;
+        }
+    }
+    if (!slot) {
+        g_customThemes.push_back(std::make_unique<CustomTheme>());
+        slot = g_customThemes.back().get();
+        index = themeCount() - 1;
+    }
+    slot->name = name;
+    slot->fontFamily = fontFamily.empty() ? L"Segoe UI" : fontFamily;
+    slot->codeFontFamily = codeFontFamily.empty() ? L"Consolas" : codeFontFamily;
+    slot->theme = t;
+    bindStrings(*slot);
+    writeThemesIni();
+    return index;
+}

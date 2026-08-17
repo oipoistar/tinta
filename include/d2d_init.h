@@ -9,6 +9,7 @@ void applyTheme(App& app, int themeIndex);
 // Windows 10 falls back to the stock dark/light caption)
 void applyWindowChrome(App& app);
 void updateTextFormats(App& app);
+void enumerateSystemFontFamilies(App& app);
 void updateOverlayFormats(App& app);
 void ensureThemePreviewFormats(App& app);
 void createTypography(App& app);

@@ -42,6 +42,9 @@ void saveSettings(const Settings& settings) {
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
     file << "folderSearchEnabled=" << (settings.folderSearchEnabled ? 1 : 0) << "\n";
+    file << "readingWidthPct=" << settings.readingWidthPct << "\n";
+    file << "zenWidthPct=" << settings.zenWidthPct << "\n";
+    file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
 
     // Remappable keys, written with every save so the section documents
     // itself: change a value, restart Tinta
@@ -153,7 +156,7 @@ Settings loadSettings() {
 
         if (key == "themeIndex") {
             int idx = std::stoi(value);
-            if (idx >= 0 && idx < THEME_COUNT) settings.themeIndex = idx;
+            if (idx >= 0) settings.themeIndex = idx;  // clamped at apply via themeCount()
         } else if (key == "zoomFactor") {
             float z = std::stof(value);
             if (z >= 0.5f && z <= 3.0f) settings.zoomFactor = z;
@@ -167,16 +170,24 @@ Settings loadSettings() {
         } else if (key == "windowHeight") {
             int h = std::stoi(value);
             if (h >= 200) settings.windowHeight = h;
+        } else if (key == "readingWidthPct") {
+            int w = std::stoi(value);
+            if (w >= 30 && w <= 100) settings.readingWidthPct = w;
+        } else if (key == "zenWidthPct") {
+            int w = std::stoi(value);
+            if (w >= 30 && w <= 100) settings.zenWidthPct = w;
+        } else if (key == "tocOnLeft") {
+            settings.tocOnLeft = (value == "1");
         } else if (key == "folderSearchEnabled") {
             settings.folderSearchEnabled = (value == "1");
         } else if (key == "followSystemTheme") {
             settings.followSystemTheme = (value == "1");
         } else if (key == "lightThemeIndex") {
             int idx = std::stoi(value);
-            if (idx >= 0 && idx < THEME_COUNT) settings.lightThemeIndex = idx;
+            if (idx >= 0) settings.lightThemeIndex = idx;
         } else if (key == "darkThemeIndex") {
             int idx = std::stoi(value);
-            if (idx >= 0 && idx < THEME_COUNT) settings.darkThemeIndex = idx;
+            if (idx >= 0) settings.darkThemeIndex = idx;
         } else if (key == "windowMaximized") {
             settings.windowMaximized = (value == "1");
         } else if (key == "hasAskedFileAssociation") {

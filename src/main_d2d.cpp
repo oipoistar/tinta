@@ -840,6 +840,8 @@ render_document:
     if (app.showContextMenu) renderContextMenu(app);
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
+    if (app.showSettings) renderSettingsOverlay(app);
+    if (app.showThemeEditor) renderThemeEditor(app);
 
     // Close edit mode split view clipping
     if (app.editMode) {
@@ -1071,6 +1073,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
+                settings.readingWidthPct = app->readingWidthPct;
+                settings.zenWidthPct = app->zenWidthPct;
+                settings.tocOnLeft = app->tocOnLeft;
                 if (!app->currentFile.empty()) {
                     rememberReadingPosition(settings, app->currentFile, app->scrollY);
                 }
@@ -1171,6 +1176,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     auto t0 = startupStart;
     g_app = &app;
 
+    // Load user themes before settings: saved theme indices may point at them
+    loadCustomThemes();
+
     // Load saved settings
     Settings savedSettings = loadSettings();
     app.followSystemTheme = savedSettings.followSystemTheme;
@@ -1180,11 +1188,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;
-    app.theme = THEMES[startTheme];
+    if (startTheme >= themeCount()) startTheme = 0;
+    app.currentThemeIndex = startTheme;
+    app.theme = themeAt(startTheme);
     app.darkMode = app.theme.isDark;
     app.zoomFactor = savedSettings.zoomFactor;
     app.editorShowPreview = savedSettings.editorShowPreview;
     app.editorWordWrap = savedSettings.editorWordWrap;
+    app.readingWidthPct = savedSettings.readingWidthPct;
+    app.zenWidthPct = savedSettings.zenWidthPct;
+    app.tocOnLeft = savedSettings.tocOnLeft;
     applyKeymap(app, savedSettings);
 
     // Parse command line

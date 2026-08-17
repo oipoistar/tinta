@@ -245,6 +245,155 @@ static void applyZoomDelta(App& app, float delta) {
     }
 }
 
+// --- Theme editor helpers ---
+
+static std::wstring colorToHexW(const D2D1_COLOR_F& c) {
+    wchar_t buf[8];
+    swprintf_s(buf, L"%02X%02X%02X",
+               (int)(c.r * 255.0f + 0.5f), (int)(c.g * 255.0f + 0.5f),
+               (int)(c.b * 255.0f + 0.5f));
+    return buf;
+}
+
+static bool hexToColorW(const std::wstring& s, D2D1_COLOR_F& out) {
+    if (s.size() != 6) return false;
+    unsigned v = 0;
+    for (wchar_t ch : s) {
+        v <<= 4;
+        if (ch >= L'0' && ch <= L'9') v |= (unsigned)(ch - L'0');
+        else if (ch >= L'a' && ch <= L'f') v |= (unsigned)(ch - L'a' + 10);
+        else if (ch >= L'A' && ch <= L'F') v |= (unsigned)(ch - L'A' + 10);
+        else return false;
+    }
+    out = hexColor(v);
+    return true;
+}
+
+// The six editable slots, in TE_FIELD_* / themeEditorHex order
+static D2D1_COLOR_F* themeEditorSlot(App& app, int field) {
+    D2DTheme& t = app.themeEditorTheme;
+    switch (field) {
+        case 0: return &t.background;
+        case 1: return &t.text;
+        case 2: return &t.heading;
+        case 3: return &t.link;
+        case 4: return &t.accent;
+        case 5: return &t.codeBackground;
+    }
+    return nullptr;
+}
+
+// Copies a base theme's colors into the working copy and refreshes the
+// hex field strings (name and focus are preserved)
+static void themeEditorAdoptBase(App& app, int baseIndex) {
+    app.themeEditorBase = baseIndex;
+    const D2DTheme& bt = themeAt(baseIndex);
+    app.themeEditorTheme = bt;
+    app.themeEditorFont = bt.fontFamily;
+    for (int i = 0; i < 6; i++) {
+        app.themeEditorHex[i] = colorToHexW(*themeEditorSlot(app, i));
+    }
+}
+
+// Seeds themes.ini with a comment header if it does not exist, then opens
+// it in the default editor. Shared by settings and the theme editor.
+static void openThemesIniFile() {
+    std::wstring p = getSettingsPath();
+    size_t slash = p.find_last_of(L'\\');
+    if (slash == std::wstring::npos) return;
+    p = p.substr(0, slash + 1) + L"themes.ini";
+    if (GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        std::ofstream f(p);
+        f << "; Custom themes: [theme] sections, RRGGBB colors.\n";
+    }
+    ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// editCurrent seeds the editor with the active theme's name so saving
+// updates that custom theme in place (built-ins save as a copy)
+static void openThemeEditor(App& app, bool editCurrent) {
+    enumerateSystemFontFamilies(app);
+    themeEditorAdoptBase(app, app.currentThemeIndex);
+    app.themeEditorName = editCurrent ? app.theme.name : L"My theme";
+    app.themeEditorField = 6;  // name focused first
+    app.themeEditorFontScroll = 0.0f;
+    app.showSettings = false;
+    app.showThemeEditor = true;
+    InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
+static void closeThemeEditor(App& app, bool backToSettings) {
+    app.showThemeEditor = false;
+    if (backToSettings) {
+        app.showSettings = true;
+        app.settingsAnimation = 1.0f;  // no re-animation on return
+    }
+    InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
+// Reading-width sliders: map a mouse X onto the stored track rect (#82)
+static void settingsSliderApply(App& app, int which, float mx) {
+    const D2D1_RECT_F& track =
+        app.settingsSliderTrack[which == SET_SLIDER_ZEN ? 1 : 0];
+    float t = (mx - track.left) / std::max(1.0f, track.right - track.left);
+    int pct = 30 + (int)(t * 70.0f + 0.5f);
+    pct = std::max(30, std::min(100, pct));
+    if (which == SET_SLIDER_ZEN) app.zenWidthPct = pct;
+    else app.readingWidthPct = pct;
+    app.layoutDirty = true;
+    InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
+// Applies one settings-overlay action (id from app.settingsHits)
+static void settingsAction(App& app, HWND hwnd, int action) {
+    switch (action) {
+        case SET_SECTION_GENERAL: app.settingsSection = 0; break;
+        case SET_SECTION_APPEARANCE: app.settingsSection = 1; break;
+        case SET_SECTION_EDITOR: app.settingsSection = 2; break;
+        case SET_TOGGLE_FOLDERSEARCH:
+            app.folderSearchEnabled = !app.folderSearchEnabled;
+            if (!app.folderSearchEnabled) clearFolderSearch(app);
+            break;
+        case SET_TOGGLE_FOLLOW:
+            app.followSystemTheme = !app.followSystemTheme;
+            if (app.followSystemTheme) {
+                if (app.theme.isDark) app.darkThemeIndex = app.currentThemeIndex;
+                else app.lightThemeIndex = app.currentThemeIndex;
+                PostMessageW(hwnd, WM_SETTINGCHANGE, 0, (LPARAM)L"ImmersiveColorSet");
+            }
+            break;
+        case SET_TOGGLE_WRAP:
+            app.editorWordWrap = !app.editorWordWrap;
+            app.clearEditorLineLayoutCache();
+            break;
+        case SET_TOGGLE_PREVIEW:
+            app.editorShowPreview = !app.editorShowPreview;
+            app.layoutDirty = true;
+            break;
+        case SET_OPEN_THEMES:
+            app.showSettings = false;
+            app.showThemeChooser = true;
+            app.themeChooserAnimation = 0;
+            break;
+        case SET_NEW_THEME:
+            openThemeEditor(app, false);
+            break;
+        case SET_EDIT_THEME:
+            openThemeEditor(app, true);
+            break;
+        case SET_TOC_LEFT: app.tocOnLeft = true; break;
+        case SET_TOC_RIGHT: app.tocOnLeft = false; break;
+        case SET_OPEN_INI:
+            ShellExecuteW(nullptr, L"open", getSettingsPath().c_str(),
+                          nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        case SET_OPEN_THEMES_INI:
+            openThemesIniFile();
+            break;
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 // Maps a pressed key through the user keymap ([Keys] in settings.ini): a
 // remapped key becomes the built-in default the switches below expect, and
 // a default key the user moved elsewhere is swallowed. Non-action keys pass
@@ -271,6 +420,22 @@ static WPARAM translateActionKey(App& app, WPARAM key, bool isChar) {
 }
 
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Theme editor: wheel scrolls the font list
+    if (app.showThemeEditor) {
+        float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+        const D2D1_RECT_F& list = app.themeEditorFontListRect;
+        if (app.mouseX >= list.left && app.mouseX <= list.right &&
+            app.mouseY >= list.top && app.mouseY <= list.bottom) {
+            app.themeEditorFontScroll -= delta * dpi(app, 78.0f);
+            if (app.themeEditorFontScroll < 0) app.themeEditorFontScroll = 0;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return;
+    }
+
+    // Settings overlay: consume the wheel (nothing scrolls yet)
+    if (app.showSettings) return;
+
     // Print preview: the wheel flips pages
     if (app.showPrintPreview) {
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
@@ -334,7 +499,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Handle TOC scroll (not when Ctrl is held — that's zoom)
     if (app.showToc && !ctrl) {
         float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
-        float panelX = app.width - panelWidth * app.tocAnimation;
+        float panelX = tocPanelX(app, panelWidth);
         if (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth) {
             app.tocScroll -= delta * dpi(app, 60.0f);
             float itemHeight = dpi(app, 28.0f);
@@ -389,6 +554,39 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // Print preview: no hover states; document hit-testing below would run
     // against print-layout coordinates anyway
     if (app.showPrintPreview) return;
+
+    // Theme editor: hand over controls, arrow elsewhere
+    if (app.showThemeEditor) {
+        bool overControl = false;
+        for (const auto& hit : app.themeEditorHits) {
+            if (app.mouseX >= hit.first.left && app.mouseX <= hit.first.right &&
+                app.mouseY >= hit.first.top && app.mouseY <= hit.first.bottom) {
+                overControl = true;
+                break;
+            }
+        }
+        SetCursor(LoadCursorW(nullptr, overControl ? IDC_HAND : IDC_ARROW));
+        return;
+    }
+
+    // Settings: drag a slider if one is held, and show a hand over controls
+    // instead of the document's text caret
+    if (app.showSettings) {
+        if (app.settingsDragSlider) {
+            settingsSliderApply(app, app.settingsDragSlider, (float)app.mouseX);
+            return;
+        }
+        bool overControl = false;
+        for (const auto& hit : app.settingsHits) {
+            if (app.mouseX >= hit.first.left && app.mouseX <= hit.first.right &&
+                app.mouseY >= hit.first.top && app.mouseY <= hit.first.bottom) {
+                overControl = true;
+                break;
+            }
+        }
+        SetCursor(LoadCursorW(nullptr, overControl ? IDC_HAND : IDC_ARROW));
+        return;
+    }
 
     // Context menu open: hover tracks menu items only — document hover
     // (code-block copy button, link underline) stays suppressed underneath
@@ -584,7 +782,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             InvalidateRect(hwnd, nullptr, FALSE);
     } else if (app.showToc) {
         float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
-        float panelX = app.width - panelWidth * app.tocAnimation;
+        float panelX = tocPanelX(app, panelWidth);
         bool inPanel = (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth);
         if (inPanel && app.hoveredTocIndex >= 0) {
             SetCursor(cursorHand);
@@ -735,6 +933,11 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             app.showThemeChooser = true;
             app.themeChooserAnimation = 0;
             break;
+        case CTX_SETTINGS:
+            closeSearchIfOpen(app);
+            app.showSettings = true;
+            app.settingsAnimation = 0;
+            break;
         case CTX_HELP:
             closeSearchIfOpen(app);
             app.showHelp = true;
@@ -747,7 +950,8 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
     // Viewer mode only, and never on top of a modal overlay. The search
     // bar is fine — it shares the viewport rather than covering it.
     if (app.editMode || app.showThemeChooser || app.showToc ||
-        app.showFolderBrowser || app.showHelp || app.showPrintPreview) {
+        app.showFolderBrowser || app.showHelp || app.showPrintPreview ||
+        app.showSettings || app.showThemeEditor) {
         return;
     }
 
@@ -764,7 +968,26 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
 }
 
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
-    // Print preview: buttons act on the release; nothing else to press
+    // Theme editor: everything acts on the release
+    if (app.showThemeEditor) return;
+
+    // Settings: sliders drag from the press; everything else acts on release
+    if (app.showSettings) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        for (const auto& hit : app.settingsHits) {
+            if ((hit.second == SET_SLIDER_READING || hit.second == SET_SLIDER_ZEN) &&
+                mx >= hit.first.left && mx <= hit.first.right &&
+                my >= hit.first.top && my <= hit.first.bottom) {
+                app.settingsDragSlider = hit.second;
+                SetCapture(hwnd);
+                settingsSliderApply(app, hit.second, mx);
+                return;
+            }
+        }
+        return;
+    }
+    // Print preview: controls act on the release
     if (app.showPrintPreview) return;
 
     // Context menu: a click lands on an item or dismisses the menu; either
@@ -1118,6 +1341,77 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         return;
     }
 
+    // Theme editor clicks
+    if (app.showThemeEditor) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        for (const auto& hit : app.themeEditorHits) {
+            if (mx < hit.first.left || mx > hit.first.right ||
+                my < hit.first.top || my > hit.first.bottom) continue;
+            int action = hit.second;
+            if (action >= TE_FONT_BASE) {
+                int idx = action - TE_FONT_BASE;
+                if (idx >= 0 && idx < (int)app.systemFontFamilies.size()) {
+                    app.themeEditorFont = app.systemFontFamilies[idx];
+                }
+            } else if (action >= TE_FIELD_BG && action <= TE_FIELD_CODEBG) {
+                app.themeEditorField = action - TE_FIELD_BG;
+            } else if (action == TE_FIELD_NAME) {
+                app.themeEditorField = 6;
+            } else if (action == TE_BASE_PREV || action == TE_BASE_NEXT) {
+                int n = themeCount();
+                int base = app.themeEditorBase + (action == TE_BASE_NEXT ? 1 : n - 1);
+                themeEditorAdoptBase(app, base % n);
+            } else if (action == TE_DARK) {
+                app.themeEditorTheme.isDark = !app.themeEditorTheme.isDark;
+            } else if (action == TE_OPEN_INI) {
+                openThemesIniFile();
+            } else if (action == TE_CANCEL) {
+                closeThemeEditor(app, true);
+                return;
+            } else if (action == TE_SAVE) {
+                std::wstring name = app.themeEditorName.empty()
+                    ? L"My theme" : app.themeEditorName;
+                int idx = saveCustomTheme(app.themeEditorTheme, name,
+                    app.themeEditorFont, themeAt(app.themeEditorBase).codeFontFamily);
+                if (idx >= 0) {
+                    // Preview format cache must grow for the chooser
+                    for (auto& pf : app.themePreviewFormats) {
+                        if (pf.name) { pf.name->Release(); pf.name = nullptr; }
+                        if (pf.preview) { pf.preview->Release(); pf.preview = nullptr; }
+                        if (pf.code) { pf.code->Release(); pf.code = nullptr; }
+                    }
+                    app.themePreviewFormats.clear();
+                    applyTheme(app, idx);
+                }
+                closeThemeEditor(app, false);
+                return;
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        return;
+    }
+
+    // Settings overlay: resolve against the hit rects stored during render
+    if (app.showSettings) {
+        if (app.settingsDragSlider) {
+            app.settingsDragSlider = 0;
+            ReleaseCapture();
+            return;
+        }
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        for (const auto& hit : app.settingsHits) {
+            if (mx >= hit.first.left && mx <= hit.first.right &&
+                my >= hit.first.top && my <= hit.first.bottom) {
+                settingsAction(app, hwnd, hit.second);
+                return;
+            }
+        }
+        return;
+    }
+
     // Print preview: buttons and format chips
     if (app.showPrintPreview) {
         float mx = (float)GET_X_LPARAM(lParam);
@@ -1169,7 +1463,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         int clickX = GET_X_LPARAM(lParam);
 
         float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
-        float panelX = app.width - panelWidth * app.tocAnimation;
+        float panelX = tocPanelX(app, panelWidth);
 
         if (clickX >= panelX && (float)clickX <= panelX + panelWidth) {
             // Click inside panel
@@ -1309,7 +1603,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         float panelY = (app.height - panelHeight) / 2;
         float gridStartY = panelY + dpi(app, 75.0f);
         float cardWidth = (panelWidth - dpi(app, 60.0f)) / 2;
-        float cardHeight = (panelHeight - dpi(app, 130.0f)) / 5;
+        float cardHeight = (panelHeight - dpi(app, 130.0f)) / themeChooserRows();
         float cardPadding = dpi(app, 8.0f);
 
         // "Follow Windows" toggle (label + switch, must match render geometry)
@@ -1335,10 +1629,9 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         }
 
         int clickedTheme = -1;
-        for (int i = 0; i < THEME_COUNT; i++) {
-            const D2DTheme& t = THEMES[i];
-            int col = t.isDark ? 1 : 0;
-            int row = t.isDark ? (i - 5) : i;
+        for (int i = 0; i < themeCount(); i++) {
+            int col, row;
+            themeChooserCell(i, col, row);
 
             float cardX = panelX + dpi(app, 20.0f) + col * (cardWidth + dpi(app, 20.0f));
             float cardY = gridStartY + row * cardHeight;
@@ -1359,7 +1652,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             // While auto mode is on, picking a card records it as the
             // preference for that card's light/dark class
             if (app.followSystemTheme) {
-                if (THEMES[clickedTheme].isDark) app.darkThemeIndex = clickedTheme;
+                if (themeAt(clickedTheme).isDark) app.darkThemeIndex = clickedTheme;
                 else app.lightThemeIndex = clickedTheme;
             }
             app.showThemeChooser = false;
@@ -1642,6 +1935,15 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 break;
             }
+            case VK_OEM_COMMA:
+                // Ctrl+, opens settings (viewer mode)
+                if (!app.editMode) {
+                    closeSearchIfOpen(app);
+                    app.showSettings = !app.showSettings;
+                    app.settingsAnimation = 0;
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                break;
             case 'F':
                 // Ctrl+F to open search
                 if (!app.showSearch) {
@@ -1658,6 +1960,20 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 break;
         }
     } else {
+        // Theme editor: Esc returns to settings; text arrives via WM_CHAR
+        if (app.showThemeEditor) {
+            if (wParam == VK_ESCAPE) closeThemeEditor(app, true);
+            return;
+        }
+        // Settings overlay captures the keyboard while open
+        if (app.showSettings) {
+            if (wParam == VK_ESCAPE) {
+                app.showSettings = false;
+                app.settingsAnimation = 0;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return;
+        }
         wParam = translateActionKey(app, wParam, false);
         switch (wParam) {
             case VK_ESCAPE:
@@ -1807,6 +2123,32 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
     // Print preview: all shortcuts are handled as key-downs
     if (app.showPrintPreview) return;
+
+    // Theme editor: route typing into the focused field
+    if (app.showThemeEditor) {
+        wchar_t ch = (wchar_t)wParam;
+        int f = app.themeEditorField;
+        if (f == 6) {  // name
+            if (ch == 8) {
+                if (!app.themeEditorName.empty()) app.themeEditorName.pop_back();
+            } else if (ch >= 32 && ch != 127 && app.themeEditorName.size() < 24) {
+                app.themeEditorName += ch;
+            }
+        } else if (f >= 0 && f < 6) {  // hex fields
+            std::wstring& hex = app.themeEditorHex[f];
+            if (ch == 8) {
+                if (!hex.empty()) hex.pop_back();
+            } else if (iswxdigit(ch) && hex.size() < 6) {
+                hex += towupper(ch);
+            }
+            D2D1_COLOR_F parsed;
+            if (hexToColorW(hex, parsed)) {
+                *themeEditorSlot(app, f) = parsed;
+            }
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
 
     // Edit mode: ':' enters edit mode, otherwise route to editor
     if (app.editMode) {

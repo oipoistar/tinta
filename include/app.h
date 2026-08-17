@@ -110,6 +110,23 @@ inline float dpi(const App& app, float value);
 extern const D2DTheme THEMES[];
 extern const int THEME_COUNT;
 
+// Dynamic theme registry (#82): the built-ins plus user themes loaded from
+// %APPDATA%\Tinta\themes.ini. Custom themes own their strings and live at
+// stable addresses for the app lifetime, so D2DTheme's const wchar_t*
+// members stay valid. Indices: [0, THEME_COUNT) built-in, then customs.
+struct CustomTheme {
+    std::wstring name, fontFamily, codeFontFamily;
+    D2DTheme theme;
+};
+int themeCount();
+const D2DTheme& themeAt(int index);  // out-of-range clamps to theme 0
+void loadCustomThemes();
+// Adds or replaces (by name) a user theme and rewrites themes.ini.
+// Returns the theme's registry index, or -1 on failure.
+int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
+                    const std::wstring& fontFamily,
+                    const std::wstring& codeFontFamily);
+
 // Persistent settings
 struct Settings {
     int themeIndex = 5;          // Default to Midnight
@@ -134,6 +151,12 @@ struct Settings {
     std::vector<ReadingPosition> readingPositions;
     // [Keys] overrides from settings.ini: action name -> key name (#77)
     std::vector<std::pair<std::string, std::string>> keyOverrides;
+    // Reading column as a percentage of the window width (#82): 100 = full.
+    // Windowed and fullscreen (zen) modes keep separate preferences.
+    int readingWidthPct = 100;
+    int zenWidthPct = 60;
+    // Table of contents panel side: false = right (default), true = left
+    bool tocOnLeft = false;
 };
 
 // Application state
@@ -309,6 +332,33 @@ struct App {
     float helpScrollbarDragStartY = 0;
     float helpScrollbarDragStartScroll = 0;
 
+    // Settings overlay (Ctrl+,): section rail + rows of toggles/chips.
+    // Hit rects are stored during render (print-preview pattern); each
+    // entry pairs a rect with a SettingsAction id for the mouse-up test.
+    bool showSettings = false;
+    float settingsAnimation = 0.0f;
+    int settingsSection = 0;  // 0 General, 1 Appearance, 2 Editor
+    std::vector<std::pair<D2D1_RECT_F, int>> settingsHits;
+    int readingWidthPct = 100;  // mirrors Settings (#82); 100 = full width
+    int zenWidthPct = 60;
+    int settingsDragSlider = 0;         // SET_SLIDER_* while dragging, else 0
+    D2D1_RECT_F settingsSliderTrack[2]{};  // 0 window, 1 fullscreen (set in render)
+
+    // Theme editor ("+ New" in settings): a working copy of a theme edited
+    // through hex fields and a system-font list, previewed live in an ink
+    // specimen. Saving goes through saveCustomTheme into themes.ini.
+    bool showThemeEditor = false;
+    D2DTheme themeEditorTheme{};        // working colors (string ptrs unused)
+    std::wstring themeEditorName;
+    std::wstring themeEditorFont;       // main font family
+    std::wstring themeEditorHex[6];     // bg, text, heading, link, accent, code bg
+    int themeEditorField = -1;          // focused field: 0..5 hex, 6 = name
+    int themeEditorBase = 0;            // registry index the colors started from
+    float themeEditorFontScroll = 0.0f;
+    std::vector<std::wstring> systemFontFamilies;  // enumerated on first open
+    std::vector<std::pair<D2D1_RECT_F, int>> themeEditorHits;
+    D2D1_RECT_F themeEditorFontListRect{};  // for wheel routing (set in render)
+
     // Resolved single-key bindings, indexed like KEY_ACTIONS (#77).
     // Filled by applyKeymap from settings; slots beyond the action count
     // stay zero.
@@ -353,7 +403,8 @@ struct App {
 
     // Table of contents overlay
     bool showToc = false;
-    float tocAnimation = 0.0f;  // 0 to 1 for slide-in from right
+    bool tocOnLeft = false;     // panel side (persisted)
+    float tocAnimation = 0.0f;  // 0 to 1 slide-in from the chosen side
     struct HeadingInfo {
         std::wstring text;
         int level;       // 1-6
