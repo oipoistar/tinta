@@ -2093,6 +2093,21 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.targetScrollY -= dpi(app, 50.0f);
                 }
                 break;
+            case VK_LEFT:
+                // Horizontal scroll for over-wide content (#77): render
+                // clamps against contentWidth, so this is a no-op when
+                // everything fits the window
+                if (!app.showSearch) {
+                    app.targetScrollX = std::max(0.0f, app.targetScrollX - dpi(app, 60.0f));
+                    app.scrollX = app.targetScrollX;
+                }
+                break;
+            case VK_RIGHT:
+                if (!app.showSearch) {
+                    app.targetScrollX += dpi(app, 60.0f);
+                    app.scrollX = app.targetScrollX;
+                }
+                break;
             case VK_DOWN:
             case 'J':
                 if (!app.showSearch) {
