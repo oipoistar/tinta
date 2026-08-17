@@ -339,7 +339,31 @@ void openDefaultAppsSettings() {
 }
 
 void askAndRegisterFileAssociation(Settings& settings) {
-    if (isRunningPackaged()) return;
+    if (isRunningPackaged()) {
+        // Store installs: the package manifest already registers the file
+        // types, so only the "make default" choice is missing. Ask once per
+        // install (settings.ini lives in the package's private AppData, so
+        // it resets on uninstall) and deep-link straight to Tinta's page in
+        // Settings > Default apps. Windows 10 ignores the query part and
+        // opens the general Default Apps page instead.
+        if (settings.hasAskedFileAssociation) return;
+        int result = MessageBoxW(
+            nullptr,
+            L"Would you like to make Tinta the default viewer for Markdown "
+            L"and Mermaid files?\n\n"
+            L"Windows will open Settings on Tinta's page — set .md, "
+            L".markdown, and .mmd to Tinta Markdown Viewer.",
+            L"Tinta - Default apps",
+            MB_YESNO | MB_ICONQUESTION);
+        if (result == IDYES) {
+            ShellExecuteW(nullptr, L"open",
+                L"ms-settings:defaultapps?registeredAppUser=Tinta%20Markdown%20Viewer",
+                nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        settings.hasAskedFileAssociation = true;
+        saveSettings(settings);
+        return;
+    }
     if (settings.hasAskedFileAssociation) {
         if (hasRegisteredFileAssociation(L".md") &&
             !hasRegisteredFileAssociation(L".mmd") &&
