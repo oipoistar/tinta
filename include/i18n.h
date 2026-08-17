@@ -51,6 +51,8 @@ const wchar_t* languageNameAt(int index);
 std::string languageIdAt(int index);
 int languageIndexById(const std::string& id);   // -1 when unknown
 int languageCompiledColumn(int index);          // -1 for ini-only languages
+// False for roster languages that have no translations yet (shown dimmed)
+bool languageHasTranslations(int index);
 void loadLanguageOverrides();
 // Seeds a translator template (common-language roster, every key commented
 // with its English text) on first use, then opens the file
