@@ -157,6 +157,9 @@ struct Settings {
     int zenWidthPct = 60;
     // Table of contents panel side: false = right (default), true = left
     bool tocOnLeft = false;
+    // UI language index (see i18n.h); -1 = follow the Windows display
+    // language. Credit: multilingual groundwork by wxh-777 (PR #84).
+    int languageIndex = -1;
 };
 
 // Application state
@@ -358,6 +361,11 @@ struct App {
     std::vector<std::wstring> systemFontFamilies;  // enumerated on first open
     std::vector<std::pair<D2D1_RECT_F, int>> themeEditorHits;
     D2D1_RECT_F themeEditorFontListRect{};  // for wheel routing (set in render)
+
+    // UI language: languageSetting is what persists (-1 = follow system),
+    // currentLanguageIndex is the resolved index tr() reads every call
+    int languageSetting = -1;
+    int currentLanguageIndex = 0;
 
     // Resolved single-key bindings, indexed like KEY_ACTIONS (#77).
     // Filled by applyKeymap from settings; slots beyond the action count

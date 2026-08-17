@@ -29,6 +29,7 @@
 #include "input.h"
 #include "editor.h"
 #include "print.h"
+#include "i18n.h"
 
 static App* g_app = nullptr;
 
@@ -1085,6 +1086,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
                 settings.tocOnLeft = app->tocOnLeft;
+                settings.languageIndex = app->languageSetting;
                 if (!app->currentFile.empty()) {
                     rememberReadingPosition(settings, app->currentFile, app->scrollY);
                 }
@@ -1207,6 +1209,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.readingWidthPct = savedSettings.readingWidthPct;
     app.zenWidthPct = savedSettings.zenWidthPct;
     app.tocOnLeft = savedSettings.tocOnLeft;
+    app.languageSetting = savedSettings.languageIndex;
+    app.currentLanguageIndex = savedSettings.languageIndex >= 0
+        ? clampLanguageIndex(savedSettings.languageIndex)
+        : detectSystemLanguage();
     applyKeymap(app, savedSettings);
 
     // Parse command line

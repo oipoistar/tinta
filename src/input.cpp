@@ -9,6 +9,7 @@
 #include "render.h"
 #include "overlays.h"
 #include "print.h"
+#include "i18n.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -382,6 +383,14 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             openThemeEditor(app, true);
             break;
         case SET_TOC_LEFT: app.tocOnLeft = true; break;
+        case SET_LANG_AUTO:
+            app.languageSetting = -1;
+            app.currentLanguageIndex = detectSystemLanguage();
+            break;
+        case SET_LANG_EN: case SET_LANG_ZH: case SET_LANG_JA: case SET_LANG_KO:
+            app.languageSetting = action - SET_LANG_EN;
+            app.currentLanguageIndex = app.languageSetting;
+            break;
         case SET_TOC_RIGHT: app.tocOnLeft = false; break;
         case SET_OPEN_INI:
             ShellExecuteW(nullptr, L"open", getSettingsPath().c_str(),

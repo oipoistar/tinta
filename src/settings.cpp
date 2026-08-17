@@ -45,6 +45,7 @@ void saveSettings(const Settings& settings) {
     file << "readingWidthPct=" << settings.readingWidthPct << "\n";
     file << "zenWidthPct=" << settings.zenWidthPct << "\n";
     file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
+    file << "languageIndex=" << settings.languageIndex << "\n";
 
     // Remappable keys, written with every save so the section documents
     // itself: change a value, restart Tinta
@@ -178,6 +179,8 @@ Settings loadSettings() {
             if (w >= 30 && w <= 100) settings.zenWidthPct = w;
         } else if (key == "tocOnLeft") {
             settings.tocOnLeft = (value == "1");
+        } else if (key == "languageIndex") {
+            settings.languageIndex = std::stoi(value);  // -1 = follow system
         } else if (key == "folderSearchEnabled") {
             settings.folderSearchEnabled = (value == "1");
         } else if (key == "followSystemTheme") {
