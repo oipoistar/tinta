@@ -42,6 +42,7 @@ void saveSettings(const Settings& settings) {
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
     file << "folderSearchEnabled=" << (settings.folderSearchEnabled ? 1 : 0) << "\n";
+    file << "readingWidth=" << settings.readingWidth << "\n";
 
     // Remappable keys, written with every save so the section documents
     // itself: change a value, restart Tinta
@@ -167,6 +168,9 @@ Settings loadSettings() {
         } else if (key == "windowHeight") {
             int h = std::stoi(value);
             if (h >= 200) settings.windowHeight = h;
+        } else if (key == "readingWidth") {
+            int w = std::stoi(value);
+            if (w == 0 || (w >= 400 && w <= 4000)) settings.readingWidth = w;
         } else if (key == "folderSearchEnabled") {
             settings.folderSearchEnabled = (value == "1");
         } else if (key == "followSystemTheme") {

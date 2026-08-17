@@ -2198,6 +2198,12 @@ bool layoutBegin(App& app) {
         float column = std::min(app.layoutMaxWidth, 760.0f * scale);
         app.layoutIndent = (layoutWidth - column) / 2.0f;
         app.layoutMaxWidth = column;
+    } else if (app.readingWidth > 0 && !app.editMode) {
+        // Preferred reading width (#82): a centered column on wide screens.
+        // Zen overrides it, and edit-mode panes are already narrow.
+        float column = std::min(app.layoutMaxWidth, app.readingWidth * scale);
+        app.layoutIndent = (layoutWidth - column) / 2.0f;
+        app.layoutMaxWidth = column;
     }
     app.layoutCursorY = 20.0f * scale;
     app.layoutNextBlock = 0;

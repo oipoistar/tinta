@@ -151,6 +151,8 @@ struct Settings {
     std::vector<ReadingPosition> readingPositions;
     // [Keys] overrides from settings.ini: action name -> key name (#77)
     std::vector<std::pair<std::string, std::string>> keyOverrides;
+    // Preferred reading column width in DIPs; 0 = use the full window (#82)
+    int readingWidth = 0;
 };
 
 // Application state
@@ -325,6 +327,15 @@ struct App {
     bool helpScrollbarDragging = false;
     float helpScrollbarDragStartY = 0;
     float helpScrollbarDragStartScroll = 0;
+
+    // Settings overlay (Ctrl+,): section rail + rows of toggles/chips.
+    // Hit rects are stored during render (print-preview pattern); each
+    // entry pairs a rect with a SettingsAction id for the mouse-up test.
+    bool showSettings = false;
+    float settingsAnimation = 0.0f;
+    int settingsSection = 0;  // 0 General, 1 Appearance, 2 Editor
+    std::vector<std::pair<D2D1_RECT_F, int>> settingsHits;
+    int readingWidth = 0;  // mirrors Settings.readingWidth (#82)
 
     // Resolved single-key bindings, indexed like KEY_ACTIONS (#77).
     // Filled by applyKeymap from settings; slots beyond the action count

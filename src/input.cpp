@@ -245,6 +245,65 @@ static void applyZoomDelta(App& app, float delta) {
     }
 }
 
+// Applies one settings-overlay action (id from app.settingsHits)
+static void settingsAction(App& app, HWND hwnd, int action) {
+    switch (action) {
+        case SET_SECTION_GENERAL: app.settingsSection = 0; break;
+        case SET_SECTION_APPEARANCE: app.settingsSection = 1; break;
+        case SET_SECTION_EDITOR: app.settingsSection = 2; break;
+        case SET_TOGGLE_FOLDERSEARCH:
+            app.folderSearchEnabled = !app.folderSearchEnabled;
+            if (!app.folderSearchEnabled) clearFolderSearch(app);
+            break;
+        case SET_TOGGLE_FOLLOW:
+            app.followSystemTheme = !app.followSystemTheme;
+            if (app.followSystemTheme) {
+                if (app.theme.isDark) app.darkThemeIndex = app.currentThemeIndex;
+                else app.lightThemeIndex = app.currentThemeIndex;
+                PostMessageW(hwnd, WM_SETTINGCHANGE, 0, (LPARAM)L"ImmersiveColorSet");
+            }
+            break;
+        case SET_TOGGLE_WRAP:
+            app.editorWordWrap = !app.editorWordWrap;
+            app.clearEditorLineLayoutCache();
+            break;
+        case SET_TOGGLE_PREVIEW:
+            app.editorShowPreview = !app.editorShowPreview;
+            app.layoutDirty = true;
+            break;
+        case SET_WIDTH_FULL: app.readingWidth = 0; app.layoutDirty = true; break;
+        case SET_WIDTH_800: app.readingWidth = 800; app.layoutDirty = true; break;
+        case SET_WIDTH_1000: app.readingWidth = 1000; app.layoutDirty = true; break;
+        case SET_WIDTH_1200: app.readingWidth = 1200; app.layoutDirty = true; break;
+        case SET_OPEN_THEMES:
+            app.showSettings = false;
+            app.showThemeChooser = true;
+            app.themeChooserAnimation = 0;
+            break;
+        case SET_NEW_THEME:
+            // Theme editor arrives in the next commit; the chip is wired
+            break;
+        case SET_OPEN_INI:
+            ShellExecuteW(nullptr, L"open", getSettingsPath().c_str(),
+                          nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        case SET_OPEN_THEMES_INI: {
+            std::wstring p = getSettingsPath();
+            size_t slash = p.find_last_of(L'\\');
+            if (slash != std::wstring::npos) {
+                p = p.substr(0, slash + 1) + L"themes.ini";
+                if (GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES) {
+                    std::ofstream f(p);  // seed an empty file so the editor opens
+                    f << "; Custom themes: [theme] sections, RRGGBB colors.\n";
+                }
+                ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            }
+            break;
+        }
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 // Maps a pressed key through the user keymap ([Keys] in settings.ini): a
 // remapped key becomes the built-in default the switches below expect, and
 // a default key the user moved elsewhere is swallowed. Non-action keys pass
@@ -271,6 +330,9 @@ static WPARAM translateActionKey(App& app, WPARAM key, bool isChar) {
 }
 
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Settings overlay: consume the wheel (nothing scrolls yet)
+    if (app.showSettings) return;
+
     // Print preview: the wheel flips pages
     if (app.showPrintPreview) {
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
@@ -735,6 +797,11 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             app.showThemeChooser = true;
             app.themeChooserAnimation = 0;
             break;
+        case CTX_SETTINGS:
+            closeSearchIfOpen(app);
+            app.showSettings = true;
+            app.settingsAnimation = 0;
+            break;
         case CTX_HELP:
             closeSearchIfOpen(app);
             app.showHelp = true;
@@ -747,7 +814,8 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
     // Viewer mode only, and never on top of a modal overlay. The search
     // bar is fine — it shares the viewport rather than covering it.
     if (app.editMode || app.showThemeChooser || app.showToc ||
-        app.showFolderBrowser || app.showHelp || app.showPrintPreview) {
+        app.showFolderBrowser || app.showHelp || app.showPrintPreview ||
+        app.showSettings) {
         return;
     }
 
@@ -764,8 +832,8 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
 }
 
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
-    // Print preview: buttons act on the release; nothing else to press
-    if (app.showPrintPreview) return;
+    // Print preview / settings: controls act on the release
+    if (app.showPrintPreview || app.showSettings) return;
 
     // Context menu: a click lands on an item or dismisses the menu; either
     // way the click is consumed
@@ -1115,6 +1183,20 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Release belonging to a context-menu item click: already handled
     if (app.swallowNextMouseUp) {
         app.swallowNextMouseUp = false;
+        return;
+    }
+
+    // Settings overlay: resolve against the hit rects stored during render
+    if (app.showSettings) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        for (const auto& hit : app.settingsHits) {
+            if (mx >= hit.first.left && mx <= hit.first.right &&
+                my >= hit.first.top && my <= hit.first.bottom) {
+                settingsAction(app, hwnd, hit.second);
+                return;
+            }
+        }
         return;
     }
 
@@ -1641,6 +1723,15 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 break;
             }
+            case VK_OEM_COMMA:
+                // Ctrl+, opens settings (viewer mode)
+                if (!app.editMode) {
+                    closeSearchIfOpen(app);
+                    app.showSettings = !app.showSettings;
+                    app.settingsAnimation = 0;
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                break;
             case 'F':
                 // Ctrl+F to open search
                 if (!app.showSearch) {
@@ -1657,6 +1748,15 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 break;
         }
     } else {
+        // Settings overlay captures the keyboard while open
+        if (app.showSettings) {
+            if (wParam == VK_ESCAPE) {
+                app.showSettings = false;
+                app.settingsAnimation = 0;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return;
+        }
         wParam = translateActionKey(app, wParam, false);
         switch (wParam) {
             case VK_ESCAPE:

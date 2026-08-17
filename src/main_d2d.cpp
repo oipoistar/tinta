@@ -840,6 +840,7 @@ render_document:
     if (app.showContextMenu) renderContextMenu(app);
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
+    if (app.showSettings) renderSettingsOverlay(app);
 
     // Close edit mode split view clipping
     if (app.editMode) {
@@ -1071,6 +1072,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
+                settings.readingWidth = app->readingWidth;
                 if (!app->currentFile.empty()) {
                     rememberReadingPosition(settings, app->currentFile, app->scrollY);
                 }
@@ -1190,6 +1192,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.zoomFactor = savedSettings.zoomFactor;
     app.editorShowPreview = savedSettings.editorShowPreview;
     app.editorWordWrap = savedSettings.editorWordWrap;
+    app.readingWidth = savedSettings.readingWidth;
     applyKeymap(app, savedSettings);
 
     // Parse command line

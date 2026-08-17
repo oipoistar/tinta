@@ -16,6 +16,19 @@ void renderHelpOverlay(App& app);
 // Full-frame print preview; render() short-circuits to this while it is open
 void renderPrintPreview(App& app);
 
+// Settings overlay (Ctrl+,). Render stores (rect, action) pairs in
+// app.settingsHits; handleMouseUp resolves them against these ids.
+enum SettingsAction {
+    SET_NONE = 0,
+    SET_SECTION_GENERAL, SET_SECTION_APPEARANCE, SET_SECTION_EDITOR,
+    SET_TOGGLE_FOLLOW, SET_TOGGLE_FOLDERSEARCH,
+    SET_TOGGLE_WRAP, SET_TOGGLE_PREVIEW,
+    SET_WIDTH_FULL, SET_WIDTH_800, SET_WIDTH_1000, SET_WIDTH_1200,
+    SET_OPEN_THEMES, SET_NEW_THEME,
+    SET_OPEN_INI, SET_OPEN_THEMES_INI,
+};
+void renderSettingsOverlay(App& app);
+
 // Right-click context menu: theme-drawn like the other overlays.
 // Item indices are shared between rendering and input handling.
 enum ContextMenuItem {
@@ -29,6 +42,7 @@ enum ContextMenuItem {
     CTX_BROWSE,
     CTX_REVEAL,
     CTX_THEME,
+    CTX_SETTINGS,
     CTX_HELP,
     CTX_ITEM_COUNT
 };

@@ -1085,6 +1085,7 @@ const ContextMenuEntry CTX_ENTRIES[CTX_ITEM_COUNT] = {
     { L"Browse Files",       L"B",      false },
     { L"Reveal in Explorer", L"",       true  },
     { L"Theme",              L"T",      false },
+    { L"Settings",           L"Ctrl+,", false },
     { L"Help",               L"?",      false },
 };
 
@@ -1575,4 +1576,204 @@ void renderPrintPreview(App& app) {
 
     if (uiFmt) uiFmt->Release();
     if (btnFmt) btnFmt->Release();
+}
+
+// --- Settings overlay (Ctrl+,) ---
+//
+// The dialog inherits the active theme deliberately: it is the one piece of
+// chrome that demonstrates the theme while you adjust it. Section rail on
+// the left, rows of toggles and chips on the right; every interactive rect
+// is pushed into app.settingsHits for the mouse-up hit test.
+
+namespace {
+
+void settingsToggle(App& app, float x, float y, bool on, int action, float anim) {
+    float w = dpi(app, 34.0f), h = dpi(app, 18.0f);
+    D2D1_COLOR_F track = on ? app.theme.accent : app.theme.text;
+    track.a = (on ? 0.9f : 0.25f) * anim;
+    app.brush->SetColor(track);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), h / 2, h / 2), app.brush);
+    float knobR = h / 2 - dpi(app, 2.0f);
+    float knobX = on ? x + w - h / 2 : x + h / 2;
+    app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
+    app.renderTarget->FillEllipse(
+        D2D1::Ellipse(D2D1::Point2F(knobX, y + h / 2), knobR, knobR), app.brush);
+    // Generous hit area: the whole row height around the switch
+    app.settingsHits.push_back({D2D1::RectF(x - dpi(app, 8.0f), y - dpi(app, 8.0f),
+                                            x + w + dpi(app, 8.0f), y + h + dpi(app, 8.0f)),
+                                action});
+}
+
+void settingsChip(App& app, float& x, float y, const wchar_t* label, bool active,
+                  int action, float anim, IDWriteTextFormat* fmt) {
+    float h = dpi(app, 24.0f);
+    float padX = dpi(app, 12.0f);
+    IDWriteTextLayout* tl = nullptr;
+    app.dwriteFactory->CreateTextLayout(label, (UINT32)wcslen(label), fmt, 500.0f, h, &tl);
+    float textW = dpi(app, 40.0f);
+    if (tl) { DWRITE_TEXT_METRICS m{}; tl->GetMetrics(&m); textW = m.width; }
+    float w = textW + padX * 2;
+    D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h),
+                                             dpi(app, 5.0f), dpi(app, 5.0f));
+    if (active) {
+        D2D1_COLOR_F c = app.theme.accent; c.a = anim;
+        app.brush->SetColor(c);
+        app.renderTarget->FillRoundedRectangle(rr, app.brush);
+        app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
+    } else {
+        D2D1_COLOR_F c = app.theme.text; c.a = 0.3f * anim;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawRoundedRectangle(rr, app.brush, 1.0f);
+        c.a = 0.85f * anim;
+        app.brush->SetColor(c);
+    }
+    if (tl) {
+        app.renderTarget->DrawTextLayout(
+            D2D1::Point2F(x + padX, y + (h - dpi(app, 17.0f)) / 2), tl, app.brush);
+        tl->Release();
+    }
+    app.settingsHits.push_back({D2D1::RectF(x, y, x + w, y + h), action});
+    x += w + dpi(app, 8.0f);
+}
+
+} // namespace
+
+void renderSettingsOverlay(App& app) {
+    if (app.settingsAnimation < 1.0f) {
+        float prev = app.settingsAnimation;
+        app.settingsAnimation = std::min(1.0f, app.settingsAnimation + 0.2f);
+        if (app.settingsAnimation != prev) InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+    float anim = app.settingsAnimation;
+    app.settingsHits.clear();
+
+    IDWriteTextFormat* fmt = app.folderBrowserFormat;
+    if (!fmt) return;
+
+    // Dimmed backdrop over the document
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.55f * anim));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
+
+    float panelW = std::min(dpi(app, 660.0f), app.width - dpi(app, 80.0f));
+    float panelH = std::min(dpi(app, 420.0f), app.height - dpi(app, 80.0f));
+    float px = (app.width - panelW) / 2;
+    float py = (app.height - panelH) / 2 + (1 - anim) * dpi(app, 30.0f);
+
+    D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(
+        D2D1::RectF(px, py, px + panelW, py + panelH), dpi(app, 12.0f), dpi(app, 12.0f));
+    D2D1_COLOR_F bg = app.theme.background; bg.a = 0.99f * anim;
+    app.brush->SetColor(bg);
+    app.renderTarget->FillRoundedRectangle(panel, app.brush);
+    D2D1_COLOR_F border = app.theme.text; border.a = 0.25f * anim;
+    app.brush->SetColor(border);
+    app.renderTarget->DrawRoundedRectangle(panel, app.brush, 1.0f);
+
+    // Title
+    if (app.themeTitleFormat) {
+        app.themeTitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        D2D1_COLOR_F tc = app.theme.heading; tc.a = anim;
+        app.brush->SetColor(tc);
+        app.renderTarget->DrawText(L"Settings", 8, app.themeTitleFormat,
+            D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 16.0f),
+                        px + panelW, py + dpi(app, 56.0f)), app.brush);
+    }
+
+    // Section rail
+    const wchar_t* sections[] = {L"General", L"Appearance", L"Editor"};
+    const int sectionActions[] = {SET_SECTION_GENERAL, SET_SECTION_APPEARANCE, SET_SECTION_EDITOR};
+    float railX = px + dpi(app, 24.0f);
+    float railY = py + dpi(app, 68.0f);
+    float railW = dpi(app, 130.0f);
+    for (int i = 0; i < 3; i++) {
+        float rowY = railY + i * dpi(app, 34.0f);
+        D2D1_RECT_F r = D2D1::RectF(railX, rowY, railX + railW, rowY + dpi(app, 28.0f));
+        if (i == app.settingsSection) {
+            D2D1_COLOR_F hl = app.theme.accent; hl.a = 0.16f * anim;
+            app.brush->SetColor(hl);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(r, dpi(app, 5.0f), dpi(app, 5.0f)), app.brush);
+        }
+        D2D1_COLOR_F tc = app.theme.text;
+        tc.a = (i == app.settingsSection ? 1.0f : 0.6f) * anim;
+        app.brush->SetColor(tc);
+        app.renderTarget->DrawText(sections[i], (UINT32)wcslen(sections[i]), fmt,
+            D2D1::RectF(r.left + dpi(app, 10.0f), r.top + dpi(app, 5.0f), r.right, r.bottom),
+            app.brush);
+        app.settingsHits.push_back({r, sectionActions[i]});
+    }
+
+    // Content column
+    float cx = railX + railW + dpi(app, 28.0f);
+    float cw = px + panelW - dpi(app, 28.0f) - cx;
+    float cy = railY;
+    float rowH = dpi(app, 44.0f);
+
+    auto rowLabel = [&](const wchar_t* label, const wchar_t* hint) {
+        D2D1_COLOR_F tc = app.theme.text; tc.a = 0.95f * anim;
+        app.brush->SetColor(tc);
+        app.renderTarget->DrawText(label, (UINT32)wcslen(label), fmt,
+            D2D1::RectF(cx, cy + dpi(app, 3.0f), cx + cw, cy + dpi(app, 21.0f)), app.brush);
+        if (hint) {
+            tc.a = 0.45f * anim;
+            app.brush->SetColor(tc);
+            app.renderTarget->DrawText(hint, (UINT32)wcslen(hint), fmt,
+                D2D1::RectF(cx, cy + dpi(app, 21.0f), cx + cw, cy + dpi(app, 39.0f)), app.brush);
+        }
+    };
+    auto hairline = [&]() {
+        D2D1_COLOR_F hc = app.theme.text; hc.a = 0.08f * anim;
+        app.brush->SetColor(hc);
+        app.renderTarget->DrawLine(D2D1::Point2F(cx, cy + rowH - dpi(app, 4.0f)),
+                                   D2D1::Point2F(cx + cw, cy + rowH - dpi(app, 4.0f)),
+                                   app.brush, 1.0f);
+    };
+
+    if (app.settingsSection == 0) {  // General
+        rowLabel(L"Folder search results", L"Sibling files matched while searching");
+        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+                       app.folderSearchEnabled, SET_TOGGLE_FOLDERSEARCH, anim);
+        hairline(); cy += rowH;
+        rowLabel(L"Edit settings.ini", L"Keys, positions, and everything else");
+        float bx = cx + cw - dpi(app, 60.0f);
+        settingsChip(app, bx, cy + dpi(app, 2.0f), L"Open", false, SET_OPEN_INI, anim, fmt);
+        hairline(); cy += rowH;
+        rowLabel(L"Edit themes.ini", L"Hand-tune custom themes, syntax colors included");
+        bx = cx + cw - dpi(app, 60.0f);
+        settingsChip(app, bx, cy + dpi(app, 2.0f), L"Open", false, SET_OPEN_THEMES_INI, anim, fmt);
+    } else if (app.settingsSection == 1) {  // Appearance
+        rowLabel(L"Reading width", L"Center the document in a column on wide screens");
+        cy += rowH - dpi(app, 6.0f);
+        float chipX = cx;
+        settingsChip(app, chipX, cy, L"Full", app.readingWidth == 0, SET_WIDTH_FULL, anim, fmt);
+        settingsChip(app, chipX, cy, L"800", app.readingWidth == 800, SET_WIDTH_800, anim, fmt);
+        settingsChip(app, chipX, cy, L"1000", app.readingWidth == 1000, SET_WIDTH_1000, anim, fmt);
+        settingsChip(app, chipX, cy, L"1200", app.readingWidth == 1200, SET_WIDTH_1200, anim, fmt);
+        cy += rowH - dpi(app, 8.0f);
+        rowLabel(L"Follow Windows theme", L"Switch light and dark with the system");
+        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+                       app.followSystemTheme, SET_TOGGLE_FOLLOW, anim);
+        hairline(); cy += rowH;
+        rowLabel(L"Themes", L"Browse, or create your own with any system font");
+        float bx2 = cx + cw - dpi(app, 150.0f);
+        settingsChip(app, bx2, cy + dpi(app, 2.0f), L"Browse", false, SET_OPEN_THEMES, anim, fmt);
+        settingsChip(app, bx2, cy + dpi(app, 2.0f), L"+ New", false, SET_NEW_THEME, anim, fmt);
+    } else {  // Editor
+        rowLabel(L"Word wrap", L"Wrap long lines in the editor pane");
+        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+                       app.editorWordWrap, SET_TOGGLE_WRAP, anim);
+        hairline(); cy += rowH;
+        rowLabel(L"Preview pane", L"Show the rendered preview beside the editor");
+        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+                       app.editorShowPreview, SET_TOGGLE_PREVIEW, anim);
+    }
+
+    // Footer hint
+    D2D1_COLOR_F fc = app.theme.text; fc.a = 0.4f * anim;
+    app.brush->SetColor(fc);
+    const wchar_t* footer = L"Esc to close \x2022 changes apply immediately";
+    app.renderTarget->DrawText(footer, (UINT32)wcslen(footer), fmt,
+        D2D1::RectF(px + dpi(app, 24.0f), py + panelH - dpi(app, 32.0f),
+                    px + panelW, py + panelH), app.brush);
 }
