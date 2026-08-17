@@ -471,6 +471,16 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             return;
         }
         if (!ctrl) {
+            float editorMax = std::max(0.0f, app.editorContentHeight - (float)app.height);
+            if (delta < 0 && app.editorScrollY >= editorMax - 1.0f) {
+                // Editor is at its end: scroll the preview's remaining tail
+                // directly (#85); the sync allows this overshoot
+                float maxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
+                app.scrollY = std::min(app.scrollY - delta * dpi(app, 60.0f), maxScroll);
+                app.targetScrollY = app.scrollY;
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
             handleEditorMouseWheel(app, hwnd, delta);
             return;
         }
@@ -2158,7 +2168,12 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
 
     // ':' to enter edit mode, '?' to toggle help — when no overlay is active
     if (!app.showSearch && !app.showFolderBrowser && !app.showToc && !app.showThemeChooser) {
-        wchar_t ch = (wchar_t)translateActionKey(app, wParam, true);
+        // Chinese IME full-width forms count as their ASCII keys, so the
+        // shortcuts work without switching input modes (#85)
+        WPARAM key = wParam;
+        if (key == 0xFF1A) key = L':';  // ：
+        if (key == 0xFF1F) key = L'?';  // ？
+        wchar_t ch = (wchar_t)translateActionKey(app, key, true);
         if (ch == L':' && !app.showHelp) {
             enterEditMode(app);
             return;
