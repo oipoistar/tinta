@@ -155,6 +155,8 @@ struct Settings {
     // Windowed and fullscreen (zen) modes keep separate preferences.
     int readingWidthPct = 100;
     int zenWidthPct = 60;
+    // Table of contents panel side: false = right (default), true = left
+    bool tocOnLeft = false;
 };
 
 // Application state
@@ -401,7 +403,8 @@ struct App {
 
     // Table of contents overlay
     bool showToc = false;
-    float tocAnimation = 0.0f;  // 0 to 1 for slide-in from right
+    bool tocOnLeft = false;     // panel side (persisted)
+    float tocAnimation = 0.0f;  // 0 to 1 slide-in from the chosen side
     struct HeadingInfo {
         std::wstring text;
         int level;       // 1-6

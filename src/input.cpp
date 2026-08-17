@@ -295,10 +295,26 @@ static void themeEditorAdoptBase(App& app, int baseIndex) {
     }
 }
 
-static void openThemeEditor(App& app) {
+// Seeds themes.ini with a comment header if it does not exist, then opens
+// it in the default editor. Shared by settings and the theme editor.
+static void openThemesIniFile() {
+    std::wstring p = getSettingsPath();
+    size_t slash = p.find_last_of(L'\\');
+    if (slash == std::wstring::npos) return;
+    p = p.substr(0, slash + 1) + L"themes.ini";
+    if (GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        std::ofstream f(p);
+        f << "; Custom themes: [theme] sections, RRGGBB colors.\n";
+    }
+    ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// editCurrent seeds the editor with the active theme's name so saving
+// updates that custom theme in place (built-ins save as a copy)
+static void openThemeEditor(App& app, bool editCurrent) {
     enumerateSystemFontFamilies(app);
     themeEditorAdoptBase(app, app.currentThemeIndex);
-    app.themeEditorName = L"My theme";
+    app.themeEditorName = editCurrent ? app.theme.name : L"My theme";
     app.themeEditorField = 6;  // name focused first
     app.themeEditorFontScroll = 0.0f;
     app.showSettings = false;
@@ -360,25 +376,20 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.themeChooserAnimation = 0;
             break;
         case SET_NEW_THEME:
-            openThemeEditor(app);
+            openThemeEditor(app, false);
             break;
+        case SET_EDIT_THEME:
+            openThemeEditor(app, true);
+            break;
+        case SET_TOC_LEFT: app.tocOnLeft = true; break;
+        case SET_TOC_RIGHT: app.tocOnLeft = false; break;
         case SET_OPEN_INI:
             ShellExecuteW(nullptr, L"open", getSettingsPath().c_str(),
                           nullptr, nullptr, SW_SHOWNORMAL);
             break;
-        case SET_OPEN_THEMES_INI: {
-            std::wstring p = getSettingsPath();
-            size_t slash = p.find_last_of(L'\\');
-            if (slash != std::wstring::npos) {
-                p = p.substr(0, slash + 1) + L"themes.ini";
-                if (GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES) {
-                    std::ofstream f(p);  // seed an empty file so the editor opens
-                    f << "; Custom themes: [theme] sections, RRGGBB colors.\n";
-                }
-                ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-            }
+        case SET_OPEN_THEMES_INI:
+            openThemesIniFile();
             break;
-        }
     }
     InvalidateRect(hwnd, nullptr, FALSE);
 }
@@ -488,7 +499,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Handle TOC scroll (not when Ctrl is held — that's zoom)
     if (app.showToc && !ctrl) {
         float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
-        float panelX = app.width - panelWidth * app.tocAnimation;
+        float panelX = tocPanelX(app, panelWidth);
         if (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth) {
             app.tocScroll -= delta * dpi(app, 60.0f);
             float itemHeight = dpi(app, 28.0f);
@@ -771,7 +782,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             InvalidateRect(hwnd, nullptr, FALSE);
     } else if (app.showToc) {
         float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
-        float panelX = app.width - panelWidth * app.tocAnimation;
+        float panelX = tocPanelX(app, panelWidth);
         bool inPanel = (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth);
         if (inPanel && app.hoveredTocIndex >= 0) {
             SetCursor(cursorHand);
@@ -1353,6 +1364,8 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 themeEditorAdoptBase(app, base % n);
             } else if (action == TE_DARK) {
                 app.themeEditorTheme.isDark = !app.themeEditorTheme.isDark;
+            } else if (action == TE_OPEN_INI) {
+                openThemesIniFile();
             } else if (action == TE_CANCEL) {
                 closeThemeEditor(app, true);
                 return;
@@ -1450,7 +1463,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         int clickX = GET_X_LPARAM(lParam);
 
         float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
-        float panelX = app.width - panelWidth * app.tocAnimation;
+        float panelX = tocPanelX(app, panelWidth);
 
         if (clickX >= panelX && (float)clickX <= panelX + panelWidth) {
             // Click inside panel

@@ -24,9 +24,13 @@ enum SettingsAction {
     SET_TOGGLE_FOLLOW, SET_TOGGLE_FOLDERSEARCH,
     SET_TOGGLE_WRAP, SET_TOGGLE_PREVIEW,
     SET_SLIDER_READING, SET_SLIDER_ZEN,
-    SET_OPEN_THEMES, SET_NEW_THEME,
+    SET_OPEN_THEMES, SET_NEW_THEME, SET_EDIT_THEME,
     SET_OPEN_INI, SET_OPEN_THEMES_INI,
+    SET_TOC_LEFT, SET_TOC_RIGHT,
 };
+// TOC panel X for the configured side at the current animation state;
+// geometry shared between render and the input hit tests
+float tocPanelX(const App& app, float panelWidth);
 void renderSettingsOverlay(App& app);
 
 // Theme editor ("+ New" in settings). Font-list entries encode their
@@ -37,7 +41,7 @@ enum ThemeEditorAction {
     TE_FIELD_ACCENT, TE_FIELD_CODEBG,   // order matches themeEditorHex[0..5]
     TE_FIELD_NAME,
     TE_BASE_PREV, TE_BASE_NEXT,
-    TE_DARK, TE_SAVE, TE_CANCEL,
+    TE_DARK, TE_SAVE, TE_CANCEL, TE_OPEN_INI,
     TE_FONT_BASE = 100,
 };
 void renderThemeEditor(App& app);

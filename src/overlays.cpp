@@ -493,7 +493,7 @@ void renderToc(App& app) {
 
     // Panel dimensions
     float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
-    float panelX = app.width - panelWidth * anim;  // Slide in from right
+    float panelX = tocPanelX(app, panelWidth);  // slides from the chosen side
     float panelY = 0;
     float panelHeight = (float)app.height;
 
@@ -621,6 +621,11 @@ void renderToc(App& app) {
             }
         }
     }
+}
+
+float tocPanelX(const App& app, float panelWidth) {
+    return app.tocOnLeft ? -panelWidth * (1.0f - app.tocAnimation)
+                         : app.width - panelWidth * app.tocAnimation;
 }
 
 int themeChooserRows() {
@@ -1790,9 +1795,19 @@ void renderSettingsOverlay(App& app) {
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.followSystemTheme, SET_TOGGLE_FOLLOW, anim);
         hairline(); cy += rowH;
-        rowLabel(L"Themes", L"Browse, or create your own with any system font");
-        float bx2 = cx + cw - dpi(app, 150.0f);
+        rowLabel(L"Table of contents", L"Which side the Tab panel slides from");
+        {
+            float tx = cx + cw - dpi(app, 118.0f);
+            settingsChip(app, tx, cy + dpi(app, 2.0f), L"Left", app.tocOnLeft,
+                         SET_TOC_LEFT, anim, fmt);
+            settingsChip(app, tx, cy + dpi(app, 2.0f), L"Right", !app.tocOnLeft,
+                         SET_TOC_RIGHT, anim, fmt);
+        }
+        hairline(); cy += rowH;
+        rowLabel(L"Themes", L"Browse, edit the current one, or start fresh");
+        float bx2 = cx + cw - dpi(app, 208.0f);
         settingsChip(app, bx2, cy + dpi(app, 2.0f), L"Browse", false, SET_OPEN_THEMES, anim, fmt);
+        settingsChip(app, bx2, cy + dpi(app, 2.0f), L"Edit", false, SET_EDIT_THEME, anim, fmt);
         settingsChip(app, bx2, cy + dpi(app, 2.0f), L"+ New", false, SET_NEW_THEME, anim, fmt);
     } else {  // Editor
         rowLabel(L"Word wrap", L"Wrap long lines in the editor pane");
@@ -2103,5 +2118,15 @@ void renderThemeEditor(App& app) {
         fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         app.themeEditorHits.push_back({save, TE_SAVE});
         app.themeEditorHits.push_back({cancel, TE_CANCEL});
+
+        // themes.ini link, bottom-left: hand-tune what the editor exposes
+        // and everything it does not (syntax palette, blockquote, code font)
+        const wchar_t* ini = L"Open themes.ini for full control";
+        D2D1_RECT_F iniR = D2D1::RectF(px + dpi(app, 24.0f), by + dpi(app, 6.0f),
+                                       px + dpi(app, 240.0f), by + bh);
+        c = base.link; c.a = 0.85f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(ini, (UINT32)wcslen(ini), fmt, iniR, app.brush);
+        app.themeEditorHits.push_back({iniR, TE_OPEN_INI});
     }
 }

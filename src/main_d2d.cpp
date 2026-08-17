@@ -1075,6 +1075,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.folderSearchEnabled = app->folderSearchEnabled;
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
+                settings.tocOnLeft = app->tocOnLeft;
                 if (!app->currentFile.empty()) {
                     rememberReadingPosition(settings, app->currentFile, app->scrollY);
                 }
@@ -1196,6 +1197,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.editorWordWrap = savedSettings.editorWordWrap;
     app.readingWidthPct = savedSettings.readingWidthPct;
     app.zenWidthPct = savedSettings.zenWidthPct;
+    app.tocOnLeft = savedSettings.tocOnLeft;
     applyKeymap(app, savedSettings);
 
     // Parse command line
