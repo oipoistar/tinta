@@ -153,7 +153,7 @@ Settings loadSettings() {
 
         if (key == "themeIndex") {
             int idx = std::stoi(value);
-            if (idx >= 0 && idx < THEME_COUNT) settings.themeIndex = idx;
+            if (idx >= 0) settings.themeIndex = idx;  // clamped at apply via themeCount()
         } else if (key == "zoomFactor") {
             float z = std::stof(value);
             if (z >= 0.5f && z <= 3.0f) settings.zoomFactor = z;
@@ -173,10 +173,10 @@ Settings loadSettings() {
             settings.followSystemTheme = (value == "1");
         } else if (key == "lightThemeIndex") {
             int idx = std::stoi(value);
-            if (idx >= 0 && idx < THEME_COUNT) settings.lightThemeIndex = idx;
+            if (idx >= 0) settings.lightThemeIndex = idx;
         } else if (key == "darkThemeIndex") {
             int idx = std::stoi(value);
-            if (idx >= 0 && idx < THEME_COUNT) settings.darkThemeIndex = idx;
+            if (idx >= 0) settings.darkThemeIndex = idx;
         } else if (key == "windowMaximized") {
             settings.windowMaximized = (value == "1");
         } else if (key == "hasAskedFileAssociation") {

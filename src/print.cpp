@@ -390,25 +390,19 @@ struct PageGeometry {
     float contentW, contentH;    // inside the margins
 };
 
-// Paper size of the default printer, for previewing before the dialog runs.
-// printDocument re-reads the size from whatever printer is finally picked.
+// Paper size for previewing before the dialog runs, decided by locale only.
+// Probing the default printer here (CreateDC) initializes third-party
+// drivers and can pop their dialogs (Acrobat Distiller's broken-temp-folder
+// error, for one) just to read a paper size — the real printer is consulted
+// after the user confirms the print dialog, and re-pagination handles any
+// difference.
 PageGeometry defaultPageGeometry() {
-    PageGeometry geo{794.0f, 1123.0f, 0.0f, 0.0f};  // A4 fallback
-    wchar_t printer[256];
-    DWORD len = 256;
-    if (GetDefaultPrinterW(printer, &len)) {
-        HDC dc = CreateDCW(L"WINSPOOL", printer, nullptr, nullptr);
-        if (dc) {
-            float dpiX = (float)GetDeviceCaps(dc, LOGPIXELSX);
-            float dpiY = (float)GetDeviceCaps(dc, LOGPIXELSY);
-            float w = GetDeviceCaps(dc, PHYSICALWIDTH) * 96.0f / dpiX;
-            float h = GetDeviceCaps(dc, PHYSICALHEIGHT) * 96.0f / dpiY;
-            if (w >= 200 && h >= 200) {
-                geo.pageW = w;
-                geo.pageH = h;
-            }
-            DeleteDC(dc);
-        }
+    PageGeometry geo{794.0f, 1123.0f, 0.0f, 0.0f};  // A4
+    wchar_t measure[2] = L"0";
+    if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IMEASURE, measure, 2) &&
+        measure[0] == L'1') {
+        geo.pageW = 816.0f;   // US customary: Letter
+        geo.pageH = 1056.0f;
     }
     geo.contentW = geo.pageW - kPageMarginDips * 2;
     geo.contentH = geo.pageH - kPageMarginDips * 2;

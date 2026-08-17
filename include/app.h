@@ -110,6 +110,23 @@ inline float dpi(const App& app, float value);
 extern const D2DTheme THEMES[];
 extern const int THEME_COUNT;
 
+// Dynamic theme registry (#82): the built-ins plus user themes loaded from
+// %APPDATA%\Tinta\themes.ini. Custom themes own their strings and live at
+// stable addresses for the app lifetime, so D2DTheme's const wchar_t*
+// members stay valid. Indices: [0, THEME_COUNT) built-in, then customs.
+struct CustomTheme {
+    std::wstring name, fontFamily, codeFontFamily;
+    D2DTheme theme;
+};
+int themeCount();
+const D2DTheme& themeAt(int index);  // out-of-range clamps to theme 0
+void loadCustomThemes();
+// Adds or replaces (by name) a user theme and rewrites themes.ini.
+// Returns the theme's registry index, or -1 on failure.
+int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
+                    const std::wstring& fontFamily,
+                    const std::wstring& codeFontFamily);
+
 // Persistent settings
 struct Settings {
     int themeIndex = 5;          // Default to Midnight

@@ -623,6 +623,28 @@ void renderToc(App& app) {
     }
 }
 
+int themeChooserRows() {
+    int light = 0, dark = 0;
+    for (int i = 0; i < themeCount(); i++) {
+        (themeAt(i).isDark ? dark : light)++;
+    }
+    return std::max(5, std::max(light, dark));
+}
+
+void themeChooserCell(int themeIndex, int& col, int& row) {
+    int light = 0, dark = 0;
+    col = 0;
+    row = 0;
+    for (int i = 0; i <= themeIndex && i < themeCount(); i++) {
+        bool d = themeAt(i).isDark;
+        if (i == themeIndex) {
+            col = d ? 1 : 0;
+            row = d ? dark : light;
+        }
+        (d ? dark : light)++;
+    }
+}
+
 void renderThemeChooser(App& app) {
     // Preview formats are created lazily on first open (not at startup)
     ensureThemePreviewFormats(app);
@@ -697,18 +719,18 @@ void renderThemeChooser(App& app) {
                         togX - dpi(app, 8.0f), togY + togH), app.brush);
     }
 
-    // Theme grid - 2 columns, 5 rows
+    // Theme grid - 2 columns (Light | Dark); rows grow with custom themes
     float gridStartY = panelY + dpi(app, 75.0f);
     float cardWidth = (panelWidth - dpi(app, 60.0f)) / 2;  // 2 columns with padding
-    float cardHeight = (panelHeight - dpi(app, 130.0f)) / 5;  // 5 rows
+    float cardHeight = (panelHeight - dpi(app, 130.0f)) / themeChooserRows();
     float cardPadding = dpi(app, 8.0f);
 
     app.hoveredThemeIndex = -1;
 
-    for (int i = 0; i < THEME_COUNT; i++) {
-        const D2DTheme& t = THEMES[i];
-        int col = t.isDark ? 1 : 0;  // Light themes left, dark themes right
-        int row = t.isDark ? (i - 5) : i;
+    for (int i = 0; i < themeCount(); i++) {
+        const D2DTheme& t = themeAt(i);
+        int col, row;
+        themeChooserCell(i, col, row);
 
         float cardX = panelX + dpi(app, 20.0f) + col * (cardWidth + dpi(app, 20.0f));
         float cardY = gridStartY + row * cardHeight;

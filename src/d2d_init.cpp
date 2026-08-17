@@ -73,9 +73,9 @@ bool initD2D(App& app) {
 }
 
 void applyTheme(App& app, int themeIndex) {
-    if (themeIndex < 0 || themeIndex >= THEME_COUNT) return;
+    if (themeIndex < 0 || themeIndex >= themeCount()) return;
 
-    const D2DTheme& newTheme = THEMES[themeIndex];
+    const D2DTheme& newTheme = themeAt(themeIndex);
 
     // If the fonts are unchanged the existing text formats are identical —
     // skip recreating ~47 IDWriteTextFormat objects. Colors are baked into
@@ -366,9 +366,9 @@ void ensureThemePreviewFormats(App& app) {
     if (!app.themePreviewFormats.empty()) return;
 
     float scale = app.contentScale;
-    app.themePreviewFormats.resize(THEME_COUNT);
-    for (int i = 0; i < THEME_COUNT; i++) {
-        const D2DTheme& t = THEMES[i];
+    app.themePreviewFormats.resize(themeCount());
+    for (int i = 0; i < themeCount(); i++) {
+        const D2DTheme& t = themeAt(i);
         app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
             DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             14.0f * scale, L"en-us", &app.themePreviewFormats[i].name);

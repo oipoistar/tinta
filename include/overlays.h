@@ -7,6 +7,11 @@ void renderSearchOverlay(App& app);
 void renderFolderBrowser(App& app);
 void renderToc(App& app);
 void renderThemeChooser(App& app);
+// Chooser grid geometry, shared between render and hit-testing: rows in the
+// taller column (never below the built-in 5), and a theme's cell position
+// (light themes fill the left column top-down, dark the right)
+int themeChooserRows();
+void themeChooserCell(int themeIndex, int& col, int& row);
 void renderHelpOverlay(App& app);
 // Full-frame print preview; render() short-circuits to this while it is open
 void renderPrintPreview(App& app);

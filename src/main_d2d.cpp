@@ -1171,6 +1171,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     auto t0 = startupStart;
     g_app = &app;
 
+    // Load user themes before settings: saved theme indices may point at them
+    loadCustomThemes();
+
     // Load saved settings
     Settings savedSettings = loadSettings();
     app.followSystemTheme = savedSettings.followSystemTheme;
@@ -1180,7 +1183,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;
-    app.theme = THEMES[startTheme];
+    if (startTheme >= themeCount()) startTheme = 0;
+    app.currentThemeIndex = startTheme;
+    app.theme = themeAt(startTheme);
     app.darkMode = app.theme.isDark;
     app.zoomFactor = savedSettings.zoomFactor;
     app.editorShowPreview = savedSettings.editorShowPreview;

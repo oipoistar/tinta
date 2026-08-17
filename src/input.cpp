@@ -1309,7 +1309,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         float panelY = (app.height - panelHeight) / 2;
         float gridStartY = panelY + dpi(app, 75.0f);
         float cardWidth = (panelWidth - dpi(app, 60.0f)) / 2;
-        float cardHeight = (panelHeight - dpi(app, 130.0f)) / 5;
+        float cardHeight = (panelHeight - dpi(app, 130.0f)) / themeChooserRows();
         float cardPadding = dpi(app, 8.0f);
 
         // "Follow Windows" toggle (label + switch, must match render geometry)
@@ -1335,10 +1335,9 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         }
 
         int clickedTheme = -1;
-        for (int i = 0; i < THEME_COUNT; i++) {
-            const D2DTheme& t = THEMES[i];
-            int col = t.isDark ? 1 : 0;
-            int row = t.isDark ? (i - 5) : i;
+        for (int i = 0; i < themeCount(); i++) {
+            int col, row;
+            themeChooserCell(i, col, row);
 
             float cardX = panelX + dpi(app, 20.0f) + col * (cardWidth + dpi(app, 20.0f));
             float cardY = gridStartY + row * cardHeight;
@@ -1359,7 +1358,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             // While auto mode is on, picking a card records it as the
             // preference for that card's light/dark class
             if (app.followSystemTheme) {
-                if (THEMES[clickedTheme].isDark) app.darkThemeIndex = clickedTheme;
+                if (themeAt(clickedTheme).isDark) app.darkThemeIndex = clickedTheme;
                 else app.lightThemeIndex = clickedTheme;
             }
             app.showThemeChooser = false;
