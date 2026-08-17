@@ -155,7 +155,16 @@ void render(App& app) {
         }
 
         float previewMaxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
-        app.scrollY = std::max(0.0f, std::min(targetY, previewMaxScroll));
+        float synced = std::max(0.0f, std::min(targetY, previewMaxScroll));
+        float editorMax = std::max(0.0f, app.editorContentHeight - (float)app.height);
+        if (app.editorScrollY >= editorMax - 1.0f) {
+            // The editor has bottomed out, but rendered content is taller
+            // than its source (images, diagrams): let the preview overshoot
+            // to reach its tail (#85). Scrolling the editor up re-syncs.
+            app.scrollY = std::min(std::max(app.scrollY, synced), previewMaxScroll);
+        } else {
+            app.scrollY = synced;
+        }
         app.targetScrollY = app.scrollY;
     }
 

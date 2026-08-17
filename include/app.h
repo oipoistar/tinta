@@ -378,6 +378,10 @@ struct App {
         float contentScale = 1.0f, zoomFactor = 1.0f, appliedZoomFactor = 1.0f;
         float scrollX = 0, scrollY = 0, targetScrollX = 0, targetScrollY = 0;
         D2DTheme theme{};
+        // Edit mode is suspended during print layout: the layout width comes
+        // from documentViewportWidth, which in edit mode is the preview
+        // pane — printing from the editor wrapped at half the page (#81)
+        bool editMode = false;
     };
     bool showPrintPreview = false;
     PrintSavedView printSaved;

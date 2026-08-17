@@ -1646,11 +1646,13 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
         std::thread(asyncImageWorker, app.hwnd, src).detach();
         return app.imageCache[src];
     } else {
-        // Resolve relative to current file's directory
+        // Resolve relative to the current file's directory. Both strings are
+        // UTF-8 and must be widened explicitly: a narrow filesystem::path
+        // decodes through the ANSI codepage and mangles non-ASCII paths (#87)
         std::wstring wsrc = toWide(src);
         if (!app.currentFile.empty()) {
-            std::filesystem::path basePath(app.currentFile);
-            std::filesystem::path imgPath = basePath.parent_path() / src;
+            std::filesystem::path basePath(toWide(app.currentFile));
+            std::filesystem::path imgPath = basePath.parent_path() / wsrc;
             widePath = imgPath.wstring();
         } else {
             widePath = wsrc;
