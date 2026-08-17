@@ -342,6 +342,21 @@ struct App {
     int settingsDragSlider = 0;         // SET_SLIDER_* while dragging, else 0
     D2D1_RECT_F settingsSliderTrack[2]{};  // 0 window, 1 fullscreen (set in render)
 
+    // Theme editor ("+ New" in settings): a working copy of a theme edited
+    // through hex fields and a system-font list, previewed live in an ink
+    // specimen. Saving goes through saveCustomTheme into themes.ini.
+    bool showThemeEditor = false;
+    D2DTheme themeEditorTheme{};        // working colors (string ptrs unused)
+    std::wstring themeEditorName;
+    std::wstring themeEditorFont;       // main font family
+    std::wstring themeEditorHex[6];     // bg, text, heading, link, accent, code bg
+    int themeEditorField = -1;          // focused field: 0..5 hex, 6 = name
+    int themeEditorBase = 0;            // registry index the colors started from
+    float themeEditorFontScroll = 0.0f;
+    std::vector<std::wstring> systemFontFamilies;  // enumerated on first open
+    std::vector<std::pair<D2D1_RECT_F, int>> themeEditorHits;
+    D2D1_RECT_F themeEditorFontListRect{};  // for wheel routing (set in render)
+
     // Resolved single-key bindings, indexed like KEY_ACTIONS (#77).
     // Filled by applyKeymap from settings; slots beyond the action count
     // stay zero.

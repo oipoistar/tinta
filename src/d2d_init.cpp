@@ -4,6 +4,8 @@
 #include <objbase.h>
 #include <dwmapi.h>
 
+#include <algorithm>
+
 // Older SDK headers may lack these
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
@@ -478,4 +480,34 @@ bool createRenderTarget(App& app) {
     }
 
     return true;
+}
+
+// System font families for the theme editor font picker (#82). Enumerated
+// once per session, sorted, en-US names preferred with first-locale
+// fallback so localized-only families still appear.
+void enumerateSystemFontFamilies(App& app) {
+    if (!app.systemFontFamilies.empty() || !app.dwriteFactory) return;
+    IDWriteFontCollection* fonts = nullptr;
+    if (FAILED(app.dwriteFactory->GetSystemFontCollection(&fonts)) || !fonts) return;
+    UINT32 count = fonts->GetFontFamilyCount();
+    app.systemFontFamilies.reserve(count);
+    for (UINT32 i = 0; i < count; i++) {
+        IDWriteFontFamily* family = nullptr;
+        if (FAILED(fonts->GetFontFamily(i, &family)) || !family) continue;
+        IDWriteLocalizedStrings* names = nullptr;
+        if (SUCCEEDED(family->GetFamilyNames(&names)) && names) {
+            UINT32 index = 0;
+            BOOL exists = FALSE;
+            names->FindLocaleName(L"en-us", &index, &exists);
+            if (!exists) index = 0;
+            wchar_t name[128] = {};
+            if (SUCCEEDED(names->GetString(index, name, 128)) && name[0]) {
+                app.systemFontFamilies.push_back(name);
+            }
+            names->Release();
+        }
+        family->Release();
+    }
+    fonts->Release();
+    std::sort(app.systemFontFamilies.begin(), app.systemFontFamilies.end());
 }
