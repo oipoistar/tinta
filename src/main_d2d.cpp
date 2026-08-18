@@ -93,6 +93,16 @@ void render(App& app) {
         return;
     }
 
+    // Any viewport width change (folder browser toggle, preview split)
+    // re-flows the reading column for the space that remains
+    {
+        float vw = documentViewportWidth(app);
+        if (vw > 0.0f && vw != app.lastViewportWidth) {
+            app.lastViewportWidth = vw;
+            app.layoutDirty = true;
+        }
+    }
+
     if (app.layoutDirty) {
         if (app.editMode && !app.editorShowPreview) {
             // Preview hidden: defer document layout until it's shown again
@@ -205,6 +215,13 @@ void render(App& app) {
     // Clear background
     app.renderTarget->Clear(app.theme.background);
     app.drawCalls++;
+
+    // Folder browser open: the document shifts right in sync with the
+    // panel's slide so it stays fully readable beside it
+    if (documentViewportX(app) > 0.0f) {
+        app.renderTarget->SetTransform(
+            D2D1::Matrix3x2F::Translation(documentViewportX(app), 0));
+    }
 
 render_document:
 
@@ -694,6 +711,12 @@ render_document:
                 app.brush);
             app.drawCalls++;
         }
+    }
+
+    // Back to screen coordinates: notifications, stats, and overlays
+    // (including the folder browser panel itself) are not shifted
+    if (!app.editMode && documentViewportX(app) > 0.0f) {
+        app.renderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
     }
 
     // "Copied!" notification with fade out (cached layout)
