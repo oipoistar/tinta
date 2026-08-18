@@ -40,11 +40,8 @@ void handleSelectScrollTimer(App& app, HWND hwnd) {
     app.scrollY = next;
     app.targetScrollY = next;
 
-    POINT pt;
-    if (GetCursorPos(&pt) && ScreenToClient(hwnd, &pt)) {
-        app.mouseX = pt.x;
-        app.mouseY = pt.y;
-    }
+    // app.mouseX/Y hold the drag position — with mouse capture they update
+    // even outside the window, and holding still keeps the last position
     float docX = ((float)app.mouseX - documentViewportX(app)) + app.scrollX;
     float docY = (float)app.mouseY + app.scrollY;
     size_t off = selectionOffsetAtPoint(app, docX, docY);
@@ -1236,6 +1233,10 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         }
         InvalidateRect(hwnd, nullptr, FALSE);
     } else {
+        // Capture the mouse for the duration of a selection drag: without
+        // it, mouse events stop at the window edge and the drag can neither
+        // auto-scroll past the viewport nor finalize outside the window
+        SetCapture(hwnd);
         // Detect double/triple clicks
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1817,6 +1818,9 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     app.mouseDown = false;
     app.selecting = false;
     app.selShiftExtend = false;
+    // Selection drags capture the mouse; the settings slider releases its
+    // own capture earlier, so this is a no-op for everything else
+    if (GetCapture() == hwnd) ReleaseCapture();
 }
 
 // Zen mode: borderless fullscreen + centered reading column (F11)
