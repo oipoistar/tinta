@@ -167,9 +167,18 @@ bool isFunctionName(const std::wstring& cmd) {
 }
 
 // Spacing classes for row layout (fractions of an em on each side)
-float symbolSpacing(const std::wstring& t) {
+float symbolSpacing(const std::wstring& t, bool roman) {
     if (t.size() != 1) {
         if (t == L"\u22EF" || t == L"\u2026") return 0.16f;
+        // Upright function names (sin, log, ...) take thin spaces so
+        // \sin m\alpha reads "sin m\u03B1" rather than "sinm\u03B1"
+        if (roman) {
+            bool allAlpha = true;
+            for (wchar_t c : t) {
+                if (!iswalpha(c)) { allAlpha = false; break; }
+            }
+            if (allAlpha) return 0.16f;
+        }
         return 0.0f;
     }
     wchar_t c = t[0];
@@ -470,6 +479,9 @@ struct Metrics {
 struct LayoutCtx {
     App& app;
     MathBox& box;
+    // TeX text style vs display style: inline fractions use near-script
+    // sizes so they fit the surrounding line
+    bool display = false;
 };
 
 IDWriteTextLayout* makeRunLayout(App& app, const std::wstring& text,
@@ -569,7 +581,7 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
                 if (!kid) continue;
                 float kidSpace = 0.0f;
                 if (kid->kind == MNode::Sym) {
-                    kidSpace = symbolSpacing(kid->text) * em;
+                    kidSpace = symbolSpacing(kid->text, kid->roman) * em;
                 }
                 if (!first) cx += std::max(prevSpace, kidSpace);
                 Metrics km = layoutNodeImpl(ctx, kid, size, cx, baselineY, record);
@@ -608,14 +620,14 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
             return m;
         }
         case MNode::Frac: {
-            float inner = std::max(8.0f, size * 0.92f);
+            float inner = std::max(8.0f, size * (ctx.display ? 0.92f : 0.72f));
             Metrics num = measureNode(ctx, node->kids[0], inner);
             Metrics den = measureNode(ctx, node->kids[1], inner);
             float pad = em * 0.12f;
             float ruleW = std::max(num.width, den.width) + pad * 2;
             float ruleH = std::max(1.0f, em * 0.055f);
             float axis = em * 0.26f;   // fraction line sits on the math axis
-            float gap = em * 0.14f;
+            float gap = em * (ctx.display ? 0.14f : 0.1f);
 
             float ruleY = baselineY - axis - ruleH / 2;
             if (record) {
@@ -780,7 +792,7 @@ MathBoxPtr mathParse(App& app, const std::wstring& latex, float fontSize,
     }
 
     auto box = std::make_shared<MathBox>();
-    LayoutCtx ctx{app, *box};
+    LayoutCtx ctx{app, *box, display};
     Metrics probe = measureNode(ctx, root, fontSize);
     float pad = display ? fontSize * 0.15f : 0.0f;
     float baseline = probe.ascent + pad;
