@@ -47,9 +47,10 @@ void saveSettings(const Settings& settings) {
     file << "zenWidthPct=" << settings.zenWidthPct << "\n";
     file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
     file << "language=" << settings.language << "\n";
+    file << "keyProfile=" << settings.keyProfile << "\n";
 
-    // Remappable keys, written with every save so the section documents
-    // itself: change a value, restart Tinta
+    // Remappable keys ("custom" profile), written with every save so the
+    // section documents itself: change a value, restart Tinta
     file << "[Keys]\n";
     file << "; single letters/digits, Tab, Space, F1-F12, or one character\n";
     for (int i = 0; i < KEY_ACTION_COUNT; i++) {
@@ -96,19 +97,32 @@ std::wstring keyLabel(unsigned key) {
     return std::wstring(narrow.begin(), narrow.end());
 }
 
-void applyKeymap(App& app, const Settings& settings) {
-    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
-        app.keymap[i] = KEY_ACTIONS[i].defaultKey;
+int keyProfileIndexById(const std::string& id) {
+    for (int i = 0; i < KEY_PROFILE_COUNT; i++) {
+        if (id == KEY_PROFILES[i].id) return i;
     }
-    for (const auto& kv : settings.keyOverrides) {
-        for (int i = 0; i < KEY_ACTION_COUNT; i++) {
-            if (kv.first == KEY_ACTIONS[i].name) {
-                unsigned key = parseKeyName(kv.second);
-                if (key) app.keymap[i] = key;
-                break;
+    return -1;
+}
+
+void applyKeymap(App& app, const Settings& settings) {
+    int prof = keyProfileIndexById(settings.keyProfile);
+    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+        app.keymap[i] = prof >= 0 ? KEY_PROFILES[prof].keys[i]
+                                  : KEY_ACTIONS[i].defaultKey;
+    }
+    if (prof < 0) {
+        // Custom: [Keys] overrides over the defaults, the #77 semantics
+        for (const auto& kv : settings.keyOverrides) {
+            for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+                if (kv.first == KEY_ACTIONS[i].name) {
+                    unsigned key = parseKeyName(kv.second);
+                    if (key) app.keymap[i] = key;
+                    break;
+                }
             }
         }
     }
+    app.keyProfile = settings.keyProfile;
 }
 
 void rememberReadingPosition(Settings& settings, const std::string& path, float scrollY) {
@@ -146,6 +160,7 @@ Settings loadSettings() {
     std::ifstream file(path);
     if (!file) return settings;
 
+    bool sawKeyProfile = false;
     std::string line;
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '[' || line[0] == ';') continue;
@@ -182,6 +197,11 @@ Settings loadSettings() {
             settings.tocOnLeft = (value == "1");
         } else if (key == "language") {
             if (!value.empty()) settings.language = value;  // "auto" or an id
+        } else if (key == "keyProfile") {
+            if (value == "custom" || keyProfileIndexById(value) >= 0) {
+                settings.keyProfile = value;
+                sawKeyProfile = true;
+            }
         } else if (key == "languageIndex") {
             // Legacy numeric form from the first i18n build
             int idx = std::stoi(value);
@@ -227,6 +247,25 @@ Settings loadSettings() {
         }
     }
     if (settings.readingPositions.size() > 50) settings.readingPositions.resize(50);
+
+    // Migration from pre-profile builds (#77-era [Keys] only): users who
+    // had customized any binding keep exactly what they had via the custom
+    // profile; everyone else gets the Windows profile (':' and '?' stay
+    // hardwired, so nothing they know stops working)
+    if (!sawKeyProfile) {
+        bool customized = false;
+        for (const auto& kv : settings.keyOverrides) {
+            for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+                if (kv.first == KEY_ACTIONS[i].name &&
+                    kv.second != keyIniName(KEY_ACTIONS[i].defaultKey)) {
+                    customized = true;
+                    break;
+                }
+            }
+            if (customized) break;
+        }
+        settings.keyProfile = customized ? "custom" : "windows";
+    }
     return settings;
 }
 

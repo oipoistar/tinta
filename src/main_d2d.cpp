@@ -809,6 +809,7 @@ render_document:
     if (app.showHelp) renderHelpOverlay(app);
     if (app.showSettings) renderSettingsOverlay(app);
     if (app.showThemeEditor) renderThemeEditor(app);
+    if (app.showShortcutEditor) renderShortcutEditor(app);
 
     // Close edit mode split view clipping
     if (app.editMode) {
@@ -1049,6 +1050,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.tocOnLeft = app->tocOnLeft;
                 settings.language = app->languageSetting >= 0
                     ? languageIdAt(app->languageSetting) : "auto";
+                settings.keyProfile = app->keyProfile;
+                settings.keyOverrides = app->keyOverrides;
                 if (!app->currentFile.empty()) {
                     rememberReadingPosition(settings, app->currentFile, app->scrollY);
                 }
@@ -1177,6 +1180,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         ? -1 : languageIndexById(savedSettings.language);
     app.currentLanguageIndex = app.languageSetting >= 0
         ? app.languageSetting : detectSystemLanguage();
+    app.keyOverrides = savedSettings.keyOverrides;
     applyKeymap(app, savedSettings);
 
     // Parse command line

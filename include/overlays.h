@@ -28,9 +28,13 @@ enum SettingsAction {
     SET_OPEN_INI, SET_OPEN_THEMES_INI,
     SET_TOC_LEFT, SET_TOC_RIGHT,
     SET_LANG_DROPDOWN, SET_OPEN_LANGS_INI,
+    SET_KEYS_DROPDOWN, SET_EDIT_KEYS,
     // Language picks encode as SET_LANG_PICK_BASE + i: 0 = Auto, then the
     // registry languages in order (the list is dynamic via languages.ini)
     SET_LANG_PICK_BASE = 1000,
+    // Shortcut profile picks: SET_KEYS_PICK_BASE + profile index, with
+    // KEY_PROFILE_COUNT meaning the custom [Keys] profile
+    SET_KEYS_PICK_BASE = 2000,
 };
 // TOC panel X for the configured side at the current animation state;
 // geometry shared between render and the input hit tests
@@ -49,6 +53,7 @@ enum ThemeEditorAction {
     TE_FONT_BASE = 100,
 };
 void renderThemeEditor(App& app);
+void renderShortcutEditor(App& app);
 
 // Right-click context menu: theme-drawn like the other overlays.
 // Item indices are shared between rendering and input handling.

@@ -154,6 +154,8 @@ struct Settings {
     std::vector<ReadingPosition> readingPositions;
     // [Keys] overrides from settings.ini: action name -> key name (#77)
     std::vector<std::pair<std::string, std::string>> keyOverrides;
+    // Shortcut profile: "windows" (default), "vim", or "custom" ([Keys])
+    std::string keyProfile = "windows";
     // Reading column as a percentage of the window width (#82): 100 = full.
     // Windowed and fullscreen (zen) modes keep separate preferences.
     int readingWidthPct = 100;
@@ -373,6 +375,19 @@ struct App {
     int currentLanguageIndex = 0;
     bool settingsLangOpen = false;      // language dropdown popup expanded
     D2D1_RECT_F settingsLangBox{};      // dropdown value box (set in render)
+
+    // Shortcut profile state (mirrors Settings.keyProfile; the dropdown in
+    // Settings switches it live)
+    std::string keyProfile = "windows";
+    bool settingsKeysOpen = false;      // profile dropdown popup expanded
+    D2D1_RECT_F settingsKeysBox{};      // dropdown value box (set in render)
+    // Session copy of the [Keys] overrides (the custom profile); the
+    // shortcut editor edits these, WM_DESTROY writes them back
+    std::vector<std::pair<std::string, std::string>> keyOverrides;
+    // Shortcut editor overlay: click an action row, press its new key
+    bool showShortcutEditor = false;
+    int shortcutEditorRow = -1;         // row armed for key capture, -1 none
+    std::vector<std::pair<D2D1_RECT_F, int>> shortcutHits;  // rebuilt each paint
 
     // Resolved single-key bindings, indexed like KEY_ACTIONS (#77).
     // Filled by applyKeymap from settings; slots beyond the action count

@@ -1736,16 +1736,21 @@ void renderSettingsOverlay(App& app) {
     float cy = railY;
     float rowH = dpi(app, 44.0f);
 
-    auto rowLabel = [&](const wchar_t* label, const wchar_t* hint) {
+    // hintRight reserves space for the row's right-side control so a long
+    // hint (or a translation) never runs beneath it
+    auto rowLabel = [&](const wchar_t* label, const wchar_t* hint,
+                        float hintRight = 0.0f) {
         D2D1_COLOR_F tc = app.theme.text; tc.a = 0.95f * anim;
         app.brush->SetColor(tc);
         app.renderTarget->DrawText(label, (UINT32)wcslen(label), fmt,
-            D2D1::RectF(cx, cy + dpi(app, 3.0f), cx + cw, cy + dpi(app, 21.0f)), app.brush);
+            D2D1::RectF(cx, cy + dpi(app, 3.0f), cx + cw - hintRight,
+                        cy + dpi(app, 21.0f)), app.brush);
         if (hint) {
             tc.a = 0.45f * anim;
             app.brush->SetColor(tc);
             app.renderTarget->DrawText(hint, (UINT32)wcslen(hint), fmt,
-                D2D1::RectF(cx, cy + dpi(app, 21.0f), cx + cw, cy + dpi(app, 39.0f)), app.brush);
+                D2D1::RectF(cx, cy + dpi(app, 21.0f), cx + cw - hintRight,
+                            cy + dpi(app, 39.0f)), app.brush);
         }
     };
     auto hairline = [&]() {
@@ -1792,7 +1797,7 @@ void renderSettingsOverlay(App& app) {
     };
 
     if (app.settingsSection == 0) {  // General
-        rowLabel(tr(app, "settings.language"), tr(app, "settings.language.hint"));
+        rowLabel(tr(app, "settings.language"), tr(app, "settings.language.hint"), dpi(app, 200.0f));
         {
             // Dropdown value box with a pencil beside it (opens languages.ini)
             float boxH = dpi(app, 26.0f);
@@ -1827,23 +1832,63 @@ void renderSettingsOverlay(App& app) {
             app.settingsHits.push_back({pen, SET_OPEN_LANGS_INI});
         }
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"));
+        rowLabel(tr(app, "settings.shortcuts"), tr(app, "settings.shortcuts.hint"), dpi(app, 200.0f));
+        {
+            // Profile dropdown with a pencil beside it (opens the shortcut
+            // editor) — geometry mirrors the language row above exactly
+            float boxH = dpi(app, 26.0f);
+            float penW = dpi(app, 26.0f);
+            float boxW = dpi(app, 150.0f);
+            float boxX = cx + cw - penW - dpi(app, 8.0f) - boxW;
+            float boxY = cy + dpi(app, 2.0f);
+            D2D1_RECT_F box = D2D1::RectF(boxX, boxY, boxX + boxW, boxY + boxH);
+            app.settingsKeysBox = box;
+            D2D1_COLOR_F c = app.theme.text;
+            c.a = (app.settingsKeysOpen ? 0.6f : 0.3f) * anim;
+            app.brush->SetColor(c);
+            app.renderTarget->DrawRoundedRectangle(
+                D2D1::RoundedRect(box, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush, 1.0f);
+            const char* profKey = app.keyProfile == "vim" ? "settings.profile.vim"
+                : app.keyProfile == "custom" ? "settings.profile.custom"
+                                             : "settings.profile.windows";
+            std::wstring current = tr(app, profKey);
+            current += L"  \x25BE";
+            c = app.theme.text;
+            c.a = 0.95f * anim;
+            app.brush->SetColor(c);
+            app.renderTarget->DrawText(current.c_str(), (UINT32)current.size(), fmt,
+                D2D1::RectF(box.left + dpi(app, 10.0f), box.top + dpi(app, 4.0f),
+                            box.right - dpi(app, 6.0f), box.bottom), app.brush);
+            app.settingsHits.push_back({box, SET_KEYS_DROPDOWN});
+
+            D2D1_RECT_F pen = D2D1::RectF(box.right + dpi(app, 8.0f), boxY,
+                                          box.right + dpi(app, 8.0f) + penW, boxY + boxH);
+            c = app.theme.text;
+            c.a = 0.7f * anim;
+            app.brush->SetColor(c);
+            app.renderTarget->DrawText(L"\x270E", 1, fmt,
+                D2D1::RectF(pen.left + dpi(app, 6.0f), pen.top + dpi(app, 4.0f),
+                            pen.right, pen.bottom), app.brush);
+            app.settingsHits.push_back({pen, SET_EDIT_KEYS});
+        }
+        hairline(); cy += rowH;
+        rowLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.folderSearchEnabled, SET_TOGGLE_FOLDERSEARCH, anim);
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.browse_focus_path"), tr(app, "settings.browse_focus_path.hint"));
+        rowLabel(tr(app, "settings.browse_focus_path"), tr(app, "settings.browse_focus_path.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.browserFocusPath, SET_TOGGLE_BROWSEFOCUS, anim);
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.open_ini"), tr(app, "settings.open_ini.hint"));
+        rowLabel(tr(app, "settings.open_ini"), tr(app, "settings.open_ini.hint"), dpi(app, 70.0f));
         float bx = cx + cw - dpi(app, 60.0f);
         settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_INI, anim, fmt);
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.open_themes_ini"), tr(app, "settings.open_themes_ini.hint"));
+        rowLabel(tr(app, "settings.open_themes_ini"), tr(app, "settings.open_themes_ini.hint"), dpi(app, 70.0f));
         bx = cx + cw - dpi(app, 60.0f);
         settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_THEMES_INI, anim, fmt);
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.open_langs"), tr(app, "settings.open_langs.hint"));
+        rowLabel(tr(app, "settings.open_langs"), tr(app, "settings.open_langs.hint"), dpi(app, 70.0f));
         bx = cx + cw - dpi(app, 60.0f);
         settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_LANGS_INI, anim, fmt);
     } else if (app.settingsSection == 1) {  // Appearance
@@ -1855,7 +1900,7 @@ void renderSettingsOverlay(App& app) {
         cy += rowH + dpi(app, 6.0f);
         slider(cx, cy, cw, app.zenWidthPct, SET_SLIDER_ZEN, 1);
         cy += dpi(app, 30.0f);
-        rowLabel(tr(app, "settings.follow_windows"), tr(app, "settings.follow_windows.hint"));
+        rowLabel(tr(app, "settings.follow_windows"), tr(app, "settings.follow_windows.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.followSystemTheme, SET_TOGGLE_FOLLOW, anim);
         hairline(); cy += rowH;
@@ -1874,13 +1919,55 @@ void renderSettingsOverlay(App& app) {
         settingsChip(app, bx2, cy + dpi(app, 2.0f), tr(app, "settings.edit"), false, SET_EDIT_THEME, anim, fmt);
         settingsChip(app, bx2, cy + dpi(app, 2.0f), tr(app, "settings.new"), false, SET_NEW_THEME, anim, fmt);
     } else {  // Editor
-        rowLabel(tr(app, "settings.word_wrap"), tr(app, "settings.word_wrap.hint"));
+        rowLabel(tr(app, "settings.word_wrap"), tr(app, "settings.word_wrap.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.editorWordWrap, SET_TOGGLE_WRAP, anim);
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.preview_pane"), tr(app, "settings.preview_pane.hint"));
+        rowLabel(tr(app, "settings.preview_pane"), tr(app, "settings.preview_pane.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.editorShowPreview, SET_TOGGLE_PREVIEW, anim);
+    }
+
+    // Shortcut profile popup, drawn last so it sits above the rows
+    if (app.settingsKeysOpen && app.settingsSection == 0) {
+        float itemH = dpi(app, 26.0f);
+        const char* rowKeys[] = {"settings.profile.windows",
+                                 "settings.profile.vim",
+                                 "settings.profile.custom"};
+        const char* rowIds[] = {"windows", "vim", "custom"};
+        int count = 3;
+        D2D1_RECT_F box = app.settingsKeysBox;
+        D2D1_RECT_F pop = D2D1::RectF(box.left, box.bottom + dpi(app, 4.0f),
+                                      box.right,
+                                      box.bottom + dpi(app, 4.0f) + itemH * count);
+        D2D1_COLOR_F pc = app.theme.background;
+        pc.a = anim;
+        app.brush->SetColor(pc);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(pop, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush);
+        pc = app.theme.text;
+        pc.a = 0.35f * anim;
+        app.brush->SetColor(pc);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(pop, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush, 1.0f);
+        for (int i = 0; i < count; i++) {
+            float ry = pop.top + i * itemH;
+            D2D1_RECT_F row = D2D1::RectF(pop.left, ry, pop.right, ry + itemH);
+            if (app.keyProfile == rowIds[i]) {
+                D2D1_COLOR_F hl = app.theme.accent;
+                hl.a = 0.18f * anim;
+                app.brush->SetColor(hl);
+                app.renderTarget->FillRectangle(row, app.brush);
+            }
+            const wchar_t* label = tr(app, rowKeys[i]);
+            pc = app.theme.text;
+            pc.a = 0.95f * anim;
+            app.brush->SetColor(pc);
+            app.renderTarget->DrawText(label, (UINT32)wcslen(label), fmt,
+                D2D1::RectF(row.left + dpi(app, 10.0f), row.top + dpi(app, 4.0f),
+                            row.right - dpi(app, 6.0f), row.bottom), app.brush);
+            app.settingsHits.push_back({row, SET_KEYS_PICK_BASE + i});
+        }
     }
 
     // Footer hint
@@ -1947,6 +2034,140 @@ void renderSettingsOverlay(App& app) {
 // swatches. Right column: the live ink specimen (repainted with the working
 // theme and font on every keystroke) above the system font list, each
 // family drawn in its own face. Fixed panel size keeps the geometry simple.
+
+// --- Shortcut editor (profiles follow-up) ---
+//
+// Twelve action rows with their current binding. Clicking a row arms it;
+// the next keypress becomes the binding (letters/digits/F-keys via
+// keydown, punctuation via WM_CHAR so any keyboard layout works). Every
+// edit lands in the custom profile.
+static const char* shortcutActionNameKey(int i) {
+    switch (i) {
+        case KA_SEARCH:     return "help.view.search";
+        case KA_BROWSE:     return "help.view.folder_browser";
+        case KA_TOC:        return "help.view.toc";
+        case KA_THEME:      return "help.view.theme";
+        case KA_STATS:      return "help.view.stats";
+        case KA_QUIT:       return "help.general.quit";
+        case KA_NEWFILE:    return "ctx.new";
+        case KA_ZEN:        return "shortcuts.zen";
+        case KA_SCROLLUP:   return "help.nav.scroll_up";
+        case KA_SCROLLDOWN: return "help.nav.scroll_down";
+        case KA_EDIT:       return "help.edit.enter_edit";
+        case KA_HELP:       return "help.view.help";
+    }
+    return "help.view.help";
+}
+
+void renderShortcutEditor(App& app) {
+    IDWriteTextFormat* fmt = app.folderBrowserFormat;
+    if (!fmt) return;
+    app.shortcutHits.clear();
+    const D2DTheme& base = app.theme;
+
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.6f));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
+
+    float rowH = dpi(app, 30.0f);
+    float panelW = dpi(app, 430.0f);
+    float panelH = dpi(app, 100.0f) + rowH * KEY_ACTION_COUNT + dpi(app, 46.0f);
+    float px = (app.width - panelW) / 2, py = (app.height - panelH) / 2;
+    D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(
+        D2D1::RectF(px, py, px + panelW, py + panelH), dpi(app, 12.0f), dpi(app, 12.0f));
+    D2D1_COLOR_F bg = base.background; bg.a = 0.99f;
+    app.brush->SetColor(bg);
+    app.renderTarget->FillRoundedRectangle(panel, app.brush);
+    D2D1_COLOR_F border = base.text; border.a = 0.25f;
+    app.brush->SetColor(border);
+    app.renderTarget->DrawRoundedRectangle(panel, app.brush, 1.0f);
+
+    if (app.themeTitleFormat) {
+        app.themeTitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        D2D1_COLOR_F tc = base.heading; tc.a = 1.0f;
+        app.brush->SetColor(tc);
+        const wchar_t* title = tr(app, "shortcuts.editor.title");
+        app.renderTarget->DrawText(title, (UINT32)wcslen(title), app.themeTitleFormat,
+            D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 16.0f),
+                        px + panelW, py + dpi(app, 52.0f)), app.brush);
+    }
+    {
+        D2D1_COLOR_F hc = base.text; hc.a = 0.55f;
+        app.brush->SetColor(hc);
+        const wchar_t* hint = tr(app, "shortcuts.editor.hint");
+        app.renderTarget->DrawText(hint, (UINT32)wcslen(hint), fmt,
+            D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 56.0f),
+                        px + panelW - dpi(app, 24.0f), py + dpi(app, 80.0f)), app.brush);
+    }
+
+    float rowsTop = py + dpi(app, 88.0f);
+    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+        float ry = rowsTop + i * rowH;
+        D2D1_RECT_F row = D2D1::RectF(px + dpi(app, 16.0f), ry,
+                                      px + panelW - dpi(app, 16.0f), ry + rowH - dpi(app, 4.0f));
+        bool armed = app.shortcutEditorRow == i;
+        if (armed) {
+            D2D1_COLOR_F hl = base.accent; hl.a = 0.18f;
+            app.brush->SetColor(hl);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(row, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush);
+        }
+        const wchar_t* name = tr(app, shortcutActionNameKey(i));
+        D2D1_COLOR_F c = base.text; c.a = 0.9f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(name, (UINT32)wcslen(name), fmt,
+            D2D1::RectF(row.left + dpi(app, 8.0f), row.top + dpi(app, 4.0f),
+                        row.right - dpi(app, 96.0f), row.bottom), app.brush);
+
+        // Key chip, right-aligned
+        std::wstring key = armed ? tr(app, "shortcuts.editor.press")
+                                 : keyLabel(app.keymap[i]);
+        float chipW = dpi(app, armed ? 110.0f : 72.0f);
+        D2D1_RECT_F chip = D2D1::RectF(row.right - chipW - dpi(app, 6.0f),
+                                       row.top + dpi(app, 2.0f),
+                                       row.right - dpi(app, 6.0f),
+                                       row.bottom - dpi(app, 2.0f));
+        c = base.text; c.a = armed ? 0.6f : 0.3f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(chip, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush,
+            armed ? 1.5f : 1.0f);
+        c = base.text; c.a = 0.95f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(key.c_str(), (UINT32)key.size(), fmt,
+            D2D1::RectF(chip.left + dpi(app, 8.0f), chip.top + dpi(app, 2.0f),
+                        chip.right - dpi(app, 4.0f), chip.bottom), app.brush);
+
+        app.shortcutHits.push_back({row, i});
+    }
+
+    // Footer: reset chip + close hint
+    float fy = rowsTop + KEY_ACTION_COUNT * rowH + dpi(app, 8.0f);
+    {
+        const wchar_t* reset = tr(app, "shortcuts.editor.reset");
+        D2D1_RECT_F chip = D2D1::RectF(px + dpi(app, 24.0f), fy,
+                                       px + dpi(app, 24.0f) + dpi(app, 90.0f),
+                                       fy + dpi(app, 24.0f));
+        D2D1_COLOR_F c = base.text; c.a = 0.3f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(chip, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush, 1.0f);
+        c = base.text; c.a = 0.8f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(reset, (UINT32)wcslen(reset), fmt,
+            D2D1::RectF(chip.left + dpi(app, 8.0f), chip.top + dpi(app, 2.0f),
+                        chip.right, chip.bottom), app.brush);
+        app.shortcutHits.push_back({chip, 100});
+    }
+    {
+        D2D1_COLOR_F c = base.text; c.a = 0.4f;
+        app.brush->SetColor(c);
+        const wchar_t* esc = tr(app, "lang.chooser.footer");
+        app.renderTarget->DrawText(esc, (UINT32)wcslen(esc), fmt,
+            D2D1::RectF(px + dpi(app, 140.0f), fy + dpi(app, 2.0f),
+                        px + panelW - dpi(app, 24.0f), fy + dpi(app, 26.0f)), app.brush);
+    }
+}
 
 void renderThemeEditor(App& app) {
     IDWriteTextFormat* fmt = app.folderBrowserFormat;
