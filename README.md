@@ -106,11 +106,17 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 
 ## Customization
 
+**Shortcut profiles** (Settings → Keyboard shortcuts): pick **Windows**
+(`E` edits, `F1` opens help, `F` searches — the default), **Vim** (`/`
+searches, `:` edits, `?` helps), or **Custom**. The Edit button opens a
+shortcut editor: click an action, press its new key. Raw `:` and `?`
+always work regardless of profile.
+
 Settings live in a plain INI file at `%APPDATA%\Tinta\settings.ini` (theme,
 zoom, window placement, word wrap, and more — written on exit). The `[Keys]`
-section lets you remap the single-key shortcuts: change a value and restart
-Tinta. Accepted values are letters, digits, `Tab`, `Space`, `F1`–`F12`, or
-any single character.
+section holds the Custom profile's bindings if you prefer editing by hand:
+change a value and restart Tinta. Accepted values are letters, digits,
+`Tab`, `Space`, `F1`–`F12`, or any single character.
 
 ```ini
 [Keys]
