@@ -1829,10 +1829,12 @@ void renderSettingsOverlay(App& app) {
         hairline(); cy += rowH;
         rowLabel(tr(app, "settings.shortcuts"), tr(app, "settings.shortcuts.hint"));
         {
-            // Profile dropdown, same pattern as the language one
+            // Profile dropdown with a pencil beside it (opens the shortcut
+            // editor) — geometry mirrors the language row above exactly
             float boxH = dpi(app, 26.0f);
+            float penW = dpi(app, 26.0f);
             float boxW = dpi(app, 150.0f);
-            float boxX = cx + cw - dpi(app, 8.0f) - boxW;
+            float boxX = cx + cw - penW - dpi(app, 8.0f) - boxW;
             float boxY = cy + dpi(app, 2.0f);
             D2D1_RECT_F box = D2D1::RectF(boxX, boxY, boxX + boxW, boxY + boxH);
             app.settingsKeysBox = box;
@@ -1853,9 +1855,16 @@ void renderSettingsOverlay(App& app) {
                 D2D1::RectF(box.left + dpi(app, 10.0f), box.top + dpi(app, 4.0f),
                             box.right - dpi(app, 6.0f), box.bottom), app.brush);
             app.settingsHits.push_back({box, SET_KEYS_DROPDOWN});
-            float chipX = boxX - dpi(app, 70.0f);
-            settingsChip(app, chipX, boxY, tr(app, "settings.edit"), false,
-                         SET_EDIT_KEYS, anim, fmt);
+
+            D2D1_RECT_F pen = D2D1::RectF(box.right + dpi(app, 8.0f), boxY,
+                                          box.right + dpi(app, 8.0f) + penW, boxY + boxH);
+            c = app.theme.text;
+            c.a = 0.7f * anim;
+            app.brush->SetColor(c);
+            app.renderTarget->DrawText(L"\x270E", 1, fmt,
+                D2D1::RectF(pen.left + dpi(app, 6.0f), pen.top + dpi(app, 4.0f),
+                            pen.right, pen.bottom), app.brush);
+            app.settingsHits.push_back({pen, SET_EDIT_KEYS});
         }
         hairline(); cy += rowH;
         rowLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"));
