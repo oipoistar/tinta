@@ -822,6 +822,9 @@ render_document:
 
         // Render edit mode notification (on top of everything)
         renderEditModeNotification(app);
+
+        // Unsaved-changes dialog above it all
+        if (app.confirmExitPending) renderConfirmExitDialog(app);
     }
 
     // "Saved!" notification (reuses "Copied!" infrastructure)

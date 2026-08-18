@@ -688,7 +688,11 @@ struct App {
     // Double-ESC detection
     std::chrono::steady_clock::time_point lastEscTime;
     bool escPressedOnce = false;
-    bool confirmExitPending = false;  // Waiting for Y/N to confirm unsaved exit
+    bool confirmExitPending = false;  // Unsaved-changes dialog is showing
+    // Dialog open time: keys arriving within the grace window are ignored
+    // so ESC-smashing lands on a visible, stable dialog
+    std::chrono::steady_clock::time_point confirmExitOpenedAt;
+    std::vector<std::pair<D2D1_RECT_F, int>> confirmExitHits;  // rebuilt each paint
 
     // Editor notification
     bool showEditModeNotification = false;

@@ -1103,6 +1103,8 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Theme and shortcut editors: everything acts on the release
     if (app.showThemeEditor || app.showShortcutEditor) return;
+    // Unsaved-changes dialog is modal: buttons act on the release
+    if (app.editMode && app.confirmExitPending) return;
 
     // Settings: sliders drag from the press; everything else acts on release
     if (app.showSettings) {
@@ -1483,6 +1485,21 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Release belonging to a context-menu item click: already handled
     if (app.swallowNextMouseUp) {
         app.swallowNextMouseUp = false;
+        return;
+    }
+
+    // Unsaved-changes dialog: resolve its buttons; clicks elsewhere keep
+    // the dialog up (it is modal, and dismissal must be deliberate)
+    if (app.editMode && app.confirmExitPending) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        for (const auto& hit : app.confirmExitHits) {
+            if (mx >= hit.first.left && mx <= hit.first.right &&
+                my >= hit.first.top && my <= hit.first.bottom) {
+                confirmExitAction(app, hwnd, hit.second);
+                return;
+            }
+        }
         return;
     }
 

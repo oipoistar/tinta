@@ -54,6 +54,7 @@ enum ThemeEditorAction {
 };
 void renderThemeEditor(App& app);
 void renderShortcutEditor(App& app);
+void renderConfirmExitDialog(App& app);
 
 // Right-click context menu: theme-drawn like the other overlays.
 // Item indices are shared between rendering and input handling.
