@@ -88,49 +88,6 @@ const App::TextRect* findTextRectAt(const App& app, int x, int y) {
     return nullptr;
 }
 
-bool findWordBoundsAt(const App& app, const App::TextRect& tr, int x,
-                      float& wordLeft, float& wordRight) {
-    std::wstring_view text = textViewForRect(app, tr);
-    if (text.empty()) return false;
-
-    float totalWidth = tr.rect.right - tr.rect.left;
-    float charWidth = totalWidth / (float)text.length();
-
-    // Find which character was clicked
-    int charIndex = (int)((x - tr.rect.left) / charWidth);
-    charIndex = std::max(0, std::min(charIndex, (int)text.length() - 1));
-
-    // Find word start (scan left)
-    int wordStart = charIndex;
-    while (wordStart > 0 && !isWordBoundary(text[wordStart - 1])) {
-        wordStart--;
-    }
-
-    // Find word end (scan right)
-    int wordEnd = charIndex;
-    while (wordEnd < (int)text.length() - 1 && !isWordBoundary(text[wordEnd + 1])) {
-        wordEnd++;
-    }
-
-    wordLeft = tr.rect.left + wordStart * charWidth;
-    wordRight = tr.rect.left + (wordEnd + 1) * charWidth;
-    return true;
-}
-
-void findLineRects(const App& app, float y, float& lineLeft, float& lineRight,
-                   float& lineTop, float& lineBottom) {
-    lineLeft = 99999.0f;
-    lineRight = 0.0f;
-    lineTop = 0.0f;
-    lineBottom = 0.0f;
-    const auto* line = findLineBucketAt(app, y);
-    if (!line) return;
-
-    lineLeft = line->minX;
-    lineRight = line->maxX;
-    lineTop = line->top;
-    lineBottom = line->bottom;
-}
 
 void updateWindowTitle(App& app) {
     std::wstring title = L"Tinta";

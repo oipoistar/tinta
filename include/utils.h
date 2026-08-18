@@ -19,13 +19,10 @@ float measureText(App& app, const std::wstring& text, IDWriteTextFormat* format)
 std::wstring toLower(const std::wstring& str);
 std::wstring_view textViewForRect(const App& app, const App::TextRect& tr);
 
-// Word/line boundary helpers
+// Word/line boundary helpers (offset-based word/line selection lives in
+// selection.h)
 bool isWordBoundary(wchar_t c);
 const App::TextRect* findTextRectAt(const App& app, int x, int y);
-bool findWordBoundsAt(const App& app, const App::TextRect& tr, int x,
-                      float& wordLeft, float& wordRight);
-void findLineRects(const App& app, float y, float& lineLeft, float& lineRight,
-                   float& lineTop, float& lineBottom);
 
 void updateWindowTitle(App& app);
 // Ctrl+N: spawns a second Tinta window on an untitled quick note

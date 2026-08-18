@@ -18,6 +18,7 @@
 #include <functional>
 #include <thread>
 #include "settings.h"
+#include "selection.h"
 #include "document.h"
 #include "d2d_init.h"
 #include "utils.h"
@@ -590,93 +591,28 @@ render_document:
         app.drawCalls++;
     }
 
-    // Draw selection highlights
-    if ((app.selecting || app.hasSelection) && !app.textRects.empty()) {
-        // Calculate selection bounds (normalized so start is always before end)
-        // Selection is stored in document coordinates
-        float selStartX = (float)app.selStartX;
-        float selStartY = (float)app.selStartY;
-        float selEndX = (float)app.selEndX;
-        float selEndY = (float)app.selEndY;
+    // Draw selection highlights: continuous per-line bars derived from the
+    // [selAnchor, selFocus) offset range, with glyph-precise edges on the
+    // boundary lines (#83). The copied text comes from the same range, so
+    // highlight and clipboard always agree.
+    if ((app.selecting || app.hasSelection) && !app.textRects.empty() &&
+        app.selAnchor != app.selFocus) {
+        size_t selA = std::min(app.selAnchor, app.selFocus);
+        size_t selB = std::max(app.selAnchor, app.selFocus);
 
-        // Swap if selection was made bottom-to-top
-        if (selStartY > selEndY || (selStartY == selEndY && selStartX > selEndX)) {
-            std::swap(selStartX, selEndX);
-            std::swap(selStartY, selEndY);
-        }
-
-        // Check if this is a "select all" (selectedText is set but selection coords are same)
-        bool isSelectAll = app.hasSelection && !app.selectedText.empty() &&
-                          app.selStartX == app.selEndX && app.selStartY == app.selEndY;
+        std::vector<D2D1_RECT_F> bars;
+        selectionHighlightRects(app, selA, selB, bars);
 
         app.brush->SetColor(D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f));
-
-        const auto& lines = app.lineBuckets;
-
-        std::wstring collectedText;
-        size_t selectedCount = 0;
-
-        for (size_t i = 0; i < lines.size(); i++) {
-            const auto& line = lines[i];
-            float lineCenterY = (line.top + line.bottom) / 2;
-
-            bool lineInSelection = false;
-            float drawLeft = line.minX;
-            float drawRight = line.maxX;
-
-            if (isSelectAll) {
-                lineInSelection = true;
-            } else if (lineCenterY >= selStartY - 3 && lineCenterY <= selEndY + 3) {
-                float lineHeight = line.bottom - line.top;
-                bool isSingleLine = (selEndY - selStartY) <= lineHeight;
-
-                if (isSingleLine) {
-                    // Single line selection
-                    drawLeft = std::max(line.minX, selStartX);
-                    drawRight = std::min(line.maxX, selEndX);
-                    if (drawLeft < drawRight) lineInSelection = true;
-                } else if (lineCenterY < selStartY + lineHeight) {
-                    // First line - from selection start to end of line
-                    drawLeft = std::max(line.minX, selStartX);
-                    lineInSelection = true;
-                } else if (lineCenterY > selEndY - lineHeight) {
-                    // Last line - from start of line to selection end
-                    drawRight = std::min(line.maxX, selEndX);
-                    lineInSelection = true;
-                } else {
-                    // Middle line - full width
-                    lineInSelection = true;
-                }
-            }
-
-            if (lineInSelection) {
-                // Draw continuous selection bar for this line
-                app.renderTarget->FillRectangle(
-                    D2D1::RectF(drawLeft - app.scrollX, line.top - app.scrollY,
-                                drawRight - app.scrollX, line.bottom - app.scrollY),
-                    app.brush);
-                selectedCount++;
-
-                // Collect text from rects in this line that fall within selection
-                if (!collectedText.empty()) collectedText += L"\n";
-                for (size_t idx : line.textRectIndices) {
-                    const auto& tr = app.textRects[idx];
-                    const D2D1_RECT_F& rect = tr.rect;
-                    if (rect.left < drawRight && rect.right > drawLeft) {
-                        if (!collectedText.empty() && collectedText.back() != L'\n') {
-                            collectedText += L" ";
-                        }
-                        std::wstring_view slice = textViewForRect(app, tr);
-                        collectedText.append(slice.data(), slice.size());
-                    }
-                }
-            }
-        }
-        app.drawCalls += selectedCount;
-
-        // Update selectedText for mouse selections (not select-all)
-        if (!isSelectAll && app.hasSelection && selectedCount > 0) {
-            app.selectedText = collectedText;
+        float viewTop = app.scrollY - 50.0f;
+        float viewBottom = app.scrollY + app.height + 50.0f;
+        for (const auto& bar : bars) {
+            if (bar.bottom < viewTop || bar.top > viewBottom) continue;
+            app.renderTarget->FillRectangle(
+                D2D1::RectF(bar.left - app.scrollX, bar.top - app.scrollY,
+                            bar.right - app.scrollX, bar.bottom - app.scrollY),
+                app.brush);
+            app.drawCalls++;
         }
     }
 

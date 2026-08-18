@@ -472,6 +472,10 @@ struct App {
         D2D1_RECT_F rect;
         size_t docStart = 0;   // Start position in docText
         size_t docLength = 0;  // Length in docText
+        // Index into layoutTextRuns of the run whose layout covers this
+        // rect's doc range (SIZE_MAX = none; hit-testing interpolates).
+        // Both vectors rebuild together on relayout, so the index is stable.
+        size_t runIndex = (size_t)-1;
     };
     std::vector<TextRect> textRects;
 
@@ -519,10 +523,12 @@ struct App {
     };
     std::vector<FolderResultHit> folderResultHits;  // rebuilt each paint
 
-    // Text selection
+    // Text selection (#83): a pair of character offsets into docText.
+    // Highlights and copies derive from the same range, and offsets survive
+    // relayout (zoom, resize) where pixel rects would not.
     bool selecting = false;
-    int selStartX = 0, selStartY = 0;
-    int selEndX = 0, selEndY = 0;
+    size_t selAnchor = 0;  // where the drag started
+    size_t selFocus = 0;   // where the mouse is now
     bool hasSelection = false;
     std::wstring selectedText;
 
@@ -531,8 +537,9 @@ struct App {
     int clickCount = 0;
     int lastClickX = 0, lastClickY = 0;
     enum class SelectionMode { Normal, Word, Line } selectionMode = SelectionMode::Normal;
-    // Anchor bounds for word/line selection (the original word/line that was clicked)
-    float anchorLeft = 0, anchorRight = 0, anchorTop = 0, anchorBottom = 0;
+    // The word/line originally clicked; drag extension unions the current
+    // word/line with this range
+    size_t selAnchorRangeStart = 0, selAnchorRangeEnd = 0;
 
     // Document text built during render (used for search/mapping)
     std::wstring docText;
