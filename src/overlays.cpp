@@ -1736,16 +1736,21 @@ void renderSettingsOverlay(App& app) {
     float cy = railY;
     float rowH = dpi(app, 44.0f);
 
-    auto rowLabel = [&](const wchar_t* label, const wchar_t* hint) {
+    // hintRight reserves space for the row's right-side control so a long
+    // hint (or a translation) never runs beneath it
+    auto rowLabel = [&](const wchar_t* label, const wchar_t* hint,
+                        float hintRight = 0.0f) {
         D2D1_COLOR_F tc = app.theme.text; tc.a = 0.95f * anim;
         app.brush->SetColor(tc);
         app.renderTarget->DrawText(label, (UINT32)wcslen(label), fmt,
-            D2D1::RectF(cx, cy + dpi(app, 3.0f), cx + cw, cy + dpi(app, 21.0f)), app.brush);
+            D2D1::RectF(cx, cy + dpi(app, 3.0f), cx + cw - hintRight,
+                        cy + dpi(app, 21.0f)), app.brush);
         if (hint) {
             tc.a = 0.45f * anim;
             app.brush->SetColor(tc);
             app.renderTarget->DrawText(hint, (UINT32)wcslen(hint), fmt,
-                D2D1::RectF(cx, cy + dpi(app, 21.0f), cx + cw, cy + dpi(app, 39.0f)), app.brush);
+                D2D1::RectF(cx, cy + dpi(app, 21.0f), cx + cw - hintRight,
+                            cy + dpi(app, 39.0f)), app.brush);
         }
     };
     auto hairline = [&]() {
@@ -1792,7 +1797,7 @@ void renderSettingsOverlay(App& app) {
     };
 
     if (app.settingsSection == 0) {  // General
-        rowLabel(tr(app, "settings.language"), tr(app, "settings.language.hint"));
+        rowLabel(tr(app, "settings.language"), tr(app, "settings.language.hint"), dpi(app, 200.0f));
         {
             // Dropdown value box with a pencil beside it (opens languages.ini)
             float boxH = dpi(app, 26.0f);
@@ -1827,7 +1832,7 @@ void renderSettingsOverlay(App& app) {
             app.settingsHits.push_back({pen, SET_OPEN_LANGS_INI});
         }
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.shortcuts"), tr(app, "settings.shortcuts.hint"));
+        rowLabel(tr(app, "settings.shortcuts"), tr(app, "settings.shortcuts.hint"), dpi(app, 200.0f));
         {
             // Profile dropdown with a pencil beside it (opens the shortcut
             // editor) — geometry mirrors the language row above exactly
@@ -1867,23 +1872,23 @@ void renderSettingsOverlay(App& app) {
             app.settingsHits.push_back({pen, SET_EDIT_KEYS});
         }
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"));
+        rowLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.folderSearchEnabled, SET_TOGGLE_FOLDERSEARCH, anim);
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.browse_focus_path"), tr(app, "settings.browse_focus_path.hint"));
+        rowLabel(tr(app, "settings.browse_focus_path"), tr(app, "settings.browse_focus_path.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.browserFocusPath, SET_TOGGLE_BROWSEFOCUS, anim);
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.open_ini"), tr(app, "settings.open_ini.hint"));
+        rowLabel(tr(app, "settings.open_ini"), tr(app, "settings.open_ini.hint"), dpi(app, 70.0f));
         float bx = cx + cw - dpi(app, 60.0f);
         settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_INI, anim, fmt);
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.open_themes_ini"), tr(app, "settings.open_themes_ini.hint"));
+        rowLabel(tr(app, "settings.open_themes_ini"), tr(app, "settings.open_themes_ini.hint"), dpi(app, 70.0f));
         bx = cx + cw - dpi(app, 60.0f);
         settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_THEMES_INI, anim, fmt);
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.open_langs"), tr(app, "settings.open_langs.hint"));
+        rowLabel(tr(app, "settings.open_langs"), tr(app, "settings.open_langs.hint"), dpi(app, 70.0f));
         bx = cx + cw - dpi(app, 60.0f);
         settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_LANGS_INI, anim, fmt);
     } else if (app.settingsSection == 1) {  // Appearance
@@ -1895,7 +1900,7 @@ void renderSettingsOverlay(App& app) {
         cy += rowH + dpi(app, 6.0f);
         slider(cx, cy, cw, app.zenWidthPct, SET_SLIDER_ZEN, 1);
         cy += dpi(app, 30.0f);
-        rowLabel(tr(app, "settings.follow_windows"), tr(app, "settings.follow_windows.hint"));
+        rowLabel(tr(app, "settings.follow_windows"), tr(app, "settings.follow_windows.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.followSystemTheme, SET_TOGGLE_FOLLOW, anim);
         hairline(); cy += rowH;
@@ -1914,11 +1919,11 @@ void renderSettingsOverlay(App& app) {
         settingsChip(app, bx2, cy + dpi(app, 2.0f), tr(app, "settings.edit"), false, SET_EDIT_THEME, anim, fmt);
         settingsChip(app, bx2, cy + dpi(app, 2.0f), tr(app, "settings.new"), false, SET_NEW_THEME, anim, fmt);
     } else {  // Editor
-        rowLabel(tr(app, "settings.word_wrap"), tr(app, "settings.word_wrap.hint"));
+        rowLabel(tr(app, "settings.word_wrap"), tr(app, "settings.word_wrap.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.editorWordWrap, SET_TOGGLE_WRAP, anim);
         hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.preview_pane"), tr(app, "settings.preview_pane.hint"));
+        rowLabel(tr(app, "settings.preview_pane"), tr(app, "settings.preview_pane.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.editorShowPreview, SET_TOGGLE_PREVIEW, anim);
     }
