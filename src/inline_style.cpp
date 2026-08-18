@@ -28,6 +28,8 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
             case ElementType::Ruby:
             case ElementType::SoftBreak:
             case ElementType::HardBreak:
+            case ElementType::MathInline:
+            case ElementType::MathDisplay:
                 out.push_back({elem, st});
                 continue;
 
