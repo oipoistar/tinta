@@ -614,6 +614,9 @@ struct App {
     };
     std::vector<TaskRect> taskRects;
 
+    // Viewport width at the last layout: a change (folder browser toggle,
+    // preview split drag) triggers a relayout in the render loop
+    float lastViewportWidth = -1.0f;
     std::vector<LayoutTextRun> layoutTextRuns;
     std::vector<LayoutRect> layoutRects;
     std::vector<LayoutLine> layoutLines;
@@ -831,8 +834,26 @@ inline float editorPaneWidth(const App& app) {
         : static_cast<float>(app.width);
 }
 
+// Folder browser panel width — shared by input hit-testing, the panel
+// renderer, and the viewport shift
+inline float folderBrowserPanelWidth(const App& app) {
+    float cap = dpi(app, 300.0f);
+    float floor_ = dpi(app, 250.0f);
+    float w = app.width * 0.2f;
+    if (w < floor_) w = floor_;
+    if (w > cap) w = cap;
+    return w;
+}
+
 inline float documentViewportX(const App& app) {
-    if (!app.editMode) return 0.0f;
+    if (!app.editMode) {
+        // The folder browser pushes the content right instead of covering
+        // it; the shift follows the panel's slide-in animation
+        if (app.showFolderBrowser) {
+            return folderBrowserPanelWidth(app) * app.folderBrowserAnimation;
+        }
+        return 0.0f;
+    }
     // Preview hidden: zero-width viewport at the right edge — document
     // rendering flows through unchanged and clips to nothing
     if (!app.editorShowPreview) return static_cast<float>(app.width);
@@ -840,9 +861,15 @@ inline float documentViewportX(const App& app) {
 }
 
 inline float documentViewportWidth(const App& app) {
-    float width = app.editMode
-        ? static_cast<float>(app.width) - documentViewportX(app)
-        : static_cast<float>(app.width);
+    float width;
+    if (app.editMode) {
+        width = static_cast<float>(app.width) - documentViewportX(app);
+    } else {
+        width = static_cast<float>(app.width);
+        // Snap to the panel's final width (not the animated position) so
+        // the reading column relayouts once per toggle, not per frame
+        if (app.showFolderBrowser) width -= folderBrowserPanelWidth(app);
+    }
     return width > 0.0f ? width : 0.0f;
 }
 
