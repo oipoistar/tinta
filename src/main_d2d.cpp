@@ -655,18 +655,16 @@ render_document:
                 size_t overlapEnd = std::min(rectEnd, mEnd);
 
                 if (overlapStart < overlapEnd) {
-                    float totalWidth = tr.rect.right - tr.rect.left;
-                    float charWidth = totalWidth / (float)textLen;
-                    float startX = tr.rect.left + (overlapStart - rectStart) * charWidth;
-                    float matchWidth = (overlapEnd - overlapStart) * charWidth;
-
-                    // Extend highlight slightly for better visibility
-                    D2D1_RECT_F highlightRect = D2D1::RectF(
-                        startX - 1, tr.rect.top,
-                        startX + matchWidth + 1, tr.rect.bottom
-                    );
-
-                    visibleMatches.push_back({highlightRect, mi});
+                    // Glyph-precise via the run layout (shared with text
+                    // selection); falls back to interpolation for code
+                    D2D1_RECT_F highlightRect;
+                    if (selectionRangeRect(app, tr, overlapStart, overlapEnd,
+                                           highlightRect)) {
+                        // Extend slightly for better visibility
+                        highlightRect.left -= 1;
+                        highlightRect.right += 1;
+                        visibleMatches.push_back({highlightRect, mi});
+                    }
                 }
 
                 if (mEnd <= rectEnd) {
@@ -942,6 +940,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (wParam == TIMER_FOLDER_SEARCH && app) {
                 KillTimer(hwnd, TIMER_FOLDER_SEARCH);
                 startFolderSearchScan(*app);
+            }
+            if (wParam == TIMER_SELECT_SCROLL && app) {
+                handleSelectScrollTimer(*app, hwnd);
             }
             if (wParam == TIMER_IMAGE_REFLOW && app) {
                 // One relayout for however many images arrived since armed

@@ -33,6 +33,7 @@ inline int64_t usElapsed(Clock::time_point start) {
 #define TIMER_ZOOM_APPLY 5
 #define TIMER_IMAGE_REFLOW 6
 #define TIMER_FOLDER_SEARCH 7
+#define TIMER_SELECT_SCROLL 8
 
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
@@ -531,6 +532,11 @@ struct App {
     size_t selFocus = 0;   // where the mouse is now
     bool hasSelection = false;
     std::wstring selectedText;
+    // Dragging past the viewport edge scrolls (px per TIMER_SELECT_SCROLL
+    // tick, sign = direction)
+    float selAutoScrollVel = 0.0f;
+    // Shift+click extends: finalize as a selection even without a drag
+    bool selShiftExtend = false;
 
     // Multi-click selection (double/triple click)
     std::chrono::steady_clock::time_point lastClickTime;

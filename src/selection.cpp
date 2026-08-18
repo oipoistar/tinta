@@ -171,6 +171,30 @@ void selectionHighlightRects(const App& app, size_t start, size_t end,
     }
 }
 
+bool selectionRangeRect(const App& app, const App::TextRect& tr,
+                        size_t start, size_t end, D2D1_RECT_F& out) {
+    size_t lo = std::max(start, tr.docStart);
+    size_t hi = std::min(end, tr.docStart + tr.docLength);
+    if (lo >= hi) return false;
+    if (const App::LayoutTextRun* run = runFor(app, tr)) {
+        DWRITE_HIT_TEST_METRICS m{};
+        UINT32 count = 0;
+        if (SUCCEEDED(run->layout->HitTestTextRange(
+                (UINT32)(lo - run->docStart), (UINT32)(hi - lo),
+                run->pos.x, run->pos.y, &m, 1, &count)) && count == 1) {
+            out = D2D1::RectF(m.left, tr.rect.top, m.left + m.width, tr.rect.bottom);
+            return true;
+        }
+    }
+    // Uniform interpolation without a covering layout (monospace code)
+    float w = tr.rect.right - tr.rect.left;
+    float cw = tr.docLength ? w / (float)tr.docLength : 0.0f;
+    float x0 = tr.rect.left + (float)(lo - tr.docStart) * cw;
+    float x1 = x0 + (float)(hi - lo) * cw;
+    out = D2D1::RectF(x0, tr.rect.top, x1, tr.rect.bottom);
+    return true;
+}
+
 std::wstring selectionTextForRange(const App& app, size_t start, size_t end) {
     start = std::min(start, app.docText.size());
     end = std::min(end, app.docText.size());
@@ -183,5 +207,7 @@ void clearSelection(App& app) {
     app.hasSelection = false;
     app.selAnchor = 0;
     app.selFocus = 0;
+    app.selAutoScrollVel = 0.0f;
+    app.selShiftExtend = false;
     app.selectedText.clear();
 }

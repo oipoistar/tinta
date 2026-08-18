@@ -30,6 +30,13 @@ bool selectionLineRange(const App& app, size_t offset, size_t& start, size_t& en
 void selectionHighlightRects(const App& app, size_t start, size_t end,
                              std::vector<D2D1_RECT_F>& out);
 
+// Precise rect for the docText range [start, end) clipped to one text rect
+// (search match highlighting shares the selection machinery). Vertical
+// extent comes from the rect, horizontal from the run layout; interpolates
+// when no layout covers the rect.
+bool selectionRangeRect(const App& app, const App::TextRect& tr,
+                        size_t start, size_t end, D2D1_RECT_F& out);
+
 // Exactly docText[start, end) — docText carries newlines between layout
 // lines and blocks, so this pastes as sensible plain text.
 std::wstring selectionTextForRange(const App& app, size_t start, size_t end);
