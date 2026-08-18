@@ -1049,6 +1049,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.tocOnLeft = app->tocOnLeft;
                 settings.language = app->languageSetting >= 0
                     ? languageIdAt(app->languageSetting) : "auto";
+                settings.keyProfile = app->keyProfile;
                 if (!app->currentFile.empty()) {
                     rememberReadingPosition(settings, app->currentFile, app->scrollY);
                 }

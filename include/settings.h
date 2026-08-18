@@ -41,6 +41,24 @@ enum KeyActionIndex {
     KA_NEWFILE, KA_ZEN, KA_SCROLLUP, KA_SCROLLDOWN, KA_EDIT, KA_HELP
 };
 
+// Shortcut profiles: Tinta grew from a keyboard-first viewer into a full
+// UI, leaving a mix of vim-style keys (j/k, ':') and Windows conventions.
+// Profiles let the user pick a coherent set; "custom" keeps the [Keys]
+// overrides-over-defaults semantics. Raw ':' and '?' stay hardwired to
+// edit/help in every profile, so documented habits never break.
+struct KeyProfileDef {
+    const char* id;                     // persisted in settings.ini
+    unsigned keys[KEY_ACTION_COUNT];    // same order as KEY_ACTIONS
+};
+inline constexpr KeyProfileDef KEY_PROFILES[] = {
+    // search browse toc     theme stats quit newfile zen     up   down edit help
+    {"windows", {'F', 'B', VK_TAB, 'T', 'S', 'Q', 'N', VK_F11, 'K', 'J', 'E', VK_F1}},
+    {"vim",     {'/', 'B', VK_TAB, 'T', 'S', 'Q', 'N', VK_F11, 'K', 'J', ':', '?'}},
+};
+inline constexpr int KEY_PROFILE_COUNT = 2;
+// Index into KEY_PROFILES, or -1 for the custom [Keys] profile
+int keyProfileIndexById(const std::string& id);
+
 // Resolves settings.keyOverrides over the defaults into app.keymap
 void applyKeymap(App& app, const Settings& settings);
 // Key spelling used in settings.ini ("G", "Tab", "F5", ...)

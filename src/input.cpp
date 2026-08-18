@@ -385,6 +385,21 @@ static void settingsSliderApply(App& app, int which, float mx) {
 
 // Applies one settings-overlay action (id from app.settingsHits)
 static void settingsAction(App& app, HWND hwnd, int action) {
+    // Shortcut profile picks (checked first: their base is above the
+    // language pick base)
+    if (action >= SET_KEYS_PICK_BASE) {
+        int pick = action - SET_KEYS_PICK_BASE;
+        const char* ids[] = {"windows", "vim", "custom"};
+        if (pick >= 0 && pick < 3) {
+            // Reload so the custom profile picks up the saved [Keys]
+            Settings s = loadSettings();
+            s.keyProfile = ids[pick];
+            applyKeymap(app, s);  // also mirrors into app.keyProfile
+        }
+        app.settingsKeysOpen = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
     // Language dropdown picks: 0 = Auto, then the registry languages
     if (action >= SET_LANG_PICK_BASE) {
         int pick = action - SET_LANG_PICK_BASE;
@@ -400,6 +415,7 @@ static void settingsAction(App& app, HWND hwnd, int action) {
         return;
     }
     if (action != SET_LANG_DROPDOWN) app.settingsLangOpen = false;
+    if (action != SET_KEYS_DROPDOWN) app.settingsKeysOpen = false;
     switch (action) {
         case SET_SECTION_GENERAL: app.settingsSection = 0; break;
         case SET_SECTION_APPEARANCE: app.settingsSection = 1; break;
@@ -442,6 +458,9 @@ static void settingsAction(App& app, HWND hwnd, int action) {
         case SET_LANG_DROPDOWN:
             app.settingsLangOpen = !app.settingsLangOpen;
             break;
+        case SET_KEYS_DROPDOWN:
+            app.settingsKeysOpen = !app.settingsKeysOpen;
+            break;
         case SET_TOC_RIGHT: app.tocOnLeft = false; break;
         case SET_OPEN_INI:
             ShellExecuteW(nullptr, L"open", getSettingsPath().c_str(),
@@ -467,7 +486,15 @@ static WPARAM translateActionKey(App& app, WPARAM key, bool isChar) {
     };
     unsigned pressed = norm((unsigned)key);
     for (int i = 0; i < KEY_ACTION_COUNT; i++) {
-        if (KEY_ACTIONS[i].isChar != isChar) continue;
+        if (KEY_ACTIONS[i].isChar != isChar) {
+            // Punctuation bound to a keydown action (vim '/'-search) only
+            // arrives as a character — its VK depends on the layout — so
+            // the char pass matches it too. Letters stay keydown-only.
+            bool punctInCharPass = isChar && !KEY_ACTIONS[i].isChar &&
+                app.keymap[i] > ' ' && app.keymap[i] < 128 &&
+                !iswalnum((wint_t)app.keymap[i]);
+            if (!punctInCharPass) continue;
+        }
         if (norm(app.keymap[i]) == pressed) {
             return (WPARAM)KEY_ACTIONS[i].defaultKey;
         }
@@ -1501,8 +1528,9 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 return;
             }
         }
-        if (app.settingsLangOpen) {
-            app.settingsLangOpen = false;  // click elsewhere collapses it
+        if (app.settingsLangOpen || app.settingsKeysOpen) {
+            app.settingsLangOpen = false;  // click elsewhere collapses them
+            app.settingsKeysOpen = false;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return;
@@ -2304,6 +2332,11 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
         if (key == 0xFF1A) key = L':';  // ：
         if (key == 0xFF1F) key = L'?';  // ？
         wchar_t ch = (wchar_t)translateActionKey(app, key, true);
+        // Universal fallbacks: raw ':' and '?' keep working in every
+        // profile — the docs and years of habit point at them
+        if (ch == 0 && (key == L':' || key == L'?')) {
+            ch = (wchar_t)key;
+        }
         if (ch == L':' && !app.showHelp) {
             enterEditMode(app);
             return;
@@ -2313,6 +2346,19 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
             if (app.showHelp) {
                 app.helpAnimation = 0;
             }
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+            return;
+        }
+        if (ch == L'F' && !app.showHelp && !app.editMode) {
+            // A punctuation search binding (vim '/') resolved here
+            app.showSearch = true;
+            app.searchActive = true;
+            app.searchAnimation = 0;
+            app.searchQuery.clear();
+            app.searchMatches.clear();
+            app.searchCurrentIndex = 0;
+            app.searchJustOpened = true;
+            updateBlinkTimer(app);
             InvalidateRect(app.hwnd, nullptr, FALSE);
             return;
         }

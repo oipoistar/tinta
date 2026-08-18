@@ -1827,6 +1827,34 @@ void renderSettingsOverlay(App& app) {
             app.settingsHits.push_back({pen, SET_OPEN_LANGS_INI});
         }
         hairline(); cy += rowH;
+        rowLabel(tr(app, "settings.shortcuts"), tr(app, "settings.shortcuts.hint"));
+        {
+            // Profile dropdown, same pattern as the language one
+            float boxH = dpi(app, 26.0f);
+            float boxW = dpi(app, 150.0f);
+            float boxX = cx + cw - dpi(app, 8.0f) - boxW;
+            float boxY = cy + dpi(app, 2.0f);
+            D2D1_RECT_F box = D2D1::RectF(boxX, boxY, boxX + boxW, boxY + boxH);
+            app.settingsKeysBox = box;
+            D2D1_COLOR_F c = app.theme.text;
+            c.a = (app.settingsKeysOpen ? 0.6f : 0.3f) * anim;
+            app.brush->SetColor(c);
+            app.renderTarget->DrawRoundedRectangle(
+                D2D1::RoundedRect(box, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush, 1.0f);
+            const char* profKey = app.keyProfile == "vim" ? "settings.profile.vim"
+                : app.keyProfile == "custom" ? "settings.profile.custom"
+                                             : "settings.profile.windows";
+            std::wstring current = tr(app, profKey);
+            current += L"  \x25BE";
+            c = app.theme.text;
+            c.a = 0.95f * anim;
+            app.brush->SetColor(c);
+            app.renderTarget->DrawText(current.c_str(), (UINT32)current.size(), fmt,
+                D2D1::RectF(box.left + dpi(app, 10.0f), box.top + dpi(app, 4.0f),
+                            box.right - dpi(app, 6.0f), box.bottom), app.brush);
+            app.settingsHits.push_back({box, SET_KEYS_DROPDOWN});
+        }
+        hairline(); cy += rowH;
         rowLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.folderSearchEnabled, SET_TOGGLE_FOLDERSEARCH, anim);
@@ -1881,6 +1909,48 @@ void renderSettingsOverlay(App& app) {
         rowLabel(tr(app, "settings.preview_pane"), tr(app, "settings.preview_pane.hint"));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.editorShowPreview, SET_TOGGLE_PREVIEW, anim);
+    }
+
+    // Shortcut profile popup, drawn last so it sits above the rows
+    if (app.settingsKeysOpen && app.settingsSection == 0) {
+        float itemH = dpi(app, 26.0f);
+        const char* rowKeys[] = {"settings.profile.windows",
+                                 "settings.profile.vim",
+                                 "settings.profile.custom"};
+        const char* rowIds[] = {"windows", "vim", "custom"};
+        int count = 3;
+        D2D1_RECT_F box = app.settingsKeysBox;
+        D2D1_RECT_F pop = D2D1::RectF(box.left, box.bottom + dpi(app, 4.0f),
+                                      box.right,
+                                      box.bottom + dpi(app, 4.0f) + itemH * count);
+        D2D1_COLOR_F pc = app.theme.background;
+        pc.a = anim;
+        app.brush->SetColor(pc);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(pop, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush);
+        pc = app.theme.text;
+        pc.a = 0.35f * anim;
+        app.brush->SetColor(pc);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(pop, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush, 1.0f);
+        for (int i = 0; i < count; i++) {
+            float ry = pop.top + i * itemH;
+            D2D1_RECT_F row = D2D1::RectF(pop.left, ry, pop.right, ry + itemH);
+            if (app.keyProfile == rowIds[i]) {
+                D2D1_COLOR_F hl = app.theme.accent;
+                hl.a = 0.18f * anim;
+                app.brush->SetColor(hl);
+                app.renderTarget->FillRectangle(row, app.brush);
+            }
+            const wchar_t* label = tr(app, rowKeys[i]);
+            pc = app.theme.text;
+            pc.a = 0.95f * anim;
+            app.brush->SetColor(pc);
+            app.renderTarget->DrawText(label, (UINT32)wcslen(label), fmt,
+                D2D1::RectF(row.left + dpi(app, 10.0f), row.top + dpi(app, 4.0f),
+                            row.right - dpi(app, 6.0f), row.bottom), app.brush);
+            app.settingsHits.push_back({row, SET_KEYS_PICK_BASE + i});
+        }
     }
 
     // Footer hint
