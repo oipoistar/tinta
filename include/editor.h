@@ -27,6 +27,8 @@ void renderEditModeNotification(App& app);
 
 // File save
 void saveEditorFile(App& app, HWND hwnd);
+// Unsaved-changes dialog outcome: 1 save+exit, 2 discard, 3 keep editing
+void confirmExitAction(App& app, HWND hwnd, int action);
 
 // Editor reparse (called from timer)
 void editorReparse(App& app);

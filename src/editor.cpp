@@ -766,13 +766,11 @@ void enterQuickNoteMode(App& app) {
 
 void exitEditMode(App& app) {
     if (app.editorDirty) {
-        // Show in-app prompt instead of modal dialog (avoids ESC key conflict)
+        // Unsaved changes: a modal dialog with clickable buttons. The
+        // timestamp opens a grace window so smashed Esc presses land on a
+        // stable dialog instead of instantly cancelling it.
         app.confirmExitPending = true;
-        app.editorNotificationMsg = tr(app, "toast.unsaved_exit");
-        app.showEditModeNotification = true;
-        app.editModeNotificationAlpha = 1.0f;
-        app.editModeNotificationStart = std::chrono::steady_clock::now();
-        startNotificationTimer(app);
+        app.confirmExitOpenedAt = std::chrono::steady_clock::now();
         InvalidateRect(app.hwnd, nullptr, FALSE);
         return;
     }
@@ -923,6 +921,28 @@ void saveEditorFile(App& app, HWND hwnd) {
 
 // --- Input handlers ---
 
+// Unsaved-changes dialog outcomes (shared by keyboard and mouse):
+// 1 = save and exit, 2 = discard changes, 3 = keep editing
+void confirmExitAction(App& app, HWND hwnd, int action) {
+    if (action == 1) {
+        app.confirmExitPending = false;
+        saveEditorFile(app, hwnd);
+        if (!app.editorDirty) {
+            exitEditMode(app);
+        }
+        // Save failed (or Save As cancelled): dialog closes, editing
+        // continues — the failure toast explains itself
+    } else if (action == 2) {
+        app.confirmExitPending = false;
+        app.editorDirty = false;
+        exitEditMode(app);
+    } else {
+        app.confirmExitPending = false;
+        app.escPressedOnce = false;
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -985,36 +1005,35 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return; // Let WM_CHAR handle text input for search
     }
 
-    // Handle confirm-exit prompt: only Y / N / ESC (and Ctrl+S as "save")
-    // respond. Other keys — including bare modifiers like the Ctrl of a
-    // Ctrl+S chord — must NOT silently dismiss the prompt.
+    // Unsaved-changes dialog. Only its own keys respond; other keys —
+    // including bare modifiers like the Ctrl of a Ctrl+S chord — must NOT
+    // silently dismiss it. Esc and N are ignored during the grace window
+    // so a smashed Esc lands on a stable, readable dialog instead of
+    // cancelling it before it was ever seen.
     if (app.confirmExitPending) {
-        if (wParam == 'Y' || (ctrl && wParam == 'S')) {
-            app.confirmExitPending = false;
-            saveEditorFile(app, hwnd);
-            if (!app.editorDirty) {
-                // Save succeeded — exit proceeds
-                exitEditMode(app);
-            }
-            // Save failed: saveEditorFile showed the error, stay in edit mode
-        } else if (wParam == 'N') {
-            app.confirmExitPending = false;
-            app.editorDirty = false;  // Discard changes
-            exitEditMode(app);
-        } else if (wParam == VK_ESCAPE) {
-            app.confirmExitPending = false;
-            app.escPressedOnce = false;
-            app.editorNotificationMsg = tr(app, "toast.exit_cancelled");
-            app.showEditModeNotification = true;
-            app.editModeNotificationAlpha = 1.0f;
-            app.editModeNotificationStart = std::chrono::steady_clock::now();
-            startNotificationTimer(app);
+        auto sinceOpen = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - app.confirmExitOpenedAt).count();
+        bool inGrace = sinceOpen < 600;
+        if (wParam == 'Y' || wParam == VK_RETURN || (ctrl && wParam == 'S')) {
+            confirmExitAction(app, hwnd, 1);
+        } else if (wParam == 'N' && !inGrace) {
+            confirmExitAction(app, hwnd, 2);
+        } else if (wParam == VK_ESCAPE && !inGrace) {
+            confirmExitAction(app, hwnd, 3);
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
 
     if (wParam == VK_ESCAPE) {
+        // Dirty buffer: straight to the dialog — it is the guard, and a
+        // second Esc stage on top of it is what made the old flow a maze.
+        // Clean buffer: keep the documented double-Esc exit.
+        if (app.editorDirty) {
+            exitEditMode(app);
+            app.escPressedOnce = false;
+            return;
+        }
         auto now = std::chrono::steady_clock::now();
         if (app.escPressedOnce) {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
