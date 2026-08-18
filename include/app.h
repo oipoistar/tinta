@@ -845,12 +845,27 @@ inline float folderBrowserPanelWidth(const App& app) {
     return w;
 }
 
+// TOC panel width — shared by input hit-testing, the panel renderer, and
+// the viewport shift
+inline float tocPanelWidth(const App& app) {
+    float cap = dpi(app, 280.0f);
+    float floor_ = dpi(app, 220.0f);
+    float w = app.width * 0.2f;
+    if (w < floor_) w = floor_;
+    if (w > cap) w = cap;
+    return w;
+}
+
 inline float documentViewportX(const App& app) {
     if (!app.editMode) {
-        // The folder browser pushes the content right instead of covering
-        // it; the shift follows the panel's slide-in animation
+        // Side panels push the content aside instead of covering it; the
+        // shift follows the panel's slide-in animation. A right-docked TOC
+        // leaves x at 0 and only narrows the viewport.
         if (app.showFolderBrowser) {
             return folderBrowserPanelWidth(app) * app.folderBrowserAnimation;
+        }
+        if (app.showToc && app.tocOnLeft) {
+            return tocPanelWidth(app) * app.tocAnimation;
         }
         return 0.0f;
     }
@@ -869,6 +884,7 @@ inline float documentViewportWidth(const App& app) {
         // Snap to the panel's final width (not the animated position) so
         // the reading column relayouts once per toggle, not per frame
         if (app.showFolderBrowser) width -= folderBrowserPanelWidth(app);
+        else if (app.showToc) width -= tocPanelWidth(app);
     }
     return width > 0.0f ? width : 0.0f;
 }

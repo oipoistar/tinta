@@ -149,7 +149,7 @@ void renderFolderBrowser(App& app) {
     float anim = app.folderBrowserAnimation;
 
     // Panel dimensions
-    float panelWidth = std::min(dpi(app, 300.0f), std::max(dpi(app, 250.0f), app.width * 0.2f));
+    float panelWidth = folderBrowserPanelWidth(app);
     float panelX = -panelWidth * (1.0f - anim);  // Slide in from left
     float panelY = 0;
     float panelHeight = (float)app.height;
@@ -494,7 +494,7 @@ void renderToc(App& app) {
     float anim = app.tocAnimation;
 
     // Panel dimensions
-    float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
+    float panelWidth = tocPanelWidth(app);
     float panelX = tocPanelX(app, panelWidth);  // slides from the chosen side
     float panelY = 0;
     float panelHeight = (float)app.height;
