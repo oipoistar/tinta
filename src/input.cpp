@@ -1168,7 +1168,21 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
     // If theme chooser, folder browser, or TOC is open, don't start selection - just record for click handling
     if (app.showThemeChooser || app.showFolderBrowser || app.showToc) {
-        return;
+        // Clicking the content scrollbar while the folder browser is open
+        // reads as "back to the document": dismiss the browser and let the
+        // click work the scrollbar normally
+        bool scrollbarClick =
+            (app.scrollbarHovered && app.contentHeight > app.height) ||
+            (app.hScrollbarHovered &&
+             app.contentWidth > documentViewportWidth(app));
+        if (app.showFolderBrowser && !app.showThemeChooser && !app.showToc &&
+            scrollbarClick) {
+            app.showFolderBrowser = false;
+            closeFolderBrowserInput(app);
+            // fall through to the scrollbar handling below
+        } else {
+            return;
+        }
     }
 
     app.mouseDown = true;
