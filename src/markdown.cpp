@@ -207,6 +207,14 @@ static int enterSpanCallback(MD_SPANTYPE type, void* detail, void* userdata) {
             elem = std::make_shared<Element>(ElementType::Code);
             break;
 
+        case MD_SPAN_LATEXMATH:
+            elem = std::make_shared<Element>(ElementType::MathInline);
+            break;
+
+        case MD_SPAN_LATEXMATH_DISPLAY:
+            elem = std::make_shared<Element>(ElementType::MathDisplay);
+            break;
+
         case MD_SPAN_A: {
             auto* a = static_cast<MD_SPAN_A_DETAIL*>(detail);
             elem = std::make_shared<Element>(ElementType::Link);
@@ -251,6 +259,8 @@ static int leaveSpanCallback(MD_SPANTYPE type, void* /*detail*/, void* userdata)
         case MD_SPAN_CODE:
         case MD_SPAN_A:
         case MD_SPAN_IMG:
+        case MD_SPAN_LATEXMATH:
+        case MD_SPAN_LATEXMATH_DISPLAY:
             ctx->popElement();
             break;
         default:
@@ -294,6 +304,17 @@ static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, voi
         case MD_TEXT_NORMAL:
         case MD_TEXT_CODE:
             ctx->addText(text, size);
+            break;
+
+        case MD_TEXT_LATEXMATH:
+            // Raw TeX accumulates directly on the math span element
+            if (ctx->current() &&
+                (ctx->current()->type == ElementType::MathInline ||
+                 ctx->current()->type == ElementType::MathDisplay)) {
+                ctx->current()->text.append(text, size);
+            } else {
+                ctx->addText(text, size);
+            }
             break;
 
         case MD_TEXT_SOFTBR:
@@ -586,7 +607,8 @@ ParseResult MarkdownParser::parse(const std::string& markdown) {
             // continuations far enough that CommonMark turns them into code
             // blocks — literal ** markers, no wrapping (#24). Fenced ```
             // blocks are unaffected and remain the way to write code.
-            MD_FLAG_NOINDENTEDCODEBLOCKS
+            MD_FLAG_NOINDENTEDCODEBLOCKS |
+            MD_FLAG_LATEXMATHSPANS
         ),
         enterBlockCallback,
         leaveBlockCallback,

@@ -4,6 +4,7 @@
 #include "syntax.h"
 #include "search.h"
 #include "mermaid.h"
+#include "math_render.h"
 
 #include <algorithm>
 #include <cctype>
@@ -422,6 +423,54 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 continue;
             }
 
+            case ElementType::MathInline:
+            case ElementType::MathDisplay: {
+                // Native inline math (#80): an atomic measured box in the
+                // text flow, baseline-aligned with the surrounding line
+                std::wstring latex = toWide(elem->text);
+                float mathSize = format ? format->GetFontSize()
+                                        : app.textFormat->GetFontSize();
+                MathBoxPtr box = mathParse(app, latex, mathSize, false);
+                if (!box) {
+                    // Unsupported TeX: show the raw source in code style
+                    format = inlineCodeFormat(app, run.style.bold, run.style.italic);
+                    if (!isLink) color = app.theme.code;
+                    text = L"$" + latex + L"$";
+                    break;
+                }
+                float w = mathBoxWidth(box);
+                if (x + w > maxX && x > startX) {
+                    x = startX;
+                    y += lineHeight;
+                }
+                // Align the box baseline with the surrounding text baseline
+                float textBaseline = mathSize * 0.8f;
+                {
+                    IDWriteTextLayout* probe = nullptr;
+                    app.dwriteFactory->CreateTextLayout(
+                        L"Ag", 2, format ? format : app.textFormat,
+                        1000.0f, 1000.0f, &probe);
+                    if (probe) {
+                        DWRITE_LINE_METRICS lm{};
+                        UINT32 n = 1;
+                        probe->GetLineMetrics(&lm, 1, &n);
+                        textBaseline = lm.baseline;
+                        probe->Release();
+                    }
+                }
+                float boxTop = y + drawYOffset + textBaseline - mathBoxBaseline(box);
+                mathBoxRetain(app, box, x, boxTop, app.theme.text);
+
+                size_t docStart = app.docText.size();
+                std::wstring source = L"$" + latex + L"$";
+                app.docText += source;
+                addTextRect(app,
+                            D2D1::RectF(x, y, x + w, y + lineHeight),
+                            docStart, source.size());
+                x += w;
+                continue;
+            }
+
             case ElementType::SoftBreak:
                 text = L" ";
                 break;
@@ -723,7 +772,65 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
     y += lineHeight;
 }
 
+static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth);
+
+// Display math ($$...$$, #80): a centered block rendered natively; the raw
+// TeX joins docText so search and selection see the source
+static void layoutMathBlock(App& app, const ElementPtr& elem, float& y,
+                            float indent, float maxWidth) {
+    std::wstring latex = toWide(elem->text);
+    float baseSize = app.textFormat ? app.textFormat->GetFontSize() : 16.0f;
+    MathBoxPtr box = mathParse(app, latex, baseSize * 1.06f, true);
+    if (!box) {
+        // Unsupported TeX: raw source in code style (the mermaid pattern)
+        auto fallback = std::make_shared<Element>(ElementType::CodeBlock);
+        auto text = std::make_shared<Element>(ElementType::Text);
+        text->text = elem->text;
+        text->parent = fallback.get();
+        fallback->children.push_back(std::move(text));
+        fallback->sourceOffset = elem->sourceOffset;
+        layoutCodeBlock(app, fallback, y, indent, maxWidth);
+        return;
+    }
+    float scale = app.contentScale * app.zoomFactor;
+    y += 6 * scale;
+    float w = mathBoxWidth(box);
+    float x = indent + std::max(0.0f, (maxWidth - w) / 2);
+    mathBoxRetain(app, box, x, y, app.theme.text);
+
+    size_t docStart = app.docText.size();
+    app.docText += latex;
+    addTextRect(app, D2D1::RectF(x, y, x + w, y + mathBoxHeight(box)),
+                docStart, latex.size());
+    app.docText += L"\n\n";
+
+    y += mathBoxHeight(box) + 14 * scale;
+}
+
+// A paragraph that is exactly one $$...$$ span renders as a math block
+static const ElementPtr* soleMathDisplayChild(const ElementPtr& elem) {
+    const ElementPtr* found = nullptr;
+    for (const auto& child : elem->children) {
+        if (!child) continue;
+        if (child->type == ElementType::MathDisplay) {
+            if (found) return nullptr;
+            found = &child;
+        } else if (child->type == ElementType::Text) {
+            for (char c : child->text) {
+                if (!isspace((unsigned char)c)) return nullptr;
+            }
+        } else if (child->type != ElementType::SoftBreak) {
+            return nullptr;
+        }
+    }
+    return found;
+}
+
 static void layoutParagraph(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
+    if (const ElementPtr* math = soleMathDisplayChild(elem)) {
+        layoutMathBlock(app, *math, y, indent, maxWidth);
+        return;
+    }
     layoutInlineContent(app, elem->children, indent, y, maxWidth, app.textFormat, app.theme.text);
     app.docText += L"\n\n";
     float scale = app.contentScale * app.zoomFactor;

@@ -53,6 +53,7 @@ set(SOURCES
     src/print.cpp
     src/i18n.cpp
     src/selection.cpp
+    src/math_render.cpp
 )
 
 set(HEADERS
@@ -75,6 +76,7 @@ set(HEADERS
     include/print.h
     include/i18n.h
     include/selection.h
+    include/math_render.h
 )
 
 # Windows resource file (icon)

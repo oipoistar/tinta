@@ -1,4 +1,5 @@
 #include "d2d_init.h"
+#include "math_render.h"
 #include "utils.h"
 
 #include <objbase.h>
@@ -108,6 +109,8 @@ void applyTheme(App& app, int themeIndex) {
 void updateTextFormats(App& app) {
     // Editor line layouts hold the old format/size
     app.clearEditorLineLayoutCache();
+    // Math boxes were laid out against the old theme font
+    mathClearCache();
     // Release existing formats
     if (app.textFormat) { app.textFormat->Release(); app.textFormat = nullptr; }
     if (app.headingFormat) { app.headingFormat->Release(); app.headingFormat = nullptr; }
