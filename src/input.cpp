@@ -552,7 +552,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
     // Handle folder browser scroll (not when Ctrl is held — that's zoom)
     if (app.showFolderBrowser && !ctrl) {
-        float panelWidth = std::min(dpi(app, 300.0f), std::max(dpi(app, 250.0f), app.width * 0.2f));
+        float panelWidth = folderBrowserPanelWidth(app);
         float panelX = -panelWidth * (1.0f - app.folderBrowserAnimation);
         if (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth) {
             // Scroll folder list
@@ -571,7 +571,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
     // Handle TOC scroll (not when Ctrl is held — that's zoom)
     if (app.showToc && !ctrl) {
-        float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
+        float panelWidth = tocPanelWidth(app);
         float panelX = tocPanelX(app, panelWidth);
         if (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth) {
             app.tocScroll -= delta * dpi(app, 60.0f);
@@ -794,12 +794,14 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         return;
     }
 
-    // Check vertical scrollbar hover
+    // Check vertical scrollbar hover. The bar draws at the viewport's
+    // right edge, which a right-docked TOC pushes left of the window edge.
     bool wasHovered = app.scrollbarHovered;
     app.scrollbarHovered = false;
     if (app.contentHeight > app.height) {
         float sbWidth = dpi(app, 14.0f);  // hit area
-        if (app.mouseX >= app.width - sbWidth) {
+        float sbRight = documentViewportX(app) + documentViewportWidth(app);
+        if (app.mouseX >= sbRight - sbWidth && app.mouseX <= sbRight) {
             app.scrollbarHovered = true;
         }
     }
@@ -847,7 +849,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
 
     // Update cursor (using cached handles)
     if (app.showFolderBrowser) {
-        float panelWidth = std::min(dpi(app, 300.0f), std::max(dpi(app, 250.0f), app.width * 0.2f));
+        float panelWidth = folderBrowserPanelWidth(app);
         float panelX = -panelWidth * (1.0f - app.folderBrowserAnimation);
         bool inPanel = (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth);
         if (inPanel && app.hoveredFolderIndex >= 0) {
@@ -859,7 +861,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         if (inPanel)
             InvalidateRect(hwnd, nullptr, FALSE);
     } else if (app.showToc) {
-        float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
+        float panelWidth = tocPanelWidth(app);
         float panelX = tocPanelX(app, panelWidth);
         bool inPanel = (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth);
         if (inPanel && app.hoveredTocIndex >= 0) {
@@ -1168,17 +1170,18 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
     // If theme chooser, folder browser, or TOC is open, don't start selection - just record for click handling
     if (app.showThemeChooser || app.showFolderBrowser || app.showToc) {
-        // Clicking the content scrollbar while the folder browser is open
-        // reads as "back to the document": dismiss the browser and let the
-        // click work the scrollbar normally
+        // The content scrollbar stays usable beside a side panel: a click
+        // on it dismisses the folder browser ("back to the document") and
+        // simply works alongside the TOC, which is a navigation aid
         bool scrollbarClick =
             (app.scrollbarHovered && app.contentHeight > app.height) ||
             (app.hScrollbarHovered &&
              app.contentWidth > documentViewportWidth(app));
-        if (app.showFolderBrowser && !app.showThemeChooser && !app.showToc &&
-            scrollbarClick) {
-            app.showFolderBrowser = false;
-            closeFolderBrowserInput(app);
+        if (!app.showThemeChooser && scrollbarClick) {
+            if (app.showFolderBrowser) {
+                app.showFolderBrowser = false;
+                closeFolderBrowserInput(app);
+            }
             // fall through to the scrollbar handling below
         } else {
             return;
@@ -1555,7 +1558,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     if (app.showToc) {
         int clickX = GET_X_LPARAM(lParam);
 
-        float panelWidth = std::min(dpi(app, 280.0f), std::max(dpi(app, 220.0f), app.width * 0.2f));
+        float panelWidth = tocPanelWidth(app);
         float panelX = tocPanelX(app, panelWidth);
 
         if (clickX >= panelX && (float)clickX <= panelX + panelWidth) {
@@ -1584,7 +1587,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         int clickY = GET_Y_LPARAM(lParam);
 
         // Calculate panel bounds (must match render code)
-        float panelWidth = std::min(dpi(app, 300.0f), std::max(dpi(app, 250.0f), app.width * 0.2f));
+        float panelWidth = folderBrowserPanelWidth(app);
         float panelX = -panelWidth * (1.0f - app.folderBrowserAnimation);
 
         // Check if click is inside panel
