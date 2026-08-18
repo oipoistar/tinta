@@ -208,9 +208,9 @@ static void commitFolderBrowserPath(App& app) {
         return;
     }
     if (isSupportedDropPath(path) && openDocumentInViewer(app, path)) {
+        // Preview mode: the browser stays open beside the document — close
+        // it by clicking the document, pressing B, or Esc
         closeFolderBrowserInput(app);
-        app.showFolderBrowser = false;
-        app.folderBrowserAnimation = 0;
     } else {
         app.folderBrowserInputError = true;
     }
@@ -1770,11 +1770,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                     }
                     fullPath += item.name;
 
-                    if (openDocumentInViewer(app, fullPath)) {
-                        // Close folder browser after opening file
-                        app.showFolderBrowser = false;
-                        app.folderBrowserAnimation = 0;
-                    }
+                    // Preview mode: open the file but keep the browser up,
+                    // so the list doubles as a file picker — the current
+                    // file is highlighted, and the browser closes on a
+                    // document click, B, or Esc
+                    openDocumentInViewer(app, fullPath);
                 }
             }
         } else {

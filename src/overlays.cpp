@@ -365,6 +365,22 @@ void renderFolderBrowser(App& app) {
 
         app.hoveredFolderIndex = -1;
 
+        // Preview mode: mark the file currently loaded in the viewer so
+        // the list reads as a picker while clicking through documents
+        std::wstring currentName;
+        {
+            std::wstring wcur = toWide(app.currentFile);
+            std::wstring wdir = app.folderBrowserPath;
+            if (!wdir.empty() && wdir.back() != L'\\' && wdir.back() != L'/') {
+                wdir += L'\\';
+            }
+            if (wcur.size() > wdir.size() &&
+                _wcsnicmp(wcur.c_str(), wdir.c_str(), wdir.size()) == 0 &&
+                wcur.find_first_of(L"\\/", wdir.size()) == std::wstring::npos) {
+                currentName = wcur.substr(wdir.size());
+            }
+        }
+
         for (size_t i = 0; i < app.folderItems.size(); i++) {
             float itemY = listStartY + namingOffset + i * itemHeight - app.folderBrowserScroll;
 
@@ -379,6 +395,17 @@ void renderFolderBrowser(App& app) {
             bool isHovered = (app.mouseX >= itemX && app.mouseX <= itemX + itemW &&
                               app.mouseY >= itemY && app.mouseY <= itemY + itemHeight &&
                               app.mouseY >= listStartY && app.mouseY <= panelHeight - padding);
+
+            bool isCurrent = !item.isDirectory && !currentName.empty() &&
+                             _wcsicmp(item.name.c_str(), currentName.c_str()) == 0;
+            if (isCurrent) {
+                D2D1_COLOR_F curColor = app.theme.accent;
+                curColor.a = 0.22f * anim;
+                app.brush->SetColor(curColor);
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(itemX - dpi(app, 4.0f), itemY, itemX + itemW + dpi(app, 4.0f), itemY + itemHeight), 4, 4),
+                    app.brush);
+            }
 
             if (isHovered) {
                 app.hoveredFolderIndex = (int)i;
