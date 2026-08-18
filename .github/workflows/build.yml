@@ -4,12 +4,20 @@ on:
   push:
     tags:
       - 'v*'
+  # Re-run just the Store submission for an existing release (e.g. after
+  # a Partner Center or tooling failure)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to submit to the Store (e.g. v2.8.0)"
+        required: true
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: github.event_name == 'push'
     runs-on: windows-latest
 
     steps:
@@ -60,7 +68,10 @@ jobs:
   store:
     runs-on: windows-latest
     needs: build
+    # Runs after a successful tag build, or standalone via workflow_dispatch
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.build.result == 'success')
     env:
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
       MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
       MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
       MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
@@ -87,7 +98,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force build\Release | Out-Null
-          gh release download $env:GITHUB_REF_NAME --pattern tinta.exe --output build\Release\tinta.exe --repo $env:GITHUB_REPOSITORY
+          gh release download $env:RELEASE_TAG --pattern tinta.exe --output build\Release\tinta.exe --repo $env:GITHUB_REPOSITORY
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -99,6 +110,10 @@ jobs:
       - name: Setup Microsoft Store CLI
         if: steps.gate.outputs.on == 'true'
         uses: microsoft/setup-msstore-cli@v1
+        with:
+          # v0.4.0 (2026-08-18, .NET 10/native-AOT rework) fails uploads at
+          # 34% consistently; pin the last known-good release
+          version: "v0.3.9"
 
       - name: Configure Store CLI
         if: steps.gate.outputs.on == 'true'
