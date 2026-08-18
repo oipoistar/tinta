@@ -14,5 +14,6 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam);
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam);
 void handleDropFiles(App& app, HWND hwnd, WPARAM wParam);
 void handleFileWatchTimer(App& app, HWND hwnd);
+void handleSelectScrollTimer(App& app, HWND hwnd);
 
 #endif // TINTA_INPUT_H

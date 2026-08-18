@@ -56,9 +56,10 @@ static LayoutInfo createLayout(App& app, std::wstring_view text, IDWriteTextForm
     return info;
 }
 
-static void addTextRect(App& app, const D2D1_RECT_F& rect, size_t docStart, size_t docLength) {
+static void addTextRect(App& app, const D2D1_RECT_F& rect, size_t docStart, size_t docLength,
+                        size_t runIndex = (size_t)-1) {
     size_t idx = app.textRects.size();
-    app.textRects.push_back({rect, docStart, docLength});
+    app.textRects.push_back({rect, docStart, docLength, runIndex});
 
     if (app.lineBuckets.empty() ||
         std::abs(rect.top - app.lineBuckets.back().top) > kLineBucketTolerance) {
@@ -95,7 +96,7 @@ static void addTextRun(App& app, LayoutInfo&& info, const D2D1_POINT_2F& pos,
     app.layoutTextRuns.push_back(run);
 
     if (selectable) {
-        addTextRect(app, bounds, docStart, docLength);
+        addTextRect(app, bounds, docStart, docLength, app.layoutTextRuns.size() - 1);
     }
 }
 
@@ -614,13 +615,17 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
             }
             D2D1_POINT_2F segPos = D2D1::Point2F(segX, y + drawYOffset);
             D2D1_RECT_F segBounds = D2D1::RectF(segX, y, segX + segWidth, y + lineHeight);
+            size_t runsBefore = app.layoutTextRuns.size();
             addTextRun(app, std::move(info), segPos, segBounds, color,
                        textDocStart + segStart, segEnd - segStart, false);
+            // Word rects hit-test against the covering segment layout
+            size_t segRun = app.layoutTextRuns.size() > runsBefore
+                ? app.layoutTextRuns.size() - 1 : (size_t)-1;
             for (const auto& w : segWords) {
                 float wx = segX + widthOf(segStart, w.start);
                 D2D1_RECT_F wb = D2D1::RectF(wx, y, wx + widthOf(w.start, w.start + w.len),
                                              y + lineHeight);
-                addTextRect(app, wb, textDocStart + w.start, w.len);
+                addTextRect(app, wb, textDocStart + w.start, w.len, segRun);
             }
             segWords.clear();
         };
@@ -1342,6 +1347,7 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
 
         size_t lineDocStart = codeDocStart + lineStart;
         float lineWidth = 0.0f;
+        size_t lineRun = (size_t)-1;
 
         if (language > 0) {
             std::vector<SyntaxToken> tokens = tokenizeLine(wline, language, inBlockComment);
@@ -1389,14 +1395,20 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
             D2D1_POINT_2F pos = D2D1::Point2F(indent + padding, textY);
             D2D1_RECT_F bounds = D2D1::RectF(indent + padding, textY,
                                              indent + padding + lineWidth, textY + lineHeight);
+            size_t runsBefore = app.layoutTextRuns.size();
             addTextRun(app, std::move(info), pos, bounds, app.theme.code,
                        lineDocStart, wline.length(), false);
+            if (app.layoutTextRuns.size() > runsBefore) {
+                lineRun = app.layoutTextRuns.size() - 1;
+            }
         }
 
         if (!wline.empty()) {
             D2D1_RECT_F lineBounds = D2D1::RectF(indent + padding, textY,
                 indent + padding + lineWidth, textY + lineHeight);
-            addTextRect(app, lineBounds, lineDocStart, wline.length());
+            // Syntax-highlighted lines have no single covering layout;
+            // monospace interpolation stays accurate there
+            addTextRect(app, lineBounds, lineDocStart, wline.length(), lineRun);
         }
 
         maxLineWidth = std::max(maxLineWidth, lineWidth);

@@ -10,6 +10,7 @@
 #include "overlays.h"
 #include "print.h"
 #include "i18n.h"
+#include "selection.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -24,6 +25,42 @@
 static HCURSOR cursorArrow = LoadCursor(nullptr, IDC_ARROW);
 static HCURSOR cursorHand  = LoadCursor(nullptr, IDC_HAND);
 static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
+
+// Drag auto-scroll (#83): while a selection drag sits in the edge band,
+// TIMER_SELECT_SCROLL scrolls the document and drags the focus offset along
+void handleSelectScrollTimer(App& app, HWND hwnd) {
+    if (!app.selecting || app.selAutoScrollVel == 0.0f || app.editMode) {
+        KillTimer(hwnd, TIMER_SELECT_SCROLL);
+        app.selAutoScrollVel = 0.0f;
+        return;
+    }
+    float maxScroll = std::max(0.0f, app.contentHeight - app.height);
+    float next = std::clamp(app.scrollY + app.selAutoScrollVel, 0.0f, maxScroll);
+    if (next == app.scrollY) return;  // pinned at an end; keep the timer for reversals
+    app.scrollY = next;
+    app.targetScrollY = next;
+
+    // app.mouseX/Y hold the drag position — with mouse capture they update
+    // even outside the window, and holding still keeps the last position
+    float docX = ((float)app.mouseX - documentViewportX(app)) + app.scrollX;
+    float docY = (float)app.mouseY + app.scrollY;
+    size_t off = selectionOffsetAtPoint(app, docX, docY);
+    if (app.selectionMode == App::SelectionMode::Word) {
+        size_t ws, we;
+        selectionWordRange(app, off, ws, we);
+        app.selAnchor = std::min(app.selAnchorRangeStart, ws);
+        app.selFocus = std::max(app.selAnchorRangeEnd, we);
+    } else if (app.selectionMode == App::SelectionMode::Line) {
+        size_t ls, le;
+        if (selectionLineRange(app, off, ls, le)) {
+            app.selAnchor = std::min(app.selAnchorRangeStart, ls);
+            app.selFocus = std::max(app.selAnchorRangeEnd, le);
+        }
+    } else {
+        app.selFocus = off;
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
 
 // Loads a document into the viewer and resets per-document state.
 // Shared by the folder browser's item clicks, path input, and new-file flow.
@@ -56,6 +93,7 @@ static bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     app.docText.clear();
     app.docTextLower.clear();
     app.searchMatches.clear();
+    clearSelection(app);  // offsets belong to the old docText
     app.layoutDirty = true;
     updateFileWriteTime(app);
     updateWindowTitle(app);
@@ -677,38 +715,43 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     float docX = (app.mouseX - previewOffsetX) + app.scrollX;
     float docY = app.mouseY + app.scrollY;
 
-    // Text selection dragging
+    // Text selection dragging: the focus follows the caret offset under
+    // the mouse; word/line modes union the current word/line with the
+    // originally clicked one (#83)
     if (app.selecting) {
-        if (app.selectionMode == App::SelectionMode::Word) {
-            // Extend selection by words - merge anchor with current word
-            const App::TextRect* tr = findTextRectAt(app, (int)docX, (int)docY);
-            if (tr) {
-                float wordLeft, wordRight;
-                if (findWordBoundsAt(app, *tr, (int)docX, wordLeft, wordRight)) {
-                    // Selection spans from min(anchor, current) to max(anchor, current)
-                    app.selStartX = (int)std::min(app.anchorLeft, wordLeft);
-                    app.selEndX = (int)std::max(app.anchorRight, wordRight);
-                    app.selStartY = (int)(std::min(app.anchorTop, tr->rect.top));
-                    app.selEndY = (int)(std::max(app.anchorBottom, tr->rect.bottom));
-                    app.hasSelection = true;
-                }
+        // Dragging near/past the top or bottom edge scrolls the document
+        // (viewer only — the edit-mode preview is slaved to the editor)
+        if (!app.editMode) {
+            float band = 40.0f;
+            float vel = 0.0f;
+            if (app.mouseY < band) {
+                vel = -(band - (float)app.mouseY) * 0.35f;
+            } else if ((float)app.mouseY > app.height - band) {
+                vel = ((float)app.mouseY - (app.height - band)) * 0.35f;
             }
+            if (vel != 0.0f && app.selAutoScrollVel == 0.0f) {
+                SetTimer(hwnd, TIMER_SELECT_SCROLL, 16, nullptr);
+            } else if (vel == 0.0f && app.selAutoScrollVel != 0.0f) {
+                KillTimer(hwnd, TIMER_SELECT_SCROLL);
+            }
+            app.selAutoScrollVel = vel;
+        }
+        size_t off = selectionOffsetAtPoint(app, docX, docY);
+        if (app.selectionMode == App::SelectionMode::Word) {
+            size_t ws, we;
+            selectionWordRange(app, off, ws, we);
+            app.selAnchor = std::min(app.selAnchorRangeStart, ws);
+            app.selFocus = std::max(app.selAnchorRangeEnd, we);
+            app.hasSelection = true;
         } else if (app.selectionMode == App::SelectionMode::Line) {
-            // Extend selection by lines - merge anchor with current line
-            float lineLeft, lineRight, lineTop, lineBottom;
-            findLineRects(app, docY, lineLeft, lineRight, lineTop, lineBottom);
-            if (lineRight > lineLeft) {
-                // Selection spans from min(anchor, current) to max(anchor, current)
-                app.selStartX = (int)std::min(app.anchorLeft, lineLeft);
-                app.selEndX = (int)std::max(app.anchorRight, lineRight);
-                app.selStartY = (int)(std::min(app.anchorTop, lineTop));
-                app.selEndY = (int)(std::max(app.anchorBottom, lineBottom));
+            size_t ls, le;
+            if (selectionLineRange(app, off, ls, le)) {
+                app.selAnchor = std::min(app.selAnchorRangeStart, ls);
+                app.selFocus = std::max(app.selAnchorRangeEnd, le);
                 app.hasSelection = true;
             }
         } else {
-            // Normal selection - store in document coordinates
-            app.selEndX = (int)docX;
-            app.selEndY = (int)docY;
+            app.selFocus = off;
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
@@ -897,13 +940,12 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             break;
         case CTX_SELECT_ALL:
             if (app.root) {
-                app.selectedText.clear();
-                extractText(app.root, app.selectedText);
+                // docText only exists for laid-out content — finish first
+                ensureLayoutComplete(app);
+                app.selAnchor = 0;
+                app.selFocus = app.docText.size();
                 app.hasSelection = true;
-                // Equal coords are the renderer's select-all signal; a stale
-                // drag range would re-extract the old selection every frame
-                app.selStartX = app.selEndX = 0;
-                app.selStartY = app.selEndY = 0;
+                app.selectedText = selectionTextForRange(app, 0, app.docText.size());
             }
             break;
         case CTX_NEW:
@@ -1191,6 +1233,10 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         }
         InvalidateRect(hwnd, nullptr, FALSE);
     } else {
+        // Capture the mouse for the duration of a selection drag: without
+        // it, mouse events stop at the window edge and the drag can neither
+        // auto-scroll past the viewport nor finalize outside the window
+        SetCapture(hwnd);
         // Detect double/triple clicks
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1213,53 +1259,46 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
         // Handle based on click count
         if (app.clickCount == 2) {
-            // Double-click: select word
-            const App::TextRect* tr = findTextRectAt(app, (int)docX, (int)docY);
-            if (tr) {
-                float wordLeft, wordRight;
-                if (findWordBoundsAt(app, *tr, (int)docX, wordLeft, wordRight)) {
-                    app.selectionMode = App::SelectionMode::Word;
-                    // Store anchor (the original word bounds) in document coords for drag extension
-                    app.anchorLeft = wordLeft;
-                    app.anchorRight = wordRight;
-                    app.anchorTop = tr->rect.top;
-                    app.anchorBottom = tr->rect.bottom;
-                    // Set selection to the word (document coordinates)
-                    app.selStartX = (int)wordLeft;
-                    app.selEndX = (int)wordRight;
-                    app.selStartY = (int)tr->rect.top;
-                    app.selEndY = (int)tr->rect.bottom;
-                    app.selecting = true;
-                    app.hasSelection = true;
-                }
-            }
-        } else if (app.clickCount == 3) {
-            // Triple-click: select line
-            float lineLeft, lineRight, lineTop, lineBottom;
-            findLineRects(app, docY, lineLeft, lineRight, lineTop, lineBottom);
-            if (lineRight > lineLeft) {
-                app.selectionMode = App::SelectionMode::Line;
-                // Store anchor (the original line bounds) in document coords for drag extension
-                app.anchorLeft = lineLeft;
-                app.anchorRight = lineRight;
-                app.anchorTop = lineTop;
-                app.anchorBottom = lineBottom;
-                // Set selection to the line (document coordinates)
-                app.selStartX = (int)lineLeft;
-                app.selEndX = (int)lineRight;
-                app.selStartY = (int)lineTop;
-                app.selEndY = (int)lineBottom;
+            // Double-click: select the word at the caret offset
+            size_t off = selectionOffsetAtPoint(app, docX, docY);
+            size_t ws, we;
+            selectionWordRange(app, off, ws, we);
+            if (we > ws) {
+                app.selectionMode = App::SelectionMode::Word;
+                app.selAnchorRangeStart = ws;
+                app.selAnchorRangeEnd = we;
+                app.selAnchor = ws;
+                app.selFocus = we;
                 app.selecting = true;
                 app.hasSelection = true;
+                app.selectedText = selectionTextForRange(app, ws, we);
             }
-        } else {
-            // Single click: start normal selection (document coordinates)
+        } else if (app.clickCount == 3) {
+            // Triple-click: select the visual line
+            size_t off = selectionOffsetAtPoint(app, docX, docY);
+            size_t ls, le;
+            if (selectionLineRange(app, off, ls, le) && le > ls) {
+                app.selectionMode = App::SelectionMode::Line;
+                app.selAnchorRangeStart = ls;
+                app.selAnchorRangeEnd = le;
+                app.selAnchor = ls;
+                app.selFocus = le;
+                app.selecting = true;
+                app.hasSelection = true;
+                app.selectedText = selectionTextForRange(app, ls, le);
+            }
+        } else if ((GetKeyState(VK_SHIFT) & 0x8000) && app.hasSelection) {
+            // Shift+click: keep the anchor, move the focus (Typora-style
+            // extension; the drag can keep adjusting it)
             app.selectionMode = App::SelectionMode::Normal;
             app.selecting = true;
-            app.selStartX = (int)docX;
-            app.selStartY = (int)docY;
-            app.selEndX = (int)docX;
-            app.selEndY = (int)docY;
+            app.selShiftExtend = true;
+            app.selFocus = selectionOffsetAtPoint(app, docX, docY);
+        } else {
+            // Single click: anchor a fresh selection at the caret offset
+            app.selectionMode = App::SelectionMode::Normal;
+            app.selecting = true;
+            app.selAnchor = app.selFocus = selectionOffsetAtPoint(app, docX, docY);
             app.hasSelection = false;
             app.selectedText.clear();
         }
@@ -1725,25 +1764,35 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         app.selecting = false;
         InvalidateRect(hwnd, nullptr, FALSE);
     } else if (app.selecting) {
+        // Edge auto-scroll ends with the drag
+        if (app.selAutoScrollVel != 0.0f) {
+            KillTimer(hwnd, TIMER_SELECT_SCROLL);
+            app.selAutoScrollVel = 0.0f;
+        }
         // Finalize selection based on mode
         if (app.selectionMode == App::SelectionMode::Word ||
             app.selectionMode == App::SelectionMode::Line) {
-            // Word/Line selection: keep the bounds set during mouse down/move
-            // hasSelection was already set to true in WM_LBUTTONDOWN
+            // Word/Line selection: ranges were set during mouse down/move
+            app.selectedText = selectionTextForRange(
+                app, std::min(app.selAnchor, app.selFocus),
+                std::max(app.selAnchor, app.selFocus));
         } else {
-            // Normal selection: finalize with current mouse position (document coordinates)
+            // Normal selection: finalize the focus at the release point
             float previewOffsetX = documentViewportX(app);
             float docX = (app.mouseX - previewOffsetX) + app.scrollX;
             float docY = app.mouseY + app.scrollY;
-            app.selEndX = (int)docX;
-            app.selEndY = (int)docY;
+            app.selFocus = selectionOffsetAtPoint(app, docX, docY);
 
-            // Check if this was a meaningful drag (not just a click)
-            // Use screen coordinates stored from mouse down
+            // Check if this was a meaningful drag (not just a click).
+            // Shift+click extension counts without one.
             int dx = abs(app.mouseX - app.lastClickX);
             int dy = abs(app.mouseY - app.lastClickY);
-            if (dx > 5 || dy > 5) {
+            if ((dx > 5 || dy > 5 || app.selShiftExtend) &&
+                app.selFocus != app.selAnchor) {
                 app.hasSelection = true;
+                app.selectedText = selectionTextForRange(
+                    app, std::min(app.selAnchor, app.selFocus),
+                    std::max(app.selAnchor, app.selFocus));
             } else if (const App::TaskRect* task = taskRectAt(app)) {
                 // Click on a task checkbox: flip the mark in the file
                 toggleTaskOnDisk(app, hwnd, task->markOffset, task->checked);
@@ -1768,6 +1817,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
     app.mouseDown = false;
     app.selecting = false;
+    app.selShiftExtend = false;
+    // Selection drags capture the mouse; the settings slider releases its
+    // own capture earlier, so this is a no-op for everything else
+    if (GetCapture() == hwnd) ReleaseCapture();
 }
 
 // Zen mode: borderless fullscreen + centered reading column (F11)
@@ -1943,15 +1996,14 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 launchQuickNoteWindow();
                 break;
             case 'A': {
-                // Select All - extract all text from document
+                // Select All - the whole docText range
                 if (app.root) {
-                    app.selectedText.clear();
-                    extractText(app.root, app.selectedText);
+                    // docText only exists for laid-out content — finish first
+                    ensureLayoutComplete(app);
+                    app.selAnchor = 0;
+                    app.selFocus = app.docText.size();
                     app.hasSelection = true;
-                    // Equal coords signal select-all to the renderer; clear
-                    // any drag range so it doesn't overwrite the selection
-                    app.selStartX = app.selEndX = 0;
-                    app.selStartY = app.selEndY = 0;
+                    app.selectedText = selectionTextForRange(app, 0, app.docText.size());
                 }
                 break;
             }
