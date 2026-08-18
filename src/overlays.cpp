@@ -1853,6 +1853,9 @@ void renderSettingsOverlay(App& app) {
                 D2D1::RectF(box.left + dpi(app, 10.0f), box.top + dpi(app, 4.0f),
                             box.right - dpi(app, 6.0f), box.bottom), app.brush);
             app.settingsHits.push_back({box, SET_KEYS_DROPDOWN});
+            float chipX = boxX - dpi(app, 70.0f);
+            settingsChip(app, chipX, boxY, tr(app, "settings.edit"), false,
+                         SET_EDIT_KEYS, anim, fmt);
         }
         hairline(); cy += rowH;
         rowLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"));
@@ -2017,6 +2020,140 @@ void renderSettingsOverlay(App& app) {
 // swatches. Right column: the live ink specimen (repainted with the working
 // theme and font on every keystroke) above the system font list, each
 // family drawn in its own face. Fixed panel size keeps the geometry simple.
+
+// --- Shortcut editor (profiles follow-up) ---
+//
+// Twelve action rows with their current binding. Clicking a row arms it;
+// the next keypress becomes the binding (letters/digits/F-keys via
+// keydown, punctuation via WM_CHAR so any keyboard layout works). Every
+// edit lands in the custom profile.
+static const char* shortcutActionNameKey(int i) {
+    switch (i) {
+        case KA_SEARCH:     return "help.view.search";
+        case KA_BROWSE:     return "help.view.folder_browser";
+        case KA_TOC:        return "help.view.toc";
+        case KA_THEME:      return "help.view.theme";
+        case KA_STATS:      return "help.view.stats";
+        case KA_QUIT:       return "help.general.quit";
+        case KA_NEWFILE:    return "ctx.new";
+        case KA_ZEN:        return "shortcuts.zen";
+        case KA_SCROLLUP:   return "help.nav.scroll_up";
+        case KA_SCROLLDOWN: return "help.nav.scroll_down";
+        case KA_EDIT:       return "help.edit.enter_edit";
+        case KA_HELP:       return "help.view.help";
+    }
+    return "help.view.help";
+}
+
+void renderShortcutEditor(App& app) {
+    IDWriteTextFormat* fmt = app.folderBrowserFormat;
+    if (!fmt) return;
+    app.shortcutHits.clear();
+    const D2DTheme& base = app.theme;
+
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.6f));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
+
+    float rowH = dpi(app, 30.0f);
+    float panelW = dpi(app, 430.0f);
+    float panelH = dpi(app, 100.0f) + rowH * KEY_ACTION_COUNT + dpi(app, 46.0f);
+    float px = (app.width - panelW) / 2, py = (app.height - panelH) / 2;
+    D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(
+        D2D1::RectF(px, py, px + panelW, py + panelH), dpi(app, 12.0f), dpi(app, 12.0f));
+    D2D1_COLOR_F bg = base.background; bg.a = 0.99f;
+    app.brush->SetColor(bg);
+    app.renderTarget->FillRoundedRectangle(panel, app.brush);
+    D2D1_COLOR_F border = base.text; border.a = 0.25f;
+    app.brush->SetColor(border);
+    app.renderTarget->DrawRoundedRectangle(panel, app.brush, 1.0f);
+
+    if (app.themeTitleFormat) {
+        app.themeTitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        D2D1_COLOR_F tc = base.heading; tc.a = 1.0f;
+        app.brush->SetColor(tc);
+        const wchar_t* title = tr(app, "shortcuts.editor.title");
+        app.renderTarget->DrawText(title, (UINT32)wcslen(title), app.themeTitleFormat,
+            D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 16.0f),
+                        px + panelW, py + dpi(app, 52.0f)), app.brush);
+    }
+    {
+        D2D1_COLOR_F hc = base.text; hc.a = 0.55f;
+        app.brush->SetColor(hc);
+        const wchar_t* hint = tr(app, "shortcuts.editor.hint");
+        app.renderTarget->DrawText(hint, (UINT32)wcslen(hint), fmt,
+            D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 56.0f),
+                        px + panelW - dpi(app, 24.0f), py + dpi(app, 80.0f)), app.brush);
+    }
+
+    float rowsTop = py + dpi(app, 88.0f);
+    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
+        float ry = rowsTop + i * rowH;
+        D2D1_RECT_F row = D2D1::RectF(px + dpi(app, 16.0f), ry,
+                                      px + panelW - dpi(app, 16.0f), ry + rowH - dpi(app, 4.0f));
+        bool armed = app.shortcutEditorRow == i;
+        if (armed) {
+            D2D1_COLOR_F hl = base.accent; hl.a = 0.18f;
+            app.brush->SetColor(hl);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(row, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush);
+        }
+        const wchar_t* name = tr(app, shortcutActionNameKey(i));
+        D2D1_COLOR_F c = base.text; c.a = 0.9f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(name, (UINT32)wcslen(name), fmt,
+            D2D1::RectF(row.left + dpi(app, 8.0f), row.top + dpi(app, 4.0f),
+                        row.right - dpi(app, 96.0f), row.bottom), app.brush);
+
+        // Key chip, right-aligned
+        std::wstring key = armed ? tr(app, "shortcuts.editor.press")
+                                 : keyLabel(app.keymap[i]);
+        float chipW = dpi(app, armed ? 110.0f : 72.0f);
+        D2D1_RECT_F chip = D2D1::RectF(row.right - chipW - dpi(app, 6.0f),
+                                       row.top + dpi(app, 2.0f),
+                                       row.right - dpi(app, 6.0f),
+                                       row.bottom - dpi(app, 2.0f));
+        c = base.text; c.a = armed ? 0.6f : 0.3f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(chip, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush,
+            armed ? 1.5f : 1.0f);
+        c = base.text; c.a = 0.95f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(key.c_str(), (UINT32)key.size(), fmt,
+            D2D1::RectF(chip.left + dpi(app, 8.0f), chip.top + dpi(app, 2.0f),
+                        chip.right - dpi(app, 4.0f), chip.bottom), app.brush);
+
+        app.shortcutHits.push_back({row, i});
+    }
+
+    // Footer: reset chip + close hint
+    float fy = rowsTop + KEY_ACTION_COUNT * rowH + dpi(app, 8.0f);
+    {
+        const wchar_t* reset = tr(app, "shortcuts.editor.reset");
+        D2D1_RECT_F chip = D2D1::RectF(px + dpi(app, 24.0f), fy,
+                                       px + dpi(app, 24.0f) + dpi(app, 90.0f),
+                                       fy + dpi(app, 24.0f));
+        D2D1_COLOR_F c = base.text; c.a = 0.3f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(chip, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush, 1.0f);
+        c = base.text; c.a = 0.8f;
+        app.brush->SetColor(c);
+        app.renderTarget->DrawText(reset, (UINT32)wcslen(reset), fmt,
+            D2D1::RectF(chip.left + dpi(app, 8.0f), chip.top + dpi(app, 2.0f),
+                        chip.right, chip.bottom), app.brush);
+        app.shortcutHits.push_back({chip, 100});
+    }
+    {
+        D2D1_COLOR_F c = base.text; c.a = 0.4f;
+        app.brush->SetColor(c);
+        const wchar_t* esc = tr(app, "lang.chooser.footer");
+        app.renderTarget->DrawText(esc, (UINT32)wcslen(esc), fmt,
+            D2D1::RectF(px + dpi(app, 140.0f), fy + dpi(app, 2.0f),
+                        px + panelW - dpi(app, 24.0f), fy + dpi(app, 26.0f)), app.brush);
+    }
+}
 
 void renderThemeEditor(App& app) {
     IDWriteTextFormat* fmt = app.folderBrowserFormat;

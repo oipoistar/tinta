@@ -381,6 +381,13 @@ struct App {
     std::string keyProfile = "windows";
     bool settingsKeysOpen = false;      // profile dropdown popup expanded
     D2D1_RECT_F settingsKeysBox{};      // dropdown value box (set in render)
+    // Session copy of the [Keys] overrides (the custom profile); the
+    // shortcut editor edits these, WM_DESTROY writes them back
+    std::vector<std::pair<std::string, std::string>> keyOverrides;
+    // Shortcut editor overlay: click an action row, press its new key
+    bool showShortcutEditor = false;
+    int shortcutEditorRow = -1;         // row armed for key capture, -1 none
+    std::vector<std::pair<D2D1_RECT_F, int>> shortcutHits;  // rebuilt each paint
 
     // Resolved single-key bindings, indexed like KEY_ACTIONS (#77).
     // Filled by applyKeymap from settings; slots beyond the action count

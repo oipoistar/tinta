@@ -384,6 +384,28 @@ static void settingsSliderApply(App& app, int which, float mx) {
 }
 
 // Applies one settings-overlay action (id from app.settingsHits)
+// Shortcut editor: bind the armed action to `key` and land in the custom
+// profile so the change persists via [Keys]
+static void shortcutAssign(App& app, unsigned key) {
+    int row = app.shortcutEditorRow;
+    if (row < 0 || row >= KEY_ACTION_COUNT) return;
+    std::string value = keyIniName(key);
+    bool found = false;
+    for (auto& kv : app.keyOverrides) {
+        if (kv.first == KEY_ACTIONS[row].name) {
+            kv.second = value;
+            found = true;
+            break;
+        }
+    }
+    if (!found) app.keyOverrides.push_back({KEY_ACTIONS[row].name, value});
+    Settings s;
+    s.keyOverrides = app.keyOverrides;
+    s.keyProfile = "custom";
+    applyKeymap(app, s);
+    app.shortcutEditorRow = -1;
+}
+
 static void settingsAction(App& app, HWND hwnd, int action) {
     // Shortcut profile picks (checked first: their base is above the
     // language pick base)
@@ -391,8 +413,8 @@ static void settingsAction(App& app, HWND hwnd, int action) {
         int pick = action - SET_KEYS_PICK_BASE;
         const char* ids[] = {"windows", "vim", "custom"};
         if (pick >= 0 && pick < 3) {
-            // Reload so the custom profile picks up the saved [Keys]
-            Settings s = loadSettings();
+            Settings s;
+            s.keyOverrides = app.keyOverrides;  // session [Keys] for custom
             s.keyProfile = ids[pick];
             applyKeymap(app, s);  // also mirrors into app.keyProfile
         }
@@ -460,6 +482,11 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             break;
         case SET_KEYS_DROPDOWN:
             app.settingsKeysOpen = !app.settingsKeysOpen;
+            break;
+        case SET_EDIT_KEYS:
+            app.showSettings = false;
+            app.showShortcutEditor = true;
+            app.shortcutEditorRow = -1;
             break;
         case SET_TOC_RIGHT: app.tocOnLeft = false; break;
         case SET_OPEN_INI:
@@ -1074,8 +1101,8 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
 }
 
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
-    // Theme editor: everything acts on the release
-    if (app.showThemeEditor) return;
+    // Theme and shortcut editors: everything acts on the release
+    if (app.showThemeEditor || app.showShortcutEditor) return;
 
     // Settings: sliders drag from the press; everything else acts on release
     if (app.showSettings) {
@@ -1456,6 +1483,35 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Release belonging to a context-menu item click: already handled
     if (app.swallowNextMouseUp) {
         app.swallowNextMouseUp = false;
+        return;
+    }
+
+    // Shortcut editor clicks: arm a row for capture, reset, or close
+    if (app.showShortcutEditor) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        for (const auto& hit : app.shortcutHits) {
+            if (mx < hit.first.left || mx > hit.first.right ||
+                my < hit.first.top || my > hit.first.bottom) continue;
+            if (hit.second == 100) {
+                // Reset: back to the stock bindings, still custom
+                app.keyOverrides.clear();
+                Settings s;
+                s.keyProfile = "custom";
+                applyKeymap(app, s);
+                app.shortcutEditorRow = -1;
+            } else {
+                app.shortcutEditorRow = hit.second;
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        // Click outside the rows: close back to settings
+        app.showShortcutEditor = false;
+        app.shortcutEditorRow = -1;
+        app.showSettings = true;
+        app.settingsAnimation = 0;
+        InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
 
@@ -2102,6 +2158,30 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 break;
         }
     } else {
+        // Shortcut editor: an armed row captures the next key; Esc cancels
+        // the capture, then closes back to settings
+        if (app.showShortcutEditor) {
+            if (wParam == VK_ESCAPE) {
+                if (app.shortcutEditorRow >= 0) {
+                    app.shortcutEditorRow = -1;
+                } else {
+                    app.showShortcutEditor = false;
+                    app.showSettings = true;
+                    app.settingsAnimation = 0;
+                }
+            } else if (app.shortcutEditorRow >= 0) {
+                unsigned key = 0;
+                if (wParam == VK_TAB || wParam == VK_SPACE ||
+                    (wParam >= VK_F1 && wParam <= VK_F12) ||
+                    (wParam >= 'A' && wParam <= 'Z') ||
+                    (wParam >= '0' && wParam <= '9')) {
+                    key = (unsigned)wParam;
+                }
+                if (key) shortcutAssign(app, key);
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
         // Theme editor: Esc returns to settings; text arrives via WM_CHAR
         if (app.showThemeEditor) {
             if (wParam == VK_ESCAPE) closeThemeEditor(app, true);
@@ -2291,6 +2371,18 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
     // Print preview: all shortcuts are handled as key-downs
     if (app.showPrintPreview) return;
+
+    // Shortcut editor: punctuation bindings arrive here (their virtual
+    // keys are layout-dependent); letters/digits were taken on keydown
+    if (app.showShortcutEditor) {
+        wchar_t ch = (wchar_t)wParam;
+        if (app.shortcutEditorRow >= 0 && ch > 32 && ch < 127 &&
+            !iswalnum(ch)) {
+            shortcutAssign(app, (unsigned)ch);
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return;  // the editor swallows all other typing
+    }
 
     // Theme editor: route typing into the focused field
     if (app.showThemeEditor) {
