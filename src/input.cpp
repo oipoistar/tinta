@@ -1974,9 +1974,12 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 return;
             }
 
-            // Hit-test items
-            if (app.hoveredFolderIndex >= 0 && app.hoveredFolderIndex < (int)app.folderItems.size()) {
-                const auto& item = app.folderItems[app.hoveredFolderIndex];
+            // Hit-test items at the CLICK position: the render-time hover
+            // index lags a paint behind the mouse, so trusting it here
+            // opened the previously highlighted row on fast move-and-click
+            int clickedItem = folderItemIndexAt(app, (float)clickX, (float)clickY);
+            if (clickedItem >= 0 && clickedItem < (int)app.folderItems.size()) {
+                const auto& item = app.folderItems[clickedItem];
 
                 if (item.isDirectory) {
                     // Navigate into folder

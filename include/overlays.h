@@ -5,6 +5,9 @@
 
 void renderSearchOverlay(App& app);
 void renderFolderBrowser(App& app);
+// Folder-browser item under a client point (-1 = none); shares the
+// renderer's geometry so click handling never trusts stale hover state
+int folderItemIndexAt(const App& app, float x, float y);
 void renderToc(App& app);
 void renderThemeChooser(App& app);
 // Chooser grid geometry, shared between render and hit-testing: rows in the
