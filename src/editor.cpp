@@ -982,6 +982,15 @@ void confirmExitAction(App& app, HWND hwnd, int action) {
             tabCloseIndex(app, hwnd, tab);
         }
     }
+    // A window close paused on this dialog resumes once the buffer is
+    // resolved: the next dirty tab prompts, or the window finally closes
+    if (app.pendingWindowClose) {
+        if (action == 3 || app.editMode) {
+            app.pendingWindowClose = false;  // cancelled (or save failed)
+        } else {
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        }
+    }
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 

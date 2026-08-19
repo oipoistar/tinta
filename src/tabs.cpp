@@ -127,7 +127,17 @@ void tabActivate(App& app, HWND hwnd, int index) {
         // the new one; parse + viewport-first layout makes this feel instant
         openDocumentInViewer(app, toWide(tab.path));
     } else {
+        // Untitled note: swap in an empty document so the preview pane
+        // does not keep showing the previous tab's content
         app.currentFile.clear();
+        auto result = parseDocument(app.parser, std::string(), app.currentFile);
+        if (result.success) {
+            app.root = result.root;
+            app.parseTimeUs = result.parseTimeUs;
+        }
+        app.scrollY = app.targetScrollY = 0;
+        app.scrollX = app.targetScrollX = 0;
+        app.layoutDirty = true;
     }
     if (tab.editMode) {
         app.editorWordWrap = tab.wordWrap;

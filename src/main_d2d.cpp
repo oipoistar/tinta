@@ -1015,6 +1015,33 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             break;
 
+        case WM_CLOSE:
+            // Unsaved buffers (active or parked in tabs) get the dialog
+            // before the window may close; tabs stay open so the session
+            // save still remembers them
+            if (app && app->confirmExitPending) {
+                app->pendingWindowClose = true;  // dialog is already asking
+                return 0;
+            }
+            if (app) {
+                for (size_t i = 0; i < app->tabs.size(); i++) {
+                    bool dirty = (int)i == app->activeTab
+                                     ? (app->editMode && app->editorDirty)
+                                     : (app->tabs[i].editMode &&
+                                        app->tabs[i].editorDirty);
+                    if (!dirty) continue;
+                    if ((int)i != app->activeTab) {
+                        tabActivate(*app, hwnd, (int)i);
+                    }
+                    app->pendingWindowClose = true;
+                    app->confirmExitPending = true;
+                    app->confirmExitOpenedAt = std::chrono::steady_clock::now();
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
+            }
+            break;
+
         case WM_COPYDATA:
             if (app) {
                 COPYDATASTRUCT* data =

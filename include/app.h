@@ -398,6 +398,9 @@ struct App {
     // Closing a dirty tab routes through the unsaved-changes dialog; the
     // close completes from confirmExitAction once the user decides
     int pendingTabClose = -1;
+    // Window close with dirty buffers: resolve them one dialog at a time,
+    // then let the close proceed (Keep editing cancels it)
+    bool pendingWindowClose = false;
     // 16px window icon drawn in the strip (device bitmap: recreated with
     // the render target)
     ID2D1Bitmap* titleIconBitmap = nullptr;
