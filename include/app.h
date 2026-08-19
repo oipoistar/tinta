@@ -16,6 +16,7 @@
 #include <vector>
 #include <unordered_map>
 #include <chrono>
+#include <utility>
 
 #include "markdown.h"
 
@@ -196,13 +197,17 @@ struct App {
     struct EditorCachedLayout {
         IDWriteTextLayout* layout = nullptr;
         size_t len = 0;
+        unsigned long long lastUsed = 0;
     };
     std::unordered_map<size_t, EditorCachedLayout> editorLineLayoutCache;
+    unsigned long long editorLayoutUseClock = 0;
+    static constexpr size_t EDITOR_LAYOUT_CACHE_MAX = 256;
     void clearEditorLineLayoutCache() {
         for (auto& [start, entry] : editorLineLayoutCache) {
             if (entry.layout) entry.layout->Release();
         }
         editorLineLayoutCache.clear();
+        editorLayoutUseClock = 0;
     }
     ID2D1SolidColorBrush* brush = nullptr;
     ID2D1DeviceContext* deviceContext = nullptr;  // For color emoji rendering
@@ -217,8 +222,54 @@ struct App {
         int height = 0;
         bool failed = false;
         bool pending = false;  // remote image download in flight
+        size_t bytes = 0;      // estimated decoded bitmap memory
+        unsigned long long lastUsed = 0;
     };
     std::unordered_map<std::string, ImageEntry> imageCache;
+    size_t imageCacheBytes = 0;
+    unsigned long long imageCacheUseClock = 0;
+    static constexpr size_t IMAGE_CACHE_BUDGET = 64ull * 1024ull * 1024ull;
+    static constexpr size_t IMAGE_CACHE_MAX_ENTRIES = 256;
+
+    void touchImageCacheEntry(ImageEntry& entry) {
+        entry.lastUsed = ++imageCacheUseClock;
+    }
+
+    void storeImageCacheEntry(const std::string& key, ImageEntry entry) {
+        entry.bytes = entry.bitmap && entry.width > 0 && entry.height > 0
+            ? (size_t)entry.width * (size_t)entry.height * 4
+            : 0;
+        touchImageCacheEntry(entry);
+
+        auto it = imageCache.find(key);
+        if (it != imageCache.end()) {
+            if (it->second.bitmap) it->second.bitmap->Release();
+            imageCacheBytes -= it->second.bytes;
+            it->second = std::move(entry);
+            imageCacheBytes += it->second.bytes;
+        } else {
+            auto result = imageCache.emplace(key, std::move(entry));
+            imageCacheBytes += result.first->second.bytes;
+        }
+
+        // Keep the just-stored key alive: layout may immediately use the
+        // returned entry even when a single oversized image exceeds the cap.
+        while (imageCache.size() > IMAGE_CACHE_MAX_ENTRIES ||
+               imageCacheBytes > IMAGE_CACHE_BUDGET) {
+            auto victim = imageCache.end();
+            for (auto candidate = imageCache.begin(); candidate != imageCache.end(); ++candidate) {
+                if (candidate->first == key || candidate->second.pending) continue;
+                if (victim == imageCache.end() ||
+                    candidate->second.lastUsed < victim->second.lastUsed) {
+                    victim = candidate;
+                }
+            }
+            if (victim == imageCache.end()) break;
+            if (victim->second.bitmap) victim->second.bitmap->Release();
+            imageCacheBytes -= victim->second.bytes;
+            imageCache.erase(victim);
+        }
+    }
 
     // Layout bitmaps (document coordinates)
     struct LayoutBitmap {
@@ -458,6 +509,8 @@ struct App {
     // Vertical scrollbar
     bool scrollbarHovered = false;
     bool scrollbarDragging = false;
+    bool verticalScrollbarVisible = false;
+    float scrollbarContentHeight = 0.0f;
     float scrollbarDragStartY = 0;
     float scrollbarDragStartScroll = 0;
 
@@ -546,7 +599,6 @@ struct App {
     size_t selAnchor = 0;  // where the drag started
     size_t selFocus = 0;   // where the mouse is now
     bool hasSelection = false;
-    std::wstring selectedText;
     // Dragging past the viewport edge scrolls (px per TIMER_SELECT_SCROLL
     // tick, sign = direction)
     float selAutoScrollVel = 0.0f;
@@ -661,6 +713,7 @@ struct App {
     // Copied notification (fades out over 2 seconds)
     bool showCopiedNotification = false;
     float copiedNotificationAlpha = 0.0f;
+    const char* copiedNotificationKey = "toast.copied";
     std::chrono::steady_clock::time_point copiedNotificationStart;
 
     // Cursor blink state, toggled by TIMER_CURSOR_BLINK (editor + search cursor)
@@ -810,6 +863,8 @@ struct App {
             if (entry.bitmap) { entry.bitmap->Release(); entry.bitmap = nullptr; }
         }
         imageCache.clear();
+        imageCacheBytes = 0;
+        imageCacheUseClock = 0;
     }
 
     void shutdown() {

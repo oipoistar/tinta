@@ -51,34 +51,6 @@ void bucketRange(const App& app, const App::LineBucket& b, size_t& lo, size_t& h
     }
 }
 
-// Precise caret x for an offset that lies on this bucket's line
-float caretXInBucket(const App& app, const App::LineBucket& b, size_t offset,
-                     float fallback) {
-    for (size_t idx : b.textRectIndices) {
-        const App::TextRect& tr = app.textRects[idx];
-        const App::LayoutTextRun* run = runFor(app, tr);
-        if (run && run->docStart <= offset &&
-            offset <= run->docStart + run->docLength) {
-            FLOAT x = 0, y = 0;
-            DWRITE_HIT_TEST_METRICS m{};
-            if (SUCCEEDED(run->layout->HitTestTextPosition(
-                    (UINT32)(offset - run->docStart), FALSE, &x, &y, &m))) {
-                return run->pos.x + x;
-            }
-        }
-    }
-    // Monospace / layout-less rects: interpolate
-    for (size_t idx : b.textRectIndices) {
-        const App::TextRect& tr = app.textRects[idx];
-        if (tr.docStart <= offset && offset <= tr.docStart + tr.docLength &&
-            tr.docLength > 0) {
-            float frac = (float)(offset - tr.docStart) / (float)tr.docLength;
-            return tr.rect.left + frac * (tr.rect.right - tr.rect.left);
-        }
-    }
-    return fallback;
-}
-
 } // namespace
 
 size_t selectionOffsetAtPoint(const App& app, float docX, float docY) {
@@ -157,16 +129,76 @@ bool selectionLineRange(const App& app, size_t offset, size_t& start, size_t& en
 void selectionHighlightRects(const App& app, size_t start, size_t end,
                              std::vector<D2D1_RECT_F>& out) {
     if (start >= end) return;
-    for (const App::LineBucket& b : app.lineBuckets) {
-        size_t lo, hi;
-        bucketRange(app, b, lo, hi);
-        if (lo == SIZE_MAX || hi <= start || lo >= end) continue;
-        // Interior lines fill their text extents; boundary lines get a
-        // precise caret edge. At most two caret lookups per frame.
-        float left = start > lo ? caretXInBucket(app, b, start, b.minX) : b.minX;
-        float right = end < hi ? caretXInBucket(app, b, end, b.maxX) : b.maxX;
-        if (right > left) {
-            out.push_back(D2D1::RectF(left, b.top, right, b.bottom));
+
+    // A line-wide bar is visibly wrong for tables: it paints the padding and
+    // the gaps between cells. Mark the runs that have a selectable text rect,
+    // then ask DirectWrite for the exact horizontal span of the selected
+    // range in each run. This is the same model used by native text views.
+    std::vector<bool> runHasTextRect(app.layoutTextRuns.size(), false);
+    for (const App::TextRect& tr : app.textRects) {
+        if (tr.runIndex < runHasTextRect.size()) {
+            runHasTextRect[tr.runIndex] = true;
+        }
+    }
+
+    for (size_t i = 0; i < app.layoutTextRuns.size(); i++) {
+        const App::LayoutTextRun& run = app.layoutTextRuns[i];
+        if (!run.layout || run.docLength == 0 || !runHasTextRect[i]) continue;
+
+        size_t lo = std::max(start, run.docStart);
+        size_t hi = std::min(end, run.docStart + run.docLength);
+        if (lo >= hi) continue;
+
+        DWRITE_HIT_TEST_METRICS metrics{};
+        UINT32 metricCount = 0;
+        HRESULT hr = run.layout->HitTestTextRange(
+            (UINT32)(lo - run.docStart), (UINT32)(hi - lo),
+            run.pos.x, run.pos.y, &metrics, 1, &metricCount);
+        if (SUCCEEDED(hr) && metricCount == 1 && metrics.width > 0.0f) {
+            out.push_back(D2D1::RectF(
+                metrics.left, run.bounds.top,
+                metrics.left + metrics.width, run.bounds.bottom));
+            continue;
+        }
+
+        // These runs are normally single-line layouts. If DirectWrite
+        // returns no single range metric, caret positions still give an
+        // exact boundary without falling back to the whole line.
+        FLOAT x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+        DWRITE_HIT_TEST_METRICS edge{};
+        if (SUCCEEDED(run.layout->HitTestTextPosition(
+                (UINT32)(lo - run.docStart), FALSE, &x0, &y0, &edge)) &&
+            SUCCEEDED(run.layout->HitTestTextPosition(
+                (UINT32)(hi - run.docStart), FALSE, &x1, &y1, &edge))) {
+            float left = run.pos.x + std::min(x0, x1);
+            float right = run.pos.x + std::max(x0, x1);
+            if (right > left) {
+                out.push_back(D2D1::RectF(left, run.bounds.top,
+                                          right, run.bounds.bottom));
+            }
+        }
+    }
+
+    // Syntax-highlighted code lines and atomic math boxes do not have a
+    // covering text layout. Keep their existing geometry fallback, but never
+    // use it for a run already handled above.
+    for (const App::TextRect& tr : app.textRects) {
+        if (tr.runIndex < app.layoutTextRuns.size() &&
+            app.layoutTextRuns[tr.runIndex].docLength > 0) {
+            continue;
+        }
+        size_t lo = std::max(start, tr.docStart);
+        size_t hi = std::min(end, tr.docStart + tr.docLength);
+        if (lo >= hi) continue;
+
+        float width = tr.rect.right - tr.rect.left;
+        if (width <= 0.0f || tr.docLength == 0) continue;
+        float x0 = tr.rect.left +
+                   (float)(lo - tr.docStart) / (float)tr.docLength * width;
+        float x1 = tr.rect.left +
+                   (float)(hi - tr.docStart) / (float)tr.docLength * width;
+        if (x1 > x0) {
+            out.push_back(D2D1::RectF(x0, tr.rect.top, x1, tr.rect.bottom));
         }
     }
 }
@@ -209,5 +241,4 @@ void clearSelection(App& app) {
     app.selFocus = 0;
     app.selAutoScrollVel = 0.0f;
     app.selShiftExtend = false;
-    app.selectedText.clear();
 }

@@ -25,6 +25,186 @@
 static HCURSOR cursorArrow = LoadCursor(nullptr, IDC_ARROW);
 static HCURSOR cursorHand  = LoadCursor(nullptr, IDC_HAND);
 static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
+static HCURSOR cursorSizeWE = LoadCursor(nullptr, IDC_SIZEWE);
+
+static const App::TaskRect* taskRectAt(const App& app);
+
+static bool cursorPointInRect(float x, float y, const D2D1_RECT_F& rect) {
+    return x >= rect.left && x <= rect.right &&
+           y >= rect.top && y <= rect.bottom;
+}
+
+static void setCursorFromHits(const std::vector<std::pair<D2D1_RECT_F, int>>& hits,
+                              float x, float y, bool textFields = false,
+                              bool sliders = false) {
+    for (auto it = hits.rbegin(); it != hits.rend(); ++it) {
+        if (!cursorPointInRect(x, y, it->first)) continue;
+        int action = it->second;
+        if (sliders && (action == SET_SLIDER_READING || action == SET_SLIDER_ZEN)) {
+            SetCursor(cursorSizeWE);
+        } else if (textFields && action >= TE_FIELD_BG && action <= TE_FIELD_NAME) {
+            SetCursor(cursorIBeam);
+        } else {
+            SetCursor(cursorHand);
+        }
+        return;
+    }
+    SetCursor(cursorArrow);
+}
+
+static void setPrintPreviewCursor(const App& app, float x, float y) {
+    if (cursorPointInRect(x, y, app.printPreviewPrintBtn) ||
+        cursorPointInRect(x, y, app.printPreviewCancelBtn)) {
+        SetCursor(cursorHand);
+        return;
+    }
+    for (int i = 0; i < PRINT_PAPER_COUNT; i++) {
+        if (cursorPointInRect(x, y, app.printPreviewPaperBtn[i])) {
+            SetCursor(cursorHand);
+            return;
+        }
+    }
+    for (const auto& rect : app.printPreviewOrientBtn) {
+        if (cursorPointInRect(x, y, rect)) {
+            SetCursor(cursorHand);
+            return;
+        }
+    }
+    SetCursor(cursorArrow);
+}
+
+static void setThemeChooserCursor(const App& app, float x, float y) {
+    float panelWidth = std::min(dpi(app, 900.0f), (float)app.width - dpi(app, 80.0f));
+    float panelHeight = std::min(dpi(app, 620.0f), (float)app.height - dpi(app, 80.0f));
+    float panelX = (app.width - panelWidth) / 2;
+    float panelY = (app.height - panelHeight) / 2;
+
+    float toggleW = dpi(app, 34.0f);
+    float toggleH = dpi(app, 18.0f);
+    float toggleX = panelX + panelWidth - dpi(app, 30.0f) - toggleW;
+    float toggleY = panelY + dpi(app, 24.0f);
+    if (x >= toggleX - dpi(app, 130.0f) && x <= toggleX + toggleW &&
+        y >= toggleY - dpi(app, 4.0f) && y <= toggleY + toggleH + dpi(app, 4.0f)) {
+        SetCursor(cursorHand);
+        return;
+    }
+
+    float gridStartY = panelY + dpi(app, 75.0f);
+    float cardWidth = (panelWidth - dpi(app, 60.0f)) / 2;
+    float cardHeight = (panelHeight - dpi(app, 130.0f)) / themeChooserRows();
+    float cardPadding = dpi(app, 8.0f);
+    for (int i = 0; i < themeCount(); i++) {
+        int col, row;
+        themeChooserCell(i, col, row);
+        float cardX = panelX + dpi(app, 20.0f) + col * (cardWidth + dpi(app, 20.0f));
+        float cardY = gridStartY + row * cardHeight;
+        D2D1_RECT_F card = D2D1::RectF(
+            cardX + cardPadding, cardY + cardPadding,
+            cardX + cardWidth - cardPadding, cardY + cardHeight - cardPadding);
+        if (cursorPointInRect(x, y, card)) {
+            SetCursor(cursorHand);
+            return;
+        }
+    }
+    SetCursor(cursorArrow);
+}
+
+static void setTocCursor(const App& app, float x, float y) {
+    float panelWidth = tocPanelWidth(app);
+    float panelX = tocPanelX(app, panelWidth);
+    float padding = dpi(app, 12.0f);
+    float listStartY = padding + dpi(app, 40.0f) + dpi(app, 8.0f);
+    float listBottom = app.height - padding;
+    float itemHeight = dpi(app, 28.0f);
+    if (x < panelX + padding || x > panelX + panelWidth - padding ||
+        y < listStartY || y > listBottom || app.headings.empty()) {
+        SetCursor(cursorArrow);
+        return;
+    }
+
+    int index = (int)((y - listStartY + app.tocScroll) / itemHeight);
+    if (index >= 0 && index < (int)app.headings.size()) {
+        float itemY = listStartY + index * itemHeight - app.tocScroll;
+        if (y >= itemY && y <= itemY + itemHeight) {
+            SetCursor(cursorHand);
+            return;
+        }
+    }
+    SetCursor(cursorArrow);
+}
+
+static void setFolderBrowserCursor(const App& app, float x, float y) {
+    float panelWidth = folderBrowserPanelWidth(app);
+    float panelX = -panelWidth * (1.0f - app.folderBrowserAnimation);
+    if (x < panelX || x > panelX + panelWidth) {
+        SetCursor(cursorArrow);
+        return;
+    }
+
+    float padding = dpi(app, 12.0f);
+    float headerY = padding;
+    float headerHeight = dpi(app, 40.0f);
+    float btnSize = dpi(app, 24.0f);
+    float btnGap = dpi(app, 6.0f);
+    float fileBtnX = panelX + panelWidth - padding - btnSize;
+    float folderBtnX = fileBtnX - btnGap - btnSize;
+    float btnY = headerY + (headerHeight - btnSize) / 2 - dpi(app, 6.0f);
+    bool inHeader = y >= headerY && y <= headerY + headerHeight;
+
+    if (app.folderBrowserEditingPath) {
+        SetCursor(inHeader ? cursorIBeam : cursorArrow);
+        return;
+    }
+    if (inHeader && y >= btnY && y <= btnY + btnSize &&
+        ((x >= folderBtnX && x <= folderBtnX + btnSize) ||
+         (x >= fileBtnX && x <= fileBtnX + btnSize))) {
+        SetCursor(cursorHand);
+        return;
+    }
+    if (inHeader && x >= panelX + padding && x < folderBtnX - dpi(app, 2.0f)) {
+        SetCursor(cursorHand);
+        return;
+    }
+
+    float listStartY = headerY + headerHeight + dpi(app, 8.0f);
+    float itemHeight = dpi(app, 28.0f);
+    float listBottom = app.height - padding;
+    float namingOffset = app.folderBrowserNaming != 0 ? itemHeight : 0.0f;
+    if (app.folderBrowserNaming != 0 &&
+        y >= listStartY && y <= listStartY + itemHeight) {
+        SetCursor(cursorIBeam);
+        return;
+    }
+    if (y >= listStartY + namingOffset && y <= listBottom) {
+        int index = (int)((y - listStartY - namingOffset + app.folderBrowserScroll) / itemHeight);
+        if (index >= 0 && index < (int)app.folderItems.size()) {
+            SetCursor(cursorHand);
+            return;
+        }
+    }
+    SetCursor(cursorArrow);
+}
+
+static void setSearchCursor(const App& app, float x, float y) {
+    float barWidth = std::min(dpi(app, 500.0f), app.width - dpi(app, 40.0f));
+    float barHeight = dpi(app, 44.0f);
+    float centerWidth = (float)app.width;
+    if (app.editMode) {
+        float paneWidth = app.width * app.editorSplitRatio - 3.0f;
+        barWidth = std::min(barWidth, paneWidth - dpi(app, 40.0f));
+        centerWidth = paneWidth;
+    }
+    float barX = (centerWidth - barWidth) / 2.0f;
+    float barY = dpi(app, 20.0f) * app.searchAnimation -
+                 barHeight * (1.0f - app.searchAnimation);
+    float textX = barX + dpi(app, 42.0f);
+    float textRight = barX + barWidth - dpi(app, 120.0f);
+    if (x >= textX && x <= textRight && y >= barY && y <= barY + barHeight) {
+        SetCursor(cursorIBeam);
+    } else {
+        SetCursor(cursorArrow);
+    }
+}
 
 // Drag auto-scroll (#83): while a selection drag sits in the edge band,
 // TIMER_SELECT_SCROLL scrolls the document and drags the focus offset along
@@ -90,8 +270,10 @@ static bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     app.pendingScrollRestore = findReadingPosition(loadSettings(), app.currentFile);
     app.focusMermaidOnNextLayout = isMermaidDocumentPath(fullPath);
     app.contentHeight = 0;
+    app.verticalScrollbarVisible = false;
+    app.scrollbarContentHeight = 0.0f;
     app.docText.clear();
-    app.docTextLower.clear();
+    std::wstring().swap(app.docTextLower);
     app.searchMatches.clear();
     clearSelection(app);  // offsets belong to the old docText
     app.layoutDirty = true;
@@ -680,19 +862,26 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
 
     // Print preview: no hover states; document hit-testing below would run
     // against print-layout coordinates anyway
-    if (app.showPrintPreview) return;
+    if (app.showPrintPreview) {
+        setPrintPreviewCursor(app, (float)app.mouseX, (float)app.mouseY);
+        return;
+    }
 
-    // Theme editor: hand over controls, arrow elsewhere
+    // Modal overlays own the cursor while open. Their hit rectangles are
+    // rebuilt during render, so cursor and mouse-up use the same geometry.
     if (app.showThemeEditor) {
-        bool overControl = false;
-        for (const auto& hit : app.themeEditorHits) {
-            if (app.mouseX >= hit.first.left && app.mouseX <= hit.first.right &&
-                app.mouseY >= hit.first.top && app.mouseY <= hit.first.bottom) {
-                overControl = true;
-                break;
-            }
-        }
-        SetCursor(LoadCursorW(nullptr, overControl ? IDC_HAND : IDC_ARROW));
+        setCursorFromHits(app.themeEditorHits, (float)app.mouseX,
+                          (float)app.mouseY, true);
+        return;
+    }
+    if (app.showShortcutEditor) {
+        setCursorFromHits(app.shortcutHits, (float)app.mouseX,
+                          (float)app.mouseY);
+        return;
+    }
+    if (app.editMode && app.confirmExitPending) {
+        setCursorFromHits(app.confirmExitHits, (float)app.mouseX,
+                          (float)app.mouseY);
         return;
     }
 
@@ -701,17 +890,11 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     if (app.showSettings) {
         if (app.settingsDragSlider) {
             settingsSliderApply(app, app.settingsDragSlider, (float)app.mouseX);
+            SetCursor(cursorSizeWE);
             return;
         }
-        bool overControl = false;
-        for (const auto& hit : app.settingsHits) {
-            if (app.mouseX >= hit.first.left && app.mouseX <= hit.first.right &&
-                app.mouseY >= hit.first.top && app.mouseY <= hit.first.bottom) {
-                overControl = true;
-                break;
-            }
-        }
-        SetCursor(LoadCursorW(nullptr, overControl ? IDC_HAND : IDC_ARROW));
+        setCursorFromHits(app.settingsHits, (float)app.mouseX,
+                          (float)app.mouseY, false, true);
         return;
     }
 
@@ -732,12 +915,14 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             app.hoveredLink.clear();
             repaint = true;
         }
+        SetCursor(contextMenuItemEnabled(app, item) ? cursorHand : cursorArrow);
         if (repaint) InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
 
     // Help overlay scrollbar dragging
     if (app.helpScrollbarDragging) {
+        SetCursor(cursorArrow);
         float maxScroll = std::max(0.0f, app.helpContentHeight - app.helpVisibleHeight);
         if (maxScroll > 0) {
             float sbHeight = app.helpVisibleHeight / app.helpContentHeight * app.helpVisibleHeight;
@@ -750,6 +935,39 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             app.helpScroll = std::max(0.0f, std::min(app.helpScroll, maxScroll));
             InvalidateRect(hwnd, nullptr, FALSE);
         }
+        return;
+    }
+    if (app.showHelp) {
+        SetCursor(cursorArrow);
+        return;
+    }
+
+    if (app.showSearch) {
+        bool overResult = false;
+        for (const auto& hit : app.folderResultHits) {
+            if (cursorPointInRect((float)app.mouseX, (float)app.mouseY, hit.rect)) {
+                overResult = true;
+                break;
+            }
+        }
+        if (folderSearchToggleAt(app, (float)app.mouseX, (float)app.mouseY) || overResult) {
+            SetCursor(cursorHand);
+        } else {
+            setSearchCursor(app, (float)app.mouseX, (float)app.mouseY);
+        }
+        return;
+    }
+
+    if (app.showFolderBrowser) {
+        setFolderBrowserCursor(app, (float)app.mouseX, (float)app.mouseY);
+        return;
+    }
+    if (app.showToc) {
+        setTocCursor(app, (float)app.mouseX, (float)app.mouseY);
+        return;
+    }
+    if (app.showThemeChooser) {
+        setThemeChooserCursor(app, (float)app.mouseX, (float)app.mouseY);
         return;
     }
 
@@ -852,7 +1070,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // right edge, which a right-docked TOC pushes left of the window edge.
     bool wasHovered = app.scrollbarHovered;
     app.scrollbarHovered = false;
-    if (app.contentHeight > app.height) {
+    if (app.verticalScrollbarVisible) {
         float sbWidth = dpi(app, 14.0f);  // hit area
         float sbRight = documentViewportX(app) + documentViewportWidth(app);
         if (app.mouseX >= sbRight - sbWidth && app.mouseX <= sbRight) {
@@ -929,10 +1147,12 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     } else if (app.scrollbarHovered || app.scrollbarDragging ||
         app.hScrollbarHovered || app.hScrollbarDragging) {
         SetCursor(cursorArrow);
+    } else if (taskRectAt(app) != nullptr) {
+        SetCursor(cursorHand);
     } else if (app.hoveredCodeBlock >= 0) {
         // Show hand cursor only when over the copy button area
         const auto& cb = app.codeBlocks[app.hoveredCodeBlock];
-        float btnW = dpi(app, 52.0f);
+        float btnW = dpi(app, 72.0f);
         float btnH = dpi(app, 26.0f);
         float btnPad = 8.0f * app.contentScale * app.zoomFactor;
         float btnX = cb.bounds.right - btnW - btnPad;
@@ -971,11 +1191,15 @@ static void closeContextMenu(App& app) {
 }
 
 static void closeSearchIfOpen(App& app) {
-    if (!app.showSearch) return;
+    if (!app.showSearch) {
+        std::wstring().swap(app.docTextLower);
+        return;
+    }
     app.showSearch = false;
     app.searchActive = false;
     app.searchQuery.clear();
     app.searchMatches.clear();
+    std::wstring().swap(app.docTextLower);
     app.searchAnimation = 0;
     clearFolderSearch(app);
     updateBlinkTimer(app);
@@ -984,10 +1208,14 @@ static void closeSearchIfOpen(App& app) {
 static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
     switch (item) {
         case CTX_COPY:
-            if (app.hasSelection && !app.selectedText.empty()) {
-                copyToClipboard(hwnd, app.selectedText);
+            if (app.hasSelection && app.selAnchor != app.selFocus) {
+                std::wstring selected = selectionTextForRange(
+                    app, std::min(app.selAnchor, app.selFocus),
+                    std::max(app.selAnchor, app.selFocus));
+                if (selected.empty()) break;
+                copyToClipboard(hwnd, selected);
                 app.hasSelection = false;
-                app.selectedText.clear();
+                app.copiedNotificationKey = "toast.copied";
                 app.showCopiedNotification = true;
                 app.copiedNotificationAlpha = 1.0f;
                 app.copiedNotificationStart = std::chrono::steady_clock::now();
@@ -1001,7 +1229,6 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
                 app.selAnchor = 0;
                 app.selFocus = app.docText.size();
                 app.hasSelection = true;
-                app.selectedText = selectionTextForRange(app, 0, app.docText.size());
             }
             break;
         case CTX_NEW:
@@ -1230,7 +1457,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         // on it dismisses the folder browser ("back to the document") and
         // simply works alongside the TOC, which is a navigation aid
         bool scrollbarClick =
-            (app.scrollbarHovered && app.contentHeight > app.height) ||
+            (app.scrollbarHovered && app.verticalScrollbarVisible) ||
             (app.hScrollbarHovered &&
              app.contentWidth > documentViewportWidth(app));
         if (!app.showThemeChooser && scrollbarClick) {
@@ -1253,7 +1480,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     float docY = app.mouseY + app.scrollY;
 
     // Check if clicking vertical scrollbar
-    if (app.scrollbarHovered && app.contentHeight > app.height) {
+    if (app.scrollbarHovered && app.verticalScrollbarVisible) {
         app.scrollbarDragging = true;
         app.scrollbarDragStartY = (float)app.mouseY;
         app.scrollbarDragStartScroll = app.scrollY;
@@ -1344,7 +1571,6 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 app.selFocus = we;
                 app.selecting = true;
                 app.hasSelection = true;
-                app.selectedText = selectionTextForRange(app, ws, we);
             }
         } else if (app.clickCount == 3) {
             // Triple-click: select the visual line
@@ -1358,7 +1584,6 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 app.selFocus = le;
                 app.selecting = true;
                 app.hasSelection = true;
-                app.selectedText = selectionTextForRange(app, ls, le);
             }
         } else if ((GetKeyState(VK_SHIFT) & 0x8000) && app.hasSelection) {
             // Shift+click: keep the anchor, move the focus (Typora-style
@@ -1373,7 +1598,6 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             app.selecting = true;
             app.selAnchor = app.selFocus = selectionOffsetAtPoint(app, docX, docY);
             app.hasSelection = false;
-            app.selectedText.clear();
         }
         InvalidateRect(hwnd, nullptr, FALSE);
     }
@@ -1472,7 +1696,7 @@ static bool codeCopyButtonAt(const App& app, int mouseX, int mouseY) {
     float previewOffsetX = documentViewportX(app);
     float docX = (mouseX - previewOffsetX) + app.scrollX;
     float docY = mouseY + app.scrollY;
-    float btnW = dpi(app, 52.0f);
+    float btnW = dpi(app, 72.0f);
     float btnH = dpi(app, 26.0f);
     float btnPad = 8.0f * app.contentScale * app.zoomFactor;
     float btnX = cb.bounds.right - btnW - btnPad;
@@ -1666,6 +1890,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             // Click inside panel
             if (app.hoveredTocIndex >= 0 && app.hoveredTocIndex < (int)app.headings.size()) {
                 // Scroll document to heading
+                ensureLayoutComplete(app);
+                if (app.hoveredTocIndex >= (int)app.headings.size()) {
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return;
+                }
                 scrollToHeadingY(app, app.headings[app.hoveredTocIndex].y);
 
                 // Close TOC
@@ -1875,6 +2104,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         // mouse-up: a drag selection ending on the block would never
         // finalize, stay "selecting", and follow the next mouse move
         copyToClipboard(hwnd, app.codeBlocks[app.hoveredCodeBlock].codeText);
+        app.copiedNotificationKey = "codeblock.copied";
         app.showCopiedNotification = true;
         app.copiedNotificationStart = std::chrono::steady_clock::now();
         startNotificationTimer(app);
@@ -1891,9 +2121,6 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         if (app.selectionMode == App::SelectionMode::Word ||
             app.selectionMode == App::SelectionMode::Line) {
             // Word/Line selection: ranges were set during mouse down/move
-            app.selectedText = selectionTextForRange(
-                app, std::min(app.selAnchor, app.selFocus),
-                std::max(app.selAnchor, app.selFocus));
         } else {
             // Normal selection: finalize the focus at the release point
             float previewOffsetX = documentViewportX(app);
@@ -1908,9 +2135,6 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             if ((dx > 5 || dy > 5 || app.selShiftExtend) &&
                 app.selFocus != app.selAnchor) {
                 app.hasSelection = true;
-                app.selectedText = selectionTextForRange(
-                    app, std::min(app.selAnchor, app.selFocus),
-                    std::max(app.selAnchor, app.selFocus));
             } else if (const App::TaskRect* task = taskRectAt(app)) {
                 // Click on a task checkbox: flip the mark in the file
                 toggleTaskOnDisk(app, hwnd, task->markOffset, task->checked);
@@ -1999,13 +2223,18 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 
     // Edit mode: Ctrl+C with preview pane selection should copy from preview
     if (app.editMode) {
-        if (ctrl && wParam == 'C' && app.hasSelection && !app.selectedText.empty()) {
-            copyToClipboard(hwnd, app.selectedText);
+        if (ctrl && wParam == 'C' && app.hasSelection &&
+            app.selAnchor != app.selFocus) {
+            std::wstring selected = selectionTextForRange(
+                app, std::min(app.selAnchor, app.selFocus),
+                std::max(app.selAnchor, app.selFocus));
+            if (selected.empty()) return;
+            copyToClipboard(hwnd, selected);
+            app.copiedNotificationKey = "toast.copied";
             app.showCopiedNotification = true;
             app.copiedNotificationStart = std::chrono::steady_clock::now();
             startNotificationTimer(app);
             app.hasSelection = false;
-            app.selectedText.clear();
             InvalidateRect(hwnd, nullptr, FALSE);
             return;
         }
@@ -2073,6 +2302,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 app.searchActive = false;
                 app.searchQuery.clear();
                 app.searchMatches.clear();
+                std::wstring().swap(app.docTextLower);
                 app.searchAnimation = 0;
                 clearFolderSearch(app);
                 updateBlinkTimer(app);
@@ -2121,18 +2351,21 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.selAnchor = 0;
                     app.selFocus = app.docText.size();
                     app.hasSelection = true;
-                    app.selectedText = selectionTextForRange(app, 0, app.docText.size());
                 }
                 break;
             }
             case 'C': {
                 // Copy - copy selected text or all text if select all was used
                 bool copied = false;
-                if (app.hasSelection && !app.selectedText.empty()) {
-                    copyToClipboard(hwnd, app.selectedText);
+                if (app.hasSelection && app.selAnchor != app.selFocus) {
+                    std::wstring selected = selectionTextForRange(
+                        app, std::min(app.selAnchor, app.selFocus),
+                        std::max(app.selAnchor, app.selFocus));
+                    if (!selected.empty()) {
+                        copyToClipboard(hwnd, selected);
+                        copied = true;
+                    }
                     app.hasSelection = false;
-                    app.selectedText.clear();
-                    copied = true;
                 } else if (app.root) {
                     // If no selection, copy all
                     std::wstring allText;
@@ -2142,6 +2375,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 // Show "Copied!" notification
                 if (copied) {
+                    app.copiedNotificationKey = "toast.copied";
                     app.showCopiedNotification = true;
                     app.copiedNotificationAlpha = 1.0f;
                     app.copiedNotificationStart = std::chrono::steady_clock::now();
@@ -2167,6 +2401,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.searchAnimation = 0;
                     app.searchQuery.clear();
                     app.searchMatches.clear();
+                    std::wstring().swap(app.docTextLower);
                     app.searchCurrentIndex = 0;
                     app.searchJustOpened = true;
                     updateBlinkTimer(app);

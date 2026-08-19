@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Refined the language selector with theme-aware colors, hover and selected states, adaptive popup sizing, and automatic placement inside the Settings panel.
+- Copy, code-block actions, editor, statistics, print preview, file-association, and initialization feedback now use the active UI language across the shipped locales.
+- Theme chooser chrome now follows the active document theme while preserving each theme card's own preview palette.
+
 ## [v2.6.0] - 2026-08-09
 
 The vacation release: print and PDF export plus a round of community-requested polish, shipped before the maintainer disappears for a few weeks.

@@ -62,8 +62,20 @@ static void addTextRect(App& app, const D2D1_RECT_F& rect, size_t docStart, size
     size_t idx = app.textRects.size();
     app.textRects.push_back({rect, docStart, docLength, runIndex});
 
-    if (app.lineBuckets.empty() ||
-        std::abs(rect.top - app.lineBuckets.back().top) > kLineBucketTolerance) {
+    // Table cells are laid out column by column. A wrapped cell can append a
+    // later line before the next column appends its first line, so buckets
+    // cannot be grouped by looking only at the last one.
+    for (auto& bucket : app.lineBuckets) {
+        if (std::abs(rect.top - bucket.top) <= kLineBucketTolerance) {
+            bucket.bottom = std::max(bucket.bottom, rect.bottom);
+            bucket.minX = std::min(bucket.minX, rect.left);
+            bucket.maxX = std::max(bucket.maxX, rect.right);
+            bucket.textRectIndices.push_back(idx);
+            return;
+        }
+    }
+
+    if (app.lineBuckets.empty() || rect.top > app.lineBuckets.back().top) {
         App::LineBucket bucket;
         bucket.top = rect.top;
         bucket.bottom = rect.bottom;
@@ -74,11 +86,18 @@ static void addTextRect(App& app, const D2D1_RECT_F& rect, size_t docStart, size
         return;
     }
 
-    auto& bucket = app.lineBuckets.back();
-    bucket.bottom = std::max(bucket.bottom, rect.bottom);
-    bucket.minX = std::min(bucket.minX, rect.left);
-    bucket.maxX = std::max(bucket.maxX, rect.right);
+    App::LineBucket bucket;
+    bucket.top = rect.top;
+    bucket.bottom = rect.bottom;
+    bucket.minX = rect.left;
+    bucket.maxX = rect.right;
     bucket.textRectIndices.push_back(idx);
+    auto insertAt = std::lower_bound(
+        app.lineBuckets.begin(), app.lineBuckets.end(), rect.top,
+        [](const App::LineBucket& existing, float top) {
+            return existing.top < top;
+        });
+    app.lineBuckets.insert(insertAt, std::move(bucket));
 }
 
 static void addTextRun(App& app, LayoutInfo&& info, const D2D1_POINT_2F& pos,
@@ -183,14 +202,30 @@ static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
         r.rect.left += dx;
         r.rect.right += dx;
     }
-    for (size_t i = from.lineBuckets; i < app.lineBuckets.size(); i++) {
-        auto& b = app.lineBuckets[i];
-        b.minX += dx;
-        b.maxX += dx;
-    }
     for (size_t i = from.tasks; i < app.taskRects.size(); i++) {
         app.taskRects[i].rect.left += dx;
         app.taskRects[i].rect.right += dx;
+    }
+
+    // A cell can share a line bucket with content laid out before it. Rebuild
+    // the affected bucket extents from their rectangles after the shift.
+    for (auto& bucket : app.lineBuckets) {
+        bool affected = false;
+        for (size_t idx : bucket.textRectIndices) {
+            if (idx >= from.textRects) {
+                affected = true;
+                break;
+            }
+        }
+        if (!affected) continue;
+
+        bucket.minX = std::numeric_limits<float>::max();
+        bucket.maxX = std::numeric_limits<float>::lowest();
+        for (size_t idx : bucket.textRectIndices) {
+            const auto& rect = app.textRects[idx].rect;
+            bucket.minX = std::min(bucket.minX, rect.left);
+            bucket.maxX = std::max(bucket.maxX, rect.right);
+        }
     }
 }
 
@@ -1743,13 +1778,16 @@ static void asyncImageWorker(HWND hwnd, std::string src) {
 
 static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
     auto it = app.imageCache.find(src);
-    if (it != app.imageCache.end()) return it->second;
+    if (it != app.imageCache.end()) {
+        app.touchImageCacheEntry(it->second);
+        return it->second;
+    }
 
     App::ImageEntry entry;
     entry.failed = true;  // assume failure
 
     if (!app.wicFactory || !app.renderTarget) {
-        app.imageCache[src] = entry;
+        app.storeImageCacheEntry(src, std::move(entry));
         return app.imageCache[src];
     }
 
@@ -1761,7 +1799,7 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
     if (isUrl) {
         entry.failed = false;
         entry.pending = true;
-        app.imageCache[src] = entry;
+        app.storeImageCacheEntry(src, std::move(entry));
         std::thread(asyncImageWorker, app.hwnd, src).detach();
         return app.imageCache[src];
     } else {
@@ -1783,7 +1821,7 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
     HRESULT hr = app.wicFactory->CreateDecoderFromFilename(widePath.c_str(), nullptr,
         GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder);
     if (FAILED(hr) || !decoder) {
-        app.imageCache[src] = entry;
+        app.storeImageCacheEntry(src, std::move(entry));
         return app.imageCache[src];
     }
 
@@ -1791,7 +1829,7 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
     hr = decoder->GetFrame(0, &frame);
     if (FAILED(hr) || !frame) {
         decoder->Release();
-        app.imageCache[src] = entry;
+        app.storeImageCacheEntry(src, std::move(entry));
         return app.imageCache[src];
     }
 
@@ -1800,7 +1838,7 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
     if (FAILED(hr) || !converter) {
         frame->Release();
         decoder->Release();
-        app.imageCache[src] = entry;
+        app.storeImageCacheEntry(src, std::move(entry));
         return app.imageCache[src];
     }
 
@@ -1810,7 +1848,7 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
         converter->Release();
         frame->Release();
         decoder->Release();
-        app.imageCache[src] = entry;
+        app.storeImageCacheEntry(src, std::move(entry));
         return app.imageCache[src];
     }
 
@@ -1828,7 +1866,7 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
         entry.failed = false;
     }
 
-    app.imageCache[src] = entry;
+    app.storeImageCacheEntry(src, std::move(entry));
     return app.imageCache[src];
 }
 
@@ -2423,11 +2461,7 @@ void completeAsyncImage(App& app, void* asyncResult) {
         }
     }
 
-    auto it = app.imageCache.find(result->src);
-    if (it != app.imageCache.end() && it->second.bitmap) {
-        it->second.bitmap->Release();
-    }
-    app.imageCache[result->src] = entry;
+    app.storeImageCacheEntry(result->src, std::move(entry));
     delete result;
 
     // Reflow with the real image dimensions — but coalesced: several images

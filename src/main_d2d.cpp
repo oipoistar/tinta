@@ -127,6 +127,18 @@ void render(App& app) {
         }
     }
 
+    // Incremental layout grows contentHeight in small steps. Keep scrollbar
+    // visibility latched for the duration of that layout and only let its
+    // extent grow, so the right edge cannot blink as chunks arrive.
+    if (app.layoutComplete) {
+        app.scrollbarContentHeight = app.contentHeight;
+        app.verticalScrollbarVisible = app.contentHeight > app.height;
+    } else if (app.contentHeight > app.height) {
+        app.verticalScrollbarVisible = true;
+        app.scrollbarContentHeight = std::max(app.scrollbarContentHeight,
+                                              app.contentHeight);
+    }
+
     // Sync preview scroll to editor scroll position using source-offset anchors
     if (app.editMode && app.editorShowPreview &&
         !app.scrollAnchors.empty() && !app.editorLineByteOffsets.empty()) {
@@ -526,7 +538,7 @@ render_document:
         const auto& cb = app.codeBlocks[app.hoveredCodeBlock];
         if (cb.bounds.bottom >= viewportTop - cullMargin &&
             cb.bounds.top <= viewportBottom + cullMargin) {
-            float btnW = dpi(app, 52.0f);
+            float btnW = dpi(app, 72.0f);
             float btnH = dpi(app, 26.0f);
             float btnPad = 8.0f * app.contentScale * app.zoomFactor;
             float btnX = cb.bounds.right - btnW - btnPad - app.scrollX;
@@ -542,14 +554,15 @@ render_document:
                 D2D1::RoundedRect(D2D1::RectF(btnX, btnY, btnX + btnW, btnY + btnH), 4, 4),
                 app.brush);
 
-            // "Copy" label centered in button
+            // Localized copy label centered in the button
             app.brush->SetColor(D2D1::ColorF(
                 app.theme.isDark ? 0.9f : 0.15f,
                 app.theme.isDark ? 0.9f : 0.15f,
                 app.theme.isDark ? 0.9f : 0.15f,
                 1.0f));
             IDWriteTextLayout* btnLayout = nullptr;
-            app.dwriteFactory->CreateTextLayout(L"Copy", 4, app.codeFormat,
+            const wchar_t* copyLabel = tr(app, "codeblock.copy");
+            app.dwriteFactory->CreateTextLayout(copyLabel, (UINT32)wcslen(copyLabel), app.codeFormat,
                 btnW, btnH, &btnLayout);
             if (btnLayout) {
                 btnLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
@@ -563,7 +576,7 @@ render_document:
     }
 
     // Determine scrollbar visibility
-    bool needsVScroll = app.contentHeight > app.height;
+    bool needsVScroll = app.verticalScrollbarVisible;
     bool needsHScroll = app.contentWidth > documentWidth;
     float scrollbarSize = dpi(app, 14.0f);
 
@@ -572,9 +585,10 @@ render_document:
 
     // Draw vertical scrollbar
     if (needsVScroll) {
-        float maxScrollY = std::max(0.0f, app.contentHeight - app.height);
+        float scrollExtent = std::max((float)app.height, app.scrollbarContentHeight);
+        float maxScrollY = std::max(0.0f, scrollExtent - app.height);
         float trackHeight = app.height - (needsHScroll ? scrollbarSize : 0);
-        float sbHeight = trackHeight / app.contentHeight * trackHeight;
+        float sbHeight = trackHeight / scrollExtent * trackHeight;
         sbHeight = std::max(sbHeight, dpi(app, 30.0f));
         float sbY = (maxScrollY > 0) ? (app.scrollY / maxScrollY * (trackHeight - sbHeight)) : 0;
 
@@ -608,10 +622,9 @@ render_document:
         app.drawCalls++;
     }
 
-    // Draw selection highlights: continuous per-line bars derived from the
-    // [selAnchor, selFocus) offset range, with glyph-precise edges on the
-    // boundary lines (#83). The copied text comes from the same range, so
-    // highlight and clipboard always agree.
+    // Draw selection highlights from the exact [selAnchor, selFocus) glyph
+    // ranges. The copied text comes from the same range, so highlight and
+    // clipboard always agree.
     if ((app.selecting || app.hasSelection) && !app.textRects.empty() &&
         app.selAnchor != app.selFocus) {
         size_t selA = std::min(app.selAnchor, app.selFocus);
@@ -719,7 +732,7 @@ render_document:
         app.renderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
     }
 
-    // "Copied!" notification with fade out (cached layout)
+    // Localized copy notification with fade out.
     if (app.showCopiedNotification) {
         auto now = std::chrono::steady_clock::now();
         float elapsed = std::chrono::duration<float>(now - app.copiedNotificationStart).count();
@@ -731,34 +744,31 @@ render_document:
             }
             app.copiedNotificationAlpha = alpha;
 
+            const wchar_t* copied = tr(app, app.copiedNotificationKey);
             float copyWidth = dpi(app, 100.0f);
+            if (app.textFormat) {
+                copyWidth = std::max(copyWidth,
+                                     measureText(app, copied, app.textFormat) + dpi(app, 40.0f));
+            }
+            copyWidth = std::min(copyWidth, (float)app.width - dpi(app, 20.0f));
             float copyHeight = dpi(app, 26.0f);
             float pillX = (app.width - copyWidth) / 2;
             float pillY = dpi(app, 10.0f);
 
-            app.brush->SetColor(D2D1::ColorF(0.2f, 0.7f, 0.3f, 0.9f * alpha));
+            D2D1_COLOR_F pillColor = app.theme.accent;
+            pillColor.a = 0.92f * alpha;
+            app.brush->SetColor(pillColor);
             app.renderTarget->FillRoundedRectangle(
                 D2D1::RoundedRect(D2D1::RectF(pillX, pillY, pillX + copyWidth, pillY + copyHeight), 13, 13),
                 app.brush);
 
-            // Cache the "Copied!" text layout and metrics across frames
-            static IDWriteTextLayout* cachedCopyLayout = nullptr;
-            static float cachedTextOffsetX = 0, cachedTextOffsetY = 0;
-            if (!cachedCopyLayout) {
-                app.dwriteFactory->CreateTextLayout(L"Copied!", 7,
-                    app.textFormat, copyWidth, copyHeight, &cachedCopyLayout);
-                if (cachedCopyLayout) {
-                    DWRITE_TEXT_METRICS m;
-                    cachedCopyLayout->GetMetrics(&m);
-                    cachedTextOffsetX = (copyWidth - m.width) / 2;
-                    cachedTextOffsetY = (copyHeight - m.height) / 2;
-                }
-            }
-            if (cachedCopyLayout) {
-                app.brush->SetColor(D2D1::ColorF(1, 1, 1, alpha));
-                app.renderTarget->DrawTextLayout(
-                    D2D1::Point2F(pillX + cachedTextOffsetX, pillY + cachedTextOffsetY),
-                    cachedCopyLayout, app.brush);
+            if (app.textFormat) {
+                D2D1_COLOR_F textColor = app.theme.background;
+                textColor.a = alpha;
+                app.brush->SetColor(textColor);
+                app.renderTarget->DrawText(copied, (UINT32)wcslen(copied), app.textFormat,
+                    D2D1::RectF(pillX, pillY + dpi(app, 4.0f),
+                                pillX + copyWidth, pillY + copyHeight), app.brush);
             }
             app.drawCalls++;
         } else {
@@ -768,18 +778,20 @@ render_document:
 
     // Draw stats
     if (app.showStats) {
-        wchar_t stats[512];
-        swprintf(stats, 512,
-            L"Parse: %zu us | Layout: %zu us | Draw calls: %zu\n"
-            L"Startup: %.1fms (Win: %.1f | D2D: %.1f | DWrite: %.1f | File: %.1f)",
+        wchar_t stats[768];
+        wchar_t statsLine1[256];
+        wchar_t statsLine2[512];
+        swprintf_s(statsLine1, _countof(statsLine1), tr(app, "stats.line1"),
             app.parseTimeUs,
             app.layoutTimeUs,
-            app.drawCalls,
+            app.drawCalls);
+        swprintf_s(statsLine2, _countof(statsLine2), tr(app, "stats.line2"),
             app.metrics.totalStartupUs / 1000.0,
             app.metrics.windowInitUs / 1000.0,
             app.metrics.d2dInitUs / 1000.0,
             app.metrics.dwriteInitUs / 1000.0,
             app.metrics.fileLoadUs / 1000.0);
+        swprintf_s(stats, _countof(stats), L"%ls\n%ls", statsLine1, statsLine2);
 
         float statsWidth = dpi(app, 600.0f);
         float statsHeight = dpi(app, 50.0f);
@@ -1226,16 +1238,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     if (forceRegister) {
         if (registerFileAssociation()) {
             MessageBoxW(nullptr,
-                       L"Tinta has been registered.\n\n"
-                       L"In the Settings window that opens:\n"
-                       L"1. Search for '.md' or '.mmd'\n"
-                       L"2. Click on the current default app\n"
-                       L"3. Select 'Tinta' from the list",
-                       L"Almost done!", MB_OK | MB_ICONINFORMATION);
+                       tr(app, "fileassoc.done_body"),
+                       tr(app, "fileassoc.done_title"),
+                       MB_OK | MB_ICONINFORMATION);
             openDefaultAppsSettings();
         } else {
-            MessageBoxW(nullptr, L"Failed to register file association. Try running as administrator.",
-                       L"Error", MB_OK | MB_ICONWARNING);
+            MessageBoxW(nullptr, tr(app, "fileassoc.register_failed_body"),
+                       tr(app, "error.title"), MB_OK | MB_ICONWARNING);
         }
         return 0;  // Exit after registering
     }
@@ -1317,7 +1326,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     // Initialize D2D
     if (!initD2D(app)) {
-        MessageBoxW(nullptr, L"Failed to initialize Direct2D", L"Error", MB_OK);
+        MessageBoxW(nullptr, tr(app, "error.d2d_init_failed"),
+                   tr(app, "error.title"), MB_OK);
         return 1;
     }
 
@@ -1334,7 +1344,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // Create render target
     t0 = Clock::now();
     if (!createRenderTarget(app)) {
-        MessageBoxW(nullptr, L"Failed to create render target", L"Error", MB_OK);
+        MessageBoxW(nullptr, tr(app, "error.render_target_failed"),
+                   tr(app, "error.title"), MB_OK);
         return 1;
     }
     app.metrics.renderTargetUs = usElapsed(t0);
