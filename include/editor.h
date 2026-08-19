@@ -25,6 +25,11 @@ void renderEditor(App& app, float editorWidth);
 void renderSeparator(App& app);
 void renderEditModeNotification(App& app);
 
+// Re-enter edit mode from a parked tab buffer (tabs.cpp), restoring the
+// dirty flag, scroll, and caret the switch-away captured
+void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
+                       float scrollY, size_t cursor);
+
 // File save
 void saveEditorFile(App& app, HWND hwnd);
 // Unsaved-changes dialog outcome: 1 save+exit, 2 discard, 3 keep editing

@@ -1,5 +1,6 @@
 #include "editor.h"
 #include "document.h"
+#include "tabs.h"
 #include "utils.h"
 #include "file_utils.h"
 #include "render.h"
@@ -535,11 +536,12 @@ static void editorEnsureCursorVisible(App& app) {
         cursorY = padding + line * lineHeight;
     }
 
+    float viewportH = (float)app.height - chromeTopHeight(app);
     if (cursorY < app.editorScrollY + lineHeight) {
         app.editorScrollY = std::max(0.0f, cursorY - lineHeight);
     }
-    if (cursorY + lineHeight > app.editorScrollY + app.height - lineHeight) {
-        app.editorScrollY = cursorY + lineHeight * 2 - app.height;
+    if (cursorY + lineHeight > app.editorScrollY + viewportH - lineHeight) {
+        app.editorScrollY = cursorY + lineHeight * 2 - viewportH;
     }
     app.editorScrollY = std::max(0.0f, app.editorScrollY);
 
@@ -756,6 +758,17 @@ static void enterEditModeWithContent(App& app, const std::string& content) {
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
+void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
+                       float scrollY, size_t cursor) {
+    enterEditModeWithContent(app, toUtf8(text));
+    app.editorDirty = dirty;
+    app.editorCursorPos = std::min(cursor, app.editorText.size());
+    app.editorScrollY = std::max(0.0f, scrollY);
+    // No re-entry toast: the user is returning to their own session
+    app.showEditModeNotification = false;
+    updateWindowTitle(app);
+}
+
 void enterEditMode(App& app) {
     if (app.currentFile.empty()) {
         // Show brief "No file loaded" notification
@@ -959,6 +972,15 @@ void confirmExitAction(App& app, HWND hwnd, int action) {
     } else {
         app.confirmExitPending = false;
         app.escPressedOnce = false;
+    }
+    // A tab close that opened this dialog completes once the buffer is
+    // resolved (Keep editing cancels the close)
+    if (app.pendingTabClose >= 0) {
+        int tab = app.pendingTabClose;
+        app.pendingTabClose = -1;
+        if (action != 3 && !app.editMode) {
+            tabCloseIndex(app, hwnd, tab);
+        }
     }
     InvalidateRect(hwnd, nullptr, FALSE);
 }
@@ -1467,7 +1489,8 @@ void editorPositionImeWindow(App& app, HWND hwnd) {
     cf.dwStyle = CFS_POINT;
     cf.ptCurrentPos.x = (LONG)(gutterWidth + padding + xOff -
                                (app.editorWordWrap ? 0.0f : app.editorScrollX));
-    cf.ptCurrentPos.y = (LONG)(lineTop + yOff - app.editorScrollY + lineHeight);
+    cf.ptCurrentPos.y = (LONG)(chromeTopHeight(app) + lineTop + yOff -
+                               app.editorScrollY + lineHeight);
     ImmSetCompositionWindow(himc, &cf);
     ImmReleaseContext(hwnd, himc);
 }
@@ -1480,7 +1503,7 @@ static size_t editorPosFromClick(App& app, int x, int y) {
     float lineHeight = app.editorTextFormat->GetFontSize() * 1.5f;
     float padding = dpi(app, 8.0f);
 
-    float adjustedY = y + app.editorScrollY - padding;
+    float adjustedY = y - chromeTopHeight(app) + app.editorScrollY - padding;
     size_t line;
     float localY = lineHeight * 0.5f;
     if (app.editorWordWrap) {
@@ -1750,7 +1773,7 @@ static void renderEditorWrapped(App& app, float editorWidth) {
     size_t firstLine = editorLineFromRow(app, firstRow);
 
     for (size_t i = firstLine; i < app.editorLineStarts.size(); i++) {
-        float lineY = padding + app.editorRowStarts[i] * lineHeight - app.editorScrollY;
+        float lineY = chromeTopHeight(app) + padding + app.editorRowStarts[i] * lineHeight - app.editorScrollY;
         if (lineY > app.height) break;
 
         size_t lineStart = app.editorLineStarts[i];
@@ -1903,7 +1926,7 @@ void renderEditor(App& app, float editorWidth) {
     }
 
     for (int i = firstVisible; i <= lastVisible && i < (int)app.editorLineStarts.size(); i++) {
-        float lineY = padding + i * lineHeight - app.editorScrollY;
+        float lineY = chromeTopHeight(app) + padding + i * lineHeight - app.editorScrollY;
         size_t lineStart = app.editorLineStarts[i];
         size_t lineLen = getLineLength(app, i);
 
@@ -1981,7 +2004,7 @@ void renderEditor(App& app, float editorWidth) {
         size_t curLineLen = getLineLength(app, curLine);
         IDWriteTextLayout* curLayout = cachedEditorLineLayout(app, curLineStart, curLineLen);
         float curX = textBase + editorColToX(app, curLayout, std::min(curCol, curLineLen));
-        float curY = padding + curLine * lineHeight - app.editorScrollY;
+        float curY = chromeTopHeight(app) + padding + curLine * lineHeight - app.editorScrollY;
 
         app.brush->SetColor(app.theme.text);
         app.renderTarget->FillRectangle(
@@ -1996,7 +2019,7 @@ void renderEditor(App& app, float editorWidth) {
     gutterColor.a = 0.3f;
     app.brush->SetColor(gutterColor);
     for (int i = firstVisible; i <= lastVisible && i < (int)app.editorLineStarts.size(); i++) {
-        float lineY = padding + i * lineHeight - app.editorScrollY;
+        float lineY = chromeTopHeight(app) + padding + i * lineHeight - app.editorScrollY;
         wchar_t lineNum[16];
         swprintf(lineNum, 16, L"%d", i + 1);
         app.renderTarget->DrawText(lineNum, (UINT32)wcslen(lineNum), app.editorTextFormat,

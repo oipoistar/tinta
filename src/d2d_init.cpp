@@ -451,6 +451,11 @@ bool createRenderTarget(App& app) {
         if (it->second.pending) { ++it; }
         else { it = app.imageCache.erase(it); }
     }
+    // The title-bar icon is a device bitmap too; the strip recreates it
+    if (app.titleIconBitmap) {
+        app.titleIconBitmap->Release();
+        app.titleIconBitmap = nullptr;
+    }
 
     RECT rc;
     GetClientRect(app.hwnd, &rc);

@@ -62,6 +62,7 @@ set(SOURCES
     src/i18n.cpp
     src/selection.cpp
     src/math_render.cpp
+    src/tabs.cpp
 )
 
 set(HEADERS

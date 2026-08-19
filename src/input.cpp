@@ -1,4 +1,5 @@
 #include "input.h"
+#include "tabs.h"
 #include "document.h"
 #include "editor.h"
 #include "file_utils.h"
@@ -142,7 +143,7 @@ static void setFolderBrowserCursor(const App& app, float x, float y) {
     }
 
     float padding = dpi(app, 12.0f);
-    float headerY = padding;
+    float headerY = chromeTopHeight(app) + padding;
     float headerHeight = dpi(app, 40.0f);
     float btnSize = dpi(app, 24.0f);
     float btnGap = dpi(app, 6.0f);
@@ -244,7 +245,7 @@ void handleSelectScrollTimer(App& app, HWND hwnd) {
 
 // Loads a document into the viewer and resets per-document state.
 // Shared by the folder browser's item clicks, path input, and new-file flow.
-static bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
+bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     std::ifstream file(fullPath);
     if (!file) return false;
     std::stringstream buffer;
@@ -389,10 +390,18 @@ static void commitFolderBrowserPath(App& app) {
         closeFolderBrowserInput(app);
         return;
     }
-    if (isSupportedDropPath(path) && openDocumentInViewer(app, path)) {
-        // Preview mode: the browser stays open beside the document — close
-        // it by clicking the document, pressing B, or Esc
-        closeFolderBrowserInput(app);
+    if (isSupportedDropPath(path)) {
+        if (app.tabNewTabIntent) {
+            app.tabNewTabIntent = false;
+            tabOpenPath(app, app.hwnd, toUtf8(path), true);
+            closeFolderBrowserInput(app);
+        } else if (openDocumentInViewer(app, path)) {
+            // Preview mode: the browser stays open beside the document —
+            // close it by clicking the document, pressing B, or Esc
+            closeFolderBrowserInput(app);
+        } else {
+            app.folderBrowserInputError = true;
+        }
     } else {
         app.folderBrowserInputError = true;
     }
@@ -631,6 +640,9 @@ static void settingsAction(App& app, HWND hwnd, int action) {
         case SET_TOGGLE_BROWSEFOCUS:
             app.browserFocusPath = !app.browserFocusPath;
             break;
+        case SET_TOGGLE_OPENTABS:
+            app.openInTabs = !app.openInTabs;
+            break;
         case SET_TOGGLE_FOLLOW:
             app.followSystemTheme = !app.followSystemTheme;
             if (app.followSystemTheme) {
@@ -859,6 +871,51 @@ void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
+
+    // Tab strip hover (close-button reveal) and switcher row hover
+    {
+        int newHover = -1;
+        if ((float)app.mouseY < chromeTopHeight(app)) {
+            for (const App::TabHit& hit : app.tabHits) {
+                if (hit.index >= 0 && app.mouseX >= hit.rect.left &&
+                    app.mouseX <= hit.rect.right &&
+                    app.mouseY >= hit.rect.top &&
+                    app.mouseY <= hit.rect.bottom) {
+                    newHover = hit.index;
+                    break;
+                }
+            }
+        }
+        if (newHover != app.hoveredTab) {
+            app.hoveredTab = newHover;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        if (app.captionButtonHover) {
+            // The pointer is back in the client area
+            app.captionButtonHover = 0;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        if (app.showTabSwitcher) {
+            int rowHover = -1;
+            for (const auto& [rect, index] : app.tabSwitcherHits) {
+                if (app.mouseX >= rect.left && app.mouseX <= rect.right &&
+                    app.mouseY >= rect.top && app.mouseY <= rect.bottom) {
+                    rowHover = index;
+                    break;
+                }
+            }
+            if (rowHover != app.tabSwitcherHover) {
+                app.tabSwitcherHover = rowHover;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            SetCursor(rowHover >= 0 ? cursorHand : cursorArrow);
+            return;
+        }
+        if (newHover >= 0) {
+            SetCursor(cursorHand);
+            return;
+        }
+    }
 
     // Print preview: no hover states; document hit-testing below would run
     // against print-layout coordinates anyway
@@ -1328,6 +1385,21 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
 }
 
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Title-bar tab strip and its switcher sit above every overlay
+    {
+        int mx = GET_X_LPARAM(lParam);
+        int my = GET_Y_LPARAM(lParam);
+        if (app.showTabSwitcher) {
+            tabSwitcherMouseDown(app, hwnd, mx, my);
+            app.swallowNextMouseUp = true;
+            return;
+        }
+        if ((float)my < chromeTopHeight(app) && !app.confirmExitPending) {
+            tabStripMouseDown(app, hwnd, mx, my, false);
+            app.swallowNextMouseUp = true;
+            return;
+        }
+    }
     // Theme and shortcut editors: everything acts on the release
     if (app.showThemeEditor || app.showShortcutEditor) return;
     // Unsaved-changes dialog is modal: buttons act on the release
@@ -1924,7 +1996,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         if (clickX >= panelX && clickX <= panelX + panelWidth) {
             // Header geometry (must match renderFolderBrowser)
             float padding = dpi(app, 12.0f);
-            float headerY = padding;
+            float headerY = chromeTopHeight(app) + padding;
             float headerHeight = dpi(app, 40.0f);
             float btnSize = dpi(app, 24.0f);
             float btnGap = dpi(app, 6.0f);
@@ -2005,8 +2077,15 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                     // Preview mode: open the file but keep the browser up,
                     // so the list doubles as a file picker — the current
                     // file is highlighted, and the browser closes on a
-                    // document click, B, or Esc
-                    openDocumentInViewer(app, fullPath);
+                    // document click, B, or Esc. A Ctrl+click (or a pending
+                    // Ctrl+T / + intent) opens into a new tab instead.
+                    bool ctrlHeld = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                    if (app.tabNewTabIntent || ctrlHeld) {
+                        app.tabNewTabIntent = false;
+                        tabOpenPath(app, hwnd, toUtf8(fullPath), true);
+                    } else {
+                        openDocumentInViewer(app, fullPath);
+                    }
                 }
             }
         } else {
@@ -2221,6 +2300,53 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 printPreviewSetPage(app, (int)app.printPreviewBounds.size() - 2);
                 break;
         }
+        return;
+    }
+
+    // Tab shortcuts work everywhere except modal capture states: Ctrl+Tab
+    // cycles, Ctrl+W closes, Ctrl+T opens the browser into a new tab,
+    // Ctrl+1..9 jumps (a dirty editor parks its buffer in the tab)
+    if (ctrl && !app.confirmExitPending &&
+        !(app.showFolderBrowser &&
+          (app.folderBrowserEditingPath || app.folderBrowserNaming != 0))) {
+        bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (wParam == VK_TAB) {
+            tabCycle(app, hwnd, shift ? -1 : 1);
+            return;
+        }
+        if (wParam == 'W' && !app.editMode) {
+            // In edit mode Ctrl+W keeps its documented word-wrap toggle
+            tabCloseIndex(app, hwnd, app.activeTab);
+            return;
+        }
+        if (wParam == 'T') {
+            app.tabNewTabIntent = true;
+            if (!app.showFolderBrowser) {
+                closeSearchIfOpen(app);
+                app.showFolderBrowser = true;
+                app.folderBrowserAnimation = 0;
+                if (!app.currentFile.empty()) {
+                    app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
+                } else {
+                    wchar_t cwd[MAX_PATH];
+                    if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
+                        app.folderBrowserPath = cwd;
+                    }
+                }
+                populateFolderItems(app);
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        if (wParam >= '1' && wParam <= '9' && app.tabs.size() > 1) {
+            int index = (int)(wParam - '1');
+            if (index < (int)app.tabs.size()) tabActivate(app, hwnd, index);
+            return;
+        }
+    }
+    if (app.showTabSwitcher && wParam == VK_ESCAPE) {
+        app.showTabSwitcher = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
 
@@ -2754,41 +2880,26 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
 }
 
 void handleDropFiles(App& app, HWND hwnd, WPARAM wParam) {
+    // Dropped files open into tabs (the first one activates); a single
+    // drop on a single-document window is where the tab strip first appears
     HDROP hDrop = (HDROP)wParam;
-    wchar_t wpath[MAX_PATH];
-    if (DragQueryFileW(hDrop, 0, wpath, MAX_PATH) &&
-        isSupportedDropPath(wpath)) {
-        // Convert wide path to UTF-8 for std::string usage
-        int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wpath, -1, nullptr, 0, nullptr, nullptr);
-        std::string filepath(utf8Len - 1, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, wpath, -1, &filepath[0], utf8Len, nullptr, nullptr);
-
-        // Load file - use wide path for non-ASCII support
-        std::ifstream file(wpath);
-        if (file) {
-            std::stringstream buffer;
-            buffer << file.rdbuf();
-            auto result = parseDocument(app.parser, buffer.str(), wpath);
-            if (result.success) {
-                app.root = result.root;
-                app.parseTimeUs = result.parseTimeUs;
-                app.currentFile = filepath;
-                app.scrollY = 0;
-                app.scrollX = 0;
-                app.targetScrollY = 0;
-                app.targetScrollX = 0;
-                app.focusMermaidOnNextLayout = isMermaidDocumentPath(wpath);
-                app.contentHeight = 0;
-                app.docText.clear();
-                app.docTextLower.clear();
-                app.searchMatches.clear();
-                app.layoutDirty = true;
-                updateFileWriteTime(app);
-                updateWindowTitle(app);
-            }
+    UINT count = DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
+    bool activated = false;
+    for (UINT i = 0; i < count; i++) {
+        wchar_t wpath[MAX_PATH];
+        if (!DragQueryFileW(hDrop, i, wpath, MAX_PATH) ||
+            !isSupportedDropPath(wpath)) {
+            continue;
         }
-        InvalidateRect(hwnd, nullptr, FALSE);
+        int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wpath, -1, nullptr, 0,
+                                          nullptr, nullptr);
+        std::string filepath(utf8Len - 1, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, wpath, -1, &filepath[0], utf8Len,
+                            nullptr, nullptr);
+        tabOpenPath(app, hwnd, filepath, !activated);
+        activated = true;
     }
+    if (activated) InvalidateRect(hwnd, nullptr, FALSE);
     DragFinish(hDrop);
 }
 

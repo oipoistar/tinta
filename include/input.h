@@ -13,6 +13,9 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam);
 void handleContextMenu(App& app, HWND hwnd, LPARAM lParam);
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam);
 void handleDropFiles(App& app, HWND hwnd, WPARAM wParam);
+// Load a document into the viewer, saving the outgoing reading position
+// and restoring the incoming one (shared with tabs.cpp)
+bool openDocumentInViewer(App& app, const std::wstring& fullPath);
 void handleFileWatchTimer(App& app, HWND hwnd);
 void handleSelectScrollTimer(App& app, HWND hwnd);
 

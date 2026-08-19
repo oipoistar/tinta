@@ -30,7 +30,8 @@ void renderSearchOverlay(App& app) {
         barCenterWidth = paneWidth;
     }
     float barX = (barCenterWidth - barWidth) / 2;
-    float barY = dpi(app, 20.0f) * anim - barHeight * (1.0f - anim);  // Slide down from top
+    float barY = chromeTopHeight(app) + dpi(app, 20.0f) * anim -
+                 barHeight * (1.0f - anim);  // Slide down from under the strip
 
     // Background with rounded corners
     D2D1_ROUNDED_RECT barRect = D2D1::RoundedRect(
@@ -149,7 +150,8 @@ int folderItemIndexAt(const App& app, float x, float y) {
     float padding = dpi(app, 12.0f);
     float itemHeight = dpi(app, 28.0f);
     float headerHeight = dpi(app, 40.0f);
-    float listStartY = padding + headerHeight + dpi(app, 8.0f);
+    float listStartY =
+        chromeTopHeight(app) + padding + headerHeight + dpi(app, 8.0f);
     float panelHeight = (float)app.height;
     float namingOffset =
         app.folderBrowserNaming != 0 ? itemHeight : 0.0f;
@@ -176,10 +178,10 @@ void renderFolderBrowser(App& app) {
     }
     float anim = app.folderBrowserAnimation;
 
-    // Panel dimensions
+    // Panel dimensions (below the title-bar tab strip)
     float panelWidth = folderBrowserPanelWidth(app);
     float panelX = -panelWidth * (1.0f - anim);  // Slide in from left
-    float panelY = 0;
+    float panelY = chromeTopHeight(app);
     float panelHeight = (float)app.height;
 
     // Semi-transparent backdrop (only on the panel area)
@@ -548,10 +550,12 @@ void renderToc(App& app) {
     }
     float anim = app.tocAnimation;
 
-    // Panel dimensions
+    // Panel dimensions (below the title-bar tab strip)
     float panelWidth = tocPanelWidth(app);
     float panelX = tocPanelX(app, panelWidth);  // slides from the chosen side
-    float panelY = 0;
+    float panelY = chromeTopHeight(app);
+    // Doubles as the absolute bottom edge in the list math below (same
+    // convention as the folder browser)
     float panelHeight = (float)app.height;
 
     // Background
@@ -1031,6 +1035,9 @@ void renderHelpOverlay(App& app) {
         {L"Enter",        tr(app, "help.view.next_match")},
         {kBrowse.c_str(), tr(app, "help.view.folder_browser")},
         {kToc.c_str(),    tr(app, "help.view.toc")},
+        {L"Ctrl+T",       tr(app, "help.view.new_tab")},
+        {L"Ctrl+Tab",     tr(app, "help.view.next_tab")},
+        {L"Ctrl+W",       tr(app, "help.view.close_tab")},
         {kTheme.c_str(),  tr(app, "help.view.theme")},
         {kStats.c_str(),  tr(app, "help.view.stats")},
         {kHelp.c_str(),   tr(app, "help.view.help")},
@@ -1964,6 +1971,10 @@ void renderSettingsOverlay(App& app) {
         rowLabel(tr(app, "settings.browse_focus_path"), tr(app, "settings.browse_focus_path.hint"), dpi(app, 50.0f));
         settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
                        app.browserFocusPath, SET_TOGGLE_BROWSEFOCUS, anim);
+        hairline(); cy += rowH;
+        rowLabel(tr(app, "settings.open_in_tabs"), tr(app, "settings.open_in_tabs.hint"), dpi(app, 50.0f));
+        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+                       app.openInTabs, SET_TOGGLE_OPENTABS, anim);
         hairline(); cy += rowH;
         rowLabel(tr(app, "settings.open_ini"), tr(app, "settings.open_ini.hint"), dpi(app, 70.0f));
         float bx = cx + cw - dpi(app, 60.0f);

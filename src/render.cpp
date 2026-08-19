@@ -2832,7 +2832,9 @@ bool layoutBegin(App& app) {
             app.layoutMaxWidth = column;
         }
     }
-    app.layoutCursorY = 20.0f * scale;
+    // Content starts below the title-bar tab strip; the strip paints over
+    // anything that scrolls up under it
+    app.layoutCursorY = chromeTopHeight(app) + 20.0f * scale;
     app.layoutNextBlock = 0;
     app.layoutComplete = false;
     app.contentWidth = layoutWidth;
