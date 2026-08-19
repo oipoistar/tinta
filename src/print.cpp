@@ -324,7 +324,23 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
         bool banded = applyBand(shape.rect.top, shape.rect.bottom);
         D2D1_RECT_F r = D2D1::RectF(shape.rect.left + dx, shape.rect.top + dy,
                                     shape.rect.right + dx, shape.rect.bottom + dy);
-        if (shape.type == App::LayoutShapeType::Diamond) {
+        if (shape.type == App::LayoutShapeType::Path) {
+            if (shape.geometry) {
+                D2D1_MATRIX_3X2_F previous;
+                dc->GetTransform(&previous);
+                dc->SetTransform(
+                    D2D1::Matrix3x2F::Translation(r.left, r.top) * previous);
+                if (shape.fill.a > 0.0f) {
+                    brush->SetColor(shape.fill);
+                    dc->FillGeometry(shape.geometry, brush);
+                }
+                if (shape.stroke.a > 0.0f && shape.strokeWidth > 0.0f) {
+                    brush->SetColor(shape.stroke);
+                    dc->DrawGeometry(shape.geometry, brush, shape.strokeWidth);
+                }
+                dc->SetTransform(previous);
+            }
+        } else if (shape.type == App::LayoutShapeType::Diamond) {
             float cx = (r.left + r.right) * 0.5f, cy = (r.top + r.bottom) * 0.5f;
             D2D1_POINT_2F pts[] = {{cx, r.top}, {r.right, cy}, {cx, r.bottom}, {r.left, cy}};
             fillStrokePolygon(pts, 4, shape);

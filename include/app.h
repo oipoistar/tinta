@@ -599,6 +599,10 @@ struct App {
         Stadium,
         Ellipse,
         Hexagon,
+        // Arbitrary geometry built eagerly at layout time (pie slices,
+        // arrowheads, crow's feet); `geometry` is in local space with the
+        // origin at rect top-left, rect doubles as the culling bounds
+        Path,
     };
     struct LayoutShape {
         LayoutShapeType type = LayoutShapeType::Rectangle;

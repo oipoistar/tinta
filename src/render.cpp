@@ -4,6 +4,7 @@
 #include "syntax.h"
 #include "search.h"
 #include "mermaid.h"
+#include "mermaid_ext.h"
 #include "math_render.h"
 
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <map>
 #include <string_view>
 #include <filesystem>
 #include <urlmon.h>
@@ -1393,6 +1395,465 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
     return true;
 }
 
+// --- extended Mermaid diagram families (sequence, pie, state, ...) ---
+
+static void rgbToHsl(float r, float g, float b, float& h, float& s, float& l) {
+    float maxC = std::max(r, std::max(g, b));
+    float minC = std::min(r, std::min(g, b));
+    l = (maxC + minC) * 0.5f;
+    if (maxC == minC) {
+        h = 0.0f;
+        s = 0.0f;
+        return;
+    }
+    float d = maxC - minC;
+    s = l > 0.5f ? d / (2.0f - maxC - minC) : d / (maxC + minC);
+    if (maxC == r) {
+        h = (g - b) / d + (g < b ? 6.0f : 0.0f);
+    } else if (maxC == g) {
+        h = (b - r) / d + 2.0f;
+    } else {
+        h = (r - g) / d + 4.0f;
+    }
+    h /= 6.0f;
+}
+
+static float hueChannel(float p, float q, float t) {
+    if (t < 0.0f) t += 1.0f;
+    if (t > 1.0f) t -= 1.0f;
+    if (t < 1.0f / 6.0f) return p + (q - p) * 6.0f * t;
+    if (t < 0.5f) return q;
+    if (t < 2.0f / 3.0f) return p + (q - p) * (2.0f / 3.0f - t) * 6.0f;
+    return p;
+}
+
+static void hslToRgb(float h, float s, float l, float& r, float& g, float& b) {
+    if (s == 0.0f) {
+        r = g = b = l;
+        return;
+    }
+    float q = l < 0.5f ? l * (1.0f + s) : l + s - l * s;
+    float p = 2.0f * l - q;
+    r = hueChannel(p, q, h + 1.0f / 3.0f);
+    g = hueChannel(p, q, h);
+    b = hueChannel(p, q, h - 1.0f / 3.0f);
+}
+
+// Categorical palette derived from the theme accent: golden-angle hue steps
+// keep neighboring series distinct in any theme
+static D2D1_COLOR_F diagramSeriesColor(const App& app, int index) {
+    float h, s, l;
+    rgbToHsl(app.theme.accent.r, app.theme.accent.g, app.theme.accent.b,
+             h, s, l);
+    h = std::fmod(h + index * 0.38197f, 1.0f);
+    s = app.theme.isDark ? 0.42f : 0.48f;
+    l = app.theme.isDark ? 0.60f : 0.52f;
+    float r, g, b;
+    hslToRgb(h, s, l, r, g, b);
+    return D2D1::ColorF(r, g, b, 1.0f);
+}
+
+static D2D1_COLOR_F resolveDiagramRole(const App& app,
+                                       const mermaidext::Prim& prim,
+                                       mermaidext::Role role) {
+    int seriesIndex = prim.seriesIndex;
+    D2D1_COLOR_F color = app.theme.text;
+    switch (role) {
+        case mermaidext::Role::Text:
+            color = app.theme.text;
+            break;
+        case mermaidext::Role::Muted:
+            color = app.theme.text;
+            color.a = app.theme.isDark ? 0.72f : 0.62f;
+            break;
+        case mermaidext::Role::Stroke:
+            color = app.theme.accent;
+            break;
+        case mermaidext::Role::Fill:
+            color = app.theme.codeBackground;
+            break;
+        case mermaidext::Role::Accent:
+            color = app.theme.accent;
+            break;
+        case mermaidext::Role::AccentSoft:
+            color = app.theme.accent;
+            color.a = app.theme.isDark ? 0.20f : 0.13f;
+            break;
+        case mermaidext::Role::Background:
+            color = app.theme.background;
+            break;
+        case mermaidext::Role::Series:
+            color = diagramSeriesColor(app, seriesIndex);
+            break;
+        case mermaidext::Role::SeriesSoft:
+            color = diagramSeriesColor(app, seriesIndex);
+            color.a = 0.30f;
+            break;
+        case mermaidext::Role::Custom:
+            color = D2D1::ColorF(prim.customR, prim.customG, prim.customB);
+            break;
+        case mermaidext::Role::None:
+            color.a = 0.0f;
+            break;
+    }
+    return color;
+}
+
+// Per-layout-pass cache of text formats for the diagram text styles
+struct DiagramFormats {
+    App& app;
+    std::map<int, IDWriteTextFormat*> formats;
+
+    explicit DiagramFormats(App& application) : app(application) {}
+    DiagramFormats(const DiagramFormats&) = delete;
+    DiagramFormats& operator=(const DiagramFormats&) = delete;
+    ~DiagramFormats() {
+        for (auto& entry : formats) {
+            if (entry.second) entry.second->Release();
+        }
+    }
+
+    IDWriteTextFormat* get(const mermaidext::TextStyle& style, float scale) {
+        int key = (style.bold ? 1 : 0) | (style.italic ? 2 : 0) |
+                  (style.mono ? 4 : 0) |
+                  (static_cast<int>(style.scale * 100.0f + 0.5f) << 3);
+        auto found = formats.find(key);
+        if (found != formats.end()) return found->second;
+
+        const wchar_t* family =
+            style.mono ? app.theme.codeFontFamily : app.theme.fontFamily;
+        float size = (style.mono ? 13.0f : 14.0f) * scale * style.scale;
+        IDWriteTextFormat* format = nullptr;
+        app.dwriteFactory->CreateTextFormat(
+            family, nullptr,
+            style.bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD
+                       : DWRITE_FONT_WEIGHT_NORMAL,
+            style.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, size, L"en-us", &format);
+        formats[key] = format;
+        return format;
+    }
+};
+
+static IDWriteTextLayout* createDiagramTextLayout(
+        App& app, DiagramFormats& formats, const std::wstring& text,
+        const mermaidext::TextStyle& style, float scale, float width,
+        float height, int alignH, int alignV) {
+    IDWriteTextFormat* format = formats.get(style, scale);
+    if (!format || text.empty()) return nullptr;
+    IDWriteTextLayout* layout = nullptr;
+    app.dwriteFactory->CreateTextLayout(
+        text.data(), static_cast<UINT32>(text.size()), format,
+        std::max(width, 1.0f), std::max(height, 1.0f), &layout);
+    if (!layout) return nullptr;
+    layout->SetTextAlignment(alignH < 0 ? DWRITE_TEXT_ALIGNMENT_LEADING
+                             : alignH > 0 ? DWRITE_TEXT_ALIGNMENT_TRAILING
+                                          : DWRITE_TEXT_ALIGNMENT_CENTER);
+    layout->SetParagraphAlignment(alignV < 0
+                                      ? DWRITE_PARAGRAPH_ALIGNMENT_NEAR
+                                  : alignV > 0 ? DWRITE_PARAGRAPH_ALIGNMENT_FAR
+                                               : DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    if (app.fontFallback) {
+        IDWriteTextLayout2* layout2 = nullptr;
+        if (SUCCEEDED(layout->QueryInterface(
+                __uuidof(IDWriteTextLayout2),
+                reinterpret_cast<void**>(&layout2)))) {
+            layout2->SetFontFallback(app.fontFallback);
+            layout2->Release();
+        }
+    }
+    return layout;
+}
+
+static ID2D1PathGeometry* buildPolygonGeometry(
+        App& app, const std::vector<mermaidext::Point>& points,
+        float originX, float originY) {
+    if (points.size() < 3) return nullptr;
+    ID2D1PathGeometry* geometry = nullptr;
+    if (FAILED(app.d2dFactory->CreatePathGeometry(&geometry)) || !geometry) {
+        return nullptr;
+    }
+    ID2D1GeometrySink* sink = nullptr;
+    if (FAILED(geometry->Open(&sink)) || !sink) {
+        geometry->Release();
+        return nullptr;
+    }
+    sink->BeginFigure(
+        D2D1::Point2F(points[0].x - originX, points[0].y - originY),
+        D2D1_FIGURE_BEGIN_FILLED);
+    for (size_t i = 1; i < points.size(); i++) {
+        sink->AddLine(
+            D2D1::Point2F(points[i].x - originX, points[i].y - originY));
+    }
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    sink->Close();
+    sink->Release();
+    return geometry;
+}
+
+static ID2D1PathGeometry* buildSliceGeometry(App& app, float radius,
+                                             float a0, float a1) {
+    // Local space: circle center at (radius, radius)
+    ID2D1PathGeometry* geometry = nullptr;
+    if (FAILED(app.d2dFactory->CreatePathGeometry(&geometry)) || !geometry) {
+        return nullptr;
+    }
+    ID2D1GeometrySink* sink = nullptr;
+    if (FAILED(geometry->Open(&sink)) || !sink) {
+        geometry->Release();
+        return nullptr;
+    }
+    float cx = radius, cy = radius;
+    D2D1_POINT_2F start =
+        D2D1::Point2F(cx + radius * std::cos(a0), cy + radius * std::sin(a0));
+    D2D1_POINT_2F end =
+        D2D1::Point2F(cx + radius * std::cos(a1), cy + radius * std::sin(a1));
+    float sweep = a1 - a0;
+    if (sweep >= 6.28318f - 0.0001f) {
+        // Full circle: two half arcs
+        sink->BeginFigure(start, D2D1_FIGURE_BEGIN_FILLED);
+        D2D1_POINT_2F opposite = D2D1::Point2F(
+            cx + radius * std::cos(a0 + 3.14159f),
+            cy + radius * std::sin(a0 + 3.14159f));
+        D2D1_ARC_SEGMENT half1 = {
+            opposite, {radius, radius}, 0.0f,
+            D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL};
+        D2D1_ARC_SEGMENT half2 = {
+            start, {radius, radius}, 0.0f,
+            D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL};
+        sink->AddArc(half1);
+        sink->AddArc(half2);
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    } else {
+        sink->BeginFigure(D2D1::Point2F(cx, cy), D2D1_FIGURE_BEGIN_FILLED);
+        sink->AddLine(start);
+        D2D1_ARC_SEGMENT arc = {
+            end, {radius, radius}, 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE,
+            sweep > 3.14159f ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL};
+        sink->AddArc(arc);
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    }
+    sink->Close();
+    sink->Release();
+    return geometry;
+}
+
+static bool layoutMermaidExtDiagram(App& app, mermaidext::Kind kind,
+                                    const std::string& source,
+                                    size_t sourceOffset, float& y,
+                                    float indent, float maxWidth,
+                                    D2D1_RECT_F* renderedBounds) {
+    float scale = app.contentScale * app.zoomFactor;
+    DiagramFormats formats(app);
+
+    auto measureFn = [&](const std::string& text,
+                         const mermaidext::TextStyle& style,
+                         float wrapWidth) -> mermaidext::Size {
+        if (text.empty()) return {};
+        std::wstring wide = toWide(text);
+        IDWriteTextLayout* layout = createDiagramTextLayout(
+            app, formats, wide, style, scale,
+            wrapWidth > 0.0f ? wrapWidth : kHugeWidth, kHugeWidth, -1, -1);
+        if (!layout) return {};
+        if (wrapWidth <= 0.0f) {
+            layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        }
+        DWRITE_TEXT_METRICS metrics{};
+        layout->GetMetrics(&metrics);
+        layout->Release();
+        return {metrics.widthIncludingTrailingWhitespace, metrics.height};
+    };
+
+    mermaidext::Built built =
+        mermaidext::build(kind, source, measureFn, scale);
+    if (!built.ok || built.prims.empty()) return false;
+
+    float baseX = indent;
+    if (built.width < maxWidth) {
+        baseX += (maxWidth - built.width) * 0.5f;
+    }
+    float baseY = y + 10.0f * scale;
+
+    if (sourceOffset != SIZE_MAX) {
+        if (app.scrollAnchors.empty() ||
+            app.scrollAnchors.back().sourceOffset < sourceOffset) {
+            app.scrollAnchors.push_back({sourceOffset, baseY});
+        }
+    }
+
+    // Text prims are appended to docText in reading order so selection
+    // sweeps the diagram top-to-bottom
+    std::vector<const mermaidext::Prim*> textPrims;
+
+    for (const auto& prim : built.prims) {
+        float x1 = baseX + prim.x1, y1 = baseY + prim.y1;
+        float x2 = baseX + prim.x2, y2 = baseY + prim.y2;
+        D2D1_COLOR_F fill = resolveDiagramRole(app, prim, prim.fill);
+        D2D1_COLOR_F stroke = resolveDiagramRole(app, prim, prim.stroke);
+        switch (prim.type) {
+            case mermaidext::PrimType::Rect:
+            case mermaidext::PrimType::RoundRect:
+            case mermaidext::PrimType::Ellipse: {
+                App::LayoutShape shape;
+                shape.type =
+                    prim.type == mermaidext::PrimType::Rect
+                        ? App::LayoutShapeType::Rectangle
+                    : prim.type == mermaidext::PrimType::RoundRect
+                        ? App::LayoutShapeType::RoundedRectangle
+                        : App::LayoutShapeType::Ellipse;
+                shape.rect = D2D1::RectF(x1, y1, x2, y2);
+                shape.fill = fill;
+                shape.stroke = stroke;
+                shape.strokeWidth = prim.strokeWidth;
+                shape.radius = prim.radius;
+                app.layoutShapes.push_back(shape);
+                break;
+            }
+            case mermaidext::PrimType::Line: {
+                App::LayoutConnector connector;
+                connector.color = stroke;
+                connector.stroke = prim.strokeWidth;
+                connector.dashed = prim.dashed;
+                connector.arrowSize = 8.0f * scale;
+                connector.directed = prim.openArrow;
+                float endX = x2, endY = y2;
+                if (prim.arrow) {
+                    // Filled triangle head: shorten the line, add a polygon
+                    float dx = x2 - x1, dy = y2 - y1;
+                    float length = std::sqrt(dx * dx + dy * dy);
+                    if (length > 0.01f) {
+                        dx /= length;
+                        dy /= length;
+                        float head = 9.0f * scale;
+                        float wing = 4.5f * scale;
+                        endX = x2 - dx * head * 0.7f;
+                        endY = y2 - dy * head * 0.7f;
+                        std::vector<mermaidext::Point> tri = {
+                            {x2, y2},
+                            {x2 - dx * head + dy * wing,
+                             y2 - dy * head - dx * wing},
+                            {x2 - dx * head - dy * wing,
+                             y2 - dy * head + dx * wing},
+                        };
+                        float minX = std::min({tri[0].x, tri[1].x, tri[2].x});
+                        float minY = std::min({tri[0].y, tri[1].y, tri[2].y});
+                        float maxX = std::max({tri[0].x, tri[1].x, tri[2].x});
+                        float maxY = std::max({tri[0].y, tri[1].y, tri[2].y});
+                        App::LayoutShape triangle;
+                        triangle.type = App::LayoutShapeType::Path;
+                        triangle.rect = D2D1::RectF(minX, minY, maxX, maxY);
+                        triangle.fill = stroke;
+                        triangle.stroke.a = 0.0f;
+                        triangle.geometry =
+                            buildPolygonGeometry(app, tri, minX, minY);
+                        app.layoutShapes.push_back(triangle);
+                    }
+                }
+                connector.points = {D2D1::Point2F(x1, y1),
+                                    D2D1::Point2F(endX, endY)};
+                connector.bounds = D2D1::RectF(
+                    std::min(x1, x2) - 10.0f * scale,
+                    std::min(y1, y2) - 10.0f * scale,
+                    std::max(x1, x2) + 10.0f * scale,
+                    std::max(y1, y2) + 10.0f * scale);
+                app.layoutConnectors.push_back(std::move(connector));
+                break;
+            }
+            case mermaidext::PrimType::Polygon: {
+                if (prim.pts.size() < 3) break;
+                std::vector<mermaidext::Point> shifted = prim.pts;
+                float minX = shifted[0].x, minY = shifted[0].y;
+                float maxX = minX, maxY = minY;
+                for (auto& point : shifted) {
+                    point.x += baseX;
+                    point.y += baseY;
+                }
+                minX = maxX = shifted[0].x;
+                minY = maxY = shifted[0].y;
+                for (const auto& point : shifted) {
+                    minX = std::min(minX, point.x);
+                    minY = std::min(minY, point.y);
+                    maxX = std::max(maxX, point.x);
+                    maxY = std::max(maxY, point.y);
+                }
+                App::LayoutShape shape;
+                shape.type = App::LayoutShapeType::Path;
+                shape.rect = D2D1::RectF(minX, minY, maxX, maxY);
+                shape.fill = fill;
+                shape.stroke = stroke;
+                shape.strokeWidth = prim.strokeWidth;
+                shape.geometry = buildPolygonGeometry(app, shifted, minX, minY);
+                app.layoutShapes.push_back(shape);
+                break;
+            }
+            case mermaidext::PrimType::Slice: {
+                App::LayoutShape shape;
+                shape.type = App::LayoutShapeType::Path;
+                shape.rect = D2D1::RectF(
+                    x1 - prim.radius, y1 - prim.radius,
+                    x1 + prim.radius, y1 + prim.radius);
+                shape.fill = fill;
+                shape.stroke = stroke;
+                shape.strokeWidth = prim.strokeWidth;
+                shape.geometry =
+                    buildSliceGeometry(app, prim.radius, prim.a0, prim.a1);
+                app.layoutShapes.push_back(shape);
+                break;
+            }
+            case mermaidext::PrimType::Text:
+                textPrims.push_back(&prim);
+                break;
+        }
+    }
+
+    std::stable_sort(textPrims.begin(), textPrims.end(),
+                     [](const mermaidext::Prim* a, const mermaidext::Prim* b) {
+                         if (std::abs(a->y1 - b->y1) > kLineBucketTolerance) {
+                             return a->y1 < b->y1;
+                         }
+                         return a->x1 < b->x1;
+                     });
+    for (const mermaidext::Prim* prim : textPrims) {
+        std::wstring wide = toWide(prim->text);
+        if (wide.empty()) continue;
+        D2D1_RECT_F rect = D2D1::RectF(baseX + prim->x1, baseY + prim->y1,
+                                       baseX + prim->x2, baseY + prim->y2);
+        // Slight width slack: boxes are sized from measured text, and
+        // re-wrapping at the exact measured width can push the last word
+        // (or a CJK character) onto a phantom second line
+        IDWriteTextLayout* layout = createDiagramTextLayout(
+            app, formats, wide, prim->style, scale,
+            rect.right - rect.left + 2.5f, rect.bottom - rect.top + 2.0f,
+            prim->alignH, prim->alignV);
+        if (!layout) continue;
+        LayoutInfo info;
+        info.layout = layout;
+        DWRITE_TEXT_METRICS metrics{};
+        layout->GetMetrics(&metrics);
+        info.width = metrics.widthIncludingTrailingWhitespace;
+        info.height = metrics.height;
+        size_t docStart = app.docText.size();
+        app.docText += wide;
+        addTextRun(app, std::move(info),
+                   D2D1::Point2F(rect.left, rect.top), rect,
+                   resolveDiagramRole(app, *prim, prim->fill),
+                   docStart, wide.size(), true);
+        app.docText += L"\n";
+    }
+    app.docText += L"\n";
+
+    float diagramRight = baseX + built.width;
+    float diagramBottom = baseY + built.height;
+    app.contentWidth = std::max(app.contentWidth,
+                                diagramRight + 40.0f * scale);
+    if (renderedBounds) {
+        *renderedBounds =
+            D2D1::RectF(baseX, baseY, diagramRight, diagramBottom);
+    }
+    y = diagramBottom + 24.0f * scale;
+    return true;
+}
+
 static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     std::string code;
     for (const auto& child : elem->children) {
@@ -1407,9 +1868,18 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (languageName == "mermaid") {
         D2D1_RECT_F renderedBounds{};
-        if (layoutMermaidDiagram(
+        mermaidext::Kind kind = mermaidext::detectKind(code);
+        bool rendered = false;
+        if (kind == mermaidext::Kind::Flowchart) {
+            rendered = layoutMermaidDiagram(
                 app, code, elem->sourceOffset, y, indent, maxWidth,
-                &renderedBounds)) {
+                &renderedBounds);
+        } else if (kind != mermaidext::Kind::None) {
+            rendered = layoutMermaidExtDiagram(
+                app, kind, code, elem->sourceOffset, y, indent, maxWidth,
+                &renderedBounds);
+        }
+        if (rendered) {
             app.codeBlocks.push_back({renderedBounds, toWide(code)});
             return;
         }

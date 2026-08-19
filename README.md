@@ -67,7 +67,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Word wrap** - Optional soft wrap in the editor (Ctrl+W)
 - **Native LaTeX math** - `$inline$` and `$$display$$` equations rendered natively (fractions, scripts, stretchy delimiters, Greek — no MathJax, no web engine)
 - **Focused editing** - Hide the preview pane while writing (Ctrl+E)
-- **Native Mermaid flowcharts** - Render `.mmd` files and fenced `mermaid` blocks without a web engine
+- **Native Mermaid diagrams** - Flowcharts, sequence, class, state, ER, pie, git graphs, gantt, mindmaps, timelines, journeys, and charts — rendered without a web engine
 - **Rich tables** - Tables with bold, italic, code, and clickable links in cells
 - **Folder browser** - Press B to browse and open Markdown or Mermaid files
 - **Table of contents** - Press Tab to see document headings, click to jump
@@ -190,7 +190,16 @@ This registers `.md`, `.markdown`, and `.mmd` so you can select Tinta as their d
 
 ## Mermaid Support
 
-Tinta natively renders Mermaid `flowchart` and `graph` diagrams in `.mmd` files and fenced `mermaid` code blocks. It supports TB/TD, BT, LR, and RL layouts; common node shapes; directed and labeled edges; `classDef`, `class`, and `style` styling. Unsupported Mermaid diagram families fall back to readable source code.
+Tinta natively renders thirteen Mermaid diagram families in `.mmd` files and fenced `mermaid` code blocks — no web engine involved:
+
+- **Flowcharts** (`flowchart` / `graph`) - TB/TD, BT, LR, RL layouts, common node shapes, directed and labeled edges, `classDef`/`class`/`style` styling
+- **Sequence diagrams** - participants and actors with aliases and `<br/>` breaks, every arrow family, activations, notes, `autonumber`, and `loop`/`alt`/`opt`/`par`/`critical`/`break` frames
+- **Class diagrams** - member blocks, stereotypes, `~T~` generics, all relation kinds with multiplicities
+- **State diagrams** - `[*]` start/end, choice/fork/join, descriptions, directions, inline notes
+- **ER diagrams** - attribute tables with keys, full crow's-foot cardinality notation
+- **Pie charts**, **git graphs**, **gantt charts**, **mindmaps**, **timelines**, **user journeys**, **quadrant charts**, and **XY charts** (`xychart-beta`)
+
+Diagrams follow the active theme, print through Ctrl+P, and their text is selectable and searchable like any other content. Anything a native renderer does not cover yet (composite states, class notes, and the remaining families such as C4) falls back to readable source code.
 
 ## Themes
 
