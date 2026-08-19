@@ -1453,8 +1453,10 @@ static D2D1_COLOR_F diagramSeriesColor(const App& app, int index) {
     return D2D1::ColorF(r, g, b, 1.0f);
 }
 
-static D2D1_COLOR_F resolveDiagramRole(const App& app, mermaidext::Role role,
-                                       int seriesIndex) {
+static D2D1_COLOR_F resolveDiagramRole(const App& app,
+                                       const mermaidext::Prim& prim,
+                                       mermaidext::Role role) {
+    int seriesIndex = prim.seriesIndex;
     D2D1_COLOR_F color = app.theme.text;
     switch (role) {
         case mermaidext::Role::Text:
@@ -1486,6 +1488,9 @@ static D2D1_COLOR_F resolveDiagramRole(const App& app, mermaidext::Role role,
         case mermaidext::Role::SeriesSoft:
             color = diagramSeriesColor(app, seriesIndex);
             color.a = 0.30f;
+            break;
+        case mermaidext::Role::Custom:
+            color = D2D1::ColorF(prim.customR, prim.customG, prim.customB);
             break;
         case mermaidext::Role::None:
             color.a = 0.0f;
@@ -1683,10 +1688,8 @@ static bool layoutMermaidExtDiagram(App& app, mermaidext::Kind kind,
     for (const auto& prim : built.prims) {
         float x1 = baseX + prim.x1, y1 = baseY + prim.y1;
         float x2 = baseX + prim.x2, y2 = baseY + prim.y2;
-        D2D1_COLOR_F fill = resolveDiagramRole(app, prim.fill,
-                                               prim.seriesIndex);
-        D2D1_COLOR_F stroke = resolveDiagramRole(app, prim.stroke,
-                                                 prim.seriesIndex);
+        D2D1_COLOR_F fill = resolveDiagramRole(app, prim, prim.fill);
+        D2D1_COLOR_F stroke = resolveDiagramRole(app, prim, prim.stroke);
         switch (prim.type) {
             case mermaidext::PrimType::Rect:
             case mermaidext::PrimType::RoundRect:
@@ -1833,7 +1836,7 @@ static bool layoutMermaidExtDiagram(App& app, mermaidext::Kind kind,
         app.docText += wide;
         addTextRun(app, std::move(info),
                    D2D1::Point2F(rect.left, rect.top), rect,
-                   resolveDiagramRole(app, prim->fill, prim->seriesIndex),
+                   resolveDiagramRole(app, *prim, prim->fill),
                    docStart, wide.size(), true);
         app.docText += L"\n";
     }

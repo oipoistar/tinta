@@ -1,5 +1,7 @@
 #include "mermaid.h"
+#include "mermaid_ext.h"
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -209,6 +211,132 @@ A --> D
     }
 }
 
+// --- extended diagram families (mermaidext) ---
+
+// Character-cell measurer: 8px per column, 16px per line
+mermaidext::Size fakeMeasure(const std::string& text,
+                             const mermaidext::TextStyle&, float) {
+    size_t longest = 0, current = 0, lines = text.empty() ? 0 : 1;
+    for (char c : text) {
+        if (c == '\n') {
+            lines++;
+            current = 0;
+        } else {
+            current++;
+            longest = std::max(longest, current);
+        }
+    }
+    return {static_cast<float>(longest * 8),
+            static_cast<float>(lines * 16)};
+}
+
+void testDetectKind() {
+    using mermaidext::Kind;
+    using mermaidext::detectKind;
+    check(detectKind("graph TD\nA-->B") == Kind::Flowchart,
+          "graph detects as flowchart");
+    check(detectKind("%% comment\nflowchart LR\nA-->B") == Kind::Flowchart,
+          "leading comments are skipped in detection");
+    check(detectKind("sequenceDiagram\nA->>B: hi") == Kind::Sequence,
+          "sequenceDiagram detected");
+    check(detectKind("classDiagram\nA <|-- B") == Kind::Class,
+          "classDiagram detected");
+    check(detectKind("stateDiagram-v2\n[*] --> A") == Kind::State,
+          "stateDiagram-v2 detected");
+    check(detectKind("erDiagram\nA ||--o{ B : has") == Kind::Er,
+          "erDiagram detected");
+    check(detectKind("pie\n\"A\" : 1") == Kind::Pie, "pie detected");
+    check(detectKind("gitGraph\ncommit") == Kind::Git, "gitGraph detected");
+    check(detectKind("gantt\ntitle X") == Kind::Gantt, "gantt detected");
+    check(detectKind("mindmap\n  root") == Kind::Mindmap,
+          "mindmap detected");
+    check(detectKind("timeline\n2020 : x") == Kind::Timeline,
+          "timeline detected");
+    check(detectKind("journey\ntitle X") == Kind::Journey,
+          "journey detected");
+    check(detectKind("quadrantChart\ntitle X") == Kind::Quadrant,
+          "quadrantChart detected");
+    check(detectKind("xychart-beta\nbar [1]") == Kind::XyChart,
+          "xychart-beta detected");
+    check(detectKind("C4Context\n...") == Kind::None,
+          "unsupported kinds report None");
+}
+
+void testExtBuilders() {
+    using mermaidext::Kind;
+    struct Case {
+        Kind kind;
+        const char* name;
+        const char* source;
+    };
+    const Case kCases[] = {
+        {Kind::Sequence, "sequence",
+         "sequenceDiagram\n"
+         "    participant A as Service<br/>api\n"
+         "    A->>+B: request\n"
+         "    B-->>-A: reply\n"
+         "    Note over A,B: both\n"
+         "    loop retry\n        A-)B: ping\n    end\n"},
+        {Kind::Pie, "pie",
+         "pie showData title Share\n    \"A\" : 60\n    \"B\" : 40\n"},
+        {Kind::State, "state",
+         "stateDiagram-v2\n    [*] --> S1\n    S1 --> S2 : go\n"
+         "    S2 --> S1 : back\n    S2 --> [*]\n"},
+        {Kind::Class, "class",
+         "classDiagram\n    Animal <|-- Duck\n    Animal : +int age\n"
+         "    class Duck{\n        +swim()\n    }\n"},
+        {Kind::Er, "er",
+         "erDiagram\n    CUSTOMER ||--o{ ORDER : places\n"
+         "    CUSTOMER {\n        string name PK\n    }\n"},
+        {Kind::Git, "git",
+         "gitGraph\n   commit\n   branch dev\n   commit\n"
+         "   checkout main\n   merge dev tag: \"v1\"\n"},
+        {Kind::Gantt, "gantt",
+         "gantt\n    dateFormat YYYY-MM-DD\n    section S\n"
+         "        T1 :a1, 2026-01-01, 5d\n        T2 :after a1, 3d\n"},
+        {Kind::Mindmap, "mindmap",
+         "mindmap\n  root((center))\n    A\n      A1\n    B\n"},
+        {Kind::Timeline, "timeline",
+         "timeline\n    title T\n    2020 : one : two\n    2021 : three\n"},
+        {Kind::Journey, "journey",
+         "journey\n    title T\n    section S\n      Task: 5: Me\n"},
+        {Kind::Quadrant, "quadrant",
+         "quadrantChart\n    x-axis Low --> High\n    quadrant-1 Q\n"
+         "    A: [0.3, 0.6]\n"},
+        {Kind::XyChart, "xychart",
+         "xychart-beta\n    x-axis [a, b]\n    bar [1, 2]\n    line [2, 1]\n"},
+    };
+    for (const auto& testCase : kCases) {
+        auto built = mermaidext::build(testCase.kind, testCase.source,
+                                       fakeMeasure, 1.0f);
+        std::string label = std::string(testCase.name) + " builds";
+        check(built.ok, label.c_str());
+        if (!built.ok) {
+            std::cerr << "  (" << built.error << ")\n";
+            continue;
+        }
+        label = std::string(testCase.name) + " has extent";
+        check(built.width > 0.0f && built.height > 0.0f, label.c_str());
+        label = std::string(testCase.name) + " emits primitives";
+        check(!built.prims.empty(), label.c_str());
+    }
+}
+
+void testExtFallbacks() {
+    auto sequence = mermaidext::build(
+        mermaidext::Kind::Sequence,
+        "sequenceDiagram\n    createParticipant A\n", fakeMeasure, 1.0f);
+    check(!sequence.ok, "unknown sequence statement falls back");
+    auto composite = mermaidext::build(
+        mermaidext::Kind::State,
+        "stateDiagram-v2\n    state Outer {\n        [*] --> A\n    }\n",
+        fakeMeasure, 1.0f);
+    check(!composite.ok, "composite states fall back");
+    auto pie = mermaidext::build(mermaidext::Kind::Pie,
+                                 "pie\n    \"A\" : -3\n", fakeMeasure, 1.0f);
+    check(!pie.ok, "negative pie values fall back");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -221,6 +349,9 @@ int main(int argc, char** argv) {
     testBackslashNLineBreak();
     testAttributeSyntaxRejected();
     testLayoutExposesRanks();
+    testDetectKind();
+    testExtBuilders();
+    testExtFallbacks();
     testFiles(argc, argv);
 
     if (failures != 0) {

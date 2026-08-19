@@ -79,6 +79,7 @@ enum class Role {
     Background,  // theme background
     Series,      // categorical palette color [seriesIndex]
     SeriesSoft,  // same, low alpha
+    Custom,      // the prim's own customR/G/B (journey scores, crit tasks)
     None,        // do not draw this half (no fill / no stroke)
 };
 
@@ -93,6 +94,7 @@ struct Prim {
     Role fill = Role::None;
     Role stroke = Role::None;
     int seriesIndex = 0;
+    float customR = 0.0f, customG = 0.0f, customB = 0.0f;
     float strokeWidth = 0.0f;
     bool dashed = false;
     bool arrow = false;      // Line: filled arrowhead at (x2,y2)

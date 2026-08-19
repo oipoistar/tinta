@@ -225,24 +225,4 @@ Built build(Kind kind, std::string_view source, const Measure& measure,
     return failed;
 }
 
-// Temporary stubs for families whose builders have not landed yet; each is
-// deleted when the real implementation arrives in its own source file.
-namespace detail {
-
-static Built notYet() {
-    Built failed;
-    failed.error = "Not implemented yet";
-    return failed;
-}
-
-Built buildGit(std::string_view, const Measure&, float) { return notYet(); }
-Built buildGantt(std::string_view, const Measure&, float) { return notYet(); }
-Built buildMindmap(std::string_view, const Measure&, float) { return notYet(); }
-Built buildTimeline(std::string_view, const Measure&, float) { return notYet(); }
-Built buildJourney(std::string_view, const Measure&, float) { return notYet(); }
-Built buildQuadrant(std::string_view, const Measure&, float) { return notYet(); }
-Built buildXyChart(std::string_view, const Measure&, float) { return notYet(); }
-
-}  // namespace detail
-
 }  // namespace mermaidext
