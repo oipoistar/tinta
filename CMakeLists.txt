@@ -51,6 +51,7 @@ set(SOURCES
     src/mermaid_ext.cpp
     src/mermaid_seq.cpp
     src/mermaid_pie.cpp
+    src/mermaid_uml.cpp
     src/document.cpp
     src/inline_style.cpp
     src/print.cpp
@@ -123,6 +124,7 @@ if(BUILD_TESTING)
         src/mermaid_ext.cpp
         src/mermaid_seq.cpp
         src/mermaid_pie.cpp
+        src/mermaid_uml.cpp
     )
     target_include_directories(mermaid_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include

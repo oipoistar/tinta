@@ -127,6 +127,9 @@ std::vector<std::string_view> diagramLines(std::string_view source);
 std::string cleanLabel(std::string_view raw);
 bool startsWithWord(std::string_view line, std::string_view word,
                     std::string_view* rest = nullptr);
+// Shifts every primitive right so nothing sits at negative x, growing the
+// diagram width to match (notes and markers can overhang the layout box).
+void normalizeLeft(Built& built);
 
 Built buildSequence(std::string_view source, const Measure& measure,
                     float scale);

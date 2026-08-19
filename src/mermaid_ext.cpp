@@ -129,6 +129,27 @@ bool startsWithWord(std::string_view line, std::string_view word,
     return true;
 }
 
+void normalizeLeft(Built& built) {
+    float minX = 0.0f;
+    for (const auto& prim : built.prims) {
+        if (prim.type == PrimType::Slice) {
+            minX = std::min(minX, prim.x1 - prim.radius);
+        } else if (prim.type == PrimType::Polygon) {
+            for (const auto& point : prim.pts) minX = std::min(minX, point.x);
+        } else {
+            minX = std::min(minX, std::min(prim.x1, prim.x2));
+        }
+    }
+    if (minX >= 0.0f) return;
+    float shift = -minX;
+    for (auto& prim : built.prims) {
+        prim.x1 += shift;
+        prim.x2 += shift;
+        for (auto& point : prim.pts) point.x += shift;
+    }
+    built.width += shift;
+}
+
 }  // namespace detail
 
 Kind detectKind(std::string_view source) {
@@ -214,8 +235,6 @@ static Built notYet() {
     return failed;
 }
 
-Built buildState(std::string_view, const Measure&, float) { return notYet(); }
-Built buildClass(std::string_view, const Measure&, float) { return notYet(); }
 Built buildEr(std::string_view, const Measure&, float) { return notYet(); }
 Built buildGit(std::string_view, const Measure&, float) { return notYet(); }
 Built buildGantt(std::string_view, const Measure&, float) { return notYet(); }
