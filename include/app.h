@@ -317,6 +317,9 @@ struct App {
     IDWriteTextFormat* tocFormat = nullptr;
     IDWriteTextFormat* tocFormatBold = nullptr;
 
+    // Stats overlay: UI chrome, so it must not follow the document zoom
+    IDWriteTextFormat* statsFormat = nullptr;
+
     // Markdown
     MarkdownParser parser;
     ElementPtr root;
@@ -852,6 +855,7 @@ struct App {
         if (folderBrowserFormat) { folderBrowserFormat->Release(); folderBrowserFormat = nullptr; }
         if (tocFormat) { tocFormat->Release(); tocFormat = nullptr; }
         if (tocFormatBold) { tocFormatBold->Release(); tocFormatBold = nullptr; }
+        if (statsFormat) { statsFormat->Release(); statsFormat = nullptr; }
         if (supSubFormat) { supSubFormat->Release(); supSubFormat = nullptr; }
         if (editorTextFormat) { editorTextFormat->Release(); editorTextFormat = nullptr; }
         for (auto& fmt : themePreviewFormats) {

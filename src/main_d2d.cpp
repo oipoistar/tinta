@@ -790,9 +790,19 @@ render_document:
                 D2D1_COLOR_F textColor = app.theme.background;
                 textColor.a = alpha;
                 app.brush->SetColor(textColor);
-                app.renderTarget->DrawText(copied, (UINT32)wcslen(copied), app.textFormat,
-                    D2D1::RectF(pillX, pillY + dpi(app, 4.0f),
-                                pillX + copyWidth, pillY + copyHeight), app.brush);
+                // A dedicated layout centers both axes; the shared textFormat
+                // is leading/near-aligned and must not be mutated here
+                IDWriteTextLayout* toastLayout = nullptr;
+                app.dwriteFactory->CreateTextLayout(
+                    copied, (UINT32)wcslen(copied), app.textFormat,
+                    copyWidth, copyHeight, &toastLayout);
+                if (toastLayout) {
+                    toastLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                    toastLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                    app.renderTarget->DrawTextLayout(
+                        D2D1::Point2F(pillX, pillY), toastLayout, app.brush);
+                    toastLayout->Release();
+                }
             }
             app.drawCalls++;
         } else {
@@ -827,7 +837,8 @@ render_document:
             app.brush);
 
         app.brush->SetColor(D2D1::ColorF(0.7f, 0.9f, 0.7f));
-        app.renderTarget->DrawText(stats, (UINT32)wcslen(stats), app.codeFormat,
+        app.renderTarget->DrawText(stats, (UINT32)wcslen(stats),
+            app.statsFormat ? app.statsFormat : app.codeFormat,
             D2D1::RectF(app.width - statsWidth - dpi(app, 5.0f), app.height - statsHeight - dpi(app, 5.0f),
                        app.width - dpi(app, 15.0f), app.height - dpi(app, 15.0f)),
             app.brush);
