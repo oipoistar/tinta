@@ -48,6 +48,8 @@ set(SOURCES
     src/input.cpp
     src/editor.cpp
     src/mermaid.cpp
+    src/mermaid_ext.cpp
+    src/mermaid_seq.cpp
     src/document.cpp
     src/inline_style.cpp
     src/print.cpp
@@ -71,6 +73,7 @@ set(HEADERS
     include/input.h
     include/editor.h
     include/mermaid.h
+    include/mermaid_ext.h
     include/document.h
     include/inline_style.h
     include/print.h
@@ -116,6 +119,8 @@ if(BUILD_TESTING)
     add_executable(mermaid_tests
         tests/mermaid_tests.cpp
         src/mermaid.cpp
+        src/mermaid_ext.cpp
+        src/mermaid_seq.cpp
     )
     target_include_directories(mermaid_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include

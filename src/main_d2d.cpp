@@ -391,6 +391,30 @@ render_document:
             shape.rect.right - app.scrollX,
             shape.rect.bottom - app.scrollY);
 
+        if (shape.type == App::LayoutShapeType::Path) {
+            // Geometry was built eagerly at layout time in local space
+            if (!shape.geometry) continue;
+            D2D1_MATRIX_3X2_F previous;
+            app.renderTarget->GetTransform(&previous);
+            app.renderTarget->SetTransform(
+                D2D1::Matrix3x2F::Translation(shape.rect.left - app.scrollX,
+                                              shape.rect.top - app.scrollY) *
+                previous);
+            if (shape.fill.a > 0.0f) {
+                app.brush->SetColor(shape.fill);
+                app.renderTarget->FillGeometry(shape.geometry, app.brush);
+                app.drawCalls++;
+            }
+            if (shape.stroke.a > 0.0f && shape.strokeWidth > 0.0f) {
+                app.brush->SetColor(shape.stroke);
+                app.renderTarget->DrawGeometry(
+                    shape.geometry, app.brush, shape.strokeWidth);
+                app.drawCalls++;
+            }
+            app.renderTarget->SetTransform(previous);
+            continue;
+        }
+
         if (shape.type == App::LayoutShapeType::Diamond) {
             float w = shape.rect.right - shape.rect.left;
             float h = shape.rect.bottom - shape.rect.top;
