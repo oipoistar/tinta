@@ -69,7 +69,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Focused editing** - Hide the preview pane while writing (Ctrl+E)
 - **Native Mermaid diagrams** - Flowcharts, sequence, class, state, ER, pie, git graphs, gantt, mindmaps, timelines, journeys, and charts — rendered without a web engine
 - **Rich tables** - Tables with bold, italic, code, and clickable links in cells
-- **Tabs** - Win11 Notepad-style tabs in the title bar: files opened from Explorer join the window as tabs, Ctrl+Tab cycles, Ctrl+W closes, middle-click closes, Ctrl+T opens the file browser into a new tab, and unsaved buffers show a dot. Single-file windows stay tabless; turn the Explorer behavior off with the "Open files in tabs" setting
+- **Tabs** - Win11 Notepad-style tabs in the title bar: files opened from Explorer join the window as tabs, Ctrl+Tab cycles, Ctrl+W closes, middle-click closes, Ctrl+T opens the file browser into a new tab, unsaved buffers show a dot, dragging reorders tabs, and pulling a tab out of the strip opens it in its own window. Single-file windows stay tabless; turn the Explorer behavior off with the "Open files in tabs" setting
 - **Folder browser** - Press B to browse and open Markdown or Mermaid files (Ctrl+click a file to open it in a new tab)
 - **Table of contents** - Press Tab to see document headings, click to jump
 - **Edit mode** - Press `:` to edit markdown with live preview, search works in editor too

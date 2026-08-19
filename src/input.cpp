@@ -872,6 +872,12 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
 
+    // An armed tab drag owns the mouse until release (capture held)
+    if (app.tabDragIndex >= 0) {
+        tabDragMove(app, hwnd, app.mouseX, app.mouseY);
+        return;
+    }
+
     // Tab strip hover (close-button reveal) and switcher row hover
     {
         int newHover = -1;
@@ -1778,6 +1784,10 @@ static bool codeCopyButtonAt(const App& app, int mouseX, int mouseY) {
 }
 
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // A tab drag ends on release (its press already consumed the click)
+    if (app.tabDragIndex >= 0) {
+        tabDragEnd(app, hwnd);
+    }
     // Release belonging to a context-menu item click: already handled
     if (app.swallowNextMouseUp) {
         app.swallowNextMouseUp = false;

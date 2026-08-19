@@ -13,6 +13,7 @@
 #include "utils.h"
 
 #include <algorithm>
+#include <shellapi.h>
 
 namespace {
 
@@ -439,6 +440,12 @@ void renderTabStrip(App& app) {
             bool active = (int)i == app.activeTab;
             bool hovered = (int)i == app.hoveredTab;
             float x = m.tabsLeft + (m.tabWidth + gap) * i;
+            if (app.tabDragging && (int)i == app.tabDragIndex) {
+                // The dragged tab follows the pointer within the row
+                float follow = (float)app.mouseX - app.tabDragOffsetX;
+                x = std::max(m.tabsLeft,
+                             std::min(follow, m.tabsRight - m.tabWidth));
+            }
             float top = active ? dpi(app, 6.0f) : dpi(app, 10.0f);
             D2D1_RECT_F r = D2D1::RectF(x, top, x + m.tabWidth, stripH);
 
@@ -809,9 +816,99 @@ bool tabStripMouseDown(App& app, HWND hwnd, int x, int y, bool middle) {
             return true;
         }
         tabActivate(app, hwnd, hit.index);
+        // Arm a potential drag: moving past the threshold starts
+        // reordering, pulling away from the strip detaches the tab
+        app.tabDragIndex = hit.index;
+        app.tabDragging = false;
+        app.tabDragOffsetX = (float)x - hit.rect.left;
+        app.tabDragStartX = x;
+        app.tabDragStartY = y;
+        SetCapture(hwnd);
         return true;
     }
     return true;  // strip clicks never fall through to the document
+}
+
+void tabDragMove(App& app, HWND hwnd, int x, int y) {
+    if (app.tabDragIndex < 0) return;
+    if (app.tabDragIndex >= (int)app.tabs.size()) {
+        tabDragEnd(app, hwnd);
+        return;
+    }
+
+    if (!app.tabDragging) {
+        if (std::abs(x - app.tabDragStartX) < (int)dpi(app, 6.0f) &&
+            std::abs(y - app.tabDragStartY) < (int)dpi(app, 6.0f)) {
+            return;
+        }
+        app.tabDragging = true;
+    }
+
+    // Pulling well clear of the strip detaches the tab into its own
+    // window (clean, titled tabs only; the last tab stays put)
+    float stripH = chromeTopHeight(app);
+    bool outside = (float)y > stripH + dpi(app, 60.0f) ||
+                   (float)y < -dpi(app, 60.0f);
+    if (outside && app.tabs.size() > 1) {
+        int index = app.tabDragIndex;
+        bool active = index == app.activeTab;
+        bool dirty = active ? (app.editMode && app.editorDirty)
+                            : (app.tabs[index].editMode &&
+                               app.tabs[index].editorDirty);
+        const std::string& path =
+            active ? app.currentFile : app.tabs[index].path;
+        if (!dirty && !path.empty()) {
+            // Spawn the satellite window near the drop point; --cascade
+            // marks it a non-session window and bypasses single-instance
+            POINT screen = {x, y};
+            ClientToScreen(hwnd, &screen);
+            wchar_t exePath[MAX_PATH];
+            if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+                wchar_t args[MAX_PATH * 2];
+                swprintf_s(args, _countof(args),
+                           L"--cascade --pos %d %d \"%hs\"",
+                           screen.x - (int)dpi(app, 120.0f),
+                           screen.y - (int)dpi(app, 20.0f), path.c_str());
+                ShellExecuteW(nullptr, L"open", exePath, args, nullptr,
+                              SW_SHOWNORMAL);
+            }
+            tabDragEnd(app, hwnd);
+            // Close locally: the neighbor takes over (guarded > 1 above)
+            if (active) {
+                int next = index + 1 < (int)app.tabs.size() ? index + 1
+                                                            : index - 1;
+                tabActivate(app, hwnd, next);
+            }
+            app.tabs.erase(app.tabs.begin() + index);
+            if (app.activeTab > index) app.activeTab--;
+            app.hoveredTab = -1;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+    }
+
+    // Reorder: the dragged tab claims the slot under the pointer
+    StripMetrics m = stripMetrics(app);
+    float gap = dpi(app, 2.0f);
+    int slot = (int)(((float)x - m.tabsLeft) / (m.tabWidth + gap));
+    slot = std::max(0, std::min((int)app.tabs.size() - 1, slot));
+    if (slot != app.tabDragIndex) {
+        App::DocTab moved = std::move(app.tabs[app.tabDragIndex]);
+        app.tabs.erase(app.tabs.begin() + app.tabDragIndex);
+        app.tabs.insert(app.tabs.begin() + slot, std::move(moved));
+        // The dragged tab is the active one (the press activated it)
+        app.activeTab = slot;
+        app.tabDragIndex = slot;
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void tabDragEnd(App& app, HWND hwnd) {
+    if (app.tabDragIndex < 0) return;
+    app.tabDragIndex = -1;
+    app.tabDragging = false;
+    if (GetCapture() == hwnd) ReleaseCapture();
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 bool tabSwitcherMouseDown(App& app, HWND hwnd, int x, int y) {

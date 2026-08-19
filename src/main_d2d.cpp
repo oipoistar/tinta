@@ -1272,18 +1272,28 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.browserFocusPath = app->browserFocusPath;
                 settings.openInTabs = app->openInTabs;
                 // Remember the open tab set for the next launch (untitled
-                // quick-note buffers have no path to restore)
-                settings.sessionTabs.clear();
-                settings.sessionActive = 0;
-                for (size_t i = 0; i < app->tabs.size(); i++) {
-                    const std::string& path =
-                        (int)i == app->activeTab ? app->currentFile
-                                                 : app->tabs[i].path;
-                    if (path.empty()) continue;
-                    if ((int)i == app->activeTab) {
-                        settings.sessionActive = (int)settings.sessionTabs.size();
+                // quick-note buffers have no path to restore). Satellite
+                // windows never own the session: they re-read the owner's
+                // stored session so their full-file save cannot clobber a
+                // newer one with launch-time data.
+                if (app->sessionOwner) {
+                    settings.sessionTabs.clear();
+                    settings.sessionActive = 0;
+                    for (size_t i = 0; i < app->tabs.size(); i++) {
+                        const std::string& path =
+                            (int)i == app->activeTab ? app->currentFile
+                                                     : app->tabs[i].path;
+                        if (path.empty()) continue;
+                        if ((int)i == app->activeTab) {
+                            settings.sessionActive =
+                                (int)settings.sessionTabs.size();
+                        }
+                        settings.sessionTabs.push_back(path);
                     }
-                    settings.sessionTabs.push_back(path);
+                } else {
+                    Settings onDisk = loadSettings();
+                    settings.sessionTabs = onDisk.sessionTabs;
+                    settings.sessionActive = onDisk.sessionActive;
                 }
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
@@ -1457,6 +1467,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     bool startInEditMode = false; // open straight into the editor
     bool quickNote = false;       // Ctrl+N: untitled buffer, no backing file
     std::wstring printPagesDir;   // debug: render print pages as PNGs and exit
+    int posX = 0, posY = 0;       // --pos: spawn position (tab drag-out)
+    bool hasPos = false;
 
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -1476,6 +1488,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             quickNote = true;
         } else if (arg == L"--printpages" && i + 1 < argc) {
             printPagesDir = argv[++i];
+        } else if (arg == L"--pos" && i + 2 < argc) {
+            // Drag-out spawn: place the new window at the drop point
+            posX = _wtoi(argv[++i]);
+            posY = _wtoi(argv[++i]);
+            hasPos = true;
         } else if (arg[0] != L'-' && arg[0] != L'/') {
             // Convert to UTF-8
             int len = WideCharToMultiByte(CP_UTF8, 0, arg.c_str(), -1, nullptr, 0, nullptr, nullptr);
@@ -1581,10 +1598,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     // A window spawned for a newly created document steps down-right from
     // the saved position so it does not cover the window that spawned it
-    if (cascadeWindow && windowX != CW_USEDEFAULT && windowY != CW_USEDEFAULT) {
+    if (hasPos) {
+        // Tab drag-out: appear under the drop point
+        windowX = posX;
+        windowY = posY;
+    } else if (cascadeWindow && windowX != CW_USEDEFAULT && windowY != CW_USEDEFAULT) {
         windowX += 40;
         windowY += 40;
     }
+
+    // Only the primary window persists and restores the tab session;
+    // deliberate offshoots (new-note windows, drag-outs) are satellites
+    app.sessionOwner = !cascadeWindow && !quickNote;
 
     app.hwnd = CreateWindowExW(
         WS_EX_ACCEPTFILES,

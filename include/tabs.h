@@ -34,5 +34,9 @@ void renderTabSwitcher(App& app);
 // Mouse handling for the strip area; return true when consumed
 bool tabStripMouseDown(App& app, HWND hwnd, int x, int y, bool middle);
 bool tabSwitcherMouseDown(App& app, HWND hwnd, int x, int y);
+// Drag lifecycle: move reorders (or detaches into a new window when the
+// pointer leaves the strip); up ends the drag
+void tabDragMove(App& app, HWND hwnd, int x, int y);
+void tabDragEnd(App& app, HWND hwnd);
 
 #endif  // TINTA_TABS_H

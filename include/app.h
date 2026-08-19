@@ -401,6 +401,17 @@ struct App {
     // Window close with dirty buffers: resolve them one dialog at a time,
     // then let the close proceed (Keep editing cancels it)
     bool pendingWindowClose = false;
+    // Tab dragging: press arms a potential drag, moving past the threshold
+    // starts reordering, leaving the strip vertically detaches the tab
+    // into its own window
+    int tabDragIndex = -1;       // pressed/dragged tab slot
+    bool tabDragging = false;    // threshold crossed
+    float tabDragOffsetX = 0.0f; // grab point within the tab
+    int tabDragStartX = 0;
+    int tabDragStartY = 0;
+    // Only the primary window persists the tab session; satellites
+    // (--cascade/--new/drag-outs) neither restore nor overwrite it
+    bool sessionOwner = true;
     // 16px window icon drawn in the strip (device bitmap: recreated with
     // the render target)
     ID2D1Bitmap* titleIconBitmap = nullptr;
