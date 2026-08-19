@@ -214,7 +214,6 @@ static Built notYet() {
     return failed;
 }
 
-Built buildPie(std::string_view, const Measure&, float) { return notYet(); }
 Built buildState(std::string_view, const Measure&, float) { return notYet(); }
 Built buildClass(std::string_view, const Measure&, float) { return notYet(); }
 Built buildEr(std::string_view, const Measure&, float) { return notYet(); }
