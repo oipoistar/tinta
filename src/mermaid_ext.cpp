@@ -235,7 +235,6 @@ static Built notYet() {
     return failed;
 }
 
-Built buildEr(std::string_view, const Measure&, float) { return notYet(); }
 Built buildGit(std::string_view, const Measure&, float) { return notYet(); }
 Built buildGantt(std::string_view, const Measure&, float) { return notYet(); }
 Built buildMindmap(std::string_view, const Measure&, float) { return notYet(); }

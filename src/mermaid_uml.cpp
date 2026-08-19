@@ -1387,5 +1387,358 @@ Built buildClass(std::string_view source, const Measure& measure,
     return result;
 }
 
+// --------------------------------------------------------------------------
+// Entity-relationship diagrams
+// --------------------------------------------------------------------------
+
+namespace {
+
+struct ErAttribute {
+    std::string type;
+    std::string name;
+    std::string keys;  // PK, FK, UK joined
+};
+
+// ||, |o, o|, }|, |{, }o, o{ ... -> marker (read outward from the line)
+Marker cardinalityMarker(std::string_view card) {
+    bool many = card.find('{') != std::string_view::npos ||
+                card.find('}') != std::string_view::npos;
+    bool zero = card.find('o') != std::string_view::npos;
+    size_t bars = static_cast<size_t>(
+        std::count(card.begin(), card.end(), '|'));
+    if (many) {
+        if (zero) return Marker::ZeroMany;
+        if (bars > 0) return Marker::OneMany;
+        return Marker::CrowMany;
+    }
+    if (zero) return Marker::ZeroOne;
+    if (bars >= 2) return Marker::One;
+    if (bars == 1) return Marker::One;
+    return Marker::None;
+}
+
+bool isCardChar(char c) {
+    return c == '|' || c == 'o' || c == '{' || c == '}';
+}
+
+}  // namespace
+
+Built buildEr(std::string_view source, const Measure& measure, float scale) {
+    Built result;
+    auto lines = diagramLines(source);
+    if (lines.empty()) {
+        result.error = "Empty diagram";
+        return result;
+    }
+
+    GraphNodes graph;
+    graph.diagram.direction = mermaid::Direction::TopToBottom;
+    std::map<size_t, std::vector<ErAttribute>> attributes;
+    std::vector<EdgeDecor> decors;
+    size_t openBlock = SIZE_MAX;
+
+    auto entityName = [&](std::string_view id) -> std::string_view {
+        // Quoted entity names and [aliases] are trimmed to the plain name
+        id = trimView(id);
+        if (id.size() >= 2 && id.front() == '"' && id.back() == '"') {
+            id = id.substr(1, id.size() - 2);
+        }
+        size_t bracket = id.find('[');
+        if (bracket != std::string_view::npos) {
+            id = trimView(id.substr(0, bracket));
+        }
+        return id;
+    };
+
+    bool sawHeader = false;
+    for (std::string_view line : lines) {
+        if (!sawHeader) {
+            if (!startsWithWord(line, "erDiagram")) {
+                result.error = "Expected erDiagram header";
+                return result;
+            }
+            sawHeader = true;
+            continue;
+        }
+        if (openBlock != SIZE_MAX) {
+            if (line == "}") {
+                openBlock = SIZE_MAX;
+                continue;
+            }
+            // type name [PK|FK|UK ...] ["comment"]
+            ErAttribute attribute;
+            std::string cleaned = cleanLabel(line);
+            std::string_view rest(cleaned);
+            // strip trailing comment
+            size_t quote = rest.find('"');
+            if (quote != std::string_view::npos) {
+                rest = trimView(rest.substr(0, quote));
+            }
+            size_t space = rest.find(' ');
+            if (space == std::string_view::npos) {
+                attribute.name = std::string(rest);
+            } else {
+                attribute.type = std::string(rest.substr(0, space));
+                std::string_view remainder = trimView(rest.substr(space + 1));
+                size_t nameEnd = remainder.find(' ');
+                if (nameEnd == std::string_view::npos) {
+                    attribute.name = std::string(remainder);
+                } else {
+                    attribute.name = std::string(remainder.substr(0, nameEnd));
+                    attribute.keys =
+                        std::string(trimView(remainder.substr(nameEnd + 1)));
+                }
+            }
+            attributes[openBlock].push_back(std::move(attribute));
+            continue;
+        }
+        if (startsWithWord(line, "direction", nullptr)) continue;
+
+        // ENTITY { ... }  |  ENTITY  |  A <card><line><card> B : label
+        if (line.back() == '{') {
+            std::string_view name =
+                entityName(trimView(line.substr(0, line.size() - 1)));
+            if (name.empty()) {
+                result.error = "Entity block without a name";
+                return result;
+            }
+            openBlock = graph.ensure(name, name);
+            continue;
+        }
+
+        // Find the relationship line: -- or .. with cardinality chars around
+        size_t linePos = std::string_view::npos;
+        bool dashed = false;
+        for (size_t i = 0; i + 1 < line.size(); i++) {
+            if ((line[i] == '-' && line[i + 1] == '-') ||
+                (line[i] == '.' && line[i + 1] == '.')) {
+                if (i > 0 && isCardChar(line[i - 1])) {
+                    linePos = i;
+                    dashed = line[i] == '.';
+                    break;
+                }
+            }
+        }
+        if (linePos != std::string_view::npos) {
+            size_t lineEnd = linePos;
+            while (lineEnd < line.size() &&
+                   (line[lineEnd] == '-' || line[lineEnd] == '.')) {
+                lineEnd++;
+            }
+            size_t leftCardStart = linePos;
+            while (leftCardStart > 0 && isCardChar(line[leftCardStart - 1])) {
+                leftCardStart--;
+            }
+            size_t rightCardEnd = lineEnd;
+            while (rightCardEnd < line.size() &&
+                   isCardChar(line[rightCardEnd])) {
+                rightCardEnd++;
+            }
+            std::string_view leftCard =
+                line.substr(leftCardStart, linePos - leftCardStart);
+            std::string_view rightCard =
+                line.substr(lineEnd, rightCardEnd - lineEnd);
+            std::string_view leftId =
+                entityName(line.substr(0, leftCardStart));
+            std::string_view remainder = line.substr(rightCardEnd);
+            std::string label;
+            size_t colon = remainder.find(':');
+            std::string_view rightId;
+            if (colon != std::string_view::npos) {
+                rightId = entityName(remainder.substr(0, colon));
+                label = cleanLabel(trimView(remainder.substr(colon + 1)));
+                if (label.size() >= 2 && label.front() == '"' &&
+                    label.back() == '"') {
+                    label = label.substr(1, label.size() - 2);
+                }
+            } else {
+                rightId = entityName(remainder);
+            }
+            if (leftId.empty() || rightId.empty()) {
+                result.error = "Relationship needs two entities";
+                return result;
+            }
+            mermaid::Edge edge;
+            edge.from = graph.ensure(leftId, leftId);
+            edge.to = graph.ensure(rightId, rightId);
+            edge.label = label;
+            graph.diagram.edges.push_back(std::move(edge));
+            EdgeDecor decor;
+            // Cardinality glyphs read outward: the marker for the LEFT
+            // entity is the left card reversed toward that end
+            decor.atFrom = cardinalityMarker(leftCard);
+            decor.atTo = cardinalityMarker(rightCard);
+            decor.dashed = dashed;
+            decors.push_back(std::move(decor));
+            continue;
+        }
+
+        // Bare entity declaration
+        std::string_view name = entityName(line);
+        if (!name.empty() && name.find(' ') == std::string_view::npos) {
+            graph.ensure(name, name);
+            continue;
+        }
+        result.error = "Unsupported ER statement";
+        return result;
+    }
+
+    if (graph.diagram.nodes.empty()) {
+        result.error = "No entities";
+        return result;
+    }
+
+    // --- measure ---
+    TextStyle titleStyle;
+    titleStyle.bold = true;
+    TextStyle attrStyle;
+    attrStyle.scale = 0.9f;
+    TextStyle keyStyle;
+    keyStyle.scale = 0.9f;
+    keyStyle.italic = true;
+    float padX = 10.0f;
+
+    struct MeasuredEntity {
+        Size title;
+        float rowHeight = 0.0f;
+        float typeWidth = 0.0f;
+        float nameWidth = 0.0f;
+        float keysWidth = 0.0f;
+    };
+    std::vector<MeasuredEntity> measured(graph.diagram.nodes.size());
+    std::vector<mermaid::Size> sizes(graph.diagram.nodes.size());
+    for (size_t i = 0; i < graph.diagram.nodes.size(); i++) {
+        MeasuredEntity& entity = measured[i];
+        entity.title = measure(graph.diagram.nodes[i].label, titleStyle, 0.0f);
+        float width = entity.title.w;
+        float height = entity.title.h + 12.0f * scale;
+        auto found = attributes.find(i);
+        if (found != attributes.end()) {
+            for (const auto& attribute : found->second) {
+                Size typeSize = measure(attribute.type, attrStyle, 0.0f);
+                Size nameSize = measure(attribute.name, attrStyle, 0.0f);
+                Size keysSize = measure(attribute.keys, keyStyle, 0.0f);
+                entity.typeWidth = std::max(entity.typeWidth, typeSize.w);
+                entity.nameWidth = std::max(entity.nameWidth, nameSize.w);
+                entity.keysWidth = std::max(entity.keysWidth, keysSize.w);
+                entity.rowHeight = std::max(
+                    entity.rowHeight,
+                    std::max(typeSize.h, std::max(nameSize.h, keysSize.h)) +
+                        6.0f * scale);
+            }
+            float rowsWidth = entity.typeWidth + entity.nameWidth +
+                              entity.keysWidth;
+            if (entity.typeWidth > 0.0f) rowsWidth += padX * scale;
+            if (entity.keysWidth > 0.0f) rowsWidth += padX * scale;
+            width = std::max(width, rowsWidth);
+            height += found->second.size() * entity.rowHeight;
+        }
+        sizes[i] = {std::max(90.0f * scale, width + padX * 2.0f * scale),
+                    height};
+    }
+
+    mermaid::Layout layout = mermaid::layout(
+        acyclicForRanking(graph.diagram), sizes, (kNodeGap + 14.0f) * scale,
+        (kRankGap + 8.0f) * scale);
+    if (layout.nodes.size() != graph.diagram.nodes.size()) {
+        result.error = "Layout failed";
+        return result;
+    }
+
+    float maxRight = layout.width;
+    float maxBottom = layout.height;
+    auto routed =
+        routeEdges(graph.diagram, layout, scale, maxRight, maxBottom);
+    emitEdges(result.prims, graph.diagram, routed, decors, measure, scale);
+
+    for (size_t i = 0; i < graph.diagram.nodes.size(); i++) {
+        const auto& rect = layout.nodes[i];
+        const MeasuredEntity& entity = measured[i];
+
+        Prim box;
+        box.type = PrimType::Rect;
+        box.x1 = rect.left;
+        box.y1 = rect.top;
+        box.x2 = rect.right;
+        box.y2 = rect.bottom;
+        box.fill = Role::Fill;
+        box.stroke = Role::Stroke;
+        box.strokeWidth = 1.5f * scale;
+        result.prims.push_back(box);
+
+        float titleHeight = entity.title.h + 12.0f * scale;
+        Prim titleBand;
+        titleBand.type = PrimType::Rect;
+        titleBand.x1 = rect.left;
+        titleBand.y1 = rect.top;
+        titleBand.x2 = rect.right;
+        titleBand.y2 = rect.top + titleHeight;
+        titleBand.fill = Role::AccentSoft;
+        titleBand.stroke = Role::Stroke;
+        titleBand.strokeWidth = 1.0f * scale;
+        result.prims.push_back(titleBand);
+        Prim title;
+        title.type = PrimType::Text;
+        title.text = graph.diagram.nodes[i].label;
+        title.style = titleStyle;
+        title.fill = Role::Text;
+        title.x1 = rect.left;
+        title.y1 = rect.top;
+        title.x2 = rect.right;
+        title.y2 = rect.top + titleHeight;
+        result.prims.push_back(std::move(title));
+
+        auto found = attributes.find(i);
+        if (found == attributes.end()) continue;
+        float y = rect.top + titleHeight;
+        float typeX = rect.left + padX * scale;
+        float nameX = typeX + entity.typeWidth +
+                      (entity.typeWidth > 0.0f ? padX * scale : 0.0f);
+        for (size_t row = 0; row < found->second.size(); row++) {
+            const auto& attribute = found->second[row];
+            if (row > 0) {
+                Prim separator;
+                separator.type = PrimType::Line;
+                separator.x1 = rect.left;
+                separator.y1 = y;
+                separator.x2 = rect.right;
+                separator.y2 = y;
+                separator.stroke = Role::Muted;
+                separator.strokeWidth = 0.6f * scale;
+                result.prims.push_back(separator);
+            }
+            auto cell = [&](const std::string& value, float x, float width,
+                            const TextStyle& style, Role role) {
+                if (value.empty() || width <= 0.0f) return;
+                Prim text;
+                text.type = PrimType::Text;
+                text.text = value;
+                text.style = style;
+                text.fill = role;
+                text.alignH = -1;
+                text.x1 = x;
+                text.y1 = y;
+                text.x2 = x + width;
+                text.y2 = y + entity.rowHeight;
+                result.prims.push_back(std::move(text));
+            };
+            cell(attribute.type, typeX, entity.typeWidth, attrStyle,
+                 Role::Muted);
+            cell(attribute.name, nameX, entity.nameWidth, attrStyle,
+                 Role::Text);
+            cell(attribute.keys,
+                 rect.right - padX * scale - entity.keysWidth,
+                 entity.keysWidth, keyStyle, Role::Muted);
+            y += entity.rowHeight;
+        }
+    }
+
+    result.width = maxRight + 8.0f * scale;
+    result.height = maxBottom + 8.0f * scale;
+    normalizeLeft(result);
+    result.ok = true;
+    return result;
+}
+
 }  // namespace detail
 }  // namespace mermaidext
