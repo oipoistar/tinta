@@ -79,12 +79,32 @@ static IDWriteTextLayout* createEditorLineLayout(const App& app, size_t lineStar
 static IDWriteTextLayout* cachedEditorLineLayout(App& app, size_t lineStart, size_t lineLen) {
     auto it = app.editorLineLayoutCache.find(lineStart);
     if (it != app.editorLineLayoutCache.end()) {
-        if (it->second.len == lineLen) return it->second.layout;
+        if (it->second.len == lineLen) {
+            it->second.lastUsed = ++app.editorLayoutUseClock;
+            return it->second.layout;
+        }
         if (it->second.layout) it->second.layout->Release();
         app.editorLineLayoutCache.erase(it);
     }
     IDWriteTextLayout* layout = createEditorLineLayout(app, lineStart, lineLen);
-    app.editorLineLayoutCache[lineStart] = {layout, lineLen};
+    app.editorLineLayoutCache[lineStart] = {
+        layout, lineLen, ++app.editorLayoutUseClock};
+
+    if (app.editorLineLayoutCache.size() > App::EDITOR_LAYOUT_CACHE_MAX) {
+        auto victim = app.editorLineLayoutCache.end();
+        for (auto candidate = app.editorLineLayoutCache.begin();
+             candidate != app.editorLineLayoutCache.end(); ++candidate) {
+            if (candidate->first == lineStart) continue;
+            if (victim == app.editorLineLayoutCache.end() ||
+                candidate->second.lastUsed < victim->second.lastUsed) {
+                victim = candidate;
+            }
+        }
+        if (victim != app.editorLineLayoutCache.end()) {
+            if (victim->second.layout) victim->second.layout->Release();
+            app.editorLineLayoutCache.erase(victim);
+        }
+    }
     return layout;
 }
 
@@ -1613,6 +1633,8 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
     float editorWidth = editorPaneWidth(app);
 
     if (app.draggingSeparator) {
+        static HCURSOR cursorSizeWE = LoadCursor(nullptr, IDC_SIZEWE);
+        SetCursor(cursorSizeWE);
         float dx = (float)x - app.separatorDragStartX;
         float newRatio = app.separatorDragStartRatio + dx / app.width;
         app.editorSplitRatio = std::max(0.2f, std::min(0.8f, newRatio));
@@ -1623,6 +1645,8 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
     }
 
     if (app.editorSelecting) {
+        static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
+        SetCursor(cursorIBeam);
         size_t pos = editorPosFromClick(app, x, y);
         app.editorSelEnd = pos;
         app.editorCursorPos = pos;
@@ -1639,10 +1663,12 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
 
     if (app.editorShowPreview && std::abs((float)x - sepX) < dpi(app, 6.0f)) {
         SetCursor(cursorSizeWE);
+        return;
     } else if (x < editorWidth) {
         SetCursor(cursorIBeam);
+        return;
     }
-    // Preview pane cursor is handled by the normal handleMouseMove
+    // Preview pane cursor is handled by the normal handleMouseMove.
 }
 
 void handleEditorMouseWheel(App& app, HWND hwnd, float delta) {
@@ -2057,14 +2083,19 @@ void renderEditModeNotification(App& app) {
     float pillX = (float)(app.width - pillWidth) / 2.0f;
     float pillY = (float)app.height - dpi(app, 60.0f);
 
-    // Green pill background
-    app.brush->SetColor(D2D1::ColorF(0.2f, 0.6f, 0.3f, 0.9f * alpha));
+    // Use the active theme for transient editor feedback as well as the
+    // translated message, so a light theme does not carry a fixed green UI.
+    D2D1_COLOR_F pillColor = app.theme.accent;
+    pillColor.a = 0.92f * alpha;
+    app.brush->SetColor(pillColor);
     app.renderTarget->FillRoundedRectangle(
         D2D1::RoundedRect(D2D1::RectF(pillX, pillY, pillX + pillWidth, pillY + pillHeight), dpi(app, 15.0f), dpi(app, 15.0f)),
         app.brush);
 
     // Text
-    app.brush->SetColor(D2D1::ColorF(1, 1, 1, alpha));
+    D2D1_COLOR_F textColor = app.theme.background;
+    textColor.a = alpha;
+    app.brush->SetColor(textColor);
     IDWriteTextFormat* fmt = app.searchTextFormat ? app.searchTextFormat : app.textFormat;
     if (fmt) {
         fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);

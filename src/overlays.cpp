@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <algorithm>
+#include <utility>
 
 void renderSearchOverlay(App& app) {
     // Animate in (only invalidate if animation is still progressing)
@@ -694,8 +695,8 @@ void renderThemeChooser(App& app) {
     }
     float anim = app.themeChooserAnimation;
 
-    // Semi-transparent backdrop with blur effect simulation
-    float backdropAlpha = 0.85f * anim;
+    // Keep the underlying document visible while the chooser is open.
+    float backdropAlpha = (app.theme.isDark ? 0.34f : 0.24f) * anim;
     app.brush->SetColor(D2D1::ColorF(0, 0, 0, backdropAlpha));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
@@ -706,22 +707,29 @@ void renderThemeChooser(App& app) {
     float panelX = (app.width - panelWidth) / 2;
     float panelY = (app.height - panelHeight) / 2 + (1 - anim) * dpi(app, 50.0f);
 
-    // Panel background with subtle gradient simulation
+    // The chooser is chrome, so it follows the active theme while each card
+    // still previews its own document palette.
     D2D1_ROUNDED_RECT panelRect = D2D1::RoundedRect(
         D2D1::RectF(panelX, panelY, panelX + panelWidth, panelY + panelHeight),
         dpi(app, 16.0f), dpi(app, 16.0f));
-    app.brush->SetColor(hexColor(0x1A1A1E, 0.98f * anim));
+    D2D1_COLOR_F panelColor = app.theme.background;
+    panelColor.a = 0.98f * anim;
+    app.brush->SetColor(panelColor);
     app.renderTarget->FillRoundedRectangle(panelRect, app.brush);
 
     // Subtle border
-    app.brush->SetColor(hexColor(0x3A3A40, 0.6f * anim));
+    D2D1_COLOR_F panelBorder = app.theme.text;
+    panelBorder.a = 0.35f * anim;
+    app.brush->SetColor(panelBorder);
     app.renderTarget->DrawRoundedRectangle(panelRect, app.brush, 1.0f);
 
     // Title
     IDWriteTextFormat* titleFormat = app.themeTitleFormat;
     if (titleFormat) {
         titleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
+        D2D1_COLOR_F titleColor = app.theme.heading;
+        titleColor.a = anim;
+        app.brush->SetColor(titleColor);
         const wchar_t* chooseTheme = tr(app, "theme.chooser.title");
         app.renderTarget->DrawText(chooseTheme, (UINT32)wcslen(chooseTheme), titleFormat,
             D2D1::RectF(panelX, panelY + dpi(app, 15.0f), panelX + panelWidth, panelY + dpi(app, 55.0f)), app.brush);
@@ -750,9 +758,13 @@ void renderThemeChooser(App& app) {
             D2D1::Ellipse(D2D1::Point2F(knobX, togY + togH / 2), knobR, knobR),
             app.brush);
 
-        app.brush->SetColor(D2D1::ColorF(1, 1, 1, 0.75f * anim));
-        app.renderTarget->DrawText(L"Follow Windows", 14, app.folderBrowserFormat,
-            D2D1::RectF(togX - dpi(app, 130.0f), togY + dpi(app, 1.0f),
+        D2D1_COLOR_F toggleText = app.theme.text;
+        toggleText.a = 0.75f * anim;
+        app.brush->SetColor(toggleText);
+        const wchar_t* followWindows = tr(app, "settings.follow_windows");
+        float followWidth = measureText(app, followWindows, app.folderBrowserFormat);
+        app.renderTarget->DrawText(followWindows, (UINT32)wcslen(followWindows), app.folderBrowserFormat,
+            D2D1::RectF(togX - followWidth - dpi(app, 10.0f), togY + dpi(app, 1.0f),
                         togX - dpi(app, 8.0f), togY + togH), app.brush);
     }
 
@@ -889,7 +901,9 @@ void renderThemeChooser(App& app) {
     IDWriteTextFormat* headerFormat = app.themeHeaderFormat;
     if (headerFormat) {
         headerFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        app.brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, anim));
+        D2D1_COLOR_F headerColor = app.theme.text;
+        headerColor.a = 0.6f * anim;
+        app.brush->SetColor(headerColor);
 
         // Light themes header
         const wchar_t* lightHdr = tr(app, "theme.chooser.light");
@@ -913,8 +927,10 @@ void renderHelpOverlay(App& app) {
     }
     float anim = app.helpAnimation;
 
-    // Semi-transparent backdrop
-    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.85f * anim));
+    // Keep the document readable behind the shortcut sheet. The panel and
+    // all of its ink use the active theme below; the mask only separates it.
+    float backdropAlpha = app.theme.isDark ? 0.34f : 0.24f;
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, backdropAlpha * anim));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
@@ -924,15 +940,19 @@ void renderHelpOverlay(App& app) {
     float panelX = (app.width - panelWidth) / 2;
     float panelY = (app.height - panelHeight) / 2 + (1 - anim) * dpi(app, 50.0f);
 
-    // Panel background
+    // Panel background follows the active document theme.
     D2D1_ROUNDED_RECT panelRect = D2D1::RoundedRect(
         D2D1::RectF(panelX, panelY, panelX + panelWidth, panelY + panelHeight),
         dpi(app, 16.0f), dpi(app, 16.0f));
-    app.brush->SetColor(hexColor(0x1A1A1E, 0.98f * anim));
+    D2D1_COLOR_F panelColor = app.theme.background;
+    panelColor.a = 0.98f * anim;
+    app.brush->SetColor(panelColor);
     app.renderTarget->FillRoundedRectangle(panelRect, app.brush);
 
     // Border
-    app.brush->SetColor(hexColor(0x3A3A40, 0.6f * anim));
+    D2D1_COLOR_F panelBorder = app.theme.text;
+    panelBorder.a = 0.35f * anim;
+    app.brush->SetColor(panelBorder);
     app.renderTarget->DrawRoundedRectangle(panelRect, app.brush, 1.0f);
 
     // Title (fixed, not scrolled)
@@ -940,7 +960,9 @@ void renderHelpOverlay(App& app) {
     IDWriteTextFormat* titleFormat = app.themeTitleFormat;
     if (titleFormat) {
         titleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
+        D2D1_COLOR_F titleColor = app.theme.heading;
+        titleColor.a = anim;
+        app.brush->SetColor(titleColor);
         const wchar_t* helpTitle = tr(app, "help.title");
         app.renderTarget->DrawText(helpTitle, (UINT32)wcslen(helpTitle), titleFormat,
             D2D1::RectF(panelX, panelY + dpi(app, 15.0f), panelX + panelWidth, titleBottomY), app.brush);
@@ -1057,13 +1079,17 @@ void renderHelpOverlay(App& app) {
         for (int i = 0; i < count; i++) {
             // Key
             boldFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            app.brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.9f * anim));
+            D2D1_COLOR_F keyColor = app.theme.text;
+            keyColor.a = 0.9f * anim;
+            app.brush->SetColor(keyColor);
             app.renderTarget->DrawText(entries[i].key, (UINT32)wcslen(entries[i].key), boldFmt,
                 D2D1::RectF(leftX + dpi(app, 8.0f), y, leftX + keyColWidth, y + lineH), app.brush);
 
             // Description
             normalFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            app.brush->SetColor(D2D1::ColorF(0.7f, 0.7f, 0.7f, 0.9f * anim));
+            D2D1_COLOR_F descriptionColor = app.theme.text;
+            descriptionColor.a = 0.7f * anim;
+            app.brush->SetColor(descriptionColor);
             app.renderTarget->DrawText(entries[i].desc, (UINT32)wcslen(entries[i].desc), normalFmt,
                 D2D1::RectF(descX, y, rightEdge, y + lineH), app.brush);
 
@@ -1079,7 +1105,9 @@ void renderHelpOverlay(App& app) {
 
     // Footer hint
     normalFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    app.brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, anim));
+    D2D1_COLOR_F footerColor = app.theme.text;
+    footerColor.a = 0.55f * anim;
+    app.brush->SetColor(footerColor);
     const wchar_t* helpFooter = tr(app, "help.footer");
     app.renderTarget->DrawText(helpFooter, (UINT32)wcslen(helpFooter), normalFmt,
         D2D1::RectF(panelX, y, panelX + panelWidth, y + lineH), app.brush);
@@ -1159,7 +1187,7 @@ float ctxItemTop(const App& app, int index) {
 
 bool contextMenuItemEnabled(const App& app, int item) {
     switch (item) {
-        case CTX_COPY:   return app.hasSelection && !app.selectedText.empty();
+        case CTX_COPY:   return app.hasSelection && app.selAnchor != app.selFocus;
         case CTX_REVEAL: return !app.currentFile.empty();
         default:         return item >= 0 && item < CTX_ITEM_COUNT;
     }
@@ -1535,8 +1563,8 @@ void renderPrintPreview(App& app) {
         uiFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         uiFmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         wchar_t label[64];
-        swprintf_s(label, L"Print preview \x2014 page %d of %d",
-                   app.printPreviewPage + 1, pageCount > 0 ? pageCount : 1);
+         swprintf_s(label, tr(app, "print.title"),
+                    app.printPreviewPage + 1, pageCount > 0 ? pageCount : 1);
         app.brush->SetColor(th.text);
         app.renderTarget->DrawText(label, (UINT32)wcslen(label), uiFmt,
             D2D1::RectF(0, 0, w, topBarH), app.brush);
@@ -1582,8 +1610,8 @@ void renderPrintPreview(App& app) {
                                     landR.left - chipGap, chipY + chipH);
     app.printPreviewOrientBtn[0] = portR;
     app.printPreviewOrientBtn[1] = landR;
-    drawChip(portR, L"Portrait", !app.printPreviewLandscape);
-    drawChip(landR, L"Landscape", app.printPreviewLandscape);
+    drawChip(portR, tr(app, "print.portrait"), !app.printPreviewLandscape);
+    drawChip(landR, tr(app, "print.landscape"), app.printPreviewLandscape);
 
     // Buttons, bottom right
     float btnH = 34.0f * ui;
@@ -1608,9 +1636,11 @@ void renderPrintPreview(App& app) {
         btnFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         btnFmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         app.brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-        app.renderTarget->DrawText(L"Print\x2026", 6, btnFmt, printR, app.brush);
+        const wchar_t* printLabel = tr(app, "print.print");
+        app.renderTarget->DrawText(printLabel, (UINT32)wcslen(printLabel), btnFmt, printR, app.brush);
         app.brush->SetColor(th.text);
-        app.renderTarget->DrawText(L"Cancel", 6, btnFmt, cancelR, app.brush);
+        const wchar_t* cancelLabel = tr(app, "print.cancel");
+        app.renderTarget->DrawText(cancelLabel, (UINT32)wcslen(cancelLabel), btnFmt, cancelR, app.brush);
     }
 
     // Hint, bottom left
@@ -1619,7 +1649,7 @@ void renderPrintPreview(App& app) {
         D2D1_COLOR_F hintC = th.text;
         hintC.a = 0.5f;
         app.brush->SetColor(hintC);
-        const wchar_t* hint = L"Scroll or PgUp/PgDn to flip pages \x2022 Enter to print \x2022 Esc to close";
+         const wchar_t* hint = tr(app, "print.hint");
         app.renderTarget->DrawText(hint, (UINT32)wcslen(hint), uiFmt,
             D2D1::RectF(margin, h - bottomBarH, cancelR.left - gap, h), app.brush);
     }
@@ -1701,8 +1731,9 @@ void renderSettingsOverlay(App& app) {
     IDWriteTextFormat* fmt = app.folderBrowserFormat;
     if (!fmt) return;
 
-    // Dimmed backdrop over the document
-    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.55f * anim));
+    // Keep the underlying document visible while settings are open.
+    float backdropAlpha = (app.theme.isDark ? 0.34f : 0.24f) * anim;
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, backdropAlpha));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
@@ -2001,7 +2032,7 @@ void renderSettingsOverlay(App& app) {
     // Language dropdown popup, drawn last so it sits above the rows.
     // Hit-testing iterates settingsHits in reverse, so these win overlaps.
     if (app.settingsLangOpen && app.settingsSection == 0) {
-        float itemH = dpi(app, 26.0f);
+        float itemH = dpi(app, 30.0f);
         // Auto plus only the languages that actually carry translations;
         // untranslated roster entries stay out of the list until
         // languages.ini fills them in.
@@ -2012,9 +2043,33 @@ void renderSettingsOverlay(App& app) {
         }
         int count = (int)rows.size();
         D2D1_RECT_F box = app.settingsLangBox;
-        D2D1_RECT_F pop = D2D1::RectF(box.left, box.bottom + dpi(app, 4.0f),
-                                      box.right,
-                                      box.bottom + dpi(app, 4.0f) + itemH * count);
+        std::vector<std::wstring> labels;
+        labels.reserve(rows.size());
+        float popupW = box.right - box.left;
+        for (int lang : rows) {
+            std::wstring label = lang < 0 ? std::wstring(tr(app, "settings.lang.auto"))
+                                          : std::wstring(languageNameAt(lang));
+            popupW = std::max(popupW, measureText(app, label, fmt) + dpi(app, 34.0f));
+            labels.push_back(std::move(label));
+        }
+        popupW = std::min(popupW, (float)app.width - dpi(app, 32.0f));
+        float popupRight = std::min(box.right, (float)app.width - dpi(app, 16.0f));
+        float popupLeft = popupRight - popupW;
+        if (popupLeft < dpi(app, 16.0f)) {
+            popupLeft = dpi(app, 16.0f);
+            popupRight = popupLeft + popupW;
+        }
+
+        float belowTop = box.bottom + dpi(app, 4.0f);
+        float popupTop = belowTop;
+        float popupBottom = popupTop + itemH * count;
+        float settingsBottom = py + panelH - dpi(app, 42.0f);
+        if (popupBottom > settingsBottom &&
+            box.top - dpi(app, 4.0f) - itemH * count >= py + dpi(app, 62.0f)) {
+            popupTop = box.top - dpi(app, 4.0f) - itemH * count;
+        }
+        D2D1_RECT_F pop = D2D1::RectF(popupLeft, popupTop, popupRight,
+                                      popupTop + itemH * count);
         D2D1_COLOR_F pc = app.theme.background; pc.a = anim;
         app.brush->SetColor(pc);
         app.renderTarget->FillRoundedRectangle(
@@ -2029,18 +2084,29 @@ void renderSettingsOverlay(App& app) {
             D2D1_RECT_F row = D2D1::RectF(pop.left, ry, pop.right, ry + itemH);
             bool active = lang < 0 ? app.languageSetting < 0
                                    : app.languageSetting == lang;
-            if (active) {
+            bool hovered = app.mouseX >= row.left && app.mouseX <= row.right &&
+                           app.mouseY >= row.top && app.mouseY <= row.bottom;
+            if (active || hovered) {
                 D2D1_COLOR_F hl = app.theme.accent; hl.a = 0.18f * anim;
+                if (!active) hl.a = 0.10f * anim;
                 app.brush->SetColor(hl);
-                app.renderTarget->FillRectangle(row, app.brush);
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(row.left + dpi(app, 2.0f), row.top,
+                                                  row.right - dpi(app, 2.0f), row.bottom),
+                                      dpi(app, 4.0f), dpi(app, 4.0f)), app.brush);
             }
-            const wchar_t* rowLabel2 = lang < 0 ? tr(app, "settings.lang.auto")
-                                                : languageNameAt(lang);
             pc = app.theme.text; pc.a = 0.95f * anim;
             app.brush->SetColor(pc);
-            app.renderTarget->DrawText(rowLabel2, (UINT32)wcslen(rowLabel2), fmt,
+            app.renderTarget->DrawText(labels[r].c_str(), (UINT32)labels[r].size(), fmt,
                 D2D1::RectF(row.left + dpi(app, 10.0f), row.top + dpi(app, 4.0f),
-                            row.right - dpi(app, 6.0f), row.bottom), app.brush);
+                            row.right - dpi(app, 30.0f), row.bottom), app.brush);
+            if (active) {
+                D2D1_COLOR_F checkColor = app.theme.accent; checkColor.a = anim;
+                app.brush->SetColor(checkColor);
+                app.renderTarget->DrawText(L"\x2713", 1, fmt,
+                    D2D1::RectF(row.right - dpi(app, 23.0f), row.top + dpi(app, 4.0f),
+                                row.right - dpi(app, 8.0f), row.bottom), app.brush);
+            }
             // -1 (Auto) lands on SET_LANG_PICK_BASE; input.cpp decodes
             // pick - 1 as the registry index, so gaps are fine.
             app.settingsHits.push_back({row, SET_LANG_PICK_BASE + 1 + lang});
@@ -2073,7 +2139,8 @@ void renderConfirmExitDialog(App& app) {
     app.confirmExitHits.clear();
     const D2DTheme& base = app.theme;
 
-    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.55f));
+    float backdropAlpha = base.isDark ? 0.34f : 0.24f;
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, backdropAlpha));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
@@ -2182,7 +2249,8 @@ void renderShortcutEditor(App& app) {
     app.shortcutHits.clear();
     const D2DTheme& base = app.theme;
 
-    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.6f));
+    float backdropAlpha = base.isDark ? 0.34f : 0.24f;
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, backdropAlpha));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
@@ -2279,7 +2347,7 @@ void renderShortcutEditor(App& app) {
     {
         D2D1_COLOR_F c = base.text; c.a = 0.4f;
         app.brush->SetColor(c);
-        const wchar_t* esc = tr(app, "lang.chooser.footer");
+        const wchar_t* esc = tr(app, "shortcuts.editor.footer");
         app.renderTarget->DrawText(esc, (UINT32)wcslen(esc), fmt,
             D2D1::RectF(px + dpi(app, 140.0f), fy + dpi(app, 2.0f),
                         px + panelW - dpi(app, 24.0f), fy + dpi(app, 26.0f)), app.brush);
@@ -2293,7 +2361,8 @@ void renderThemeEditor(App& app) {
     const D2DTheme& base = app.theme;      // dialog chrome uses the ACTIVE theme
     const D2DTheme& work = app.themeEditorTheme;  // specimen uses the WORKING one
 
-    app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.6f));
+    float backdropAlpha = base.isDark ? 0.34f : 0.24f;
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, backdropAlpha));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
@@ -2312,7 +2381,8 @@ void renderThemeEditor(App& app) {
         app.themeTitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         D2D1_COLOR_F tc = base.heading; tc.a = 1.0f;
         app.brush->SetColor(tc);
-        app.renderTarget->DrawText(L"New theme", 9, app.themeTitleFormat,
+        const wchar_t* title = tr(app, "theme.editor.title");
+        app.renderTarget->DrawText(title, (UINT32)wcslen(title), app.themeTitleFormat,
             D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 16.0f),
                         px + panelW, py + dpi(app, 52.0f)), app.brush);
     }
@@ -2346,13 +2416,13 @@ void renderThemeEditor(App& app) {
     };
 
     // Name
-    label(x0, y, L"Name", 0.55f);
+    label(x0, y, tr(app, "theme.editor.name"), 0.55f);
     inputBox(x0, y + dpi(app, 20.0f), dpi(app, 276.0f), app.themeEditorName,
              app.themeEditorField == 6, TE_FIELD_NAME);
     y += dpi(app, 56.0f);
 
     // Base theme cycler + dark toggle on one row
-    label(x0, y, L"Based on", 0.55f);
+    label(x0, y, tr(app, "theme.editor.based_on"), 0.55f);
     {
         float by = y + dpi(app, 20.0f);
         D2D1_RECT_F prev = D2D1::RectF(x0, by, x0 + dpi(app, 26.0f), by + dpi(app, 26.0f));
@@ -2378,7 +2448,7 @@ void renderThemeEditor(App& app) {
     y += dpi(app, 56.0f);
 
     // Dark flag
-    label(x0, y + dpi(app, 3.0f), L"Dark theme", 0.95f);
+    label(x0, y + dpi(app, 3.0f), tr(app, "theme.editor.dark"), 0.95f);
     {
         float tx = x0 + dpi(app, 242.0f), ty = y;
         float tw = dpi(app, 34.0f), th = dpi(app, 18.0f);
@@ -2401,13 +2471,15 @@ void renderThemeEditor(App& app) {
     y += dpi(app, 34.0f);
 
     // Six color fields
-    static const wchar_t* kColorLabels[6] = {
-        L"Background", L"Text", L"Heading", L"Link", L"Accent", L"Code background"};
+    static const char* kColorLabelKeys[6] = {
+        "theme.editor.color.background", "theme.editor.color.text",
+        "theme.editor.color.heading", "theme.editor.color.link",
+        "theme.editor.color.accent", "theme.editor.color.code_background"};
     const D2D1_COLOR_F* slots[6] = {&work.background, &work.text, &work.heading,
                                     &work.link, &work.accent, &work.codeBackground};
     for (int i = 0; i < 6; i++) {
         float ry = y + i * dpi(app, 36.0f);
-        label(x0, ry + dpi(app, 5.0f), kColorLabels[i], 0.95f);
+        label(x0, ry + dpi(app, 5.0f), tr(app, kColorLabelKeys[i]), 0.95f);
         inputBox(x0 + dpi(app, 138.0f), ry, dpi(app, 96.0f), app.themeEditorHex[i],
                  app.themeEditorField == i, TE_FIELD_BG + i);
         D2D1_RECT_F sw = D2D1::RectF(x0 + dpi(app, 244.0f), ry,
@@ -2545,16 +2617,24 @@ void renderThemeEditor(App& app) {
     {
         float bh = dpi(app, 30.0f);
         float by = py + panelH - dpi(app, 46.0f);
-        D2D1_RECT_F save = D2D1::RectF(px + panelW - dpi(app, 118.0f), by,
-                                       px + panelW - dpi(app, 24.0f), by + bh);
-        D2D1_RECT_F cancel = D2D1::RectF(save.left - dpi(app, 96.0f), by,
+        const wchar_t* saveLabel = tr(app, "theme.editor.save");
+        const wchar_t* cancelLabel = tr(app, "theme.editor.cancel");
+        float saveW = std::max(dpi(app, 94.0f),
+                               measureText(app, saveLabel, fmt) + dpi(app, 20.0f));
+        float cancelW = std::max(dpi(app, 84.0f),
+                                 measureText(app, cancelLabel, fmt) + dpi(app, 20.0f));
+        float saveRight = px + panelW - dpi(app, 24.0f);
+        D2D1_RECT_F save = D2D1::RectF(saveRight - saveW, by, saveRight, by + bh);
+        D2D1_RECT_F cancel = D2D1::RectF(save.left - dpi(app, 12.0f) - cancelW, by,
                                          save.left - dpi(app, 12.0f), by + bh);
         app.brush->SetColor(base.accent);
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(save, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush);
-        app.brush->SetColor(D2D1::ColorF(1, 1, 1, 1));
+        D2D1_COLOR_F saveText = base.background;
+        saveText.a = 1.0f;
+        app.brush->SetColor(saveText);
         fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        app.renderTarget->DrawText(L"Save theme", 10, fmt,
+        app.renderTarget->DrawText(saveLabel, (UINT32)wcslen(saveLabel), fmt,
             D2D1::RectF(save.left, save.top + dpi(app, 6.0f), save.right, save.bottom),
             app.brush);
         D2D1_COLOR_F c = base.text; c.a = 0.4f;
@@ -2563,7 +2643,7 @@ void renderThemeEditor(App& app) {
             D2D1::RoundedRect(cancel, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush, 1.0f);
         c.a = 0.9f;
         app.brush->SetColor(c);
-        app.renderTarget->DrawText(L"Cancel", 6, fmt,
+        app.renderTarget->DrawText(cancelLabel, (UINT32)wcslen(cancelLabel), fmt,
             D2D1::RectF(cancel.left, cancel.top + dpi(app, 6.0f), cancel.right, cancel.bottom),
             app.brush);
         fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
@@ -2572,9 +2652,9 @@ void renderThemeEditor(App& app) {
 
         // themes.ini link, bottom-left: hand-tune what the editor exposes
         // and everything it does not (syntax palette, blockquote, code font)
-        const wchar_t* ini = L"Open themes.ini for full control";
+        const wchar_t* ini = tr(app, "theme.editor.open_ini");
         D2D1_RECT_F iniR = D2D1::RectF(px + dpi(app, 24.0f), by + dpi(app, 6.0f),
-                                       px + dpi(app, 240.0f), by + bh);
+                                       cancel.left - dpi(app, 18.0f), by + bh);
         c = base.link; c.a = 0.85f;
         app.brush->SetColor(c);
         app.renderTarget->DrawText(ini, (UINT32)wcslen(ini), fmt, iniR, app.brush);

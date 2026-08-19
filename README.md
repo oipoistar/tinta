@@ -74,6 +74,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Edit mode** - Press `:` to edit markdown with live preview, search works in editor too
 - **Search** - Find text with F or Ctrl+F, cycle through matches with Enter
 - **Persistent settings** - Remembers your theme, zoom level, and window position
+- **Localized interface** - English, Simplified Chinese, Japanese, Korean, German, French, and Italian UI; follows Windows or a chosen language
 - **Text selection & copy** - Select text and copy to clipboard
 - **Zoom support** - Ctrl+scroll to zoom in/out
 - **Drag & drop** - Drop any Markdown or Mermaid file to view it
@@ -142,6 +143,12 @@ Other settings of note: `browserFocusPath=1` makes `B` open the file browser
 with the path box focused and selected, so paste + Enter jumps anywhere
 (also in Settings → General). `tinta --new` starts an untitled quick note
 from the command line.
+
+The interface language is available in Settings → General. It follows the
+Windows display language by default, or can be changed explicitly. Transient
+notifications and native error dialogs use the same language. Additional
+translations can be added through `languages.ini`; the app remains a native,
+single-file Windows viewer with no web runtime.
 
 ## Building
 

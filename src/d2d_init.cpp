@@ -345,6 +345,21 @@ void updateOverlayFormats(App& app) {
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         12.0f * scale, L"en-us", &app.tocFormat);
+    auto configureTocFormat = [&](IDWriteTextFormat* format) {
+        if (!format) return;
+        // TOC entries occupy fixed-height rows. Wrapping would paint into the
+        // following entry, so trim long headings to one line.
+        format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        DWRITE_TRIMMING trimming = { DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0 };
+        IDWriteInlineObject* ellipsis = nullptr;
+        if (SUCCEEDED(app.dwriteFactory->CreateEllipsisTrimmingSign(format, &ellipsis)) &&
+            ellipsis) {
+            format->SetTrimming(&trimming, ellipsis);
+            ellipsis->Release();
+        }
+    };
+    configureTocFormat(app.tocFormatBold);
+    configureTocFormat(app.tocFormat);
 
     // Editor text format (monospace, same size as body)
     float editorScale = app.contentScale * app.zoomFactor;
@@ -423,8 +438,10 @@ bool createRenderTarget(App& app) {
     // alt-text placeholder forever instead of reloading. In-flight
     // downloads keep their entry — the arriving result creates its bitmap
     // on whatever target exists then.
+    app.imageCacheBytes = 0;
     for (auto it = app.imageCache.begin(); it != app.imageCache.end();) {
         if (it->second.bitmap) { it->second.bitmap->Release(); it->second.bitmap = nullptr; }
+        it->second.bytes = 0;
         if (it->second.pending) { ++it; }
         else { it = app.imageCache.erase(it); }
     }

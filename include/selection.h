@@ -24,9 +24,9 @@ void selectionWordRange(const App& app, size_t offset, size_t& start, size_t& en
 // Visual line (layout line bucket) containing an offset (triple-click).
 bool selectionLineRange(const App& app, size_t offset, size_t& start, size_t& end);
 
-// Continuous per-line highlight bars for [start, end), document coordinates.
-// Interior lines fill to their text extents; the two boundary lines get
-// precise caret-x edges from the run layouts.
+// Exact text-run highlight rectangles for [start, end), document coordinates.
+// Each rectangle covers only the selected glyph range; table-cell padding and
+// gaps between cells are not included.
 void selectionHighlightRects(const App& app, size_t start, size_t end,
                              std::vector<D2D1_RECT_F>& out);
 

@@ -30,11 +30,15 @@ int main() {
     int de = languageIndexById("de");
     int fr = languageIndexById("fr");
     int it = languageIndexById("it");
+    int ja = languageIndexById("ja");
+    int ko = languageIndexById("ko");
     check(en == 0, "en is the first registry entry");
     check(zh == 1, "zh is the second registry entry");
     check(de >= 0, "de is registered");
     check(fr >= 0, "fr is registered");
     check(it >= 0, "it is registered");
+    check(ja >= 0, "ja is registered");
+    check(ko >= 0, "ko is registered");
 
     // The Settings dropdown lists exactly the languages that carry
     // translations; the shipped set must always qualify.
@@ -43,6 +47,8 @@ int main() {
     check(languageHasTranslations(de), "de ships built-in translations");
     check(languageHasTranslations(fr), "fr ships built-in translations");
     check(languageHasTranslations(it), "it ships built-in translations");
+    check(languageHasTranslations(ja), "ja ships built-in translations");
+    check(languageHasTranslations(ko), "ko ships built-in translations");
 
     // Alias normalization onto compiled languages
     check(languageIndexById("zh-CN") == zh, "zh-CN aliases to zh");
@@ -56,6 +62,30 @@ int main() {
           "French settings title");
     check(std::wstring(tr(it, "ctx.settings")) == L"Impostazioni",
           "Italian settings menu item");
+    check(std::wstring(tr(ja, "settings.language")) == L"\u8A00\u8A9E",
+          "Japanese language setting label");
+    check(std::wstring(tr(ko, "settings.language")) == L"\uC5B8\uC5B4",
+          "Korean language setting label");
+    check(std::wstring(tr(ja, "toast.copied")) == L"\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F\uFF01",
+          "Japanese copy toast");
+    check(std::wstring(tr(ko, "toast.copied")) == L"\uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4!",
+          "Korean copy toast");
+    check(std::wstring(tr(zh, "theme.editor.title")) == L"\u65B0\u5EFA\u4E3B\u9898",
+          "Chinese theme editor title");
+    check(std::wstring(tr(ja, "theme.editor.save")) == L"\u30C6\u30FC\u30DE\u3092\u4FDD\u5B58",
+          "Japanese theme editor save action");
+    check(std::wstring(tr(ko, "theme.editor.color.background")) == L"\uBC30\uACBD",
+          "Korean theme editor color label");
+    check(std::wstring(tr(de, "theme.editor.cancel")) == L"Abbrechen",
+          "German theme editor cancel action");
+    check(std::wstring(tr(ja, "codeblock.copy")) == L"\u30B3\u30D4\u30FC",
+          "Japanese code block copy button");
+    check(std::wstring(tr(ko, "codeblock.copied")) == L"\uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4!",
+          "Korean code block copied toast");
+    check(std::wstring(tr(ja, "ctx.settings")) == L"\u8A2D\u5B9A",
+          "Japanese context menu settings");
+    check(std::wstring(tr(ko, "confirm.discard")) == L"\uBCC0\uACBD \uBC84\uB9AC\uAE30",
+          "Korean discard confirmation");
 
     // Keys left out of the built-in table fall back to English
     check(std::wstring(tr(de, "title.no_file")) == L"Tinta",
