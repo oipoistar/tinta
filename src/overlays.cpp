@@ -139,6 +139,33 @@ void renderSearchOverlay(App& app) {
     }
 }
 
+// Item index at a client point, sharing renderFolderBrowser's geometry.
+// Clicks must hit-test their own coordinates: the render-time hover index
+// lags one paint behind the mouse, so a fast move-and-click would act on
+// the previously highlighted row.
+int folderItemIndexAt(const App& app, float x, float y) {
+    float panelWidth = folderBrowserPanelWidth(app);
+    float panelX = -panelWidth * (1.0f - app.folderBrowserAnimation);
+    float padding = dpi(app, 12.0f);
+    float itemHeight = dpi(app, 28.0f);
+    float headerHeight = dpi(app, 40.0f);
+    float listStartY = padding + headerHeight + dpi(app, 8.0f);
+    float panelHeight = (float)app.height;
+    float namingOffset =
+        app.folderBrowserNaming != 0 ? itemHeight : 0.0f;
+
+    float itemX = panelX + padding;
+    float itemW = panelWidth - padding * 2.0f;
+    if (x < itemX || x > itemX + itemW) return -1;
+    if (y < listStartY || y > panelHeight - padding) return -1;
+    float offset =
+        y - (listStartY + namingOffset - app.folderBrowserScroll);
+    if (offset < 0.0f) return -1;
+    int index = (int)(offset / itemHeight);
+    if (index < 0 || index >= (int)app.folderItems.size()) return -1;
+    return index;
+}
+
 void renderFolderBrowser(App& app) {
     // Animate in (slide from left) - only invalidate while progressing
     if (app.folderBrowserAnimation < 1.0f) {
