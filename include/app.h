@@ -409,6 +409,14 @@ struct App {
     float tabDragOffsetX = 0.0f; // grab point within the tab
     int tabDragStartX = 0;
     int tabDragStartY = 0;
+    // Pulled clear of the strip: the tab floats as a ghost card until
+    // release decides (drop into another window / new window / snap back)
+    bool tabDragDetached = false;
+    HWND tabGhostWnd = nullptr;
+    // A native move/size loop is in progress; the starting rect tells a
+    // pure move (a possible strip drop) apart from a resize on exit
+    bool windowMoveTracking = false;
+    RECT windowMoveStartRect = {};
     // Only the primary window persists the tab session; satellites
     // (--cascade/--new/drag-outs) neither restore nor overwrite it
     bool sessionOwner = true;

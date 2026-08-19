@@ -13,6 +13,7 @@
 #include "utils.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <shellapi.h>
 
 namespace {
@@ -437,6 +438,9 @@ void renderTabStrip(App& app) {
             D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
         for (size_t i = 0; i < app.tabs.size(); i++) {
+            // Pulled clear of the strip: the slot stays as a gap while
+            // the tab rides along as the ghost card
+            if (app.tabDragDetached && (int)i == app.tabDragIndex) continue;
             bool active = (int)i == app.activeTab;
             bool hovered = (int)i == app.hoveredTab;
             float x = m.tabsLeft + (m.tabWidth + gap) * i;
@@ -829,10 +833,155 @@ bool tabStripMouseDown(App& app, HWND hwnd, int x, int y, bool middle) {
     return true;  // strip clicks never fall through to the document
 }
 
+// --- drag ghost: a layered popup card that follows the cursor while a
+// tab is pulled clear of the strip, so the detach reads as a motion
+// instead of a jump ---
+
+namespace {
+
+const wchar_t* kGhostClass = L"TintaTabGhost";
+
+COLORREF toColorref(const D2D1_COLOR_F& c) {
+    return RGB((BYTE)(c.r * 255.0f + 0.5f), (BYTE)(c.g * 255.0f + 0.5f),
+               (BYTE)(c.b * 255.0f + 0.5f));
+}
+
+void ghostDestroy(App& app) {
+    if (app.tabGhostWnd) {
+        DestroyWindow(app.tabGhostWnd);
+        app.tabGhostWnd = nullptr;
+    }
+}
+
+// Paints the tab card into a premultiplied ARGB surface and shows it via
+// UpdateLayeredWindow (GDI text writes alpha 0, so alpha is rebuilt from
+// rounded-rect membership afterwards)
+void ghostCreate(App& app, const std::wstring& title, int screenX,
+                 int screenY) {
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXW wc = {};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = DefWindowProcW;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = kGhostClass;
+        RegisterClassExW(&wc);
+        registered = true;
+    }
+
+    int width = (int)dpi(app, 190.0f);
+    int height = (int)dpi(app, 34.0f);
+    float radius = dpi(app, 8.0f);
+
+    app.tabGhostWnd = CreateWindowExW(
+        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW |
+            WS_EX_NOACTIVATE | WS_EX_TOPMOST,
+        kGhostClass, L"", WS_POPUP, screenX, screenY, width, height, nullptr,
+        nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!app.tabGhostWnd) return;
+
+    HDC screen = GetDC(nullptr);
+    HDC memory = CreateCompatibleDC(screen);
+    BITMAPINFO info = {};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;  // top-down
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    void* bits = nullptr;
+    HBITMAP dib = CreateDIBSection(memory, &info, DIB_RGB_COLORS, &bits,
+                                   nullptr, 0);
+    if (dib && bits) {
+        HGDIOBJ oldBitmap = SelectObject(memory, dib);
+        memset(bits, 0, (size_t)width * height * 4);
+
+        // Card: strip-colored fill, subtle border
+        HRGN region = CreateRoundRectRgn(0, 0, width + 1, height + 1,
+                                         (int)(radius * 2), (int)(radius * 2));
+        HBRUSH fill = CreateSolidBrush(toColorref(tabStripBackground(app)));
+        FillRgn(memory, region, fill);
+        D2D1_COLOR_F borderColor = app.theme.text;
+        HBRUSH border = CreateSolidBrush(toColorref(borderColor));
+        FrameRgn(memory, region, border, 1, 1);
+        DeleteObject(fill);
+        DeleteObject(border);
+        DeleteObject(region);
+
+        // Title
+        HFONT font = CreateFontW(-(int)dpi(app, 13.0f), 0, 0, 0, FW_NORMAL,
+                                 FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                 CLEARTYPE_QUALITY, DEFAULT_PITCH,
+                                 L"Segoe UI");
+        HGDIOBJ oldFont = SelectObject(memory, font);
+        SetBkMode(memory, TRANSPARENT);
+        SetTextColor(memory, toColorref(app.theme.text));
+        RECT textRect = {(int)dpi(app, 12.0f), 0,
+                         width - (int)dpi(app, 10.0f), height};
+        DrawTextW(memory, title.c_str(), (int)title.size(), &textRect,
+                  DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS |
+                      DT_NOPREFIX);
+        SelectObject(memory, oldFont);
+        DeleteObject(font);
+
+        // Rebuild alpha: opaque inside the rounded card, clear outside
+        uint32_t* pixels = static_cast<uint32_t*>(bits);
+        float rr = radius;
+        for (int py = 0; py < height; py++) {
+            for (int px = 0; px < width; px++) {
+                float dx = 0.0f, dy = 0.0f;
+                if (px < rr && py < rr) { dx = rr - px; dy = rr - py; }
+                else if (px >= width - rr && py < rr) { dx = px - (width - 1 - rr); dy = rr - py; }
+                else if (px < rr && py >= height - rr) { dx = rr - px; dy = py - (height - 1 - rr); }
+                else if (px >= width - rr && py >= height - rr) { dx = px - (width - 1 - rr); dy = py - (height - 1 - rr); }
+                bool inside = dx * dx + dy * dy <= rr * rr;
+                uint32_t& p = pixels[(size_t)py * width + px];
+                p = inside ? (p | 0xFF000000u) : 0u;
+            }
+        }
+
+        POINT source = {0, 0};
+        POINT position = {screenX, screenY};
+        SIZE size = {width, height};
+        BLENDFUNCTION blend = {AC_SRC_OVER, 0, 235, AC_SRC_ALPHA};
+        UpdateLayeredWindow(app.tabGhostWnd, screen, &position, &size,
+                            memory, &source, 0, &blend, ULW_ALPHA);
+        SelectObject(memory, oldBitmap);
+        DeleteObject(dib);
+    }
+    DeleteDC(memory);
+    ReleaseDC(nullptr, screen);
+    ShowWindow(app.tabGhostWnd, SW_SHOWNOACTIVATE);
+}
+
+void ghostMoveTo(App& app, int screenX, int screenY) {
+    if (!app.tabGhostWnd) return;
+    SetWindowPos(app.tabGhostWnd, HWND_TOPMOST, screenX, screenY, 0, 0,
+                 SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+}
+
+// Close the dragged tab locally after it moved elsewhere
+void dragCloseLocal(App& app, HWND hwnd, int index) {
+    if (index < 0 || index >= (int)app.tabs.size()) return;
+    if ((int)app.tabs.size() <= 1) {
+        PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        return;
+    }
+    if (index == app.activeTab) {
+        int next = index + 1 < (int)app.tabs.size() ? index + 1 : index - 1;
+        tabActivate(app, hwnd, next);
+    }
+    app.tabs.erase(app.tabs.begin() + index);
+    if (app.activeTab > index) app.activeTab--;
+    app.hoveredTab = -1;
+}
+
+}  // namespace
+
 void tabDragMove(App& app, HWND hwnd, int x, int y) {
     if (app.tabDragIndex < 0) return;
     if (app.tabDragIndex >= (int)app.tabs.size()) {
-        tabDragEnd(app, hwnd);
+        tabDragEnd(app, hwnd, x, y);
         return;
     }
 
@@ -844,47 +993,40 @@ void tabDragMove(App& app, HWND hwnd, int x, int y) {
         app.tabDragging = true;
     }
 
-    // Pulling well clear of the strip detaches the tab into its own
-    // window (clean, titled tabs only; the last tab stays put)
+    int index = app.tabDragIndex;
+    bool active = index == app.activeTab;
+    bool dirty = active ? (app.editMode && app.editorDirty)
+                        : (app.tabs[index].editMode &&
+                           app.tabs[index].editorDirty);
+    const std::string& path = active ? app.currentFile : app.tabs[index].path;
+    bool detachable = !dirty && !path.empty();
+
+    // Clear of the strip: the tab floats as a ghost card until release
     float stripH = chromeTopHeight(app);
-    bool outside = (float)y > stripH + dpi(app, 60.0f) ||
-                   (float)y < -dpi(app, 60.0f);
-    if (outside && app.tabs.size() > 1) {
-        int index = app.tabDragIndex;
-        bool active = index == app.activeTab;
-        bool dirty = active ? (app.editMode && app.editorDirty)
-                            : (app.tabs[index].editMode &&
-                               app.tabs[index].editorDirty);
-        const std::string& path =
-            active ? app.currentFile : app.tabs[index].path;
-        if (!dirty && !path.empty()) {
-            // Spawn the satellite window near the drop point; --cascade
-            // marks it a non-session window and bypasses single-instance
-            POINT screen = {x, y};
-            ClientToScreen(hwnd, &screen);
-            wchar_t exePath[MAX_PATH];
-            if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-                wchar_t args[MAX_PATH * 2];
-                swprintf_s(args, _countof(args),
-                           L"--cascade --pos %d %d \"%hs\"",
-                           screen.x - (int)dpi(app, 120.0f),
-                           screen.y - (int)dpi(app, 20.0f), path.c_str());
-                ShellExecuteW(nullptr, L"open", exePath, args, nullptr,
-                              SW_SHOWNORMAL);
-            }
-            tabDragEnd(app, hwnd);
-            // Close locally: the neighbor takes over (guarded > 1 above)
-            if (active) {
-                int next = index + 1 < (int)app.tabs.size() ? index + 1
-                                                            : index - 1;
-                tabActivate(app, hwnd, next);
-            }
-            app.tabs.erase(app.tabs.begin() + index);
-            if (app.activeTab > index) app.activeTab--;
-            app.hoveredTab = -1;
+    bool outside = (float)y > stripH + dpi(app, 48.0f) ||
+                   (float)y < -dpi(app, 48.0f);
+    if (outside && detachable) {
+        POINT screen = {x, y};
+        ClientToScreen(hwnd, &screen);
+        // Keep the cursor on the card even when the tab was wider than it
+        int grab = std::min((int)app.tabDragOffsetX,
+                            (int)dpi(app, 166.0f));
+        int ghostX = screen.x - std::max(grab, (int)dpi(app, 12.0f));
+        int ghostY = screen.y - (int)dpi(app, 17.0f);
+        if (!app.tabDragDetached) {
+            app.tabDragDetached = true;
+            ghostCreate(app, app.tabs[index].title, ghostX, ghostY);
             InvalidateRect(hwnd, nullptr, FALSE);
-            return;
+        } else {
+            ghostMoveTo(app, ghostX, ghostY);
         }
+        return;
+    }
+    if (app.tabDragDetached) {
+        // Back over the strip: the tab snaps home and reordering resumes
+        app.tabDragDetached = false;
+        ghostDestroy(app);
+        InvalidateRect(hwnd, nullptr, FALSE);
     }
 
     // Reorder: the dragged tab claims the slot under the pointer
@@ -903,10 +1045,100 @@ void tabDragMove(App& app, HWND hwnd, int x, int y) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-void tabDragEnd(App& app, HWND hwnd) {
+void tabDragEnd(App& app, HWND hwnd, int x, int y) {
+    if (app.tabDragIndex < 0) return;
+    int index = app.tabDragIndex;
+    bool detached = app.tabDragDetached;
+    app.tabDragIndex = -1;
+    app.tabDragging = false;
+    app.tabDragDetached = false;
+    ghostDestroy(app);
+    if (GetCapture() == hwnd) ReleaseCapture();
+
+    if (detached && index < (int)app.tabs.size()) {
+        bool active = index == app.activeTab;
+        const std::string& path =
+            active ? app.currentFile : app.tabs[index].path;
+        POINT screen = {x, y};
+        ClientToScreen(hwnd, &screen);
+
+        // Dropped onto another Tinta window: the tab moves there
+        HWND under = WindowFromPoint(screen);
+        HWND root = under ? GetAncestor(under, GA_ROOT) : nullptr;
+        wchar_t className[16] = {};
+        if (root && root != hwnd &&
+            GetClassNameW(root, className, _countof(className)) &&
+            wcscmp(className, L"Tinta") == 0) {
+            COPYDATASTRUCT data;
+            data.dwData = 1;
+            data.cbData = (DWORD)path.size() + 1;
+            data.lpData = (void*)path.c_str();
+            SendMessageW(root, WM_COPYDATA, 0, (LPARAM)&data);
+            SetForegroundWindow(root);
+            dragCloseLocal(app, hwnd, index);
+        } else if (root == hwnd) {
+            // Dropped back onto this window's content: snap home
+        } else if (app.tabs.size() > 1) {
+            // Free drop: a new window appears where the ghost was
+            wchar_t exePath[MAX_PATH];
+            if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+                wchar_t args[MAX_PATH * 2];
+                swprintf_s(args, _countof(args),
+                           L"--cascade --pos %d %d \"%hs\"",
+                           screen.x - (int)dpi(app, 120.0f),
+                           screen.y - (int)dpi(app, 20.0f), path.c_str());
+                ShellExecuteW(nullptr, L"open", exePath, args, nullptr,
+                              SW_SHOWNORMAL);
+            }
+            dragCloseLocal(app, hwnd, index);
+        }
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void tabWindowDropMerge(App& app, HWND hwnd) {
+    // A tabless window dropped so the cursor lands on another Tinta
+    // window's tab strip donates its document there (Notepad-style);
+    // multi-tab windows hand tabs over through per-tab drags instead
+    if (app.tabs.size() != 1) return;
+    if (app.editMode && app.editorDirty) return;
+    const std::string& path = app.currentFile;
+    if (path.empty()) return;
+
+    POINT cursor;
+    if (!GetCursorPos(&cursor)) return;
+    HWND target = nullptr;
+    // Top-level Tinta windows in z-order; the first one under the cursor
+    // (other than us) is the drop candidate
+    for (HWND w = FindWindowExW(nullptr, nullptr, L"Tinta", nullptr); w;
+         w = FindWindowExW(nullptr, w, L"Tinta", nullptr)) {
+        if (w == hwnd || !IsWindowVisible(w) || IsIconic(w)) continue;
+        RECT r;
+        if (!GetWindowRect(w, &r) || !PtInRect(&r, cursor)) continue;
+        // Only the strip band counts as a drop zone; anywhere lower is
+        // an ordinary overlapping window placement
+        UINT targetDpi = GetDpiForWindow(w);
+        if (cursor.y > r.top + MulDiv(46, (int)targetDpi, 96)) break;
+        target = w;
+        break;
+    }
+    if (!target) return;
+
+    COPYDATASTRUCT data;
+    data.dwData = 1;
+    data.cbData = (DWORD)path.size() + 1;
+    data.lpData = (void*)path.c_str();
+    SendMessageW(target, WM_COPYDATA, 0, (LPARAM)&data);
+    SetForegroundWindow(target);
+    PostMessageW(hwnd, WM_CLOSE, 0, 0);
+}
+
+void tabDragCancel(App& app, HWND hwnd) {
     if (app.tabDragIndex < 0) return;
     app.tabDragIndex = -1;
     app.tabDragging = false;
+    app.tabDragDetached = false;
+    ghostDestroy(app);
     if (GetCapture() == hwnd) ReleaseCapture();
     InvalidateRect(hwnd, nullptr, FALSE);
 }

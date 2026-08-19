@@ -1786,7 +1786,7 @@ static bool codeCopyButtonAt(const App& app, int mouseX, int mouseY) {
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // A tab drag ends on release (its press already consumed the click)
     if (app.tabDragIndex >= 0) {
-        tabDragEnd(app, hwnd);
+        tabDragEnd(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
     }
     // Release belonging to a context-menu item click: already handled
     if (app.swallowNextMouseUp) {
@@ -2357,6 +2357,11 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     if (app.showTabSwitcher && wParam == VK_ESCAPE) {
         app.showTabSwitcher = false;
         InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    // Esc aborts a tab drag in flight (ghost vanishes, tab snaps home)
+    if (app.tabDragIndex >= 0 && wParam == VK_ESCAPE) {
+        tabDragCancel(app, hwnd);
         return;
     }
 

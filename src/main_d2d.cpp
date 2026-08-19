@@ -1142,6 +1142,38 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) handleMouseUp(*app, hwnd, wParam, lParam);
             return 0;
 
+        case WM_ENTERSIZEMOVE:
+            if (app) {
+                app->windowMoveTracking = true;
+                GetWindowRect(hwnd, &app->windowMoveStartRect);
+            }
+            break;
+
+        case WM_EXITSIZEMOVE:
+            // A finished native window MOVE may be a drop onto another
+            // Tinta window's strip; resizes land here too, so only a
+            // changed position with an unchanged size qualifies
+            if (app && app->windowMoveTracking) {
+                app->windowMoveTracking = false;
+                RECT now;
+                const RECT& was = app->windowMoveStartRect;
+                if (GetWindowRect(hwnd, &now) &&
+                    (now.left != was.left || now.top != was.top) &&
+                    now.right - now.left == was.right - was.left &&
+                    now.bottom - now.top == was.bottom - was.top) {
+                    tabWindowDropMerge(*app, hwnd);
+                }
+            }
+            break;
+
+        case WM_CAPTURECHANGED:
+            // Losing capture mid tab-drag (Alt+Tab, a popup stealing the
+            // mouse) aborts the drag instead of leaving a stray ghost
+            if (app && app->tabDragIndex >= 0 && (HWND)lParam != hwnd) {
+                tabDragCancel(*app, hwnd);
+            }
+            return 0;
+
         case WM_SETCURSOR:
             if (app && LOWORD(lParam) == HTCLIENT) {
                 // We handle cursor in WM_MOUSEMOVE
