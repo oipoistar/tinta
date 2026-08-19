@@ -153,6 +153,9 @@ struct Settings {
     // Plain file launches join the existing window as a new tab (Win11
     // Notepad model); off restores one window per document
     bool openInTabs = true;
+    // Last session's open tabs, restored on the next plain launch
+    std::vector<std::string> sessionTabs;
+    int sessionActive = 0;
     // Reading positions: most-recent-first, capped (#77)
     struct ReadingPosition { std::string path; float scrollY; };
     std::vector<ReadingPosition> readingPositions;
@@ -366,6 +369,7 @@ struct App {
         std::wstring title;        // display name (file name / Untitled)
         bool editMode = false;     // switched away while editing
         bool editorDirty = false;
+        bool fileMissing = false;  // deleted/renamed on disk (red-grey dot)
         std::wstring editorText;   // parked edit buffer (editMode only)
         float editorScrollY = 0.0f;
         size_t editorCursor = 0;

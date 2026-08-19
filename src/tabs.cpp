@@ -85,6 +85,31 @@ void tabsInit(App& app) {
     app.activeTab = 0;
 }
 
+void tabsSeedSession(App& app, const std::vector<std::string>& paths) {
+    // Rebuilds the tab row from a saved session, in order; the already
+    // loaded startup document becomes the active tab (appended if it was
+    // not part of the session, e.g. a file-argument launch)
+    app.tabs.clear();
+    app.activeTab = -1;
+    for (const auto& path : paths) {
+        App::DocTab tab;
+        tab.path = path;
+        tab.title = titleForPath(app, path);
+        if (app.activeTab < 0 &&
+            _stricmp(path.c_str(), app.currentFile.c_str()) == 0) {
+            app.activeTab = (int)app.tabs.size();
+        }
+        app.tabs.push_back(std::move(tab));
+    }
+    if (app.activeTab < 0) {
+        App::DocTab tab;
+        tab.path = app.currentFile;
+        tab.title = titleForPath(app, app.currentFile);
+        app.tabs.push_back(std::move(tab));
+        app.activeTab = (int)app.tabs.size() - 1;
+    }
+}
+
 void tabActivate(App& app, HWND hwnd, int index) {
     tabsInit(app);
     if (index < 0 || index >= (int)app.tabs.size()) return;
@@ -378,23 +403,22 @@ void renderTabStrip(App& app) {
             D2D1_RECT_F r = D2D1::RectF(x, top, x + m.tabWidth, stripH);
 
             if (active) {
-                // Lifts to the document surface, hairline sides
-                D2D1_COLOR_F edge = text;
-                edge.a = 0.08f;
-                fillTabBody(app, D2D1::RectF(r.left - 1, r.top - 1,
-                                             r.right + 1, r.bottom),
-                            radius, edge);
+                // The active tab drops a soft shadow onto its neighbors
+                // instead of an underline: layered halos, clipped to the
+                // strip so they spread sideways over the inactive tabs
+                float shadowAlpha = app.theme.isDark ? 0.34f : 0.16f;
+                for (int ring = 3; ring >= 1; ring--) {
+                    float spread = dpi(app, (float)ring * 2.2f);
+                    D2D1_COLOR_F shadow =
+                        D2D1::ColorF(0.0f, 0.0f, 0.0f,
+                                     shadowAlpha / (float)(ring * ring));
+                    fillTabBody(app,
+                                D2D1::RectF(r.left - spread,
+                                            r.top - spread * 0.6f,
+                                            r.right + spread, r.bottom),
+                                radius + spread * 0.5f, shadow);
+                }
                 fillTabBody(app, r, radius, app.theme.background);
-                // Accent underline
-                D2D1_COLOR_F accent = app.theme.accent;
-                app.brush->SetColor(accent);
-                app.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(
-                        D2D1::RectF(r.left + dpi(app, 10.0f),
-                                    stripH - dpi(app, 2.0f),
-                                    r.right - dpi(app, 10.0f), stripH),
-                        dpi(app, 1.0f), dpi(app, 1.0f)),
-                    app.brush);
             } else if (hovered) {
                 fillTabBody(app, r, radius, faint);
             }
@@ -402,7 +426,14 @@ void renderTabStrip(App& app) {
             bool dirty = active ? (app.editMode && app.editorDirty)
                                 : (app.tabs[i].editMode &&
                                    app.tabs[i].editorDirty);
+            bool missing = app.tabs[i].fileMissing && !app.tabs[i].path.empty();
             bool showClose = active || hovered;
+            // Status dot: orange = unsaved changes, red-grey = the file
+            // vanished from disk
+            bool showDot = dirty || missing;
+            D2D1_COLOR_F dotColor =
+                dirty ? D2D1::ColorF(0.94f, 0.56f, 0.12f)
+                      : D2D1::ColorF(0.74f, 0.36f, 0.34f);
 
             // Label, ellipsis-trimmed, leaving room for the close/dot
             float labelRight = r.right - dpi(app, showClose ? 30.0f : 20.0f);
@@ -437,10 +468,9 @@ void renderTabStrip(App& app) {
                         D2D1::RoundedRect(cb, dpi(app, 4.0f), dpi(app, 4.0f)),
                         app.brush);
                 }
-                if (dirty && !closeHover && !active) {
-                    // dot instead of x until the pointer commits
-                    D2D1_COLOR_F accent = app.theme.accent;
-                    app.brush->SetColor(accent);
+                if (showDot && !closeHover && !hovered) {
+                    // status dot instead of x until the pointer commits
+                    app.brush->SetColor(dotColor);
                     float dotR = dpi(app, 3.5f);
                     app.renderTarget->FillEllipse(
                         D2D1::Ellipse(
@@ -455,9 +485,8 @@ void renderTabStrip(App& app) {
                 }
                 hit.closeRect = cb;
                 hit.hasClose = true;
-            } else if (dirty) {
-                D2D1_COLOR_F accent = app.theme.accent;
-                app.brush->SetColor(accent);
+            } else if (showDot) {
+                app.brush->SetColor(dotColor);
                 float dotR = dpi(app, 3.5f);
                 float cx = r.right - dpi(app, 13.0f);
                 app.renderTarget->FillEllipse(
@@ -663,7 +692,9 @@ void renderTabSwitcher(App& app) {
 
         bool dirty = active ? (app.editMode && app.editorDirty)
                             : (app.tabs[i].editMode && app.tabs[i].editorDirty);
-        float nameRight = row.right - dpi(app, dirty ? 66.0f : 56.0f);
+        bool missing = app.tabs[i].fileMissing && !app.tabs[i].path.empty();
+        bool showDot = dirty || missing;
+        float nameRight = row.right - dpi(app, showDot ? 66.0f : 56.0f);
         if (app.folderBrowserFormat) {
             D2D1_COLOR_F nameColor = text;
             if (!active) nameColor.a = 0.8f;
@@ -676,8 +707,9 @@ void renderTabSwitcher(App& app) {
                             nameRight, rowY + rowH),
                 app.brush);
         }
-        if (dirty) {
-            app.brush->SetColor(app.theme.accent);
+        if (showDot) {
+            app.brush->SetColor(dirty ? D2D1::ColorF(0.94f, 0.56f, 0.12f)
+                                      : D2D1::ColorF(0.74f, 0.36f, 0.34f));
             float dotR = dpi(app, 3.5f);
             app.renderTarget->FillEllipse(
                 D2D1::Ellipse(D2D1::Point2F(row.right - dpi(app, 60.0f),

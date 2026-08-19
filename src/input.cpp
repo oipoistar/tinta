@@ -2904,6 +2904,22 @@ void handleDropFiles(App& app, HWND hwnd, WPARAM wParam) {
 }
 
 void handleFileWatchTimer(App& app, HWND hwnd) {
+    // Refresh the deleted-on-disk flags driving the red-grey tab dots
+    // (runs even when the active document is untitled or being edited)
+    bool missingChanged = false;
+    for (auto& tab : app.tabs) {
+        const std::string& path =
+            (&tab == &app.tabs[app.activeTab]) ? app.currentFile : tab.path;
+        bool missing =
+            !path.empty() &&
+            GetFileAttributesW(toWide(path).c_str()) == INVALID_FILE_ATTRIBUTES;
+        if (missing != tab.fileMissing) {
+            tab.fileMissing = missing;
+            missingChanged = true;
+        }
+    }
+    if (missingChanged) InvalidateRect(hwnd, nullptr, FALSE);
+
     if (app.currentFile.empty() || !app.fileWatchEnabled || app.editMode) return;
 
     std::wstring widePath = toWide(app.currentFile);

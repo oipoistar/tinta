@@ -1243,7 +1243,21 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.darkThemeIndex = app->darkThemeIndex;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
                 settings.browserFocusPath = app->browserFocusPath;
-        settings.openInTabs = app->openInTabs;
+                settings.openInTabs = app->openInTabs;
+                // Remember the open tab set for the next launch (untitled
+                // quick-note buffers have no path to restore)
+                settings.sessionTabs.clear();
+                settings.sessionActive = 0;
+                for (size_t i = 0; i < app->tabs.size(); i++) {
+                    const std::string& path =
+                        (int)i == app->activeTab ? app->currentFile
+                                                 : app->tabs[i].path;
+                    if (path.empty()) continue;
+                    if ((int)i == app->activeTab) {
+                        settings.sessionActive = (int)settings.sessionTabs.size();
+                    }
+                    settings.sessionTabs.push_back(path);
+                }
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
                 settings.tocOnLeft = app->tocOnLeft;
@@ -1616,6 +1630,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         return loadDocumentContent(buffer.str(), path);
     };
 
+    // Last session's tabs come back on plain launches (files that vanished
+    // from disk in the meantime are dropped)
+    bool restoreSession = !quickNote && !cascadeWindow && !startInEditMode &&
+                          printPagesDir.empty() &&
+                          !savedSettings.sessionTabs.empty();
+    std::vector<std::string> sessionPaths;
+    int sessionActive = 0;
+    if (restoreSession) {
+        for (size_t i = 0; i < savedSettings.sessionTabs.size(); i++) {
+            const auto& path = savedSettings.sessionTabs[i];
+            if (GetFileAttributesW(toWide(path).c_str()) !=
+                INVALID_FILE_ATTRIBUTES) {
+                // The active slot follows its path through the filtering
+                if ((int)i == savedSettings.sessionActive) {
+                    sessionActive = (int)sessionPaths.size();
+                }
+                sessionPaths.push_back(path);
+            }
+        }
+        if (sessionPaths.empty()) restoreSession = false;
+    }
+
     if (quickNote) {
         // Untitled quick note: an empty document, no backing file
         loadDocumentContent(std::string(), {});
@@ -1623,6 +1659,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         if (loadFile(inputFile)) {
             app.currentFile = inputFile;
             app.focusMermaidOnNextLayout = isMermaidDocumentPath(inputFile);
+        } else {
+            loadDocumentContent(sampleMarkdown, {});
+        }
+    } else if (restoreSession) {
+        // No file argument: reopen where the last session left off
+        if (loadFile(sessionPaths[sessionActive])) {
+            app.currentFile = sessionPaths[sessionActive];
+            app.focusMermaidOnNextLayout =
+                isMermaidDocumentPath(sessionPaths[sessionActive]);
         } else {
             loadDocumentContent(sampleMarkdown, {});
         }
@@ -1646,8 +1691,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // Set window title with filename
     updateWindowTitle(app);
 
-    // The startup document becomes the first (tabless) tab
-    tabsInit(app);
+    // The startup document becomes the first (tabless) tab; a restored
+    // session rebuilds the whole row in its saved order
+    if (restoreSession && !app.currentFile.empty()) {
+        tabsSeedSession(app, sessionPaths);
+    } else {
+        tabsInit(app);
+    }
 
     // Start file watch timer and record initial write time
     updateFileWriteTime(app);

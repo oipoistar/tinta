@@ -741,8 +741,8 @@ static void enterEditModeWithContent(App& app, const std::string& content) {
         app.editorScrollY = std::max(0.0f, row * lineHeight);
     }
 
-    // Disable file watch while editing
-    KillTimer(app.hwnd, 1); // TIMER_FILE_WATCH = 1
+    // The file-watch tick keeps running: its reload path guards editMode
+    // itself, and the per-tab deleted-file sweep needs the heartbeat
 
     // Show notification
     app.editorNotificationMsg = tr(app, "toast.exit_edit_hint");

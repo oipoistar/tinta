@@ -71,6 +71,15 @@ void saveSettings(const Settings& settings) {
         file << KEY_ACTIONS[i].name << "=" << value << "\n";
     }
 
+    if (!settings.sessionTabs.empty()) {
+        // Open tabs from the last session, restored on the next plain launch
+        file << "[Session]\n";
+        file << "sessionActive=" << settings.sessionActive << "\n";
+        for (const auto& path : settings.sessionTabs) {
+            file << "tab=" << path << "\n";
+        }
+    }
+
     if (!settings.readingPositions.empty()) {
         file << "[Positions]\n";
         for (const auto& pos : settings.readingPositions) {
@@ -239,6 +248,13 @@ Settings loadSettings() {
             settings.editorShowPreview = (value == "1");
         } else if (key == "editorWordWrap") {
             settings.editorWordWrap = (value == "1");
+        } else if (key == "sessionActive") {
+            int idx = std::stoi(value);
+            if (idx >= 0) settings.sessionActive = idx;
+        } else if (key == "tab") {
+            if (!value.empty() && settings.sessionTabs.size() < 64) {
+                settings.sessionTabs.push_back(value);
+            }
         } else if (key == "pos") {
             size_t sep = value.find('|');
             if (sep != std::string::npos && sep + 1 < value.size()) {
