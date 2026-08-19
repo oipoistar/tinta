@@ -370,6 +370,7 @@ struct App {
         bool editMode = false;     // switched away while editing
         bool editorDirty = false;
         bool fileMissing = false;  // deleted/renamed on disk (red-grey dot)
+        FILETIME lastWrite{};      // for external-change conflicts (dirty tabs)
         std::wstring editorText;   // parked edit buffer (editMode only)
         float editorScrollY = 0.0f;
         size_t editorCursor = 0;

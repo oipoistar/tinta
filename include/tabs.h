@@ -21,6 +21,11 @@ void tabCycle(App& app, HWND hwnd, int direction);
 // Title-bar geometry shared by rendering and non-client hit testing
 D2D1_RECT_F captionButtonRect(const App& app, int button);  // 0 min 1 max 2 close
 int captionHitTest(const App& app, float x, float y);       // 0 none, 1..3
+// Strip surface color derived from the theme (shared with the DWM frame
+// tint so border and transition flashes match the drawn caption)
+D2D1_COLOR_F tabStripBackground(const App& app);
+// + button: a new untitled quick-note tab, straight into the editor
+void tabOpenQuickNote(App& app, HWND hwnd);
 
 // Rendering (main_d2d render loop)
 void renderTabStrip(App& app);

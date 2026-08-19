@@ -5,6 +5,7 @@
 
 #include "tabs.h"
 
+#include "document.h"
 #include "editor.h"
 #include "file_utils.h"
 #include "i18n.h"
@@ -51,6 +52,7 @@ void parkActiveEditBuffer(App& app) {
     tab.editorScrollY = app.editorScrollY;
     tab.editorCursor = app.editorCursorPos;
     tab.wordWrap = app.editorWordWrap;
+    tab.lastWrite = app.lastFileWriteTime;  // external-change detection
 
     app.editMode = false;
     app.editorDirty = false;
@@ -215,6 +217,30 @@ void tabCycle(App& app, HWND hwnd, int direction) {
     tabActivate(app, hwnd, next);
 }
 
+void tabOpenQuickNote(App& app, HWND hwnd) {
+    // The + button behaves like Ctrl+N, in-window: a fresh untitled
+    // quick-note tab straight into the editor; the first Ctrl+S runs the
+    // classic Save As flow and the tab picks up the chosen name
+    tabsInit(app);
+    syncActiveTab(app);
+    parkActiveEditBuffer(app);
+    App::DocTab tab;
+    tab.title = tr(app, "title.untitled");
+    app.tabs.push_back(std::move(tab));
+    app.activeTab = (int)app.tabs.size() - 1;
+    // The preview pane renders app.root: swap in an empty document so the
+    // fresh note does not preview the previous tab's content
+    app.currentFile.clear();
+    auto result = parseDocument(app.parser, std::string(), app.currentFile);
+    if (result.success) {
+        app.root = result.root;
+        app.parseTimeUs = result.parseTimeUs;
+    }
+    enterQuickNoteMode(app);
+    app.showTabSwitcher = false;
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 // --- geometry ---
 
 namespace {
@@ -278,15 +304,19 @@ int captionHitTest(const App& app, float x, float y) {
 
 // --- rendering ---
 
-namespace {
-
-D2D1_COLOR_F stripBackground(const App& app) {
+D2D1_COLOR_F tabStripBackground(const App& app) {
     D2D1_COLOR_F c = app.theme.background;
     float f = app.theme.isDark ? 0.78f : 0.955f;
     c.r *= f;
     c.g *= f;
     c.b *= f;
     return c;
+}
+
+namespace {
+
+D2D1_COLOR_F stripBackground(const App& app) {
+    return tabStripBackground(app);
 }
 
 // Rounded-top tab body: rounded rect extended past the strip bottom, the
@@ -745,25 +775,9 @@ bool tabStripMouseDown(App& app, HWND hwnd, int x, int y, bool middle) {
             continue;
         }
         if (hit.index == -2) {
-            // + opens the folder browser; the next pick lands in a new tab
-            if (!middle) {
-                app.tabNewTabIntent = true;
-                if (!app.showFolderBrowser) {
-                    app.showFolderBrowser = true;
-                    app.folderBrowserAnimation = 0.0f;
-                    if (!app.currentFile.empty()) {
-                        app.folderBrowserPath =
-                            getDirectoryFromFile(app.currentFile);
-                    } else {
-                        wchar_t cwd[MAX_PATH];
-                        if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                            app.folderBrowserPath = cwd;
-                        }
-                    }
-                    populateFolderItems(app);
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
-            }
+            // + = new untitled quick-note tab (Ctrl+T still opens the
+            // browser into a new tab for picking an existing file)
+            if (!middle) tabOpenQuickNote(app, hwnd);
             return true;
         }
         if (hit.index == -3) {

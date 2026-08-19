@@ -2920,6 +2920,42 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
     }
     if (missingChanged) InvalidateRect(hwnd, nullptr, FALSE);
 
+    // External edits to a file that has unsaved changes in some tab surface
+    // immediately: jump to that tab and raise the unsaved-changes dialog
+    // (Save and exit = your version wins, Discard = the disk version loads)
+    if (!app.confirmExitPending) {
+        for (size_t i = 0; i < app.tabs.size(); i++) {
+            bool isActive = (int)i == app.activeTab;
+            bool dirty = isActive
+                             ? (app.editMode && app.editorDirty)
+                             : (app.tabs[i].editMode && app.tabs[i].editorDirty);
+            const std::string& path =
+                isActive ? app.currentFile : app.tabs[i].path;
+            if (!dirty || path.empty()) continue;
+            HANDLE fileHandle = CreateFileW(
+                toWide(path).c_str(), GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0,
+                nullptr);
+            if (fileHandle == INVALID_HANDLE_VALUE) continue;
+            FILETIME current{};
+            GetFileTime(fileHandle, nullptr, nullptr, &current);
+            CloseHandle(fileHandle);
+            FILETIME& stored =
+                isActive ? app.lastFileWriteTime : app.tabs[i].lastWrite;
+            if (CompareFileTime(&current, &stored) != 0) {
+                stored = current;  // one prompt per external change
+                if (!isActive) {
+                    tabActivate(app, hwnd, (int)i);
+                    app.lastFileWriteTime = current;
+                }
+                app.confirmExitPending = true;
+                app.confirmExitOpenedAt = std::chrono::steady_clock::now();
+                InvalidateRect(hwnd, nullptr, FALSE);
+                break;
+            }
+        }
+    }
+
     if (app.currentFile.empty() || !app.fileWatchEnabled || app.editMode) return;
 
     std::wstring widePath = toWide(app.currentFile);
