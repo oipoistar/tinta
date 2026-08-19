@@ -321,6 +321,12 @@ void updateOverlayFormats(App& app) {
     // releaseOverlayFormats() above already cleared them; they rebuild at the
     // current scale on next use.
 
+    // Stats overlay format: fixed UI size so zooming the document cannot
+    // overflow the fixed stats box
+    app.dwriteFactory->CreateTextFormat(app.theme.codeFontFamily, nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        13.0f * scale, L"en-us", &app.statsFormat);
+
     // Folder browser format
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
