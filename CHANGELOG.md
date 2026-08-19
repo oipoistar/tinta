@@ -1,11 +1,34 @@
 # Changelog
 
-## Unreleased
+## [v2.9.0] - 2026-08-19
+
+The diagram release: Tinta grows from one natively rendered Mermaid family to thirteen.
+
+### Added
+- Native Mermaid rendering for twelve new diagram families: sequence diagrams, class diagrams, state diagrams, ER diagrams, pie charts, git graphs, gantt charts, mindmaps, timelines, user journeys, quadrant charts, and xy charts — all drawn with Direct2D like the existing flowcharts, themed, printable, with selectable and searchable text. Anything still unsupported falls back to readable source (#108, thanks @iYting for the report and test case)
+- Folder browser preview mode: clicking a file with B open keeps the panel up, so the list works as a file picker — flip through files, the open one is highlighted, and the browser closes only on a document click, B, or Esc (#107)
+- Japanese and Korean interface languages, completing the community translation scaffold, plus localized strings for the copy button, statistics, print preview, file-association dialogs, and startup errors in every shipped language (#110, thanks @wxh-777)
+- Context-aware mouse cursors across the UI: links, buttons, TOC entries, theme cards, folder items, checkboxes, text fields, sliders, and pane separators now signal what they do (#110)
 
 ### Changed
-- Refined the language selector with theme-aware colors, hover and selected states, adaptive popup sizing, and automatic placement inside the Settings panel.
-- Copy, code-block actions, editor, statistics, print preview, file-association, and initialization feedback now use the active UI language across the shipped locales.
-- Theme chooser chrome now follows the active document theme while preserving each theme card's own preview palette.
+- Leaving edit mode with unsaved changes now opens a proper dialog (Save and exit / Discard / Keep editing) with a short grace window, so smashing Esc can never silently discard work (#106)
+- Text selection in tables highlights exactly the selected characters in each cell instead of painting a bar across cell padding and gaps (#110)
+- Long TOC headings trim with an ellipsis instead of overlapping the next entry (#110)
+- Refined the language selector with theme-aware colors, hover and selected states, adaptive popup sizing, and automatic placement inside the Settings panel (#110)
+- Theme chooser chrome now follows the active document theme while preserving each theme card's own preview palette (#110)
+
+### Fixed
+- Wrapped table cells outside the first column could not be selected (#110)
+- The scrollbar no longer flickers while long documents stream in (#110)
+- Decoded images are now capped at 64 MiB with least-recently-used eviction, and the editor's line-layout cache is bounded, keeping memory flat over long sessions (#110)
+
+## [v2.8.0] - 2026-08-18
+
+The math release. See the [GitHub release](https://github.com/oipoistar/tinta/releases/tag/v2.8.0) for details: native LaTeX math rendering (#80), the glyph-precise selection rework (#83), split-view content shifting for the folder browser and TOC, and shortcut profiles (Windows / Vim / Custom) with a visual shortcut editor.
+
+## [v2.7.0] - 2026-08-17
+
+The settings release. See the [GitHub release](https://github.com/oipoistar/tinta/releases/tag/v2.7.0) for details: the Ctrl+, settings dialog, custom themes with a theme editor, reading-width sliders, multilingual UI (en/zh/de/fr/it), quick notes (Ctrl+N), and a batch of community-reported fixes.
 
 ## [v2.6.0] - 2026-08-09
 
