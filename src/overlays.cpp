@@ -1701,8 +1701,22 @@ void renderPrintPreview(App& app) {
 
 namespace {
 
+// Surface elevation (design 2e): panels and cards lift from the theme
+// background toward white — a small step in dark themes, a larger one in
+// light themes where the cards read as near-white paper
+D2D1_COLOR_F settingsLift(const App& app, float darkT, float lightT,
+                          float alpha) {
+    float t = app.theme.isDark ? darkT : lightT;
+    D2D1_COLOR_F c = app.theme.background;
+    c.r += (1.0f - c.r) * t;
+    c.g += (1.0f - c.g) * t;
+    c.b += (1.0f - c.b) * t;
+    c.a = alpha;
+    return c;
+}
+
 void settingsToggle(App& app, float x, float y, bool on, int action, float anim) {
-    float w = dpi(app, 34.0f), h = dpi(app, 18.0f);
+    float w = dpi(app, 40.0f), h = dpi(app, 20.0f);
     D2D1_COLOR_F track = on ? app.theme.accent : app.theme.text;
     track.a = (on ? 0.9f : 0.25f) * anim;
     app.brush->SetColor(track);
@@ -1771,17 +1785,29 @@ void renderSettingsOverlay(App& app) {
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
-    float panelW = std::min(dpi(app, 660.0f), app.width - dpi(app, 80.0f));
-    float panelH = std::min(dpi(app, 420.0f), app.height - dpi(app, 80.0f));
+    float panelW = std::min(dpi(app, 760.0f), app.width - dpi(app, 80.0f));
+    float panelH = std::min(dpi(app, 540.0f), app.height - dpi(app, 64.0f));
     float px = (app.width - panelW) / 2;
     float py = (app.height - panelH) / 2 + (1 - anim) * dpi(app, 30.0f);
 
+    // Elevated panel: soft drop shadow, lifted surface, hairline border
+    for (int ring = 3; ring >= 1; ring--) {
+        float spread = dpi(app, (float)ring * 4.0f);
+        D2D1_COLOR_F shadow = D2D1::ColorF(
+            0.0f, 0.0f, 0.0f, 0.10f * anim / (float)(ring * ring));
+        app.brush->SetColor(shadow);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(
+                D2D1::RectF(px - spread, py - spread * 0.4f, px + panelW + spread,
+                            py + panelH + spread),
+                dpi(app, 14.0f) + spread, dpi(app, 14.0f) + spread),
+            app.brush);
+    }
     D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(
-        D2D1::RectF(px, py, px + panelW, py + panelH), dpi(app, 12.0f), dpi(app, 12.0f));
-    D2D1_COLOR_F bg = app.theme.background; bg.a = 0.99f * anim;
-    app.brush->SetColor(bg);
+        D2D1::RectF(px, py, px + panelW, py + panelH), dpi(app, 14.0f), dpi(app, 14.0f));
+    app.brush->SetColor(settingsLift(app, 0.045f, 0.5f, 0.99f * anim));
     app.renderTarget->FillRoundedRectangle(panel, app.brush);
-    D2D1_COLOR_F border = app.theme.text; border.a = 0.25f * anim;
+    D2D1_COLOR_F border = app.theme.text; border.a = 0.14f * anim;
     app.brush->SetColor(border);
     app.renderTarget->DrawRoundedRectangle(panel, app.brush, 1.0f);
 
@@ -1803,54 +1829,83 @@ void renderSettingsOverlay(App& app) {
     const int sectionActions[] = {SET_SECTION_GENERAL, SET_SECTION_APPEARANCE, SET_SECTION_EDITOR};
     float railX = px + dpi(app, 24.0f);
     float railY = py + dpi(app, 68.0f);
-    float railW = dpi(app, 130.0f);
+    float railW = dpi(app, 140.0f);
     for (int i = 0; i < 3; i++) {
-        float rowY = railY + i * dpi(app, 34.0f);
-        D2D1_RECT_F r = D2D1::RectF(railX, rowY, railX + railW, rowY + dpi(app, 28.0f));
+        float rowY = railY + i * dpi(app, 38.0f);
+        D2D1_RECT_F r = D2D1::RectF(railX, rowY, railX + railW, rowY + dpi(app, 30.0f));
         if (i == app.settingsSection) {
-            D2D1_COLOR_F hl = app.theme.accent; hl.a = 0.16f * anim;
-            app.brush->SetColor(hl);
+            // Active section: lifted pill plus an accent indicator bar
+            app.brush->SetColor(settingsLift(app, 0.12f, 0.95f, anim));
             app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(r, dpi(app, 5.0f), dpi(app, 5.0f)), app.brush);
+                D2D1::RoundedRect(r, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush);
+            D2D1_COLOR_F bar = app.theme.accent; bar.a = anim;
+            app.brush->SetColor(bar);
+            float barH = dpi(app, 14.0f);
+            float barY = (r.top + r.bottom - barH) * 0.5f;
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(
+                    D2D1::RectF(r.left, barY, r.left + dpi(app, 3.0f), barY + barH),
+                    dpi(app, 1.5f), dpi(app, 1.5f)),
+                app.brush);
         }
         D2D1_COLOR_F tc = app.theme.text;
-        tc.a = (i == app.settingsSection ? 1.0f : 0.6f) * anim;
+        tc.a = (i == app.settingsSection ? 1.0f : 0.55f) * anim;
         app.brush->SetColor(tc);
         app.renderTarget->DrawText(sections[i], (UINT32)wcslen(sections[i]), fmt,
-            D2D1::RectF(r.left + dpi(app, 10.0f), r.top + dpi(app, 5.0f), r.right, r.bottom),
+            D2D1::RectF(r.left + dpi(app, 12.0f), r.top + dpi(app, 6.0f), r.right, r.bottom),
             app.brush);
         app.settingsHits.push_back({r, sectionActions[i]});
     }
 
-    // Content column
-    float cx = railX + railW + dpi(app, 28.0f);
-    float cw = px + panelW - dpi(app, 28.0f) - cx;
+    // Content column: one lifted card per setting (design 2e), with the
+    // control right-aligned and vertically centered inside its card
+    float cx = railX + railW + dpi(app, 24.0f);
+    float cw = px + panelW - dpi(app, 24.0f) - cx;
     float cy = railY;
-    float rowH = dpi(app, 44.0f);
+    float cardPad = dpi(app, 14.0f);
+    float cardGap = dpi(app, 10.0f);
+    float rowCardH = dpi(app, 58.0f);
+    float sliderCardH = dpi(app, 84.0f);
 
-    // hintRight reserves space for the row's right-side control so a long
-    // hint (or a translation) never runs beneath it
-    auto rowLabel = [&](const wchar_t* label, const wchar_t* hint,
-                        float hintRight = 0.0f) {
+    D2D1_COLOR_F cardBg = settingsLift(app, 0.085f, 0.85f, anim);
+    D2D1_COLOR_F cardBorder = app.theme.isDark
+        ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.05f * anim)
+        : D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.08f * anim);
+
+    auto card = [&](float h) {
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(
+            D2D1::RectF(cx, cy, cx + cw, cy + h), dpi(app, 8.0f), dpi(app, 8.0f));
+        app.brush->SetColor(cardBg);
+        app.renderTarget->FillRoundedRectangle(rr, app.brush);
+        app.brush->SetColor(cardBorder);
+        app.renderTarget->DrawRoundedRectangle(rr, app.brush, 1.0f);
+    };
+    // Title + muted hint in the card's top-left; reserveRight keeps long
+    // hints (or translations) clear of the row's control
+    auto cardLabel = [&](const wchar_t* label, const wchar_t* hint,
+                         float reserveRight = 0.0f) {
         D2D1_COLOR_F tc = app.theme.text; tc.a = 0.95f * anim;
         app.brush->SetColor(tc);
         app.renderTarget->DrawText(label, (UINT32)wcslen(label), fmt,
-            D2D1::RectF(cx, cy + dpi(app, 3.0f), cx + cw - hintRight,
-                        cy + dpi(app, 21.0f)), app.brush);
+            D2D1::RectF(cx + cardPad, cy + dpi(app, 10.0f),
+                        cx + cw - cardPad - reserveRight, cy + dpi(app, 28.0f)),
+            app.brush);
         if (hint) {
-            tc.a = 0.45f * anim;
+            tc.a = 0.5f * anim;
             app.brush->SetColor(tc);
             app.renderTarget->DrawText(hint, (UINT32)wcslen(hint), fmt,
-                D2D1::RectF(cx, cy + dpi(app, 21.0f), cx + cw - hintRight,
-                            cy + dpi(app, 39.0f)), app.brush);
+                D2D1::RectF(cx + cardPad, cy + dpi(app, 28.0f),
+                            cx + cw - cardPad - reserveRight, cy + dpi(app, 46.0f)),
+                app.brush);
         }
     };
-    auto hairline = [&]() {
-        D2D1_COLOR_F hc = app.theme.text; hc.a = 0.08f * anim;
-        app.brush->SetColor(hc);
-        app.renderTarget->DrawLine(D2D1::Point2F(cx, cy + rowH - dpi(app, 4.0f)),
-                                   D2D1::Point2F(cx + cw, cy + rowH - dpi(app, 4.0f)),
-                                   app.brush, 1.0f);
+    // Right-aligned chip rows: total advance width of settingsChip calls
+    auto chipsWidth = [&](std::initializer_list<const wchar_t*> labels) {
+        float total = 0.0f;
+        for (const wchar_t* l : labels) {
+            total += measureText(app, l, fmt) + dpi(app, 24.0f) + dpi(app, 8.0f);
+        }
+        return total - dpi(app, 8.0f);
     };
 
     // Percentage slider: track + accent fill + knob + value label. The
@@ -1889,14 +1944,15 @@ void renderSettingsOverlay(App& app) {
     };
 
     if (app.settingsSection == 0) {  // General
-        rowLabel(tr(app, "settings.language"), tr(app, "settings.language.hint"), dpi(app, 200.0f));
+        card(rowCardH);
+        cardLabel(tr(app, "settings.language"), tr(app, "settings.language.hint"), dpi(app, 200.0f));
         {
             // Dropdown value box with a pencil beside it (opens languages.ini)
             float boxH = dpi(app, 26.0f);
             float penW = dpi(app, 26.0f);
             float boxW = dpi(app, 150.0f);
-            float boxX = cx + cw - penW - dpi(app, 8.0f) - boxW;
-            float boxY = cy + dpi(app, 2.0f);
+            float boxX = cx + cw - cardPad - penW - dpi(app, 8.0f) - boxW;
+            float boxY = cy + (rowCardH - boxH) * 0.5f;
             D2D1_RECT_F box = D2D1::RectF(boxX, boxY, boxX + boxW, boxY + boxH);
             app.settingsLangBox = box;
             D2D1_COLOR_F c = app.theme.text; c.a = (app.settingsLangOpen ? 0.6f : 0.3f) * anim;
@@ -1923,16 +1979,17 @@ void renderSettingsOverlay(App& app) {
                             pen.right, pen.bottom), app.brush);
             app.settingsHits.push_back({pen, SET_OPEN_LANGS_INI});
         }
-        hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.shortcuts"), tr(app, "settings.shortcuts.hint"), dpi(app, 200.0f));
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        cardLabel(tr(app, "settings.shortcuts"), tr(app, "settings.shortcuts.hint"), dpi(app, 200.0f));
         {
             // Profile dropdown with a pencil beside it (opens the shortcut
             // editor) — geometry mirrors the language row above exactly
             float boxH = dpi(app, 26.0f);
             float penW = dpi(app, 26.0f);
             float boxW = dpi(app, 150.0f);
-            float boxX = cx + cw - penW - dpi(app, 8.0f) - boxW;
-            float boxY = cy + dpi(app, 2.0f);
+            float boxX = cx + cw - cardPad - penW - dpi(app, 8.0f) - boxW;
+            float boxY = cy + (rowCardH - boxH) * 0.5f;
             D2D1_RECT_F box = D2D1::RectF(boxX, boxY, boxX + boxW, boxY + boxH);
             app.settingsKeysBox = box;
             D2D1_COLOR_F c = app.theme.text;
@@ -1963,64 +2020,124 @@ void renderSettingsOverlay(App& app) {
                             pen.right, pen.bottom), app.brush);
             app.settingsHits.push_back({pen, SET_EDIT_KEYS});
         }
-        hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"), dpi(app, 50.0f));
-        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        cardLabel(tr(app, "settings.folder_search"), tr(app, "settings.folder_search.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.folderSearchEnabled, SET_TOGGLE_FOLDERSEARCH, anim);
-        hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.browse_focus_path"), tr(app, "settings.browse_focus_path.hint"), dpi(app, 50.0f));
-        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        cardLabel(tr(app, "settings.browse_focus_path"), tr(app, "settings.browse_focus_path.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.browserFocusPath, SET_TOGGLE_BROWSEFOCUS, anim);
-        hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.open_in_tabs"), tr(app, "settings.open_in_tabs.hint"), dpi(app, 50.0f));
-        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        cardLabel(tr(app, "settings.open_in_tabs"), tr(app, "settings.open_in_tabs.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.openInTabs, SET_TOGGLE_OPENTABS, anim);
-        hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.open_ini"), tr(app, "settings.open_ini.hint"), dpi(app, 70.0f));
-        float bx = cx + cw - dpi(app, 60.0f);
-        settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_INI, anim, fmt);
-        hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.open_themes_ini"), tr(app, "settings.open_themes_ini.hint"), dpi(app, 70.0f));
-        bx = cx + cw - dpi(app, 60.0f);
-        settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_THEMES_INI, anim, fmt);
-        hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.open_langs"), tr(app, "settings.open_langs.hint"), dpi(app, 70.0f));
-        bx = cx + cw - dpi(app, 60.0f);
-        settingsChip(app, bx, cy + dpi(app, 2.0f), tr(app, "settings.open"), false, SET_OPEN_LANGS_INI, anim, fmt);
-    } else if (app.settingsSection == 1) {  // Appearance
-        rowLabel(tr(app, "settings.reading_width_window"), tr(app, "settings.reading_width_window.hint"));
-        cy += rowH + dpi(app, 6.0f);
-        slider(cx, cy, cw, app.readingWidthPct, SET_SLIDER_READING, 0);
-        cy += dpi(app, 30.0f);
-        rowLabel(tr(app, "settings.reading_width_full"), tr(app, "settings.reading_width_full.hint"));
-        cy += rowH + dpi(app, 6.0f);
-        slider(cx, cy, cw, app.zenWidthPct, SET_SLIDER_ZEN, 1);
-        cy += dpi(app, 30.0f);
-        rowLabel(tr(app, "settings.follow_windows"), tr(app, "settings.follow_windows.hint"), dpi(app, 50.0f));
-        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
-                       app.followSystemTheme, SET_TOGGLE_FOLLOW, anim);
-        hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.toc_side"), tr(app, "settings.toc_side.hint"));
+        cy += rowCardH + cardGap;
+        // One card for the three hand-editable ini files (was three rows)
+        card(rowCardH);
+        float filesW = chipsWidth({L"settings.ini", L"themes.ini", L"languages.ini"});
+        cardLabel(tr(app, "settings.config_files"), tr(app, "settings.config_files.hint"),
+                  filesW + dpi(app, 10.0f));
         {
-            float tx = cx + cw - dpi(app, 118.0f);
-            settingsChip(app, tx, cy + dpi(app, 2.0f), tr(app, "settings.toc.left"), app.tocOnLeft,
-                         SET_TOC_LEFT, anim, fmt);
-            settingsChip(app, tx, cy + dpi(app, 2.0f), tr(app, "settings.toc.right"), !app.tocOnLeft,
-                         SET_TOC_RIGHT, anim, fmt);
+            float bx = cx + cw - cardPad - filesW;
+            float chipY = cy + (rowCardH - dpi(app, 24.0f)) * 0.5f;
+            settingsChip(app, bx, chipY, L"settings.ini", false, SET_OPEN_INI, anim, fmt);
+            settingsChip(app, bx, chipY, L"themes.ini", false, SET_OPEN_THEMES_INI, anim, fmt);
+            settingsChip(app, bx, chipY, L"languages.ini", false, SET_OPEN_LANGS_INI, anim, fmt);
         }
-        hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.themes"), tr(app, "settings.themes.hint"));
-        float bx2 = cx + cw - dpi(app, 208.0f);
-        settingsChip(app, bx2, cy + dpi(app, 2.0f), tr(app, "settings.browse"), false, SET_OPEN_THEMES, anim, fmt);
-        settingsChip(app, bx2, cy + dpi(app, 2.0f), tr(app, "settings.edit"), false, SET_EDIT_THEME, anim, fmt);
-        settingsChip(app, bx2, cy + dpi(app, 2.0f), tr(app, "settings.new"), false, SET_NEW_THEME, anim, fmt);
+    } else if (app.settingsSection == 1) {  // Appearance
+        card(sliderCardH);
+        cardLabel(tr(app, "settings.reading_width_window"), tr(app, "settings.reading_width_window.hint"));
+        slider(cx + cardPad, cy + dpi(app, 62.0f), cw - cardPad * 2,
+               app.readingWidthPct, SET_SLIDER_READING, 0);
+        cy += sliderCardH + cardGap;
+        card(sliderCardH);
+        cardLabel(tr(app, "settings.reading_width_full"), tr(app, "settings.reading_width_full.hint"));
+        slider(cx + cardPad, cy + dpi(app, 62.0f), cw - cardPad * 2,
+               app.zenWidthPct, SET_SLIDER_ZEN, 1);
+        cy += sliderCardH + cardGap;
+        card(rowCardH);
+        cardLabel(tr(app, "settings.follow_windows"), tr(app, "settings.follow_windows.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
+                       app.followSystemTheme, SET_TOGGLE_FOLLOW, anim);
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        {
+            // Left | Right segmented control inside a sunken container
+            const wchar_t* labels[2] = {tr(app, "settings.toc.left"),
+                                        tr(app, "settings.toc.right")};
+            float segH = dpi(app, 26.0f);
+            float segW = std::max(measureText(app, labels[0], fmt),
+                                  measureText(app, labels[1], fmt)) +
+                         dpi(app, 26.0f);
+            float inset = dpi(app, 3.0f);
+            float segRight = cx + cw - cardPad - inset;
+            float segY = cy + (rowCardH - segH) * 0.5f;
+            cardLabel(tr(app, "settings.toc_side"), tr(app, "settings.toc_side.hint"),
+                      segW * 2 + inset * 3 + dpi(app, 10.0f));
+            D2D1_RECT_F container = D2D1::RectF(
+                segRight - segW * 2 - inset * 2, segY - inset,
+                segRight + inset, segY + segH + inset);
+            D2D1_COLOR_F well = app.theme.isDark
+                ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.22f * anim)
+                : D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.07f * anim);
+            app.brush->SetColor(well);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(container, dpi(app, 8.0f), dpi(app, 8.0f)),
+                app.brush);
+            for (int s = 0; s < 2; s++) {
+                float sx = container.left + inset + s * (segW + inset);
+                D2D1_RECT_F sr = D2D1::RectF(sx, segY, sx + segW, segY + segH);
+                bool active = (s == 0) == app.tocOnLeft;
+                if (active) {
+                    app.brush->SetColor(settingsLift(app, 0.22f, 1.0f, anim));
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(sr, dpi(app, 6.0f), dpi(app, 6.0f)),
+                        app.brush);
+                }
+                D2D1_COLOR_F tc = app.theme.text;
+                tc.a = (active ? 0.95f : 0.55f) * anim;
+                app.brush->SetColor(tc);
+                float tw = measureText(app, labels[s], fmt);
+                app.renderTarget->DrawText(labels[s], (UINT32)wcslen(labels[s]), fmt,
+                    D2D1::RectF(sx + (segW - tw) * 0.5f, segY + dpi(app, 4.0f),
+                                sx + segW, segY + segH), app.brush);
+                app.settingsHits.push_back({sr, s == 0 ? SET_TOC_LEFT : SET_TOC_RIGHT});
+            }
+        }
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        {
+            float themesW = chipsWidth({tr(app, "settings.browse"),
+                                        tr(app, "settings.edit"),
+                                        tr(app, "settings.new")});
+            cardLabel(tr(app, "settings.themes"), tr(app, "settings.themes.hint"),
+                      themesW + dpi(app, 10.0f));
+            float bx2 = cx + cw - cardPad - themesW;
+            float chipY = cy + (rowCardH - dpi(app, 24.0f)) * 0.5f;
+            settingsChip(app, bx2, chipY, tr(app, "settings.browse"), false, SET_OPEN_THEMES, anim, fmt);
+            settingsChip(app, bx2, chipY, tr(app, "settings.edit"), false, SET_EDIT_THEME, anim, fmt);
+            // The create action is the accent-filled primary button
+            settingsChip(app, bx2, chipY, tr(app, "settings.new"), true, SET_NEW_THEME, anim, fmt);
+        }
     } else {  // Editor
-        rowLabel(tr(app, "settings.word_wrap"), tr(app, "settings.word_wrap.hint"), dpi(app, 50.0f));
-        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+        card(rowCardH);
+        cardLabel(tr(app, "settings.word_wrap"), tr(app, "settings.word_wrap.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.editorWordWrap, SET_TOGGLE_WRAP, anim);
-        hairline(); cy += rowH;
-        rowLabel(tr(app, "settings.preview_pane"), tr(app, "settings.preview_pane.hint"), dpi(app, 50.0f));
-        settingsToggle(app, cx + cw - dpi(app, 40.0f), cy + dpi(app, 6.0f),
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        cardLabel(tr(app, "settings.preview_pane"), tr(app, "settings.preview_pane.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.editorShowPreview, SET_TOGGLE_PREVIEW, anim);
     }
 
