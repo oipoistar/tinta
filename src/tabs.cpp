@@ -359,6 +359,40 @@ void drawCloseGlyph(App& app, float cx, float cy, float arm,
                                app.brush, dpi(app, 1.1f));
 }
 
+// The + new-tab button, shared by the full strip and the tabless title
+// (where it is the visible hint that the window can hold tabs)
+void drawPlusButton(App& app, float plusX, float stripH,
+                    const D2D1_COLOR_F& faint, const D2D1_COLOR_F& muted) {
+    float plusSize = dpi(app, 30.0f);
+    float plusY = (stripH - plusSize) * 0.5f;
+    D2D1_RECT_F plusRect = D2D1::RectF(plusX, plusY, plusX + plusSize,
+                                       plusY + plusSize);
+    bool plusHover = app.mouseX >= plusRect.left &&
+                     app.mouseX <= plusRect.right &&
+                     app.mouseY >= plusRect.top &&
+                     app.mouseY <= plusRect.bottom;
+    if (plusHover) {
+        app.brush->SetColor(faint);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(plusRect, dpi(app, 6.0f), dpi(app, 6.0f)),
+            app.brush);
+    }
+    app.brush->SetColor(muted);
+    float pcx = (plusRect.left + plusRect.right) * 0.5f;
+    float pcy = (plusRect.top + plusRect.bottom) * 0.5f;
+    float parm = dpi(app, 5.0f);
+    app.renderTarget->DrawLine(D2D1::Point2F(pcx - parm, pcy),
+                               D2D1::Point2F(pcx + parm, pcy), app.brush,
+                               dpi(app, 1.2f));
+    app.renderTarget->DrawLine(D2D1::Point2F(pcx, pcy - parm),
+                               D2D1::Point2F(pcx, pcy + parm), app.brush,
+                               dpi(app, 1.2f));
+    App::TabHit plusHit;
+    plusHit.rect = plusRect;
+    plusHit.index = -2;
+    app.tabHits.push_back(plusHit);
+}
+
 }  // namespace
 
 void renderTabStrip(App& app) {
@@ -417,22 +451,37 @@ void renderTabStrip(App& app) {
 
     bool tabless = !tabStripVisible(app);
     if (tabless) {
-        // Single document: the caption shows the plain window title
+        // Single document: the caption shows the plain window title, with
+        // the + button right after it so the tab row is discoverable
         std::wstring title = L"Tinta";
         if (!app.tabs.empty() && !app.tabs[0].title.empty()) {
             title = app.tabs[0].title;
             if (app.editMode && app.editorDirty) title = L"* " + title;
         }
+        float textLeft = iconCell + dpi(app, 4.0f);
+        float textRight = textLeft;
+        float maxRight = (float)app.width - captionButtonWidth(app) * 3;
         if (app.folderBrowserFormat) {
             app.brush->SetColor(muted);
             app.renderTarget->DrawText(
                 title.c_str(), (UINT32)title.size(), app.folderBrowserFormat,
-                D2D1::RectF(iconCell + dpi(app, 4.0f),
-                            (stripH - dpi(app, 17.0f)) * 0.5f,
-                            (float)app.width - captionButtonWidth(app) * 3,
-                            stripH),
+                D2D1::RectF(textLeft, (stripH - dpi(app, 17.0f)) * 0.5f,
+                            maxRight, stripH),
                 app.brush);
+            IDWriteTextLayout* layout = nullptr;
+            app.dwriteFactory->CreateTextLayout(
+                title.c_str(), (UINT32)title.size(), app.folderBrowserFormat,
+                std::max(1.0f, maxRight - textLeft), stripH, &layout);
+            if (layout) {
+                DWRITE_TEXT_METRICS tm{};
+                layout->GetMetrics(&tm);
+                textRight += tm.width;
+                layout->Release();
+            }
         }
+        float plusX = std::min(textRight + dpi(app, 10.0f),
+                               maxRight - dpi(app, 38.0f));
+        drawPlusButton(app, plusX, stripH, faint, muted);
     } else {
         StripMetrics m = stripMetrics(app);
         float radius = dpi(app, 8.0f);
@@ -556,34 +605,9 @@ void renderTabStrip(App& app) {
         app.renderTarget->PopAxisAlignedClip();
 
         // + new tab
+        drawPlusButton(app, m.plusX, stripH, faint, muted);
         float plusSize = dpi(app, 30.0f);
         float plusY = (stripH - plusSize) * 0.5f;
-        D2D1_RECT_F plusRect = D2D1::RectF(m.plusX, plusY, m.plusX + plusSize,
-                                           plusY + plusSize);
-        bool plusHover = app.mouseX >= plusRect.left &&
-                         app.mouseX <= plusRect.right &&
-                         app.mouseY >= plusRect.top &&
-                         app.mouseY <= plusRect.bottom;
-        if (plusHover) {
-            app.brush->SetColor(faint);
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(plusRect, dpi(app, 6.0f), dpi(app, 6.0f)),
-                app.brush);
-        }
-        app.brush->SetColor(muted);
-        float pcx = (plusRect.left + plusRect.right) * 0.5f;
-        float pcy = (plusRect.top + plusRect.bottom) * 0.5f;
-        float parm = dpi(app, 5.0f);
-        app.renderTarget->DrawLine(D2D1::Point2F(pcx - parm, pcy),
-                                   D2D1::Point2F(pcx + parm, pcy), app.brush,
-                                   dpi(app, 1.2f));
-        app.renderTarget->DrawLine(D2D1::Point2F(pcx, pcy - parm),
-                                   D2D1::Point2F(pcx, pcy + parm), app.brush,
-                                   dpi(app, 1.2f));
-        App::TabHit plusHit;
-        plusHit.rect = plusRect;
-        plusHit.index = -2;
-        app.tabHits.push_back(plusHit);
 
         // Overflow chevron when compressed
         if (m.compressed) {
