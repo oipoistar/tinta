@@ -53,7 +53,7 @@ Most markdown apps ship an entire browser to render text. Tinta uses the GPU-acc
 
 |  | Tinta | Typora | Obsidian | VS Code |
 |---|---|---|---|---|
-| Startup | **~200 ms** | ~1.5 s | ~3 s | ~2 s |
+| Startup | **<100 ms** | ~1.5 s | ~3 s | ~2 s |
 | Install size | **~1.4 MB** | ~90 MB | ~250 MB | ~350 MB |
 | Runtime | **Native Direct2D** | Electron | Electron | Electron |
 
