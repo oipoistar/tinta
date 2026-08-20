@@ -1,5 +1,24 @@
 # Changelog
 
+## [v3.0.0] - 2026-08-20
+
+The tabs release: Tinta becomes a tabbed markdown workspace while staying a single small native executable.
+
+### Added
+- Win11 Notepad-style tabs in the title bar: files opened from Explorer join the existing window as tabs (turn off with the "Open files in tabs" setting), Ctrl+Tab cycles, Ctrl+W or middle-click closes, Ctrl+T opens the file browser into a new tab, Ctrl+1–9 jumps, and an overflow switcher appears when the strip gets crowded (#115)
+- Tab dragging: reorder within the strip, pull a tab out as a floating card and drop it on open space for a new window or onto another Tinta window to move it there, and drop a single-file window onto a tab strip to merge it back (#115)
+- Right-click tab menu with close operations — Close, Close all but this, Close all to the left/right — plus Copy file path and Reveal in Explorer (#115)
+- Session restore: the tab set and active tab come back on the next launch; tabs show an orange dot for unsaved changes and a muted red dot when the file vanished from disk, and edits parked in background tabs survive switching (#115)
+- A fresh untitled note (Ctrl+N or the + button) offers a centered "Open a file" button (Ctrl+O) in the preview pane until you start typing (#115)
+- Crashes now write a diagnostic dump to `%LOCALAPPDATA%\Tinta\crash.dmp` to make bug reports actionable (#115)
+
+### Changed
+- The title bar is Tinta's own: a themed caption whose strip doubles as the tab row, with matching window controls and DWM frame colors (#115)
+- The settings dialog adopts a Fluent-style design: one lifted card per setting, a cleaner section rail, a real Left/Right segmented control for the TOC side, and the three configuration-file rows merged into a single card (#116)
+
+### Fixed
+- Clicking a folder-browser row right after a fast mouse move opened the previously highlighted row instead of the one under the cursor (#114)
+
 ## [v2.9.0] - 2026-08-19
 
 The diagram release: Tinta grows from one natively rendered Mermaid family to thirteen.
