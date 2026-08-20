@@ -31,6 +31,9 @@
 #include "editor.h"
 #include "print.h"
 #include "i18n.h"
+#include "tabs.h"
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
 
 static App* g_app = nullptr;
 
@@ -611,10 +614,13 @@ render_document:
     if (needsVScroll) {
         float scrollExtent = std::max((float)app.height, app.scrollbarContentHeight);
         float maxScrollY = std::max(0.0f, scrollExtent - app.height);
-        float trackHeight = app.height - (needsHScroll ? scrollbarSize : 0);
+        float trackTop = chromeTopHeight(app);
+        float trackHeight =
+            app.height - trackTop - (needsHScroll ? scrollbarSize : 0);
         float sbHeight = trackHeight / scrollExtent * trackHeight;
         sbHeight = std::max(sbHeight, dpi(app, 30.0f));
-        float sbY = (maxScrollY > 0) ? (app.scrollY / maxScrollY * (trackHeight - sbHeight)) : 0;
+        float sbY = trackTop +
+            ((maxScrollY > 0) ? (app.scrollY / maxScrollY * (trackHeight - sbHeight)) : 0);
 
         float sbWidth = (app.scrollbarHovered || app.scrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f);
         float sbAlpha = (app.scrollbarHovered || app.scrollbarDragging) ? 0.5f : 0.3f;
@@ -777,7 +783,7 @@ render_document:
             copyWidth = std::min(copyWidth, (float)app.width - dpi(app, 20.0f));
             float copyHeight = dpi(app, 26.0f);
             float pillX = (app.width - copyWidth) / 2;
-            float pillY = dpi(app, 10.0f);
+            float pillY = chromeTopHeight(app) + dpi(app, 10.0f);
 
             D2D1_COLOR_F pillColor = app.theme.accent;
             pillColor.a = 0.92f * alpha;
@@ -864,17 +870,23 @@ render_document:
         app.renderTarget->SetTransform(identity);
         app.renderTarget->PopAxisAlignedClip();
 
+        // Quick-note empty state: Open button in the blank preview pane
+        renderQuickNoteEmptyState(app);
+
         // Render search overlay in screen coordinates (over editor pane)
         if (app.showSearch) renderSearchOverlay(app);
 
         // Render edit mode notification (on top of everything)
         renderEditModeNotification(app);
-
-        // Unsaved-changes dialog above it all
-        if (app.confirmExitPending) renderConfirmExitDialog(app);
     }
 
-    // "Saved!" notification (reuses "Copied!" infrastructure)
+    // Title-bar tab strip: the caption itself, above every panel
+    renderTabStrip(app);
+    renderTabSwitcher(app);
+    renderTabMenu(app);
+
+    // Unsaved-changes dialog above it all (also entered from tab closes)
+    if (app.confirmExitPending) renderConfirmExitDialog(app);
 
     app.renderTarget->EndDraw();
 }
@@ -883,6 +895,173 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     App* app = g_app;
 
     switch (msg) {
+        case WM_NCCALCSIZE: {
+            // Reclaim the caption: the title bar becomes the tab strip.
+            // DefWindowProc computes the resize borders, then the top edge
+            // is restored so the client area reaches the top of the window.
+            if (!wParam || !app || app->zenMode) break;
+            NCCALCSIZE_PARAMS* params =
+                reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
+            RECT original = params->rgrc[0];
+            DefWindowProcW(hwnd, WM_NCCALCSIZE, wParam, lParam);
+            params->rgrc[0].top = original.top;
+            if (IsZoomed(hwnd)) {
+                params->rgrc[0].top += GetSystemMetrics(SM_CYSIZEFRAME) +
+                                       GetSystemMetrics(SM_CXPADDEDBORDER);
+            }
+            return 0;
+        }
+
+        case WM_NCHITTEST: {
+            if (!app || app->zenMode) break;
+            LRESULT def = DefWindowProcW(hwnd, WM_NCHITTEST, wParam, lParam);
+            if (def != HTCLIENT) return def;  // resize borders
+            POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            ScreenToClient(hwnd, &pt);
+            float x = (float)pt.x, y = (float)pt.y;
+            if (y >= chromeTopHeight(*app)) return HTCLIENT;
+            if (!IsZoomed(hwnd) &&
+                y < (float)GetSystemMetrics(SM_CYSIZEFRAME)) {
+                return HTTOP;
+            }
+            int button = captionHitTest(*app, x, y);
+            if (button == 1) return HTMINBUTTON;
+            if (button == 2) return HTMAXBUTTON;  // Win11 snap flyout
+            if (button == 3) return HTCLOSE;
+            for (const App::TabHit& hit : app->tabHits) {
+                if (x >= hit.rect.left && x <= hit.rect.right &&
+                    y >= hit.rect.top && y <= hit.rect.bottom) {
+                    return HTCLIENT;  // tabs, +, chevron take normal clicks
+                }
+            }
+            return HTCAPTION;  // empty strip drags the window
+        }
+
+        case WM_NCMOUSEMOVE: {
+            if (!app || app->zenMode) break;
+            POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            ScreenToClient(hwnd, &pt);
+            int hover = captionHitTest(*app, (float)pt.x, (float)pt.y);
+            if (hover != app->captionButtonHover) {
+                app->captionButtonHover = hover;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            TRACKMOUSEEVENT track = {sizeof(track), TME_NONCLIENT | TME_LEAVE,
+                                     hwnd, 0};
+            TrackMouseEvent(&track);
+            break;
+        }
+
+        case WM_NCMOUSELEAVE:
+            if (app && (app->captionButtonHover || app->captionButtonPressed)) {
+                app->captionButtonHover = 0;
+                app->captionButtonPressed = 0;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            break;
+
+        case WM_NCLBUTTONDOWN:
+            if (app && !app->zenMode &&
+                (wParam == HTMINBUTTON || wParam == HTMAXBUTTON ||
+                 wParam == HTCLOSE)) {
+                app->captionButtonPressed =
+                    wParam == HTMINBUTTON ? 1 : wParam == HTMAXBUTTON ? 2 : 3;
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;  // consume: no legacy button painting
+            }
+            break;
+
+        case WM_NCLBUTTONUP:
+            if (app && app->captionButtonPressed) {
+                POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                ScreenToClient(hwnd, &pt);
+                int released = captionHitTest(*app, (float)pt.x, (float)pt.y);
+                int pressed = app->captionButtonPressed;
+                app->captionButtonPressed = 0;
+                InvalidateRect(hwnd, nullptr, FALSE);
+                if (released == pressed) {
+                    if (pressed == 1) {
+                        PostMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+                    } else if (pressed == 2) {
+                        PostMessageW(hwnd, WM_SYSCOMMAND,
+                                     IsZoomed(hwnd) ? SC_RESTORE : SC_MAXIMIZE,
+                                     0);
+                    } else {
+                        PostMessageW(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+                    }
+                }
+                return 0;
+            }
+            break;
+
+        case WM_NCRBUTTONUP:
+            if (app && !app->zenMode && wParam == HTCAPTION) {
+                HMENU menu = GetSystemMenu(hwnd, FALSE);
+                if (menu) {
+                    int cmd = TrackPopupMenu(
+                        menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+                        GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), 0, hwnd,
+                        nullptr);
+                    if (cmd) PostMessageW(hwnd, WM_SYSCOMMAND, cmd, 0);
+                }
+                return 0;
+            }
+            break;
+
+        case WM_MBUTTONDOWN:
+            if (app && app->renderTarget) {
+                int mx = GET_X_LPARAM(lParam);
+                int my = GET_Y_LPARAM(lParam);
+                if ((float)my < chromeTopHeight(*app)) {
+                    tabStripMouseDown(*app, hwnd, mx, my, true);
+                    return 0;
+                }
+            }
+            break;
+
+        case WM_CLOSE:
+            // Unsaved buffers (active or parked in tabs) get the dialog
+            // before the window may close; tabs stay open so the session
+            // save still remembers them
+            if (app && app->confirmExitPending) {
+                app->pendingWindowClose = true;  // dialog is already asking
+                return 0;
+            }
+            if (app) {
+                for (size_t i = 0; i < app->tabs.size(); i++) {
+                    bool dirty = (int)i == app->activeTab
+                                     ? (app->editMode && app->editorDirty)
+                                     : (app->tabs[i].editMode &&
+                                        app->tabs[i].editorDirty);
+                    if (!dirty) continue;
+                    if ((int)i != app->activeTab) {
+                        tabActivate(*app, hwnd, (int)i);
+                    }
+                    app->pendingWindowClose = true;
+                    app->confirmExitPending = true;
+                    app->confirmExitOpenedAt = std::chrono::steady_clock::now();
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
+            }
+            break;
+
+        case WM_COPYDATA:
+            if (app) {
+                COPYDATASTRUCT* data =
+                    reinterpret_cast<COPYDATASTRUCT*>(lParam);
+                if (data && data->dwData == 1 && data->lpData &&
+                    data->cbData > 0) {
+                    std::string path(static_cast<const char*>(data->lpData),
+                                     data->cbData - 1);
+                    if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+                    SetForegroundWindow(hwnd);
+                    tabOpenPath(*app, hwnd, path, true);
+                    return TRUE;
+                }
+            }
+            break;
+
         case WM_SIZE:
             if (app && app->d2dFactory) {
                 // The preview's geometry is stale after a resize: restore
@@ -965,6 +1144,38 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_LBUTTONUP:
             if (app) handleMouseUp(*app, hwnd, wParam, lParam);
+            return 0;
+
+        case WM_ENTERSIZEMOVE:
+            if (app) {
+                app->windowMoveTracking = true;
+                GetWindowRect(hwnd, &app->windowMoveStartRect);
+            }
+            break;
+
+        case WM_EXITSIZEMOVE:
+            // A finished native window MOVE may be a drop onto another
+            // Tinta window's strip; resizes land here too, so only a
+            // changed position with an unchanged size qualifies
+            if (app && app->windowMoveTracking) {
+                app->windowMoveTracking = false;
+                RECT now;
+                const RECT& was = app->windowMoveStartRect;
+                if (GetWindowRect(hwnd, &now) &&
+                    (now.left != was.left || now.top != was.top) &&
+                    now.right - now.left == was.right - was.left &&
+                    now.bottom - now.top == was.bottom - was.top) {
+                    tabWindowDropMerge(*app, hwnd);
+                }
+            }
+            break;
+
+        case WM_CAPTURECHANGED:
+            // Losing capture mid tab-drag (Alt+Tab, a popup stealing the
+            // mouse) aborts the drag instead of leaving a stray ghost
+            if (app && app->tabDragIndex >= 0 && (HWND)lParam != hwnd) {
+                tabDragCancel(*app, hwnd);
+            }
             return 0;
 
         case WM_SETCURSOR:
@@ -1095,6 +1306,31 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.darkThemeIndex = app->darkThemeIndex;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
                 settings.browserFocusPath = app->browserFocusPath;
+                settings.openInTabs = app->openInTabs;
+                // Remember the open tab set for the next launch (untitled
+                // quick-note buffers have no path to restore). Satellite
+                // windows never own the session: they re-read the owner's
+                // stored session so their full-file save cannot clobber a
+                // newer one with launch-time data.
+                if (app->sessionOwner) {
+                    settings.sessionTabs.clear();
+                    settings.sessionActive = 0;
+                    for (size_t i = 0; i < app->tabs.size(); i++) {
+                        const std::string& path =
+                            (int)i == app->activeTab ? app->currentFile
+                                                     : app->tabs[i].path;
+                        if (path.empty()) continue;
+                        if ((int)i == app->activeTab) {
+                            settings.sessionActive =
+                                (int)settings.sessionTabs.size();
+                        }
+                        settings.sessionTabs.push_back(path);
+                    }
+                } else {
+                    Settings onDisk = loadSettings();
+                    settings.sessionTabs = onDisk.sessionTabs;
+                    settings.sessionActive = onDisk.sessionActive;
+                }
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
                 settings.tocOnLeft = app->tocOnLeft;
@@ -1192,7 +1428,32 @@ Press **?** at any time to see all shortcuts.
 - **Q** - Quit
 )";
 
+// Last-chance handler: writes %LOCALAPPDATA%\Tinta\crash.dmp so crash
+// reports from the field carry a usable stack
+static LONG WINAPI writeCrashDump(EXCEPTION_POINTERS* exceptionInfo) {
+    wchar_t path[MAX_PATH];
+    DWORD len = GetEnvironmentVariableW(L"LOCALAPPDATA", path, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) return EXCEPTION_CONTINUE_SEARCH;
+    std::wstring dir = std::wstring(path) + L"\\Tinta";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    std::wstring file = dir + L"\\crash.dmp";
+    HANDLE dump = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr,
+                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (dump != INVALID_HANDLE_VALUE) {
+        MINIDUMP_EXCEPTION_INFORMATION info;
+        info.ThreadId = GetCurrentThreadId();
+        info.ExceptionPointers = exceptionInfo;
+        info.ClientPointers = FALSE;
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), dump,
+                          MiniDumpWithIndirectlyReferencedMemory, &info,
+                          nullptr, nullptr);
+        CloseHandle(dump);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow) {
+    SetUnhandledExceptionFilter(writeCrashDump);
     // Enable per-monitor DPI V2 awareness
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -1213,6 +1474,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.darkThemeIndex = savedSettings.darkThemeIndex;
     app.folderSearchEnabled = savedSettings.folderSearchEnabled;
     app.browserFocusPath = savedSettings.browserFocusPath;
+    app.openInTabs = savedSettings.openInTabs;
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;
@@ -1241,6 +1503,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     bool startInEditMode = false; // open straight into the editor
     bool quickNote = false;       // Ctrl+N: untitled buffer, no backing file
     std::wstring printPagesDir;   // debug: render print pages as PNGs and exit
+    int posX = 0, posY = 0;       // --pos: spawn position (tab drag-out)
+    bool hasPos = false;
 
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -1254,12 +1518,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             forceRegister = true;
         } else if (arg == L"--cascade") {
             cascadeWindow = true;
+        } else if (arg == L"--tabbed") {
+            // Drag-out satellites keep the tab row even with one tab
+            app.forceTabStrip = true;
         } else if (arg == L"--edit") {
             startInEditMode = true;
         } else if (arg == L"--new") {
             quickNote = true;
         } else if (arg == L"--printpages" && i + 1 < argc) {
             printPagesDir = argv[++i];
+        } else if (arg == L"--pos" && i + 2 < argc) {
+            // Drag-out spawn: place the new window at the drop point
+            posX = _wtoi(argv[++i]);
+            posY = _wtoi(argv[++i]);
+            hasPos = true;
         } else if (arg[0] != L'-' && arg[0] != L'/') {
             // Convert to UTF-8
             int len = WideCharToMultiByte(CP_UTF8, 0, arg.c_str(), -1, nullptr, 0, nullptr, nullptr);
@@ -1268,6 +1540,35 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         }
     }
     LocalFree(argv);
+
+    // Single instance: a plain file launch joins the existing window as a
+    // new tab (Win11 Notepad model). --new/--cascade windows and the
+    // openInTabs=false setting keep the one-window-per-document behavior.
+    if (!inputFile.empty() && !quickNote && !cascadeWindow &&
+        printPagesDir.empty() && savedSettings.openInTabs) {
+        HWND existing = FindWindowW(L"Tinta", nullptr);
+        if (existing) {
+            // Resolve to an absolute path: the receiving window has its own
+            // working directory
+            std::wstring wide = toWide(inputFile);
+            wchar_t full[MAX_PATH];
+            if (GetFullPathNameW(wide.c_str(), MAX_PATH, full, nullptr)) {
+                int len = WideCharToMultiByte(CP_UTF8, 0, full, -1, nullptr, 0,
+                                              nullptr, nullptr);
+                std::string absolute(len - 1, '\0');
+                WideCharToMultiByte(CP_UTF8, 0, full, -1, &absolute[0], len,
+                                    nullptr, nullptr);
+                COPYDATASTRUCT data;
+                data.dwData = 1;
+                data.cbData = (DWORD)absolute.size() + 1;
+                data.lpData = (void*)absolute.c_str();
+                SendMessageW(existing, WM_COPYDATA, 0, (LPARAM)&data);
+                if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
+                SetForegroundWindow(existing);
+                return 0;
+            }
+        }
+    }
 
     // Handle /register command
     if (forceRegister) {
@@ -1336,10 +1637,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     // A window spawned for a newly created document steps down-right from
     // the saved position so it does not cover the window that spawned it
-    if (cascadeWindow && windowX != CW_USEDEFAULT && windowY != CW_USEDEFAULT) {
+    if (hasPos) {
+        // Tab drag-out: appear under the drop point
+        windowX = posX;
+        windowY = posY;
+    } else if (cascadeWindow && windowX != CW_USEDEFAULT && windowY != CW_USEDEFAULT) {
         windowX += 40;
         windowY += 40;
     }
+
+    // Only the primary window persists and restores the tab session;
+    // deliberate offshoots (new-note windows, drag-outs) are satellites
+    app.sessionOwner = !cascadeWindow && !quickNote;
 
     app.hwnd = CreateWindowExW(
         WS_EX_ACCEPTFILES,
@@ -1358,6 +1667,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     // Theme the native title bar before the window is ever shown
     applyWindowChrome(app);
+
+    // Apply the custom-caption frame (WM_NCCALCSIZE) to the fresh window
+    SetWindowPos(app.hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
+                     SWP_FRAMECHANGED);
 
     // Initialize D2D
     if (!initD2D(app)) {
@@ -1407,6 +1721,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         return loadDocumentContent(buffer.str(), path);
     };
 
+    // Last session's tabs come back on plain launches (files that vanished
+    // from disk in the meantime are dropped)
+    bool restoreSession = !quickNote && !cascadeWindow && !startInEditMode &&
+                          printPagesDir.empty() &&
+                          !savedSettings.sessionTabs.empty();
+    std::vector<std::string> sessionPaths;
+    int sessionActive = 0;
+    if (restoreSession) {
+        for (size_t i = 0; i < savedSettings.sessionTabs.size(); i++) {
+            const auto& path = savedSettings.sessionTabs[i];
+            if (GetFileAttributesW(toWide(path).c_str()) !=
+                INVALID_FILE_ATTRIBUTES) {
+                // The active slot follows its path through the filtering
+                if ((int)i == savedSettings.sessionActive) {
+                    sessionActive = (int)sessionPaths.size();
+                }
+                sessionPaths.push_back(path);
+            }
+        }
+        if (sessionPaths.empty()) restoreSession = false;
+    }
+
     if (quickNote) {
         // Untitled quick note: an empty document, no backing file
         loadDocumentContent(std::string(), {});
@@ -1414,6 +1750,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         if (loadFile(inputFile)) {
             app.currentFile = inputFile;
             app.focusMermaidOnNextLayout = isMermaidDocumentPath(inputFile);
+        } else {
+            loadDocumentContent(sampleMarkdown, {});
+        }
+    } else if (restoreSession) {
+        // No file argument: reopen where the last session left off
+        if (loadFile(sessionPaths[sessionActive])) {
+            app.currentFile = sessionPaths[sessionActive];
+            app.focusMermaidOnNextLayout =
+                isMermaidDocumentPath(sessionPaths[sessionActive]);
         } else {
             loadDocumentContent(sampleMarkdown, {});
         }
@@ -1436,6 +1781,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
 
     // Set window title with filename
     updateWindowTitle(app);
+
+    // The startup document becomes the first (tabless) tab; a restored
+    // session rebuilds the whole row in its saved order
+    if (restoreSession && !app.currentFile.empty()) {
+        tabsSeedSession(app, sessionPaths);
+    } else {
+        tabsInit(app);
+    }
 
     // Start file watch timer and record initial write time
     updateFileWriteTime(app);

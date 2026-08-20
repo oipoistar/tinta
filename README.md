@@ -69,7 +69,8 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Focused editing** - Hide the preview pane while writing (Ctrl+E)
 - **Native Mermaid diagrams** - Flowcharts, sequence, class, state, ER, pie, git graphs, gantt, mindmaps, timelines, journeys, and charts — rendered without a web engine
 - **Rich tables** - Tables with bold, italic, code, and clickable links in cells
-- **Folder browser** - Press B to browse and open Markdown or Mermaid files
+- **Tabs** - Win11 Notepad-style tabs in the title bar: files opened from Explorer join the window as tabs, Ctrl+Tab cycles, Ctrl+W closes, middle-click closes, Ctrl+T opens the file browser into a new tab, unsaved buffers show a dot, and dragging reorders tabs. Right-click a tab for close operations (close, close all but this, close all to the left/right) plus copy path and reveal in Explorer. Pulling a tab out of the strip floats it as a card: drop it on open space for a new window (which keeps the tab row), or onto another Tinta window to move it there — and dropping a single-file window onto a tab strip merges it back. Single-file windows stay tabless; turn the Explorer behavior off with the "Open files in tabs" setting
+- **Folder browser** - Press B to browse and open Markdown or Mermaid files (Ctrl+click a file to open it in a new tab)
 - **Table of contents** - Press Tab to see document headings, click to jump
 - **Edit mode** - Press `:` to edit markdown with live preview, search works in editor too
 - **Search** - Find text with F or Ctrl+F, cycle through matches with Enter
@@ -99,7 +100,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Home/End` | Jump to start/end |
 | `:` | Enter edit mode |
 | `ESC` `ESC` | Exit edit mode |
-| `Ctrl+N` | New quick note — a fresh window, start typing right away; `Ctrl+S` names it via the save dialog |
+| `Ctrl+N` | New quick note — a fresh window, start typing right away; `Ctrl+S` names it via the save dialog. While the note is still empty, an **Open a file** button (`Ctrl+O`) in the preview pane picks an existing file instead |
 | `Ctrl+S` | Save (in edit mode) |
 | `Ctrl+P` | Print / export to PDF |
 | `Ctrl+E` | Show/hide preview pane (in edit mode) |

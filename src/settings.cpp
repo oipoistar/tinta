@@ -52,6 +52,7 @@ void saveSettings(const Settings& settings) {
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
     file << "folderSearchEnabled=" << (settings.folderSearchEnabled ? 1 : 0) << "\n";
     file << "browserFocusPath=" << (settings.browserFocusPath ? 1 : 0) << "\n";
+    file << "openInTabs=" << (settings.openInTabs ? 1 : 0) << "\n";
     file << "readingWidthPct=" << settings.readingWidthPct << "\n";
     file << "zenWidthPct=" << settings.zenWidthPct << "\n";
     file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
@@ -68,6 +69,15 @@ void saveSettings(const Settings& settings) {
             if (kv.first == KEY_ACTIONS[i].name) { value = kv.second; break; }
         }
         file << KEY_ACTIONS[i].name << "=" << value << "\n";
+    }
+
+    if (!settings.sessionTabs.empty()) {
+        // Open tabs from the last session, restored on the next plain launch
+        file << "[Session]\n";
+        file << "sessionActive=" << settings.sessionActive << "\n";
+        for (const auto& path : settings.sessionTabs) {
+            file << "tab=" << path << "\n";
+        }
     }
 
     if (!settings.readingPositions.empty()) {
@@ -220,6 +230,8 @@ Settings loadSettings() {
             settings.folderSearchEnabled = (value == "1");
         } else if (key == "browserFocusPath") {
             settings.browserFocusPath = (value == "1");
+        } else if (key == "openInTabs") {
+            settings.openInTabs = (value == "1");
         } else if (key == "followSystemTheme") {
             settings.followSystemTheme = (value == "1");
         } else if (key == "lightThemeIndex") {
@@ -236,6 +248,13 @@ Settings loadSettings() {
             settings.editorShowPreview = (value == "1");
         } else if (key == "editorWordWrap") {
             settings.editorWordWrap = (value == "1");
+        } else if (key == "sessionActive") {
+            int idx = std::stoi(value);
+            if (idx >= 0) settings.sessionActive = idx;
+        } else if (key == "tab") {
+            if (!value.empty() && settings.sessionTabs.size() < 64) {
+                settings.sessionTabs.push_back(value);
+            }
         } else if (key == "pos") {
             size_t sep = value.find('|');
             if (sep != std::string::npos && sep + 1 < value.size()) {

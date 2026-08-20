@@ -150,6 +150,12 @@ struct Settings {
     bool folderSearchEnabled = true;
     // B opens the folder browser with the path box focused (#81)
     bool browserFocusPath = false;
+    // Plain file launches join the existing window as a new tab (Win11
+    // Notepad model); off restores one window per document
+    bool openInTabs = true;
+    // Last session's open tabs, restored on the next plain launch
+    std::vector<std::string> sessionTabs;
+    int sessionActive = 0;
     // Reading positions: most-recent-first, capped (#77)
     struct ReadingPosition { std::string path; float scrollY; };
     std::vector<ReadingPosition> readingPositions;
@@ -353,6 +359,89 @@ struct App {
     bool showThemeChooser = false;
     int hoveredThemeIndex = -1;
     float themeChooserAnimation = 0.0f;  // 0 to 1 for fade in
+
+    // --- Tabbed interface (Win11 Notepad-style tabs in the title bar) ---
+    // A tab keeps only what the document itself cannot restore: its path
+    // and, when the user switches away mid-edit, the parked editor buffer.
+    // View-mode scroll positions ride the existing reading-position memory.
+    struct DocTab {
+        int id = 0;                // stable identity across reorders/closes
+        std::string path;          // empty = untitled quick note buffer
+        std::wstring title;        // display name (file name / Untitled)
+        bool editMode = false;     // switched away while editing
+        bool editorDirty = false;
+        bool fileMissing = false;  // deleted/renamed on disk (red-grey dot)
+        FILETIME lastWrite{};      // for external-change conflicts (dirty tabs)
+        std::wstring editorText;   // parked edit buffer (editMode only)
+        float editorScrollY = 0.0f;
+        size_t editorCursor = 0;
+        bool wordWrap = true;
+    };
+    std::vector<DocTab> tabs;
+    int activeTab = 0;
+    bool showTabSwitcher = false;      // chevron dropdown (open-files list)
+    int tabSwitcherHover = -1;
+    int hoveredTab = -1;               // strip hover for close-button reveal
+    int captionButtonHover = 0;        // 0 none, 1 min, 2 max, 3 close
+    int captionButtonPressed = 0;
+    bool tabNewTabIntent = false;      // Ctrl+T: next browser pick -> new tab
+
+    // Caption button hit rects (client coords), refreshed by renderTabStrip
+    D2D1_RECT_F tabStripRects[3] = {};  // min, max, close
+    struct TabHit {
+        D2D1_RECT_F rect{};
+        int index = -1;    // tab index; -2 = plus, -3 = chevron
+        D2D1_RECT_F closeRect{};
+        bool hasClose = false;
+    };
+    std::vector<TabHit> tabHits;       // refreshed by renderTabStrip
+    std::vector<std::pair<D2D1_RECT_F, int>> tabSwitcherHits;
+    // Closing a dirty tab routes through the unsaved-changes dialog; the
+    // close completes from confirmExitAction once the user decides
+    int pendingTabClose = -1;
+    // Window close with dirty buffers: resolve them one dialog at a time,
+    // then let the close proceed (Keep editing cancels it)
+    bool pendingWindowClose = false;
+    // Tab dragging: press arms a potential drag, moving past the threshold
+    // starts reordering, leaving the strip vertically detaches the tab
+    // into its own window
+    int tabDragIndex = -1;       // pressed/dragged tab slot
+    bool tabDragging = false;    // threshold crossed
+    float tabDragOffsetX = 0.0f; // grab point within the tab
+    int tabDragStartX = 0;
+    int tabDragStartY = 0;
+    // Pulled clear of the strip: the tab floats as a ghost card until
+    // release decides (drop into another window / new window / snap back)
+    bool tabDragDetached = false;
+    HWND tabGhostWnd = nullptr;
+    // A native move/size loop is in progress; the starting rect tells a
+    // pure move (a possible strip drop) apart from a resize on exit
+    bool windowMoveTracking = false;
+    RECT windowMoveStartRect = {};
+    // Right-click tab context menu (NPP-style close operations)
+    bool showTabMenu = false;
+    int tabMenuIndex = -1;          // tab the menu targets
+    int tabMenuHover = -1;
+    float tabMenuX = 0.0f;
+    float tabMenuY = 0.0f;
+    float tabMenuAnimation = 0.0f;
+    // Bulk close (others / left / right) survives the per-tab
+    // unsaved-changes dialogs by re-finding the kept tab by id
+    int tabBulkCloseMode = 0;       // 0 none, 1 others, 2 left, 3 right
+    int tabBulkKeepId = 0;
+    int tabIdCounter = 0;           // DocTab.id source
+    // Drag-out satellites keep the tab row even with a single tab
+    bool forceTabStrip = false;
+    // Quick-note empty state: "Open a file" button in the preview pane of
+    // an untitled, still-empty buffer (rect refreshed by its renderer)
+    D2D1_RECT_F quickNoteButtonRect = {};
+    bool quickNoteButtonHover = false;
+    // Only the primary window persists the tab session; satellites
+    // (--cascade/--new/drag-outs) neither restore nor overwrite it
+    bool sessionOwner = true;
+    // 16px window icon drawn in the strip (device bitmap: recreated with
+    // the render target)
+    ID2D1Bitmap* titleIconBitmap = nullptr;
 
     // Folder browser overlay
     bool showFolderBrowser = false;
@@ -576,6 +665,8 @@ struct App {
     bool folderSearchEnabled = true;
     // B opens the folder browser with the path box focused (#81)
     bool browserFocusPath = false;
+    // Plain file launches join this window as tabs (settings toggle)
+    bool openInTabs = true;
     int folderSearchGeneration = 0;
     struct FolderMatch {
         std::wstring snippet;
@@ -873,6 +964,10 @@ struct App {
         imageCache.clear();
         imageCacheBytes = 0;
         imageCacheUseClock = 0;
+        if (titleIconBitmap) {
+            titleIconBitmap->Release();
+            titleIconBitmap = nullptr;
+        }
     }
 
     void shutdown() {
@@ -918,6 +1013,13 @@ inline float editorPaneWidth(const App& app) {
 
 // Folder browser panel width — shared by input hit-testing, the panel
 // renderer, and the viewport shift
+// Title-bar strip height: the custom caption hosting the tab strip. Zero
+// in zen mode (borderless fullscreen hides all chrome).
+inline float chromeTopHeight(const App& app) {
+    if (app.zenMode) return 0.0f;
+    return dpi(app, 40.0f);
+}
+
 inline float folderBrowserPanelWidth(const App& app) {
     float cap = dpi(app, 300.0f);
     float floor_ = dpi(app, 250.0f);

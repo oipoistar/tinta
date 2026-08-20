@@ -1,4 +1,5 @@
 #include "d2d_init.h"
+#include "tabs.h"
 #include "math_render.h"
 #include "utils.h"
 
@@ -35,8 +36,10 @@ void applyWindowChrome(App& app) {
     DwmSetWindowAttribute(app.hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
                           &dark, sizeof(dark));
 
-    // Windows 11: exact theme colors (silently rejected on older builds)
-    COLORREF caption = toColorref(app.theme.background);
+    // Windows 11: exact theme colors (silently rejected on older builds).
+    // The frame tint matches the drawn tab strip, so the window border and
+    // any DWM-drawn transition flash blend with the custom caption.
+    COLORREF caption = toColorref(tabStripBackground(app));
     DwmSetWindowAttribute(app.hwnd, DWMWA_CAPTION_COLOR,
                           &caption, sizeof(caption));
     DwmSetWindowAttribute(app.hwnd, DWMWA_BORDER_COLOR,
@@ -450,6 +453,11 @@ bool createRenderTarget(App& app) {
         it->second.bytes = 0;
         if (it->second.pending) { ++it; }
         else { it = app.imageCache.erase(it); }
+    }
+    // The title-bar icon is a device bitmap too; the strip recreates it
+    if (app.titleIconBitmap) {
+        app.titleIconBitmap->Release();
+        app.titleIconBitmap = nullptr;
     }
 
     RECT rc;
