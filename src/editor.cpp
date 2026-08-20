@@ -881,6 +881,165 @@ static bool promptSaveAsPath(App& app, HWND hwnd) {
     return true;
 }
 
+// --- Quick-note empty state (design 4a) ---
+//
+// An untitled buffer with no text yet shows a centered "Open a file"
+// button in the preview pane; it disappears at the first typed character.
+// The button (or Ctrl+O) opens the classic file picker and the picked
+// document takes over this tab.
+
+bool quickNoteEmptyStateActive(const App& app) {
+    return app.editMode && app.currentFile.empty() && app.editorText.empty();
+}
+
+void quickNoteOpenFile(App& app, HWND hwnd) {
+    wchar_t path[MAX_PATH] = L"";
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = L"Markdown / Mermaid (*.md;*.markdown;*.mmd)\0"
+                      L"*.md;*.markdown;*.mmd\0"
+                      L"All files (*.*)\0*.*\0";
+    ofn.lpstrFile = path;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
+                OFN_HIDEREADONLY;
+    if (!GetOpenFileNameW(&ofn)) return;
+
+    // The picked document takes over: open it as a tab (dedupe and
+    // activation included — this parks and leaves the empty editor),
+    // then drop the untitled shell tab
+    tabsInit(app);
+    int untitledId = app.tabs[app.activeTab].id;
+    tabOpenPath(app, hwnd, toUtf8(path));
+    for (int i = 0; i < (int)app.tabs.size(); i++) {
+        if (app.tabs[i].id == untitledId) {
+            tabCloseIndex(app, hwnd, i);
+            break;
+        }
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void renderQuickNoteEmptyState(App& app) {
+    if (!quickNoteEmptyStateActive(app) || !app.editorShowPreview) return;
+    IDWriteTextFormat* format = app.folderBrowserFormat;
+    if (!format || !app.renderTarget || !app.brush || !app.dwriteFactory)
+        return;
+
+    float paneX = (float)app.width * app.editorSplitRatio;
+    float paneW = (float)app.width - paneX;
+    if (paneW < dpi(app, 180.0f)) return;  // pane too narrow to bother
+
+    const wchar_t* label = tr(app, "empty.open_button");
+    const wchar_t* chip = L"Ctrl+O";
+
+    IDWriteTextLayout* labelLayout = nullptr;
+    IDWriteTextLayout* chipLayout = nullptr;
+    app.dwriteFactory->CreateTextLayout(label, (UINT32)wcslen(label), format,
+                                        2000.0f, 100.0f, &labelLayout);
+    app.dwriteFactory->CreateTextLayout(chip, (UINT32)wcslen(chip), format,
+                                        2000.0f, 100.0f, &chipLayout);
+    if (!labelLayout || !chipLayout) {
+        if (labelLayout) labelLayout->Release();
+        if (chipLayout) chipLayout->Release();
+        return;
+    }
+    DWRITE_TEXT_METRICS lm{}, cm{};
+    labelLayout->GetMetrics(&lm);
+    chipLayout->GetMetrics(&cm);
+
+    // Button geometry: folder icon, label, and a Ctrl+O keycap chip
+    float iconW = dpi(app, 20.0f);
+    float chipW = cm.width + dpi(app, 16.0f);
+    float btnW = dpi(app, 18.0f) + iconW + dpi(app, 10.0f) + lm.width +
+                 dpi(app, 12.0f) + chipW + dpi(app, 14.0f);
+    float btnH = dpi(app, 44.0f);
+    float chromeTop = chromeTopHeight(app);
+    float cx = paneX + paneW * 0.5f;
+    float cy = chromeTop + ((float)app.height - chromeTop) * 0.5f -
+               dpi(app, 40.0f);
+    D2D1_RECT_F btn = D2D1::RectF(cx - btnW * 0.5f, cy - btnH * 0.5f,
+                                  cx + btnW * 0.5f, cy + btnH * 0.5f);
+    app.quickNoteButtonRect = btn;
+
+    // Raised card over the empty pane; a touch stronger under the cursor
+    D2D1_COLOR_F fill = app.theme.text;
+    fill.a = app.quickNoteButtonHover ? 0.10f : 0.06f;
+    app.brush->SetColor(fill);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(btn, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush);
+    D2D1_COLOR_F border = app.theme.text;
+    border.a = 0.12f;
+    app.brush->SetColor(border);
+    app.renderTarget->DrawRoundedRectangle(
+        D2D1::RoundedRect(btn, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush,
+        1.0f);
+
+    // Folder icon: tab flap over a rounded body, in the accent color
+    float ix = btn.left + dpi(app, 18.0f);
+    float iy = cy - dpi(app, 7.5f);
+    app.brush->SetColor(app.theme.accent);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(D2D1::RectF(ix, iy, ix + dpi(app, 9.0f),
+                                      iy + dpi(app, 6.0f)),
+                          dpi(app, 1.5f), dpi(app, 1.5f)),
+        app.brush);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(D2D1::RectF(ix, iy + dpi(app, 2.5f), ix + iconW,
+                                      iy + dpi(app, 15.0f)),
+                          dpi(app, 2.0f), dpi(app, 2.0f)),
+        app.brush);
+
+    // Label
+    float labelX = ix + iconW + dpi(app, 10.0f);
+    app.brush->SetColor(app.theme.text);
+    app.renderTarget->DrawTextLayout(
+        D2D1::Point2F(labelX, cy - lm.height * 0.5f), labelLayout, app.brush);
+
+    // Ctrl+O keycap chip
+    float chipX = labelX + lm.width + dpi(app, 12.0f);
+    float chipH = dpi(app, 22.0f);
+    D2D1_RECT_F chipRect = D2D1::RectF(chipX, cy - chipH * 0.5f,
+                                       chipX + chipW, cy + chipH * 0.5f);
+    D2D1_COLOR_F chipBg = app.theme.text;
+    chipBg.a = 0.08f;
+    app.brush->SetColor(chipBg);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(chipRect, dpi(app, 4.0f), dpi(app, 4.0f)),
+        app.brush);
+    D2D1_COLOR_F chipText = app.theme.text;
+    chipText.a = 0.55f;
+    app.brush->SetColor(chipText);
+    app.renderTarget->DrawTextLayout(
+        D2D1::Point2F(chipX + dpi(app, 8.0f), cy - cm.height * 0.5f),
+        chipLayout, app.brush);
+    labelLayout->Release();
+    chipLayout->Release();
+
+    // Hint lines, centered under the button
+    const char* hintKeys[2] = { "empty.hint1", "empty.hint2" };
+    float hintY = btn.bottom + dpi(app, 18.0f);
+    for (const char* key : hintKeys) {
+        const wchar_t* hint = tr(app, key);
+        IDWriteTextLayout* layout = nullptr;
+        app.dwriteFactory->CreateTextLayout(hint, (UINT32)wcslen(hint),
+                                            format, 2000.0f, 100.0f, &layout);
+        if (layout) {
+            DWRITE_TEXT_METRICS hm{};
+            layout->GetMetrics(&hm);
+            D2D1_COLOR_F muted = app.theme.text;
+            muted.a = 0.5f;
+            app.brush->SetColor(muted);
+            app.renderTarget->DrawTextLayout(
+                D2D1::Point2F(cx - hm.width * 0.5f, hintY), layout,
+                app.brush);
+            hintY += hm.height + dpi(app, 4.0f);
+            layout->Release();
+        }
+    }
+}
+
 void saveEditorFile(App& app, HWND hwnd) {
     if (app.currentFile.empty()) {
         // Untitled quick note: name it now; cancel keeps editing untitled
@@ -1021,6 +1180,13 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             updateBlinkTimer(app);
         }
         InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
+    // Ctrl+O on an untitled, still-empty note opens the file picker
+    // (the empty state's keycap hint; works with the preview hidden too)
+    if (ctrl && wParam == 'O' && quickNoteEmptyStateActive(app)) {
+        quickNoteOpenFile(app, hwnd);
         return;
     }
 

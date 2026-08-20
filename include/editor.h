@@ -30,6 +30,13 @@ void renderEditModeNotification(App& app);
 void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
                        float scrollY, size_t cursor);
 
+// Quick-note empty state (design 4a): an untitled buffer with no text yet
+// shows a centered "Open a file" button in the preview pane until typing
+// starts; the button (or Ctrl+O) opens the classic file picker
+bool quickNoteEmptyStateActive(const App& app);
+void quickNoteOpenFile(App& app, HWND hwnd);
+void renderQuickNoteEmptyState(App& app);
+
 // File save
 void saveEditorFile(App& app, HWND hwnd);
 // Unsaved-changes dialog outcome: 1 save+exit, 2 discard, 3 keep editing

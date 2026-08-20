@@ -1054,6 +1054,22 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             ? app.width * app.editorSplitRatio
             : static_cast<float>(app.width);
         if (app.mouseX < sepX || app.draggingSeparator || app.editorSelecting) return;
+        // Quick-note empty state: hover feedback for the Open button
+        if (quickNoteEmptyStateActive(app) && app.editorShowPreview) {
+            const D2D1_RECT_F& r = app.quickNoteButtonRect;
+            bool over = (float)app.mouseX >= r.left &&
+                        (float)app.mouseX <= r.right &&
+                        (float)app.mouseY >= r.top &&
+                        (float)app.mouseY <= r.bottom;
+            if (over != app.quickNoteButtonHover) {
+                app.quickNoteButtonHover = over;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            if (over) {
+                SetCursor(cursorHand);
+                return;
+            }
+        }
         // For preview pane, adjust mouseX to be relative to preview offset
         // but we leave the existing code to work with document coordinates
     }
@@ -1486,6 +1502,16 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             : static_cast<float>(app.width);
         if (x < sepX + 6) {
             handleEditorMouseDown(app, hwnd, x, y);
+            return;
+        }
+        // Quick-note empty state: the Open button in the preview pane
+        if (quickNoteEmptyStateActive(app) && app.editorShowPreview &&
+            (float)x >= app.quickNoteButtonRect.left &&
+            (float)x <= app.quickNoteButtonRect.right &&
+            (float)y >= app.quickNoteButtonRect.top &&
+            (float)y <= app.quickNoteButtonRect.bottom) {
+            app.swallowNextMouseUp = true;
+            quickNoteOpenFile(app, hwnd);
             return;
         }
         // Fall through for preview pane clicks

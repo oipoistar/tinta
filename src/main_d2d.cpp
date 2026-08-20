@@ -870,6 +870,9 @@ render_document:
         app.renderTarget->SetTransform(identity);
         app.renderTarget->PopAxisAlignedClip();
 
+        // Quick-note empty state: Open button in the blank preview pane
+        renderQuickNoteEmptyState(app);
+
         // Render search overlay in screen coordinates (over editor pane)
         if (app.showSearch) renderSearchOverlay(app);
 

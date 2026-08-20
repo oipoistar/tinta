@@ -432,6 +432,10 @@ struct App {
     int tabIdCounter = 0;           // DocTab.id source
     // Drag-out satellites keep the tab row even with a single tab
     bool forceTabStrip = false;
+    // Quick-note empty state: "Open a file" button in the preview pane of
+    // an untitled, still-empty buffer (rect refreshed by its renderer)
+    D2D1_RECT_F quickNoteButtonRect = {};
+    bool quickNoteButtonHover = false;
     // Only the primary window persists the tab session; satellites
     // (--cascade/--new/drag-outs) neither restore nor overwrite it
     bool sessionOwner = true;

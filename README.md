@@ -100,7 +100,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Home/End` | Jump to start/end |
 | `:` | Enter edit mode |
 | `ESC` `ESC` | Exit edit mode |
-| `Ctrl+N` | New quick note — a fresh window, start typing right away; `Ctrl+S` names it via the save dialog |
+| `Ctrl+N` | New quick note — a fresh window, start typing right away; `Ctrl+S` names it via the save dialog. While the note is still empty, an **Open a file** button (`Ctrl+O`) in the preview pane picks an existing file instead |
 | `Ctrl+S` | Save (in edit mode) |
 | `Ctrl+P` | Print / export to PDF |
 | `Ctrl+E` | Show/hide preview pane (in edit mode) |
