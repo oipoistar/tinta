@@ -4,8 +4,14 @@
   <p><em>Markdown, distilled.</em></p>
   <p>A fast, lightweight Markdown and Mermaid viewer for Windows</p>
 
+  <p>
+    <a href="https://apps.microsoft.com/detail/9MZ5MZ3L9RKF">
+      <img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get Tinta from the Microsoft Store">
+    </a>
+  </p>
+
   <a href="https://github.com/oipoistar/tinta/releases/latest">
-    <img src="https://img.shields.io/github/v/release/oipoistar/tinta?label=Download&style=for-the-badge&color=1a1a2e" alt="Download">
+    <img src="https://img.shields.io/github/v/release/oipoistar/tinta?label=Portable&style=for-the-badge&color=1a1a2e" alt="Portable download">
   </a>
   <a href="https://tinta.cc">
     <img src="https://img.shields.io/badge/website-tinta.cc-8b4513?style=for-the-badge" alt="Website">
@@ -13,12 +19,6 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT License">
   </a>
-
-  <p>
-    <a href="https://apps.microsoft.com/detail/9MZ5MZ3L9RKF">
-      <img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get Tinta from the Microsoft Store">
-    </a>
-  </p>
 </div>
 
 <br>
@@ -30,17 +30,19 @@ Tinta is a **fast, lightweight Markdown and Mermaid viewer for Windows**, built 
   <img src="https://tinta.cc/img/screenshots/midnight.png" width="49%" alt="Tinta markdown viewer on Windows — Midnight dark theme">
 </p>
 
-## Download
+## Install
 
-Grab [the latest release](https://github.com/oipoistar/tinta/releases/latest) — a single portable `tinta.exe`, no installation required. Run it and open a Markdown or Mermaid file.
-
-Or install from the [Microsoft Store](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF) (automatic updates, Store-signed):
+The recommended way is the [Microsoft Store](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF): the build is signed by the Store, trusted by Windows out of the box (no security prompts, works with Smart App Control), and updates automatically. The same signed build installs from the command line:
 
 ```pwsh
 winget install "Tinta Markdown Viewer" -s msstore
 ```
 
-Or install with [Scoop](https://scoop.sh):
+### Portable and other options
+
+Prefer a single file? Grab [the latest release](https://github.com/oipoistar/tinta/releases/latest): a portable `tinta.exe`, no installation required. Because a freshly released exe is not yet code-signed, Windows may show a SmartScreen prompt on first run ("More info", then "Run anyway") until the new version builds up download reputation.
+
+[Scoop](https://scoop.sh) users can install from the bucket:
 
 ```pwsh
 scoop bucket add tinta https://github.com/oipoistar/scoop-bucket
