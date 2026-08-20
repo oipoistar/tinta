@@ -982,6 +982,15 @@ void confirmExitAction(App& app, HWND hwnd, int action) {
             tabCloseIndex(app, hwnd, tab);
         }
     }
+    // A Close-others/left/right sweep paused on this dialog: continue with
+    // the remaining tabs, or abort the whole sweep on Keep editing
+    if (app.tabBulkCloseMode) {
+        if (action == 3 || app.editMode) {
+            app.tabBulkCloseMode = 0;
+        } else {
+            tabBulkCloseStep(app, hwnd);
+        }
+    }
     // A window close paused on this dialog resumes once the buffer is
     // resolved: the next dirty tab prompts, or the window finally closes
     if (app.pendingWindowClose) {

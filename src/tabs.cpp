@@ -83,6 +83,7 @@ void parkActiveEditBuffer(App& app) {
 void tabsInit(App& app) {
     if (!app.tabs.empty()) return;
     App::DocTab tab;
+    tab.id = ++app.tabIdCounter;
     tab.path = app.currentFile;
     tab.title = titleForPath(app, app.currentFile);
     app.tabs.push_back(std::move(tab));
@@ -97,6 +98,7 @@ void tabsSeedSession(App& app, const std::vector<std::string>& paths) {
     app.activeTab = -1;
     for (const auto& path : paths) {
         App::DocTab tab;
+        tab.id = ++app.tabIdCounter;
         tab.path = path;
         tab.title = titleForPath(app, path);
         if (app.activeTab < 0 &&
@@ -107,6 +109,7 @@ void tabsSeedSession(App& app, const std::vector<std::string>& paths) {
     }
     if (app.activeTab < 0) {
         App::DocTab tab;
+        tab.id = ++app.tabIdCounter;
         tab.path = app.currentFile;
         tab.title = titleForPath(app, app.currentFile);
         app.tabs.push_back(std::move(tab));
@@ -166,6 +169,7 @@ void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
         }
     }
     App::DocTab tab;
+    tab.id = ++app.tabIdCounter;
     tab.path = utf8Path;
     tab.title = titleForPath(app, utf8Path);
     app.tabs.push_back(std::move(tab));
@@ -237,6 +241,7 @@ void tabOpenQuickNote(App& app, HWND hwnd) {
     syncActiveTab(app);
     parkActiveEditBuffer(app);
     App::DocTab tab;
+    tab.id = ++app.tabIdCounter;
     tab.title = tr(app, "title.untitled");
     app.tabs.push_back(std::move(tab));
     app.activeTab = (int)app.tabs.size() - 1;
@@ -410,7 +415,7 @@ void renderTabStrip(App& app) {
 
     app.tabHits.clear();
 
-    bool tabless = app.tabs.size() < 2;
+    bool tabless = !tabStripVisible(app);
     if (tabless) {
         // Single document: the caption shows the plain window title
         std::wstring title = L"Tinta";
@@ -833,6 +838,292 @@ bool tabStripMouseDown(App& app, HWND hwnd, int x, int y, bool middle) {
     return true;  // strip clicks never fall through to the document
 }
 
+bool tabStripVisible(const App& app) {
+    return app.tabs.size() > 1 || (app.forceTabStrip && !app.tabs.empty());
+}
+
+// --- tab context menu: right-click a tab for NPP-style close operations
+// (close, close others, close left/right) plus path utilities ---
+
+namespace {
+
+enum TabMenuItem {
+    TM_CLOSE = 0,
+    TM_CLOSE_OTHERS,
+    TM_CLOSE_LEFT,
+    TM_CLOSE_RIGHT,
+    TM_COPY_PATH,
+    TM_REVEAL,
+    TM_ITEM_COUNT,
+};
+
+struct TabMenuEntry {
+    const char* key;         // translation key
+    const wchar_t* shortcut;
+    bool separatorAfter;
+};
+
+const TabMenuEntry TAB_MENU[TM_ITEM_COUNT] = {
+    { "tab.menu.close",        L"Ctrl+W", false },
+    { "tab.menu.close_others", L"",       false },
+    { "tab.menu.close_left",   L"",       false },
+    { "tab.menu.close_right",  L"",       true  },
+    { "tab.menu.copy_path",    L"",       false },
+    { "ctx.reveal",            L"",       false },
+};
+
+float tabMenuItemHeight(const App& app) { return dpi(app, 30.0f); }
+float tabMenuSeparator(const App& app) { return dpi(app, 9.0f); }
+float tabMenuWidth(const App& app) { return dpi(app, 235.0f); }
+float tabMenuPadding(const App& app) { return dpi(app, 6.0f); }
+
+float tabMenuItemTop(const App& app, int index) {
+    float y = tabMenuPadding(app);
+    for (int i = 0; i < index; i++) {
+        y += tabMenuItemHeight(app);
+        if (TAB_MENU[i].separatorAfter) y += tabMenuSeparator(app);
+    }
+    return y;
+}
+
+float tabMenuTotalHeight(const App& app) {
+    return tabMenuItemTop(app, TM_ITEM_COUNT) + tabMenuPadding(app);
+}
+
+bool tabMenuItemEnabled(const App& app, int item) {
+    int index = app.tabMenuIndex;
+    if (index < 0 || index >= (int)app.tabs.size()) return false;
+    switch (item) {
+        case TM_CLOSE:        return true;
+        case TM_CLOSE_OTHERS: return app.tabs.size() > 1;
+        case TM_CLOSE_LEFT:   return index > 0;
+        case TM_CLOSE_RIGHT:  return index + 1 < (int)app.tabs.size();
+        case TM_COPY_PATH:
+        case TM_REVEAL:       return !app.tabs[index].path.empty();
+    }
+    return false;
+}
+
+int tabIndexById(const App& app, int id) {
+    for (size_t i = 0; i < app.tabs.size(); i++) {
+        if (app.tabs[i].id == id) return (int)i;
+    }
+    return -1;
+}
+
+void tabBulkCloseBegin(App& app, HWND hwnd, int mode, int keepIndex) {
+    if (keepIndex < 0 || keepIndex >= (int)app.tabs.size()) return;
+    app.tabBulkCloseMode = mode;
+    app.tabBulkKeepId = app.tabs[keepIndex].id;
+    tabBulkCloseStep(app, hwnd);
+}
+
+}  // namespace
+
+void tabBulkCloseStep(App& app, HWND hwnd) {
+    // Sweeps clean victims immediately; a dirty one opens the #106 dialog
+    // and the sweep resumes from confirmExitAction (Keep editing aborts)
+    while (app.tabBulkCloseMode) {
+        int keep = tabIndexById(app, app.tabBulkKeepId);
+        if (keep < 0) {
+            app.tabBulkCloseMode = 0;
+            return;
+        }
+        int victim = -1;
+        if (app.tabBulkCloseMode != 3 && keep > 0) {
+            victim = 0;  // everything left of the kept tab, one by one
+        } else if (app.tabBulkCloseMode != 2 &&
+                   keep + 1 < (int)app.tabs.size()) {
+            victim = keep + 1;  // everything to its right
+        }
+        if (victim < 0) {
+            app.tabBulkCloseMode = 0;
+            if (keep != app.activeTab) tabActivate(app, hwnd, keep);
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        tabCloseIndex(app, hwnd, victim);
+        if (app.confirmExitPending) return;  // waiting on the dialog
+    }
+}
+
+void openTabMenu(App& app, int tabIndex, float x, float y) {
+    float w = tabMenuWidth(app);
+    float h = tabMenuTotalHeight(app);
+    app.tabMenuIndex = tabIndex;
+    app.tabMenuX = std::max(0.0f, std::min(x, (float)app.width - w));
+    app.tabMenuY = std::max(0.0f, std::min(y, (float)app.height - h));
+    app.showTabMenu = true;
+    app.tabMenuHover = -1;
+    app.tabMenuAnimation = 0.0f;
+    // The strip's own hover state stays quiet underneath
+    app.hoveredTab = -1;
+}
+
+void closeTabMenu(App& app) {
+    app.showTabMenu = false;
+    app.tabMenuHover = -1;
+    app.tabMenuAnimation = 0.0f;
+}
+
+int tabMenuItemAt(const App& app, float x, float y) {
+    if (x < app.tabMenuX || x > app.tabMenuX + tabMenuWidth(app)) return -1;
+    float rel = y - app.tabMenuY;
+    for (int i = 0; i < TM_ITEM_COUNT; i++) {
+        float top = tabMenuItemTop(app, i);
+        if (rel >= top && rel < top + tabMenuItemHeight(app)) return i;
+    }
+    return -1;
+}
+
+void renderTabMenu(App& app) {
+    if (!app.showTabMenu) return;
+    if (app.tabMenuIndex < 0 || app.tabMenuIndex >= (int)app.tabs.size()) {
+        closeTabMenu(app);
+        return;
+    }
+    if (app.tabMenuAnimation < 1.0f) {
+        float prev = app.tabMenuAnimation;
+        app.tabMenuAnimation = std::min(1.0f, app.tabMenuAnimation + 0.25f);
+        if (app.tabMenuAnimation != prev)
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+    float anim = app.tabMenuAnimation;
+
+    IDWriteTextFormat* format = app.folderBrowserFormat;
+    if (!format) return;
+
+    float x = app.tabMenuX;
+    float y = app.tabMenuY;
+    float w = tabMenuWidth(app);
+    float h = tabMenuTotalHeight(app);
+
+    D2D1_COLOR_F panelBg = app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
+                                            : hexColor(0xF8F8F8, 0.97f);
+    D2D1_COLOR_F borderColor = app.theme.isDark ? hexColor(0x3A3A40, 0.9f)
+                                                : hexColor(0xC8C8C8, 0.9f);
+    app.brush->SetColor(panelBg);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6, 6), app.brush);
+    app.brush->SetColor(borderColor);
+    app.renderTarget->DrawRoundedRectangle(
+        D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6, 6), app.brush,
+        1.0f);
+
+    app.tabMenuHover = tabMenuItemAt(app, (float)app.mouseX, (float)app.mouseY);
+
+    float pad = tabMenuPadding(app);
+    float itemH = tabMenuItemHeight(app);
+    float inset = dpi(app, 12.0f);
+    for (int i = 0; i < TM_ITEM_COUNT; i++) {
+        float top = y + tabMenuItemTop(app, i);
+        bool enabled = tabMenuItemEnabled(app, i);
+
+        if (i == app.tabMenuHover && enabled) {
+            D2D1_COLOR_F hoverColor = app.theme.accent;
+            hoverColor.a = 0.18f * anim;
+            app.brush->SetColor(hoverColor);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(
+                    D2D1::RectF(x + pad, top, x + w - pad, top + itemH), 4, 4),
+                app.brush);
+        }
+
+        D2D1_COLOR_F textColor = app.theme.text;
+        textColor.a = (enabled ? 1.0f : 0.35f) * anim;
+        app.brush->SetColor(textColor);
+        float textY = top + (itemH - dpi(app, 18.0f)) / 2;
+        const wchar_t* label = tr(app, TAB_MENU[i].key);
+        app.renderTarget->DrawText(
+            label, (UINT32)wcslen(label), format,
+            D2D1::RectF(x + inset, textY, x + w - inset, top + itemH),
+            app.brush);
+
+        if (TAB_MENU[i].shortcut[0]) {
+            IDWriteTextLayout* hint = nullptr;
+            app.dwriteFactory->CreateTextLayout(
+                TAB_MENU[i].shortcut, (UINT32)wcslen(TAB_MENU[i].shortcut),
+                format, 1000.0f, itemH, &hint);
+            if (hint) {
+                DWRITE_TEXT_METRICS metrics{};
+                hint->GetMetrics(&metrics);
+                D2D1_COLOR_F hintColor = app.theme.text;
+                hintColor.a = 0.4f * anim;
+                app.brush->SetColor(hintColor);
+                app.renderTarget->DrawTextLayout(
+                    D2D1::Point2F(x + w - inset - metrics.width, textY), hint,
+                    app.brush);
+                hint->Release();
+            }
+        }
+
+        if (TAB_MENU[i].separatorAfter) {
+            float sepY = top + itemH + tabMenuSeparator(app) * 0.5f;
+            app.brush->SetColor(borderColor);
+            app.renderTarget->DrawLine(D2D1::Point2F(x + pad, sepY),
+                                       D2D1::Point2F(x + w - pad, sepY),
+                                       app.brush, 1.0f);
+        }
+    }
+}
+
+bool tabMenuMouseDown(App& app, HWND hwnd, int x, int y) {
+    if (!app.showTabMenu) return false;
+    int item = tabMenuItemAt(app, (float)x, (float)y);
+    int index = app.tabMenuIndex;
+    closeTabMenu(app);
+    app.swallowNextMouseUp = true;
+    InvalidateRect(hwnd, nullptr, FALSE);
+    if (item < 0 || index < 0 || index >= (int)app.tabs.size()) return true;
+    // Re-validate against the surviving tab row (indices can shift while
+    // the menu is up only via external means; the guard is cheap)
+    App& a = app;
+    switch (item) {
+        case TM_CLOSE:
+            if (tabMenuItemEnabled(a, TM_CLOSE)) tabCloseIndex(a, hwnd, index);
+            break;
+        case TM_CLOSE_OTHERS:
+            if (a.tabs.size() > 1) tabBulkCloseBegin(a, hwnd, 1, index);
+            break;
+        case TM_CLOSE_LEFT:
+            if (index > 0) tabBulkCloseBegin(a, hwnd, 2, index);
+            break;
+        case TM_CLOSE_RIGHT:
+            if (index + 1 < (int)a.tabs.size())
+                tabBulkCloseBegin(a, hwnd, 3, index);
+            break;
+        case TM_COPY_PATH:
+            if (!a.tabs[index].path.empty()) {
+                std::wstring wide = toWide(a.tabs[index].path);
+                wchar_t fullPath[MAX_PATH];
+                if (GetFullPathNameW(wide.c_str(), MAX_PATH, fullPath,
+                                     nullptr)) {
+                    wide = fullPath;
+                }
+                copyToClipboard(hwnd, wide);
+                a.copiedNotificationKey = "toast.copied";
+                a.showCopiedNotification = true;
+                a.copiedNotificationStart = std::chrono::steady_clock::now();
+                startNotificationTimer(a);
+            }
+            break;
+        case TM_REVEAL:
+            if (!a.tabs[index].path.empty()) {
+                std::wstring wide = toWide(a.tabs[index].path);
+                wchar_t fullPath[MAX_PATH];
+                if (GetFullPathNameW(wide.c_str(), MAX_PATH, fullPath,
+                                     nullptr)) {
+                    std::wstring params =
+                        L"/select,\"" + std::wstring(fullPath) + L"\"";
+                    ShellExecuteW(nullptr, L"open", L"explorer.exe",
+                                  params.c_str(), nullptr, SW_SHOWNORMAL);
+                }
+            }
+            break;
+    }
+    return true;
+}
+
 // --- drag ghost: a layered popup card that follows the cursor while a
 // tab is pulled clear of the strip, so the detach reads as a motion
 // instead of a jump ---
@@ -1084,7 +1375,7 @@ void tabDragEnd(App& app, HWND hwnd, int x, int y) {
             if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
                 wchar_t args[MAX_PATH * 2];
                 swprintf_s(args, _countof(args),
-                           L"--cascade --pos %d %d \"%hs\"",
+                           L"--cascade --tabbed --pos %d %d \"%hs\"",
                            screen.x - (int)dpi(app, 120.0f),
                            screen.y - (int)dpi(app, 20.0f), path.c_str());
                 ShellExecuteW(nullptr, L"open", exePath, args, nullptr,

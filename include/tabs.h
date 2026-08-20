@@ -31,6 +31,18 @@ void tabOpenQuickNote(App& app, HWND hwnd);
 void renderTabStrip(App& app);
 void renderTabSwitcher(App& app);
 
+// Tab row vs tabless title text (drag-out satellites force the row)
+bool tabStripVisible(const App& app);
+
+// Right-click tab context menu (NPP-style close operations)
+void openTabMenu(App& app, int tabIndex, float x, float y);
+void closeTabMenu(App& app);
+int tabMenuItemAt(const App& app, float x, float y);
+void renderTabMenu(App& app);
+bool tabMenuMouseDown(App& app, HWND hwnd, int x, int y);
+// Continue a Close-others/left/right sweep after a dirty tab's dialog
+void tabBulkCloseStep(App& app, HWND hwnd);
+
 // Mouse handling for the strip area; return true when consumed
 bool tabStripMouseDown(App& app, HWND hwnd, int x, int y, bool middle);
 bool tabSwitcherMouseDown(App& app, HWND hwnd, int x, int y);

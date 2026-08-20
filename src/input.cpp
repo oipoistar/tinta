@@ -758,6 +758,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         app.contextMenuAnimation = 0;
         app.hoveredContextMenuItem = -1;
     }
+    if (app.showTabMenu) closeTabMenu(app);
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
 
@@ -935,6 +936,17 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     if (app.showThemeEditor) {
         setCursorFromHits(app.themeEditorHits, (float)app.mouseX,
                           (float)app.mouseY, true);
+        return;
+    }
+    // Tab menu open: hover tracks its items only (the menu sits above
+    // every panel, like the strip that spawned it)
+    if (app.showTabMenu) {
+        int item = tabMenuItemAt(app, (float)app.mouseX, (float)app.mouseY);
+        if (item != app.tabMenuHover) {
+            app.tabMenuHover = item;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        SetCursor(item >= 0 ? cursorHand : cursorArrow);
         return;
     }
     if (app.showShortcutEditor) {
@@ -1370,21 +1382,39 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
 }
 
 void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
-    // Viewer mode only, and never on top of a modal overlay. The search
-    // bar is fine — it shares the viewport rather than covering it.
-    if (app.editMode || app.showThemeChooser || app.showToc ||
-        app.showFolderBrowser || app.showHelp || app.showPrintPreview ||
-        app.showSettings || app.showThemeEditor) {
-        return;
-    }
-
     POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-    if (pt.x == -1 && pt.y == -1) {
+    bool fromKeyboard = pt.x == -1 && pt.y == -1;
+    if (fromKeyboard) {
         // Keyboard menu key: open near the viewport center
         pt.x = app.width / 2;
         pt.y = app.height / 2;
     } else {
         ScreenToClient(hwnd, &pt);
+    }
+
+    // A right-click on a tab opens the tab menu (works in edit mode and
+    // above panels too — the strip stays interactive there)
+    if (!fromKeyboard && !app.showPrintPreview && !app.confirmExitPending &&
+        (float)pt.y < chromeTopHeight(app)) {
+        for (const App::TabHit& hit : app.tabHits) {
+            if (hit.index >= 0 && (float)pt.x >= hit.rect.left &&
+                (float)pt.x <= hit.rect.right && (float)pt.y >= hit.rect.top &&
+                (float)pt.y <= hit.rect.bottom) {
+                openTabMenu(app, hit.index, (float)pt.x, (float)pt.y);
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+        }
+        return;  // strip right-clicks never reach the document menu
+    }
+
+    // Document menu: viewer mode only, and never on top of a modal
+    // overlay. The search bar is fine — it shares the viewport rather
+    // than covering it.
+    if (app.editMode || app.showThemeChooser || app.showToc ||
+        app.showFolderBrowser || app.showHelp || app.showPrintPreview ||
+        app.showSettings || app.showThemeEditor) {
+        return;
     }
     openContextMenu(app, (float)pt.x, (float)pt.y);
     InvalidateRect(hwnd, nullptr, FALSE);
@@ -1395,6 +1425,8 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     {
         int mx = GET_X_LPARAM(lParam);
         int my = GET_Y_LPARAM(lParam);
+        // Tab context menu: a click lands on an item or dismisses it
+        if (tabMenuMouseDown(app, hwnd, mx, my)) return;
         if (app.showTabSwitcher) {
             tabSwitcherMouseDown(app, hwnd, mx, my);
             app.swallowNextMouseUp = true;
@@ -2362,6 +2394,13 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     // Esc aborts a tab drag in flight (ghost vanishes, tab snaps home)
     if (app.tabDragIndex >= 0 && wParam == VK_ESCAPE) {
         tabDragCancel(app, hwnd);
+        return;
+    }
+    // An open tab menu takes Esc before anything else (edit mode too —
+    // the strip stays interactive while editing)
+    if (app.showTabMenu && wParam == VK_ESCAPE) {
+        closeTabMenu(app);
+        InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
 

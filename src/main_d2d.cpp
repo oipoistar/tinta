@@ -880,6 +880,7 @@ render_document:
     // Title-bar tab strip: the caption itself, above every panel
     renderTabStrip(app);
     renderTabSwitcher(app);
+    renderTabMenu(app);
 
     // Unsaved-changes dialog above it all (also entered from tab closes)
     if (app.confirmExitPending) renderConfirmExitDialog(app);
@@ -1514,6 +1515,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             forceRegister = true;
         } else if (arg == L"--cascade") {
             cascadeWindow = true;
+        } else if (arg == L"--tabbed") {
+            // Drag-out satellites keep the tab row even with one tab
+            app.forceTabStrip = true;
         } else if (arg == L"--edit") {
             startInEditMode = true;
         } else if (arg == L"--new") {

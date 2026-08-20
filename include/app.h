@@ -365,6 +365,7 @@ struct App {
     // and, when the user switches away mid-edit, the parked editor buffer.
     // View-mode scroll positions ride the existing reading-position memory.
     struct DocTab {
+        int id = 0;                // stable identity across reorders/closes
         std::string path;          // empty = untitled quick note buffer
         std::wstring title;        // display name (file name / Untitled)
         bool editMode = false;     // switched away while editing
@@ -417,6 +418,20 @@ struct App {
     // pure move (a possible strip drop) apart from a resize on exit
     bool windowMoveTracking = false;
     RECT windowMoveStartRect = {};
+    // Right-click tab context menu (NPP-style close operations)
+    bool showTabMenu = false;
+    int tabMenuIndex = -1;          // tab the menu targets
+    int tabMenuHover = -1;
+    float tabMenuX = 0.0f;
+    float tabMenuY = 0.0f;
+    float tabMenuAnimation = 0.0f;
+    // Bulk close (others / left / right) survives the per-tab
+    // unsaved-changes dialogs by re-finding the kept tab by id
+    int tabBulkCloseMode = 0;       // 0 none, 1 others, 2 left, 3 right
+    int tabBulkKeepId = 0;
+    int tabIdCounter = 0;           // DocTab.id source
+    // Drag-out satellites keep the tab row even with a single tab
+    bool forceTabStrip = false;
     // Only the primary window persists the tab session; satellites
     // (--cascade/--new/drag-outs) neither restore nor overwrite it
     bool sessionOwner = true;
