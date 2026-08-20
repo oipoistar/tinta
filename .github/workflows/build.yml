@@ -50,9 +50,9 @@ jobs:
             A fast, lightweight Markdown and Mermaid reader for Windows.
 
             ### Installation
-            1. Download `tinta.exe` below
-            2. Run it (you may need to click "More info" → "Run anyway" on SmartScreen)
-            3. Optionally run `tinta.exe /register` to register Markdown and Mermaid files
+            - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
+            - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
+            - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
             ### What's included
             - Tabbed interface with drag, session restore, and a tab context menu
