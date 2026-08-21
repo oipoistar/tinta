@@ -1199,6 +1199,41 @@ void saveEditorFileAs(App& app, HWND hwnd) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
+// Save As from anywhere: the editor variant writes the buffer, the viewer
+// variant copies the viewed file — either way the document continues
+// under the chosen name
+void saveFileAs(App& app, HWND hwnd) {
+    if (app.editMode) {
+        saveEditorFileAs(app, hwnd);
+        return;
+    }
+    if (app.currentFile.empty()) return;  // welcome doc: nothing to save
+
+    std::string previous = app.currentFile;
+    if (!promptSaveAsPath(app, hwnd)) return;  // sets currentFile on OK
+    std::wstring src = toWide(previous);
+    std::wstring dst = toWide(app.currentFile);
+    bool ok = CopyFileW(src.c_str(), dst.c_str(), FALSE) != 0;
+    if (!ok) {
+        app.currentFile = previous;
+        app.copiedNotificationKey = "toast.save_failed";
+    } else {
+        tabsInit(app);
+        App::DocTab& tab = app.tabs[app.activeTab];
+        tab.path = app.currentFile;
+        size_t slash = app.currentFile.find_last_of("/\\");
+        tab.title = toWide(slash == std::string::npos
+                               ? app.currentFile
+                               : app.currentFile.substr(slash + 1));
+        updateWindowTitle(app);
+        app.copiedNotificationKey = "toast.saved";
+    }
+    app.showCopiedNotification = true;
+    app.copiedNotificationStart = std::chrono::steady_clock::now();
+    startNotificationTimer(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 // --- Input handlers ---
 
 // Unsaved-changes dialog outcomes (shared by keyboard and mouse):

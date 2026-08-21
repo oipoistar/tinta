@@ -2567,6 +2567,14 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 // editor path)
                 openPrintPreview(app, hwnd);
                 break;
+            case 'S':
+                // Ctrl+Shift+S: save the viewed file under a new name and
+                // continue there (#121); plain Ctrl+S stays a no-op in the
+                // viewer — there is nothing edited to save
+                if (GetKeyState(VK_SHIFT) & 0x8000) {
+                    saveFileAs(app, hwnd);
+                }
+                break;
             case 'H':
                 // Find & replace implies editing: from the viewer, hop
                 // into edit mode with the replace row already open (#121)

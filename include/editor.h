@@ -41,6 +41,9 @@ void renderQuickNoteEmptyState(App& app);
 // tab's identity to the chosen file
 void saveEditorFile(App& app, HWND hwnd);
 void saveEditorFileAs(App& app, HWND hwnd);
+// Ctrl+Shift+S anywhere: editor writes the buffer to a new path, viewer
+// copies the viewed file; the tab follows the new name either way
+void saveFileAs(App& app, HWND hwnd);
 // Unsaved-changes dialog outcome: 1 save+exit, 2 discard, 3 keep editing
 void confirmExitAction(App& app, HWND hwnd, int action);
 
