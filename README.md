@@ -104,6 +104,8 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `ESC` `ESC` | Exit edit mode |
 | `Ctrl+N` | New quick note — a fresh window, start typing right away; `Ctrl+S` names it via the save dialog. While the note is still empty, an **Open a file** button (`Ctrl+O`) in the preview pane picks an existing file instead |
 | `Ctrl+S` | Save (in edit mode) |
+| `Ctrl+Shift+S` | Save As: the editor writes the buffer to a new path, the viewer saves a copy, and the document continues under the new name |
+| `Ctrl+H` | Find and replace (in edit mode): Tab switches fields, Enter replaces, Ctrl+Enter replaces all |
 | `Ctrl+P` | Print / export to PDF |
 | `Ctrl+E` | Show/hide preview pane (in edit mode) |
 | `Ctrl+W` | Toggle word wrap (in edit mode) |

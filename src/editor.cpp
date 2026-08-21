@@ -8,6 +8,7 @@
 #include "search.h"
 #include "print.h"
 #include "i18n.h"
+#include "input.h"
 
 #include <fstream>
 #include <sstream>
@@ -595,6 +596,75 @@ void performEditorSearch(App& app) {
     }
 }
 
+// --- Find & replace (#121) ---
+
+static void scheduleReparse(App& app);  // defined below with the debounce
+
+void editorReplaceCurrent(App& app, HWND hwnd) {
+    if (!app.editMode || app.searchQuery.empty()) return;
+    if (app.editorSearchMatches.empty()) return;
+    int idx = app.editorSearchCurrentIndex;
+    if (idx < 0 || idx >= (int)app.editorSearchMatches.size()) idx = 0;
+    const App::EditorSearchMatch m = app.editorSearchMatches[idx];
+
+    std::wstring removed = app.editorText.substr(m.startPos, m.length);
+    pushUndo(app, App::EditAction::Delete, m.startPos, removed,
+             app.editorCursorPos, m.startPos);
+    app.editorText.erase(m.startPos, m.length);
+    if (!app.replaceText.empty()) {
+        app.editorText.insert(m.startPos, app.replaceText);
+        pushUndo(app, App::EditAction::Insert, m.startPos, app.replaceText,
+                 m.startPos, m.startPos + app.replaceText.size());
+    }
+    app.editorCursorPos = m.startPos + app.replaceText.size();
+    app.editorHasSelection = false;
+    rebuildLineStarts(app);
+    scheduleReparse(app);
+
+    // Land on the next remaining match past the replacement
+    performEditorSearch(app);
+    if (!app.editorSearchMatches.empty()) {
+        app.editorSearchCurrentIndex = 0;
+        for (size_t i = 0; i < app.editorSearchMatches.size(); i++) {
+            if (app.editorSearchMatches[i].startPos >= app.editorCursorPos) {
+                app.editorSearchCurrentIndex = (int)i;
+                break;
+            }
+        }
+        scrollEditorToMatch(app);
+    }
+    editorEnsureCursorVisible(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void editorReplaceAll(App& app, HWND hwnd) {
+    if (!app.editMode || app.searchQuery.empty()) return;
+    performEditorSearch(app);
+    if (app.editorSearchMatches.empty()) return;
+
+    // Back to front so earlier offsets stay valid; each hunk is its own
+    // undo entry, so Ctrl+Z walks the replacement back out
+    for (int i = (int)app.editorSearchMatches.size() - 1; i >= 0; i--) {
+        const App::EditorSearchMatch m = app.editorSearchMatches[i];
+        std::wstring removed = app.editorText.substr(m.startPos, m.length);
+        pushUndo(app, App::EditAction::Delete, m.startPos, removed,
+                 app.editorCursorPos, m.startPos);
+        app.editorText.erase(m.startPos, m.length);
+        if (!app.replaceText.empty()) {
+            app.editorText.insert(m.startPos, app.replaceText);
+            pushUndo(app, App::EditAction::Insert, m.startPos, app.replaceText,
+                     m.startPos, m.startPos + app.replaceText.size());
+        }
+        app.editorCursorPos = m.startPos + app.replaceText.size();
+    }
+    app.editorHasSelection = false;
+    rebuildLineStarts(app);
+    scheduleReparse(app);
+    performEditorSearch(app);
+    editorEnsureCursorVisible(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 void scrollEditorToMatch(App& app) {
     if (app.editorSearchMatches.empty() || app.editorSearchCurrentIndex < 0 ||
         app.editorSearchCurrentIndex >= (int)app.editorSearchMatches.size()) return;
@@ -1111,6 +1181,59 @@ void saveEditorFile(App& app, HWND hwnd) {
     }
 }
 
+// Save As (#121): pick a new path, write there, and the tab follows
+void saveEditorFileAs(App& app, HWND hwnd) {
+    if (!promptSaveAsPath(app, hwnd)) return;  // cancel keeps the old path
+    app.editorDirty = true;  // force the write even for a clean buffer
+    saveEditorFile(app, hwnd);
+    if (app.editorDirty) return;  // write failed (toast already shown)
+
+    // The active tab takes on the new identity
+    tabsInit(app);
+    App::DocTab& tab = app.tabs[app.activeTab];
+    tab.path = app.currentFile;
+    size_t slash = app.currentFile.find_last_of("/\\");
+    tab.title = toWide(slash == std::string::npos
+                           ? app.currentFile
+                           : app.currentFile.substr(slash + 1));
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// Save As from anywhere: the editor variant writes the buffer, the viewer
+// variant copies the viewed file — either way the document continues
+// under the chosen name
+void saveFileAs(App& app, HWND hwnd) {
+    if (app.editMode) {
+        saveEditorFileAs(app, hwnd);
+        return;
+    }
+    if (app.currentFile.empty()) return;  // welcome doc: nothing to save
+
+    std::string previous = app.currentFile;
+    if (!promptSaveAsPath(app, hwnd)) return;  // sets currentFile on OK
+    std::wstring src = toWide(previous);
+    std::wstring dst = toWide(app.currentFile);
+    bool ok = CopyFileW(src.c_str(), dst.c_str(), FALSE) != 0;
+    if (!ok) {
+        app.currentFile = previous;
+        app.copiedNotificationKey = "toast.save_failed";
+    } else {
+        tabsInit(app);
+        App::DocTab& tab = app.tabs[app.activeTab];
+        tab.path = app.currentFile;
+        size_t slash = app.currentFile.find_last_of("/\\");
+        tab.title = toWide(slash == std::string::npos
+                               ? app.currentFile
+                               : app.currentFile.substr(slash + 1));
+        updateWindowTitle(app);
+        app.copiedNotificationKey = "toast.saved";
+    }
+    app.showCopiedNotification = true;
+    app.copiedNotificationStart = std::chrono::steady_clock::now();
+    startNotificationTimer(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 // --- Input handlers ---
 
 // Unsaved-changes dialog outcomes (shared by keyboard and mouse):
@@ -1179,6 +1302,27 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             app.searchJustOpened = true;
             updateBlinkTimer(app);
         }
+        app.searchReplaceMode = false;
+        app.replaceFieldActive = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
+    // Ctrl+H: search with the replace row (#121)
+    if (ctrl && wParam == 'H') {
+        if (!app.showSearch) {
+            app.showSearch = true;
+            app.searchActive = true;
+            app.searchAnimation = 0;
+            app.searchQuery.clear();
+            app.editorSearchMatches.clear();
+            app.editorSearchCurrentIndex = 0;
+            app.searchCurrentIndex = 0;
+            app.searchJustOpened = true;
+            updateBlinkTimer(app);
+        }
+        app.searchReplaceMode = true;
+        app.replaceFieldActive = false;
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
@@ -1197,18 +1341,44 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             saveEditorFile(app, hwnd);
             return;
         }
+        // Ctrl+H from an open search reveals the replace row (#121)
+        if (ctrl && wParam == 'H') {
+            app.searchReplaceMode = true;
+            app.replaceFieldActive = true;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        // Ctrl+Enter replaces every match at once
+        if (ctrl && wParam == VK_RETURN && app.searchReplaceMode) {
+            editorReplaceAll(app, hwnd);
+            return;
+        }
         switch (wParam) {
             case VK_ESCAPE:
                 app.showSearch = false;
                 app.searchActive = false;
                 app.searchQuery.clear();
+                app.searchReplaceMode = false;
+                app.replaceFieldActive = false;
                 app.editorSearchMatches.clear();
                 app.editorSearchCurrentIndex = 0;
                 app.searchAnimation = 0;
                 updateBlinkTimer(app);
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
+            case VK_TAB:
+                // Replace mode: Tab hops between the two fields
+                if (app.searchReplaceMode) {
+                    app.replaceFieldActive = !app.replaceFieldActive;
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                return;
             case VK_RETURN: {
+                if (app.searchReplaceMode && app.replaceFieldActive) {
+                    // Enter in the replace row: replace current, move on
+                    editorReplaceCurrent(app, hwnd);
+                    return;
+                }
                 if (!app.editorSearchMatches.empty()) {
                     app.editorSearchCurrentIndex = (app.editorSearchCurrentIndex + 1) % (int)app.editorSearchMatches.size();
                     app.searchCurrentIndex = app.editorSearchCurrentIndex;
@@ -1218,6 +1388,11 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 return;
             }
             case VK_BACK: {
+                if (app.searchReplaceMode && app.replaceFieldActive) {
+                    if (!app.replaceText.empty()) app.replaceText.pop_back();
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return;
+                }
                 if (!app.searchQuery.empty()) {
                     app.searchQuery.pop_back();
                     performEditorSearch(app);
@@ -1287,6 +1462,10 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     if (ctrl) {
         switch (wParam) {
             case 'S':
+                if (shift) {
+                    saveEditorFileAs(app, hwnd);
+                    return;
+                }
                 saveEditorFile(app, hwnd);
                 return;
             case 'N':
@@ -1567,7 +1746,32 @@ void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
             return;
         }
         wchar_t ch = (wchar_t)wParam;
+        bool toReplace = app.searchReplaceMode && app.replaceFieldActive;
+        // Ctrl+V arrives here as the SYN control character (#121)
+        if (ch == 0x16) {
+            std::wstring pasted = clipboardLine(hwnd);
+            if (!pasted.empty()) {
+                if (toReplace) {
+                    app.replaceText += pasted;
+                } else {
+                    app.searchQuery += pasted;
+                    performEditorSearch(app);
+                    if (!app.editorSearchMatches.empty()) {
+                        app.editorSearchCurrentIndex = 0;
+                        app.searchCurrentIndex = 0;
+                        scrollEditorToMatch(app);
+                    }
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return;
+        }
         if (ch >= 32 && ch != 127) {
+            if (toReplace) {
+                app.replaceText += ch;
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
             app.searchQuery += ch;
             performEditorSearch(app);
             if (!app.editorSearchMatches.empty()) {
@@ -1735,6 +1939,31 @@ static size_t editorPosFromClick(App& app, int x, int y) {
 void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
     float editorWidth = editorPaneWidth(app);
 
+    // Editor scrollbar: a track click jumps, and the drag follows (#121).
+    // Checked before the separator, whose grab zone overlaps the thumb —
+    // the thin scrollbar is the more deliberate target
+    if (app.editorContentHeight > app.height &&
+        (float)x >= editorWidth - dpi(app, 14.0f) &&
+        (float)x <= editorWidth - dpi(app, 2.0f)) {
+        float maxScroll = app.editorContentHeight - app.height;
+        float sbHeight = (float)app.height / app.editorContentHeight * app.height;
+        sbHeight = std::max(sbHeight, dpi(app, 30.0f));
+        float track = std::max(1.0f, app.height - sbHeight);
+        float sbY = app.editorScrollY / maxScroll * track;
+        if ((float)y < sbY || (float)y > sbY + sbHeight) {
+            // Track click: center the thumb on the click point
+            float t = ((float)y - sbHeight * 0.5f) / track;
+            app.editorScrollY =
+                std::max(0.0f, std::min(maxScroll, t * maxScroll));
+        }
+        app.editorScrollbarDragging = true;
+        app.editorScrollbarDragStartY = (float)y;
+        app.editorScrollbarDragStartScroll = app.editorScrollY;
+        SetCapture(hwnd);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Check for separator (only exists while the preview is visible)
     if (app.editorShowPreview) {
         float sepX = app.width * app.editorSplitRatio;
@@ -1822,6 +2051,11 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
 }
 
 void handleEditorMouseUp(App& app, HWND hwnd, int x, int y) {
+    if (app.editorScrollbarDragging) {
+        app.editorScrollbarDragging = false;
+        ReleaseCapture();
+        return;
+    }
     if (app.draggingSeparator) {
         app.draggingSeparator = false;
         ReleaseCapture();
@@ -1838,6 +2072,21 @@ void handleEditorMouseUp(App& app, HWND hwnd, int x, int y) {
 
 void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
     float editorWidth = editorPaneWidth(app);
+
+    if (app.editorScrollbarDragging) {
+        float maxScroll = std::max(0.0f, app.editorContentHeight - app.height);
+        float sbHeight = (float)app.height /
+                         std::max(1.0f, app.editorContentHeight) * app.height;
+        sbHeight = std::max(sbHeight, dpi(app, 30.0f));
+        float track = std::max(1.0f, app.height - sbHeight);
+        float delta =
+            ((float)y - app.editorScrollbarDragStartY) / track * maxScroll;
+        app.editorScrollY = std::max(
+            0.0f,
+            std::min(maxScroll, app.editorScrollbarDragStartScroll + delta));
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
 
     if (app.draggingSeparator) {
         static HCURSOR cursorSizeWE = LoadCursor(nullptr, IDC_SIZEWE);

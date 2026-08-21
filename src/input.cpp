@@ -332,7 +332,7 @@ static void closeFolderBrowserInput(App& app) {
 }
 
 // Single-line clipboard text: newlines and tabs become spaces
-static std::wstring clipboardLine(HWND hwnd) {
+std::wstring clipboardLine(HWND hwnd) {
     if (!OpenClipboard(hwnd)) return {};
     std::wstring text;
     if (HANDLE hData = GetClipboardData(CF_UNICODETEXT)) {
@@ -1290,6 +1290,8 @@ static void closeSearchIfOpen(App& app) {
     app.searchActive = false;
     app.searchQuery.clear();
     app.searchMatches.clear();
+    app.searchReplaceMode = false;
+    app.replaceFieldActive = false;
     std::wstring().swap(app.docTextLower);
     app.searchAnimation = 0;
     clearFolderSearch(app);
@@ -1497,6 +1499,23 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     if (app.editMode) {
         int x = GET_X_LPARAM(lParam);
         int y = GET_Y_LPARAM(lParam);
+        // Find & replace bar: clicks focus a field or press a button (#121)
+        if (app.showSearch && app.searchReplaceMode) {
+            for (const auto& hit : app.searchReplaceHits) {
+                if ((float)x >= hit.first.left && (float)x <= hit.first.right &&
+                    (float)y >= hit.first.top && (float)y <= hit.first.bottom) {
+                    app.swallowNextMouseUp = true;
+                    switch (hit.second) {
+                        case 1: app.replaceFieldActive = false; break;
+                        case 2: app.replaceFieldActive = true; break;
+                        case 3: editorReplaceCurrent(app, hwnd); break;
+                        case 4: editorReplaceAll(app, hwnd); break;
+                    }
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return;
+                }
+            }
+        }
         float sepX = app.editorShowPreview
             ? app.width * app.editorSplitRatio
             : static_cast<float>(app.width);
@@ -2010,7 +2029,8 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     }
 
     // Edit mode: route to editor
-    if (app.editMode && (app.draggingSeparator || app.editorSelecting)) {
+    if (app.editMode && (app.draggingSeparator || app.editorSelecting ||
+                         app.editorScrollbarDragging)) {
         int x = GET_X_LPARAM(lParam);
         int y = GET_Y_LPARAM(lParam);
         handleEditorMouseUp(app, hwnd, x, y);
@@ -2547,10 +2567,47 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 // editor path)
                 openPrintPreview(app, hwnd);
                 break;
+            case 'S':
+                // Ctrl+Shift+S: save the viewed file under a new name and
+                // continue there (#121); plain Ctrl+S stays a no-op in the
+                // viewer — there is nothing edited to save
+                if (GetKeyState(VK_SHIFT) & 0x8000) {
+                    saveFileAs(app, hwnd);
+                }
+                break;
+            case 'H':
+                // Find & replace implies editing: from the viewer, hop
+                // into edit mode with the replace row already open (#121)
+                enterEditMode(app);
+                if (app.editMode) {
+                    app.showSearch = true;
+                    app.searchActive = true;
+                    app.searchAnimation = 0;
+                    app.searchQuery.clear();
+                    app.editorSearchMatches.clear();
+                    app.editorSearchCurrentIndex = 0;
+                    app.searchCurrentIndex = 0;
+                    app.searchJustOpened = true;
+                    app.searchReplaceMode = true;
+                    app.replaceFieldActive = false;
+                    updateBlinkTimer(app);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                break;
             case 'N':
-                // Quick note: a fresh window in edit mode on an untitled
-                // buffer; Ctrl+S there opens the classic Save As dialog
-                launchQuickNoteWindow();
+                // Quick note. On the bare-launch welcome document the note
+                // takes over this window instead of leaving the welcome
+                // behind (#121); any real document keeps its window and a
+                // fresh one spawns
+                if (app.currentFile.empty()) {
+                    tabsInit(app);
+                    enterQuickNoteMode(app);
+                    app.tabs[app.activeTab].title = tr(app, "title.untitled");
+                    updateWindowTitle(app);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                } else {
+                    launchQuickNoteWindow();
+                }
                 break;
             case 'A': {
                 // Select All - the whole docText range
@@ -2945,6 +3002,21 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
             return;
         }
         wchar_t ch = (wchar_t)wParam;
+        // Ctrl+V arrives here as the SYN control character (#121)
+        if (ch == 0x16) {
+            std::wstring pasted = clipboardLine(hwnd);
+            if (!pasted.empty()) {
+                app.searchQuery += pasted;
+                resetCursorBlink(app);
+                performSearch(app);
+                if (!app.searchMatches.empty()) {
+                    app.searchCurrentIndex = 0;
+                    scrollToCurrentMatch(app);
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return;
+        }
         // Only handle printable characters (not control chars)
         if (ch >= 32 && ch != 127) {
             app.searchQuery += ch;
