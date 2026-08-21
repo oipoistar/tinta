@@ -882,13 +882,18 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // Tab strip hover (close-button reveal) and switcher row hover
     {
         int newHover = -1;
+        bool overStripButton = false;  // + and chevron want the hand too
         if ((float)app.mouseY < chromeTopHeight(app)) {
             for (const App::TabHit& hit : app.tabHits) {
-                if (hit.index >= 0 && app.mouseX >= hit.rect.left &&
+                if (app.mouseX >= hit.rect.left &&
                     app.mouseX <= hit.rect.right &&
                     app.mouseY >= hit.rect.top &&
                     app.mouseY <= hit.rect.bottom) {
-                    newHover = hit.index;
+                    if (hit.index >= 0) {
+                        newHover = hit.index;
+                    } else {
+                        overStripButton = true;
+                    }
                     break;
                 }
             }
@@ -918,7 +923,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             SetCursor(rowHover >= 0 ? cursorHand : cursorArrow);
             return;
         }
-        if (newHover >= 0) {
+        if (newHover >= 0 || overStripButton) {
             SetCursor(cursorHand);
             return;
         }
@@ -1049,6 +1054,21 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // Edit mode: handle separator drag, editor selection, cursor shape
     if (app.editMode) {
         handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
+        // Replace-bar controls override the pane cursor: hand over the
+        // buttons, text beam over the two input fields (#119 feedback)
+        if (app.showSearch && app.searchReplaceMode &&
+            !app.draggingSeparator && !app.editorSelecting) {
+            static HCURSOR replaceIBeam = LoadCursor(nullptr, IDC_IBEAM);
+            for (const auto& hit : app.searchReplaceHits) {
+                if ((float)app.mouseX >= hit.first.left &&
+                    (float)app.mouseX <= hit.first.right &&
+                    (float)app.mouseY >= hit.first.top &&
+                    (float)app.mouseY <= hit.first.bottom) {
+                    SetCursor(hit.second >= 3 ? cursorHand : replaceIBeam);
+                    return;
+                }
+            }
+        }
         // If mouse is in the preview pane and not dragging separator, fall through for link hover etc.
         float sepX = app.editorShowPreview
             ? app.width * app.editorSplitRatio
