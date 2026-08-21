@@ -2567,6 +2567,25 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 // editor path)
                 openPrintPreview(app, hwnd);
                 break;
+            case 'H':
+                // Find & replace implies editing: from the viewer, hop
+                // into edit mode with the replace row already open (#121)
+                enterEditMode(app);
+                if (app.editMode) {
+                    app.showSearch = true;
+                    app.searchActive = true;
+                    app.searchAnimation = 0;
+                    app.searchQuery.clear();
+                    app.editorSearchMatches.clear();
+                    app.editorSearchCurrentIndex = 0;
+                    app.searchCurrentIndex = 0;
+                    app.searchJustOpened = true;
+                    app.searchReplaceMode = true;
+                    app.replaceFieldActive = false;
+                    updateBlinkTimer(app);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                break;
             case 'N':
                 // Quick note. On the bare-launch welcome document the note
                 // takes over this window instead of leaving the welcome
