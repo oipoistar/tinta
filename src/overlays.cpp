@@ -98,7 +98,8 @@ void renderSearchOverlay(App& app) {
             // Blinking cursor (blink state driven by TIMER_CURSOR_BLINK).
             // Query width is cached — it only changes when the query or the
             // text format changes, not per frame.
-            if (app.searchActive && app.cursorBlinkOn) {
+            if (app.searchActive && app.cursorBlinkOn &&
+                !(app.searchReplaceMode && app.replaceFieldActive)) {
                 static std::wstring cachedQuery;
                 static IDWriteTextFormat* cachedFormat = nullptr;
                 static float cachedQueryWidth = 0.0f;
@@ -137,6 +138,127 @@ void renderSearchOverlay(App& app) {
                 D2D1::RectF(countX, barY + dpi(app, 12.0f), barX + barWidth - dpi(app, 10.0f), barY + barHeight), app.brush);
         }
 
+    }
+
+    // Replace row (#121): a second input under the bar plus Replace / All
+    app.searchReplaceHits.clear();
+    if (app.editMode && app.searchReplaceMode && searchTextFormat) {
+        float rowY = barY + barHeight + dpi(app, 6.0f);
+        float rowH = dpi(app, 44.0f);
+        D2D1_ROUNDED_RECT rowRect = D2D1::RoundedRect(
+            D2D1::RectF(barX, rowY, barX + barWidth, rowY + rowH),
+            dpi(app, 8.0f), dpi(app, 8.0f));
+        if (app.theme.isDark) {
+            app.brush->SetColor(D2D1::ColorF(0.12f, 0.12f, 0.14f, 0.95f * anim));
+        } else {
+            app.brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.95f * anim));
+        }
+        app.renderTarget->FillRoundedRectangle(rowRect, app.brush);
+        if (app.theme.isDark) {
+            app.brush->SetColor(D2D1::ColorF(0.3f, 0.3f, 0.35f, 0.8f * anim));
+        } else {
+            app.brush->SetColor(D2D1::ColorF(0.7f, 0.7f, 0.75f, 0.8f * anim));
+        }
+        app.renderTarget->DrawRoundedRectangle(rowRect, app.brush, 1.0f);
+
+        // Buttons on the right; Replace is the accent-filled primary
+        const wchar_t* repLabel = tr(app, "search.replace");
+        const wchar_t* allLabel = tr(app, "search.replace_all");
+        float repW = measureText(app, repLabel, searchTextFormat) + dpi(app, 24.0f);
+        float allW = measureText(app, allLabel, searchTextFormat) + dpi(app, 24.0f);
+        float chipH = dpi(app, 28.0f);
+        float chipY = rowY + (rowH - chipH) * 0.5f;
+        float allX = barX + barWidth - dpi(app, 10.0f) - allW;
+        float repX = allX - dpi(app, 8.0f) - repW;
+        auto chip = [&](float cx, float cw, const wchar_t* label, int id,
+                        bool primary) {
+            D2D1_ROUNDED_RECT cr = D2D1::RoundedRect(
+                D2D1::RectF(cx, chipY, cx + cw, chipY + chipH),
+                dpi(app, 5.0f), dpi(app, 5.0f));
+            D2D1_COLOR_F c;
+            if (primary) {
+                c = app.theme.accent; c.a = anim;
+                app.brush->SetColor(c);
+                app.renderTarget->FillRoundedRectangle(cr, app.brush);
+                app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
+            } else {
+                c = app.theme.text; c.a = 0.3f * anim;
+                app.brush->SetColor(c);
+                app.renderTarget->DrawRoundedRectangle(cr, app.brush, 1.0f);
+                c.a = 0.85f * anim;
+                app.brush->SetColor(c);
+            }
+            app.renderTarget->DrawText(label, (UINT32)wcslen(label),
+                searchTextFormat,
+                D2D1::RectF(cx + dpi(app, 12.0f), chipY + dpi(app, 5.0f),
+                            cx + cw, chipY + chipH), app.brush);
+            app.searchReplaceHits.push_back(
+                {D2D1::RectF(cx, chipY, cx + cw, chipY + chipH), id});
+        };
+        chip(repX, repW, repLabel, 3, true);
+        chip(allX, allW, allLabel, 4, false);
+
+        // Arrow icon marking the replace row
+        D2D1_COLOR_F iconColor = app.theme.text;
+        iconColor.a = 0.5f * anim;
+        app.brush->SetColor(iconColor);
+        float ix = barX + dpi(app, 20.0f);
+        float iy = rowY + rowH * 0.5f;
+        app.renderTarget->DrawLine(
+            D2D1::Point2F(ix, iy - dpi(app, 7.0f)),
+            D2D1::Point2F(ix, iy + dpi(app, 3.0f)), app.brush, dpi(app, 2.0f));
+        app.renderTarget->DrawLine(
+            D2D1::Point2F(ix, iy + dpi(app, 3.0f)),
+            D2D1::Point2F(ix + dpi(app, 8.0f), iy + dpi(app, 3.0f)),
+            app.brush, dpi(app, 2.0f));
+
+        // Replace text (or placeholder), left of the buttons
+        float textX = barX + dpi(app, 42.0f);
+        float textRight = repX - dpi(app, 12.0f);
+        if (app.replaceText.empty()) {
+            D2D1_COLOR_F ph = app.theme.text;
+            ph.a = 0.4f * anim;
+            app.brush->SetColor(ph);
+            const wchar_t* p = tr(app, "search.replace_placeholder");
+            app.renderTarget->DrawText(p, (UINT32)wcslen(p), searchTextFormat,
+                D2D1::RectF(textX, rowY + dpi(app, 12.0f), textRight,
+                            rowY + rowH), app.brush);
+        } else {
+            D2D1_COLOR_F tc = app.theme.text;
+            tc.a = anim;
+            app.brush->SetColor(tc);
+            app.renderTarget->DrawText(app.replaceText.c_str(),
+                (UINT32)app.replaceText.size(), searchTextFormat,
+                D2D1::RectF(textX, rowY + dpi(app, 12.0f), textRight,
+                            rowY + rowH), app.brush);
+        }
+
+        // The active field carries the accent focus ring and the caret
+        D2D1_COLOR_F focus = app.theme.accent;
+        focus.a = 0.9f * anim;
+        app.brush->SetColor(focus);
+        if (app.replaceFieldActive) {
+            app.renderTarget->DrawRoundedRectangle(rowRect, app.brush, 1.5f);
+            if (app.searchActive && app.cursorBlinkOn) {
+                float cw2 = measureText(app, app.replaceText, searchTextFormat);
+                float cx2 = textX + cw2 + 2;
+                D2D1_COLOR_F tc = app.theme.text;
+                tc.a = anim;
+                app.brush->SetColor(tc);
+                app.renderTarget->DrawLine(
+                    D2D1::Point2F(cx2, rowY + dpi(app, 12.0f)),
+                    D2D1::Point2F(cx2, rowY + dpi(app, 32.0f)), app.brush,
+                    dpi(app, 1.5f));
+            }
+        } else {
+            app.renderTarget->DrawRoundedRectangle(barRect, app.brush, 1.5f);
+        }
+
+        // Field rects come after the buttons so button clicks win
+        app.searchReplaceHits.push_back(
+            {D2D1::RectF(barX, barY, barX + barWidth, barY + barHeight), 1});
+        app.searchReplaceHits.push_back(
+            {D2D1::RectF(barX, rowY, barX + barWidth, rowY + rowH), 2});
     }
 }
 

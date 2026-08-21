@@ -37,8 +37,10 @@ bool quickNoteEmptyStateActive(const App& app);
 void quickNoteOpenFile(App& app, HWND hwnd);
 void renderQuickNoteEmptyState(App& app);
 
-// File save
+// File save; Save As (Ctrl+Shift+S) re-prompts for the path and moves the
+// tab's identity to the chosen file
 void saveEditorFile(App& app, HWND hwnd);
+void saveEditorFileAs(App& app, HWND hwnd);
 // Unsaved-changes dialog outcome: 1 save+exit, 2 discard, 3 keep editing
 void confirmExitAction(App& app, HWND hwnd, int action);
 
@@ -48,6 +50,10 @@ void editorReparse(App& app);
 // Editor search
 void performEditorSearch(App& app);
 void scrollEditorToMatch(App& app);
+// Find & replace (#121): replace the current match / every match with
+// App::replaceText; each hunk is one undo entry
+void editorReplaceCurrent(App& app, HWND hwnd);
+void editorReplaceAll(App& app, HWND hwnd);
 
 // Utility
 void rebuildLineStarts(App& app);

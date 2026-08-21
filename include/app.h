@@ -436,6 +436,10 @@ struct App {
     // an untitled, still-empty buffer (rect refreshed by its renderer)
     D2D1_RECT_F quickNoteButtonRect = {};
     bool quickNoteButtonHover = false;
+    // Editor pane scrollbar dragging (#121)
+    bool editorScrollbarDragging = false;
+    float editorScrollbarDragStartY = 0.0f;
+    float editorScrollbarDragStartScroll = 0.0f;
     // Only the primary window persists the tab session; satellites
     // (--cascade/--new/drag-outs) neither restore nor overwrite it
     bool sessionOwner = true;
@@ -888,6 +892,14 @@ struct App {
     };
     std::vector<EditorSearchMatch> editorSearchMatches;
     int editorSearchCurrentIndex = 0;
+
+    // Editor find & replace (#121): Ctrl+H adds a replace row to search
+    bool searchReplaceMode = false;
+    std::wstring replaceText;
+    bool replaceFieldActive = false;    // keyboard goes to the replace row
+    // Hit rects refreshed by renderSearchOverlay: 1 query field,
+    // 2 replace field, 3 Replace button, 4 Replace-all button
+    std::vector<std::pair<D2D1_RECT_F, int>> searchReplaceHits;
 
     // Undo/redo
     struct EditAction {
