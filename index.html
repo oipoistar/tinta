@@ -8,6 +8,7 @@
 <link rel="canonical" href="https://tinta.cc/">
 <meta name="theme-color" content="#fbfbf8">
 <meta property="og:type" content="website">
+<meta property="og:locale" content="en_US">
 <meta property="og:url" content="https://tinta.cc/">
 <meta property="og:site_name" content="Tinta">
 <meta property="og:title" content="Tinta - Fast, Lightweight Markdown Viewer for Windows">
@@ -30,11 +31,16 @@
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "Tinta",
+  "description": "Free, lightweight markdown viewer for Windows with 22 natively rendered Mermaid diagram families and export to HTML, DOCX and PDF. Native C++ with Direct2D, about 1.8 MB, under 100 ms startup, no Electron.",
+  "image": "https://tinta.cc/img/social-card.png",
+  "screenshot": "https://tinta.cc/img/screenshots/showcase-light.png",
   "operatingSystem": "Windows",
   "applicationCategory": "UtilitiesApplication",
   "downloadUrl": "https://github.com/oipoistar/tinta/releases/latest",
+  "installUrl": "https://apps.microsoft.com/detail/9MZ5MZ3L9RKF",
   "fileSize": "1.8MB",
   "license": "https://github.com/oipoistar/tinta/blob/master/LICENSE",
+  "author": { "@type": "Person", "name": "oipoistar", "url": "https://github.com/oipoistar" },
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "url": "https://tinta.cc/"
 }
@@ -73,11 +79,11 @@ nav a.dl{color:var(--seal);font-weight:600}
 .btn-line{text-decoration:none;color:var(--ink);padding:15px 22px;font-size:14px;border-bottom:1px solid var(--ink)}
 .hero-stats{display:flex;gap:34px;margin-top:48px;font-family:var(--mono);font-size:12px;color:var(--muted);flex-wrap:wrap}
 .hero-stats b{color:var(--seal);font-weight:600}
-.shots{position:relative}
+.shots{position:relative;padding-bottom:27%}
 .shots img{height:auto}
-.shots .main{width:100%;border:1px solid var(--edge);box-shadow:0 24px 60px rgba(23,24,26,.14)}
-.shots .over{width:62%;position:absolute;bottom:-40px;left:-48px;border:1px solid var(--edge);box-shadow:0 20px 50px rgba(23,24,26,.2)}
-.seal{position:absolute;top:-22px;right:-22px;width:64px;height:64px;border:2px solid var(--seal);border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-style:italic;color:var(--seal);font-size:15px;transform:rotate(12deg);background:var(--paper)}
+.shots .main{width:78%;border:1px solid var(--edge);box-shadow:0 24px 60px rgba(23,24,26,.14)}
+.shots .over{width:78%;position:absolute;bottom:0;right:-18px;border:1px solid var(--edge);box-shadow:0 20px 50px rgba(23,24,26,.25)}
+.seal{position:absolute;top:-26px;right:-10px;width:54px;height:54px;transform:rotate(12deg)}
 
 /* sections */
 section{padding:70px 0;border-top:1px solid var(--line)}
@@ -133,9 +139,9 @@ section{padding:70px 0;border-top:1px solid var(--line)}
 @media (max-width:560px){
   .wrap{padding:0 20px}
   .feats{grid-template-columns:1fr}
-  .shots{margin:30px 0 50px}
-  .shots .over{left:-8px}
-  .seal{right:-8px}
+  .shots{margin:30px 0 40px}
+  .shots .over{right:0}
+  .seal{right:0;top:-20px}
   .bars{grid-template-columns:76px 1fr 70px}
   .outro h2{font-size:42px}
 }
@@ -167,9 +173,9 @@ section{padding:70px 0;border-top:1px solid var(--line)}
     </div>
   </div>
   <div class="shots">
-    <img class="main" src="img/screenshots/showcase-light.png" alt="Tinta in the Arctic theme showing tabs, a native pie chart and a table" width="1366" height="768">
-    <img class="over" src="img/screenshots/showcase-dark.png" alt="Tinta in the Abyss dark theme showing tabs and a native radar chart" loading="lazy" width="1366" height="768">
-    <span class="seal" aria-hidden="true">ink</span>
+    <img class="main" src="img/screenshots/showcase-light.png" alt="Tinta in the Arctic theme showing tabs, a native pie chart and a table" width="1350" height="760">
+    <img class="over" src="img/screenshots/showcase-dark.png" alt="Tinta in the Abyss dark theme showing tabs and a native radar chart" loading="lazy" width="1350" height="760">
+    <img class="seal" src="img/logo.png" alt="" aria-hidden="true">
   </div>
 </div>
 
