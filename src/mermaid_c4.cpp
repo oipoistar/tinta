@@ -726,7 +726,7 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
     float wrap = elementWidth - 24.0f * scale;
     for (auto& element : elements) {
         float height = 14.0f * scale;
-        if (element.kind == C4Kind::Person) height += 22.0f * scale;
+        if (element.kind == C4Kind::Person) height += 28.0f * scale;
         if (element.db) height += 10.0f * scale;
         height += measure(element.label, labelStyle, wrap).h;
         if (!element.techn.empty()) {
@@ -999,13 +999,18 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
                 }
             }
             float chipH = size.h + technSize.h;
+            // A visible chip like the flowchart edge labels: an invisible
+            // background mask would punch holes through box edges instead
             Prim chip;
-            chip.type = PrimType::Rect;
-            chip.x1 = cx - chipW * 0.5f - 4.0f * scale;
+            chip.type = PrimType::RoundRect;
+            chip.radius = 4.0f * scale;
+            chip.x1 = cx - chipW * 0.5f - 5.0f * scale;
             chip.y1 = cy - chipH * 0.5f - 2.0f * scale;
-            chip.x2 = cx + chipW * 0.5f + 4.0f * scale;
+            chip.x2 = cx + chipW * 0.5f + 5.0f * scale;
             chip.y2 = cy + chipH * 0.5f + 2.0f * scale;
-            chip.fill = Role::Background;
+            chip.fill = Role::Fill;
+            chip.stroke = Role::Muted;
+            chip.strokeWidth = 1.0f * scale;
             // Rides with the texts so it draws over the element boxes
             texts.push_back(chip);
             Prim label;
@@ -1037,21 +1042,6 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
     for (const auto& element : elements) {
         C4Colors colors = c4Palette(element);
         float bodyTop = element.y;
-        if (element.kind == C4Kind::Person) {
-            float headR = 16.0f * scale;
-            Prim head;
-            head.type = PrimType::Ellipse;
-            head.x1 = element.x + element.width * 0.5f - headR;
-            head.y1 = element.y;
-            head.x2 = element.x + element.width * 0.5f + headR;
-            head.y2 = element.y + headR * 2.0f;
-            head.fill = Role::Custom;
-            head.customR = colors.bgR;
-            head.customG = colors.bgG;
-            head.customB = colors.bgB;
-            result.prims.push_back(std::move(head));
-            bodyTop += 22.0f * scale;
-        }
         if (element.db) {
             // A real cylinder: silhouette plus a lid seam in a lighter mix
             Prim paint;
@@ -1097,7 +1087,39 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
             result.prims.push_back(box);
         }
 
-        float textTop = bodyTop + (element.db ? 20.0f : 8.0f) * scale;
+        if (element.kind == C4Kind::Person) {
+            // Small person glyph (head over a shoulder dome) above the label
+            float cx = element.x + element.width * 0.5f;
+            float glyphTop = element.y + 7.0f * scale;
+            Prim shoulders;
+            shoulders.type = PrimType::Slice;
+            shoulders.x1 = cx;
+            shoulders.y1 = glyphTop + 24.0f * scale;
+            shoulders.radius = 10.0f * scale;
+            shoulders.a0 = 3.14159265f;
+            shoulders.a1 = 6.28318531f;
+            shoulders.fill = Role::Custom;
+            shoulders.customR = colors.fgR;
+            shoulders.customG = colors.fgG;
+            shoulders.customB = colors.fgB;
+            result.prims.push_back(std::move(shoulders));
+            Prim head;
+            head.type = PrimType::Ellipse;
+            head.x1 = cx - 6.0f * scale;
+            head.y1 = glyphTop;
+            head.x2 = cx + 6.0f * scale;
+            head.y2 = glyphTop + 12.0f * scale;
+            head.fill = Role::Custom;
+            head.customR = colors.fgR;
+            head.customG = colors.fgG;
+            head.customB = colors.fgB;
+            result.prims.push_back(std::move(head));
+        }
+
+        float textTop = bodyTop + (element.db ? 20.0f
+                                   : element.kind == C4Kind::Person ? 34.0f
+                                                                    : 8.0f) *
+                                      scale;
         float textLeft = element.x + 12.0f * scale;
         float textRight = element.x + element.width - 12.0f * scale;
         Size labelSize = measure(element.label, labelStyle, wrap);
@@ -1600,24 +1622,25 @@ Built buildArchitecture(std::string_view source, const Measure& measure,
             globe.stroke = Role::Stroke;
             globe.strokeWidth = stroke;
             result.prims.push_back(std::move(globe));
-            Prim meridian;
-            meridian.type = PrimType::Ellipse;
-            meridian.x1 = x + icon * 0.30f;
-            meridian.y1 = y;
-            meridian.x2 = x + icon * 0.70f;
-            meridian.y2 = y + icon;
-            meridian.stroke = Role::Stroke;
-            meridian.strokeWidth = stroke * 0.8f;
-            result.prims.push_back(std::move(meridian));
-            Prim equator;
-            equator.type = PrimType::Line;
-            equator.x1 = x;
-            equator.y1 = y + icon * 0.5f;
-            equator.x2 = x + icon;
-            equator.y2 = y + icon * 0.5f;
-            equator.stroke = Role::Stroke;
-            equator.strokeWidth = stroke * 0.8f;
-            result.prims.push_back(std::move(equator));
+            // Equator plus two latitude chords: globe line art without any
+            // inner ellipses
+            float radius = icon * 0.5f;
+            float centerY = y + radius;
+            float centerX = x + radius;
+            for (float offset : {-0.24f, 0.0f, 0.24f}) {
+                float dy = offset * icon;
+                float halfChord =
+                    std::sqrt(std::max(0.0f, radius * radius - dy * dy));
+                Prim latitude;
+                latitude.type = PrimType::Line;
+                latitude.x1 = centerX - halfChord;
+                latitude.y1 = centerY + dy;
+                latitude.x2 = centerX + halfChord;
+                latitude.y2 = centerY + dy;
+                latitude.stroke = Role::Stroke;
+                latitude.strokeWidth = stroke * 0.8f;
+                result.prims.push_back(std::move(latitude));
+            }
         } else {  // server and anything unknown
             Prim box;
             box.type = PrimType::RoundRect;
