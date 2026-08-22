@@ -445,15 +445,28 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
             break;
         }
         case ElementType::BlockQuote: {
-            static const char* kAlert[] = {"",          " class=\"alert-note\"",
-                                           " class=\"alert-tip\"",
-                                           " class=\"alert-important\"",
-                                           " class=\"alert-warning\"",
-                                           " class=\"alert-caution\""};
+            // GitHub alert callouts: class for the palette plus the same
+            // icon-and-label title line the viewer draws
+            static const struct {
+                const char* cls;
+                const char* title;  // icon (text presentation) + label
+            } kAlert[] = {
+                {"note", "\xE2\x93\x98\xEF\xB8\x8E  Note"},
+                {"tip", "\xF0\x9F\x92\xA1\xEF\xB8\x8E  Tip"},
+                {"important", "\xE2\x9D\x97\xEF\xB8\x8E  Important"},
+                {"warning", "\xE2\x9A\xA0\xEF\xB8\x8E  Warning"},
+                {"caution", "\xE2\x9B\x94\xEF\xB8\x8E  Caution"},
+            };
             int kind =
-                elem->alertKind >= 0 && elem->alertKind <= 5 ? elem->alertKind
+                elem->alertKind >= 1 && elem->alertKind <= 5 ? elem->alertKind
                                                              : 0;
-            ctx.out += std::string("<blockquote") + kAlert[kind] + ">";
+            if (kind) {
+                const auto& a = kAlert[kind - 1];
+                ctx.out += std::string("<blockquote class=\"alert-") + a.cls +
+                           "\"><p class=\"alert-title\">" + a.title + "</p>";
+            } else {
+                ctx.out += "<blockquote>";
+            }
             walkChildren(ctx, elem);
             ctx.out += "</blockquote>\n";
             break;
@@ -632,11 +645,29 @@ std::string themeCss(const App& app, const std::string& bodyFont,
            colorCss(t.blockquoteBorder) +
            ";margin:1em 0;padding:2px 18px;color:" + colorCss(mutedText) +
            ";}";
-    css += "blockquote.alert-note{border-color:#316dca;}";
-    css += "blockquote.alert-tip{border-color:#347d39;}";
-    css += "blockquote.alert-important{border-color:#8256d0;}";
-    css += "blockquote.alert-warning{border-color:#966600;}";
-    css += "blockquote.alert-caution{border-color:#c93c37;}";
+    // github.com's alert accents, light or dark side picked by the theme
+    // (the same table the viewer uses)
+    {
+        static const struct {
+            const char* cls;
+            uint32_t light;
+            uint32_t dark;
+        } kAlertCss[] = {
+            {"note", 0x0969DA, 0x4493F8},
+            {"tip", 0x1A7F37, 0x3FB950},
+            {"important", 0x8250DF, 0xAB7DF8},
+            {"warning", 0x9A6700, 0xD29922},
+            {"caution", 0xCF222E, 0xF85149},
+        };
+        css += ".alert-title{font-weight:600;margin:0 0 4px 0;}";
+        for (const auto& a : kAlertCss) {
+            std::string hex = colorCss(hexColor(t.isDark ? a.dark : a.light));
+            css += std::string("blockquote.alert-") + a.cls +
+                   "{border-color:" + hex + ";}";
+            css += std::string("blockquote.alert-") + a.cls +
+                   " .alert-title{color:" + hex + ";}";
+        }
+    }
     css += "table{border-collapse:collapse;margin:1em 0;}";
     css += "th,td{border:1px solid " + colorCss(border) +
            ";padding:6px 13px;}";
@@ -648,8 +679,11 @@ std::string themeCss(const App& app, const std::string& bodyFont,
     css += ".diagram{text-align:center;margin:1em 0;overflow-x:auto;}";
     css += ".math-display{text-align:center;margin:1em 0;}";
     css += ".math-inline svg{vertical-align:middle;}";
-    css += "mark{background:" + colorCss(t.accent) +
-           "33;color:inherit;padding:0 2px;}";
+    // ==highlight== uses the viewer's marker-pen yellow, not the accent
+    css += "mark{background:" +
+           colorCss(t.isDark ? D2D1::ColorF(0.98f, 0.80f, 0.25f, 0.28f)
+                             : D2D1::ColorF(1.00f, 0.88f, 0.20f, 0.45f)) +
+           ";color:inherit;padding:0 2px;}";
     return css;
 }
 
