@@ -1488,9 +1488,9 @@ static D2D1_COLOR_F diagramSeriesColor(const App& app, int index) {
     return D2D1::ColorF(r, g, b, 1.0f);
 }
 
-static D2D1_COLOR_F resolveDiagramRole(const App& app,
-                                       const mermaidext::Prim& prim,
-                                       mermaidext::Role role) {
+D2D1_COLOR_F resolveDiagramRoleImpl(const App& app,
+                                const mermaidext::Prim& prim,
+                                mermaidext::Role role) {
     int seriesIndex = prim.seriesIndex;
     D2D1_COLOR_F color = app.theme.text;
     switch (role) {
@@ -1723,8 +1723,8 @@ static bool layoutMermaidExtDiagram(App& app, mermaidext::Kind kind,
     for (const auto& prim : built.prims) {
         float x1 = baseX + prim.x1, y1 = baseY + prim.y1;
         float x2 = baseX + prim.x2, y2 = baseY + prim.y2;
-        D2D1_COLOR_F fill = resolveDiagramRole(app, prim, prim.fill);
-        D2D1_COLOR_F stroke = resolveDiagramRole(app, prim, prim.stroke);
+        D2D1_COLOR_F fill = resolveDiagramRoleImpl(app, prim, prim.fill);
+        D2D1_COLOR_F stroke = resolveDiagramRoleImpl(app, prim, prim.stroke);
         switch (prim.type) {
             case mermaidext::PrimType::Rect:
             case mermaidext::PrimType::RoundRect:
@@ -1871,7 +1871,7 @@ static bool layoutMermaidExtDiagram(App& app, mermaidext::Kind kind,
         app.docText += wide;
         addTextRun(app, std::move(info),
                    D2D1::Point2F(rect.left, rect.top), rect,
-                   resolveDiagramRole(app, *prim, prim->fill),
+                   resolveDiagramRoleImpl(app, *prim, prim->fill),
                    docStart, wide.size(), true);
         app.docText += L"\n";
     }
@@ -2953,4 +2953,12 @@ void ensureLayoutComplete(App& app) {
         layoutFinish(app);
         app.layoutTimeUs += (size_t)usElapsed(t0);
     }
+}
+
+
+// Public face of the role resolver for the exporters (the implementation
+// lives in this file's anonymous namespace beside the palette helpers)
+D2D1_COLOR_F resolveDiagramRole(const App& app, const mermaidext::Prim& prim,
+                                mermaidext::Role role) {
+    return resolveDiagramRoleImpl(app, prim, role);
 }

@@ -39,4 +39,9 @@ void mathBoxRetain(App& app, const MathBoxPtr& box, float x, float y,
 // Drop all cached boxes (zoom / theme font changed)
 void mathClearCache();
 
+// Standalone SVG markup for a laid-out box (HTML export): text runs at
+// their measured positions, rules as rects, arrow strokes as lines
+std::string mathBoxSvg(const MathBoxPtr& box, const std::string& colorCss,
+                       const std::string& fontFamilyCss);
+
 #endif // TINTA_MATH_RENDER_H

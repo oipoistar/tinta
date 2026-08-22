@@ -2,6 +2,7 @@
 #define TINTA_RENDER_H
 
 #include "app.h"
+#include "mermaid_ext.h"
 
 // Full synchronous layout of the whole document
 void layoutDocument(App& app);
@@ -20,5 +21,9 @@ void ensureLayoutComplete(App& app);
 // UI-thread completion for WM_APP_IMAGE_READY: takes ownership of the
 // AsyncImageResult, updates the image cache, and triggers a reflow
 void completeAsyncImage(App& app, void* asyncResult);
+
+// Theme color for a diagram primitive's role (shared with the exporters)
+D2D1_COLOR_F resolveDiagramRole(const App& app, const mermaidext::Prim& prim,
+                                mermaidext::Role role);
 
 #endif // TINTA_RENDER_H
