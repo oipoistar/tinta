@@ -23,7 +23,7 @@
 
 <br>
 
-Tinta is a **fast, lightweight Markdown and Mermaid viewer for Windows**, built with Direct2D and DirectWrite for hardware-accelerated rendering. A single native executable of about 1.4 MB that opens instantly — no Electron, no web engine, no installer.
+Tinta is a **fast, lightweight Markdown and Mermaid viewer for Windows**, built with Direct2D and DirectWrite for hardware-accelerated rendering. A single native executable of about 1.8 MB that opens instantly — no Electron, no web engine, no installer.
 
 <p align="center">
   <img src="https://tinta.cc/img/screenshots/paper.png" width="49%" alt="Tinta markdown viewer on Windows — Paper light theme">
@@ -56,7 +56,7 @@ Most markdown apps ship an entire browser to render text. Tinta uses the GPU-acc
 |  | Tinta | Typora | Obsidian | VS Code |
 |---|---|---|---|---|
 | Startup | **<100 ms** | ~1.5 s | ~3 s | ~2 s |
-| Install size | **~1.4 MB** | ~90 MB | ~250 MB | ~350 MB |
+| Install size | **~1.8 MB** | ~90 MB | ~250 MB | ~350 MB |
 | Runtime | **Native Direct2D** | Electron | Electron | Electron |
 
 It's a viewer first: perfect as the double-click default for `.md` and `.mmd` files, for reading documentation and diagrams — with an edit mode when you need it.
@@ -69,7 +69,8 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Word wrap** - Optional soft wrap in the editor (Ctrl+W)
 - **Native LaTeX math** - `$inline$` and `$$display$$` equations rendered natively (fractions, scripts, stretchy delimiters, Greek — no MathJax, no web engine)
 - **Focused editing** - Hide the preview pane while writing (Ctrl+E)
-- **Native Mermaid diagrams** - Flowcharts, sequence, class, state, ER, pie, git graphs, gantt, mindmaps, timelines, journeys, and charts — rendered without a web engine
+- **Native Mermaid diagrams** - 22 diagram families, from flowcharts with subgraphs through sequence, class, state, ER, gantt, and pie to C4, sankey, kanban, and radar - rendered without a web engine
+- **Export as HTML, DOCX, or PDF** - Right-click and pick "Export as..." for a self-contained web page, a Word document that opens natively, or a vector PDF; diagrams and math come along in every format
 - **Rich tables** - Tables with bold, italic, code, and clickable links in cells
 - **Tabs** - Win11 Notepad-style tabs in the title bar: files opened from Explorer join the window as tabs, Ctrl+Tab cycles, Ctrl+W closes, middle-click closes, Ctrl+T opens the file browser into a new tab, unsaved buffers show a dot, and dragging reorders tabs. Right-click a tab for close operations (close, close all but this, close all to the left/right) plus copy path and reveal in Explorer. Pulling a tab out of the strip floats it as a card: drop it on open space for a new window (which keeps the tab row), or onto another Tinta window to move it there — and dropping a single-file window onto a tab strip merges it back. Single-file windows stay tabless; turn the Explorer behavior off with the "Open files in tabs" setting
 - **Folder browser** - Press B to browse and open Markdown or Mermaid files (Ctrl+click a file to open it in a new tab)
@@ -202,16 +203,24 @@ This registers `.md`, `.markdown`, and `.mmd` so you can select Tinta as their d
 
 ## Mermaid Support
 
-Tinta natively renders thirteen Mermaid diagram families in `.mmd` files and fenced `mermaid` code blocks — no web engine involved:
+Tinta natively renders twenty-two Mermaid diagram families in `.mmd` files and fenced `mermaid` code blocks — no web engine involved:
 
-- **Flowcharts** (`flowchart` / `graph`) - TB/TD, BT, LR, RL layouts, common node shapes, directed and labeled edges, `classDef`/`class`/`style` styling
+- **Flowcharts** (`flowchart` / `graph`) - TB/TD, BT, LR, RL layouts, `subgraph` groups, common node shapes, directed and labeled edges, `classDef`/`class`/`style` styling, and graceful handling of Mermaid 11 edge IDs and node configs
 - **Sequence diagrams** - participants and actors with aliases and `<br/>` breaks, every arrow family, activations, notes, `autonumber`, and `loop`/`alt`/`opt`/`par`/`critical`/`break` frames
-- **Class diagrams** - member blocks, stereotypes, `~T~` generics, all relation kinds with multiplicities
+- **Class diagrams** - member blocks, stereotypes, `~T~` generics, all relation kinds with multiplicities, `note` and `note for`
 - **State diagrams** - `[*]` start/end, choice/fork/join, descriptions, directions, inline notes
 - **ER diagrams** - attribute tables with keys, full crow's-foot cardinality notation
-- **Pie charts**, **git graphs**, **gantt charts**, **mindmaps**, **timelines**, **user journeys**, **quadrant charts**, and **XY charts** (`xychart-beta`)
+- **C4 diagrams** (`C4Context`/`C4Container`/`C4Component`/`C4Dynamic`/`C4Deployment`) - persons, systems, containers, and components in the standard C4 palette, nested boundaries, labeled relations
+- **Requirement diagrams** - typed requirement and element boxes with labeled relations
+- **Architecture diagrams** (`architecture-beta`) - services with line-art icons, groups, junctions, and side-anchored edges
+- **Block diagrams** (`block-beta`) - column grids, spans, spaces, nested blocks, block arrows, labeled edges
+- **Sankey diagrams** (`sankey-beta`) - ranked nodes with smooth flow ribbons
+- **Packet diagrams** (`packet-beta`) - 32-bit rows with labeled bit-range fields
+- **Kanban boards** - columns and cards with ticket, assignee, and priority metadata
+- **Treemaps** (`treemap-beta`) and **radar charts** (`radar-beta`)
+- **Pie charts**, **git graphs**, **gantt charts** (including the numeric `dateFormat X` axis), **mindmaps**, **timelines**, **user journeys**, **quadrant charts**, and **XY charts** (`xychart-beta`)
 
-Diagrams follow the active theme, print through Ctrl+P, and their text is selectable and searchable like any other content. Anything a native renderer does not cover yet (composite states, class notes, and the remaining families such as C4) falls back to readable source code.
+Diagrams follow the active theme, print through Ctrl+P, export as SVG in HTML and as crisp images in DOCX, and their text is selectable and searchable like any other content. Anything a native renderer does not cover yet (composite states, zenuml) falls back to readable source code.
 
 ## Themes
 
