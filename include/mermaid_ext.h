@@ -142,6 +142,12 @@ bool startsWithWord(std::string_view line, std::string_view word,
 // diagram width to match (notes and markers can overhang the layout box).
 void normalizeLeft(Built& built);
 
+// Cylinder silhouette (top ellipse, straight sides, bottom arc) plus the
+// lid seam, sampled into a polygon and short lines. `paint` supplies the
+// fill/stroke roles and widths; lidHeight is the full top-ellipse height.
+void emitCylinder(std::vector<Prim>& out, const Prim& paint, float x1,
+                  float y1, float x2, float y2, float lidHeight);
+
 Built buildSequence(std::string_view source, const Measure& measure,
                     float scale);
 Built buildPie(std::string_view source, const Measure& measure, float scale);

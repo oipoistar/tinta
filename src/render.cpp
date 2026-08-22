@@ -1099,6 +1099,11 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
         baseX += (maxWidth - graphLayout.width) * 0.5f;
     }
     float baseY = y + 10.0f * scale;
+    if (!diagram.subgraphs.empty()) {
+        // Group boxes extend above their topmost node by pad + title
+        // height; reserve that room so they stay inside the block
+        baseY += 30.0f * scale;
+    }
     float diagramLeft = baseX;
     float diagramTop = baseY;
     float diagramRight = baseX + graphLayout.width;

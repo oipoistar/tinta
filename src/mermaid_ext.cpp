@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 
 namespace mermaidext {
 
@@ -148,6 +149,52 @@ void normalizeLeft(Built& built) {
         for (auto& point : prim.pts) point.x += shift;
     }
     built.width += shift;
+}
+
+void emitCylinder(std::vector<Prim>& out, const Prim& paint, float x1,
+                  float y1, float x2, float y2, float lidHeight) {
+    constexpr float kPi = 3.14159265f;
+    float rx = (x2 - x1) * 0.5f;
+    float ry = lidHeight * 0.5f;
+    float cx = (x1 + x2) * 0.5f;
+    float topCy = y1 + ry;
+    float botCy = y2 - ry;
+    if (botCy < topCy) botCy = topCy;
+
+    // Silhouette: over the top arc, down the right side, under the bottom
+    // arc, back up the left side
+    Prim body = paint;
+    body.type = PrimType::Polygon;
+    body.pts.clear();
+    constexpr int kSteps = 10;
+    for (int i = 0; i <= kSteps; i++) {
+        float t = kPi + kPi * i / kSteps;  // left -> top -> right
+        body.pts.push_back(
+            {cx + rx * std::cos(t), topCy + ry * std::sin(t)});
+    }
+    for (int i = 0; i <= kSteps; i++) {
+        float t = kPi * i / kSteps;  // right -> bottom -> left
+        body.pts.push_back(
+            {cx + rx * std::cos(t), botCy + ry * std::sin(t)});
+    }
+    out.push_back(std::move(body));
+
+    // Lid seam: the lower half of the top ellipse, as short segments
+    if (paint.stroke != Role::None) {
+        for (int i = 0; i < kSteps; i++) {
+            float t0 = kPi * i / kSteps;
+            float t1 = kPi * (i + 1) / kSteps;
+            Prim seam = paint;
+            seam.type = PrimType::Line;
+            seam.fill = Role::None;
+            seam.pts.clear();
+            seam.x1 = cx + rx * std::cos(t0);
+            seam.y1 = topCy + ry * std::sin(t0);
+            seam.x2 = cx + rx * std::cos(t1);
+            seam.y2 = topCy + ry * std::sin(t1);
+            out.push_back(std::move(seam));
+        }
+    }
 }
 
 }  // namespace detail

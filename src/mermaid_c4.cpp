@@ -962,6 +962,42 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
             }
             float cx = (start.x + end.x) * 0.5f;
             float cy = (start.y + end.y) * 0.5f;
+            // Straight rels can cross intermediate boxes; put the label on
+            // the longest clear stretch of the line instead of the midpoint
+            {
+                constexpr int kSamples = 48;
+                auto blocked = [&](float px, float py) {
+                    for (const auto& other : elements) {
+                        if (&other == from || &other == to) continue;
+                        if (px > other.x && px < other.x + other.width &&
+                            py > other.y && py < other.y + other.height) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                int bestStart = -1, bestLength = 0, runStart = -1;
+                for (int i = 0; i <= kSamples; i++) {
+                    float t = static_cast<float>(i) / kSamples;
+                    bool clear = !blocked(start.x + (end.x - start.x) * t,
+                                          start.y + (end.y - start.y) * t);
+                    if (clear && runStart < 0) runStart = i;
+                    if ((!clear || i == kSamples) && runStart >= 0) {
+                        int length = (clear ? i : i - 1) - runStart + 1;
+                        if (length > bestLength) {
+                            bestLength = length;
+                            bestStart = runStart;
+                        }
+                        runStart = -1;
+                    }
+                }
+                // Any clear stretch beats covering a box center
+                if (bestLength >= 2) {
+                    float t = (bestStart + bestLength * 0.5f) / kSamples;
+                    cx = start.x + (end.x - start.x) * t;
+                    cy = start.y + (end.y - start.y) * t;
+                }
+            }
             float chipH = size.h + technSize.h;
             Prim chip;
             chip.type = PrimType::Rect;
@@ -970,7 +1006,8 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
             chip.x2 = cx + chipW * 0.5f + 4.0f * scale;
             chip.y2 = cy + chipH * 0.5f + 2.0f * scale;
             chip.fill = Role::Background;
-            result.prims.push_back(chip);
+            // Rides with the texts so it draws over the element boxes
+            texts.push_back(chip);
             Prim label;
             label.type = PrimType::Text;
             label.text = rel.label;
@@ -1015,37 +1052,52 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
             result.prims.push_back(std::move(head));
             bodyTop += 22.0f * scale;
         }
-        Prim box;
-        box.type = PrimType::RoundRect;
-        box.radius =
-            element.queue ? (element.y + element.height - bodyTop) * 0.5f
-                          : 8.0f * scale;
-        box.x1 = element.x;
-        box.y1 = bodyTop;
-        box.x2 = element.x + element.width;
-        box.y2 = element.y + element.height;
-        box.fill = Role::Custom;
-        box.customR = colors.bgR;
-        box.customG = colors.bgG;
-        box.customB = colors.bgB;
-        result.prims.push_back(box);
         if (element.db) {
-            // A lid ellipse turns the box into a cylinder
-            Prim lid;
-            lid.type = PrimType::Ellipse;
-            lid.x1 = element.x;
-            lid.y1 = bodyTop;
-            lid.x2 = element.x + element.width;
-            lid.y2 = bodyTop + 14.0f * scale;
-            lid.stroke = Role::Custom;
-            lid.customR = colors.bgR * 0.75f + colors.fgR * 0.25f;
-            lid.customG = colors.bgG * 0.75f + colors.fgG * 0.25f;
-            lid.customB = colors.bgB * 0.75f + colors.fgB * 0.25f;
-            lid.strokeWidth = 1.4f * scale;
-            result.prims.push_back(std::move(lid));
+            // A real cylinder: silhouette plus a lid seam in a lighter mix
+            Prim paint;
+            paint.fill = Role::Custom;
+            paint.customR = colors.bgR;
+            paint.customG = colors.bgG;
+            paint.customB = colors.bgB;
+            paint.stroke = Role::None;
+            emitCylinder(result.prims, paint, element.x, bodyTop,
+                         element.x + element.width,
+                         element.y + element.height, 14.0f * scale);
+            Prim seamPaint = paint;
+            seamPaint.stroke = Role::Custom;
+            seamPaint.fill = Role::None;
+            seamPaint.customR = colors.bgR * 0.7f + colors.fgR * 0.3f;
+            seamPaint.customG = colors.bgG * 0.7f + colors.fgG * 0.3f;
+            seamPaint.customB = colors.bgB * 0.7f + colors.fgB * 0.3f;
+            seamPaint.strokeWidth = 1.3f * scale;
+            // Only the seam from this second pass: skip its silhouette
+            std::vector<Prim> seamPrims;
+            emitCylinder(seamPrims, seamPaint, element.x, bodyTop,
+                         element.x + element.width,
+                         element.y + element.height, 14.0f * scale);
+            for (auto& prim : seamPrims) {
+                if (prim.type == PrimType::Line) {
+                    result.prims.push_back(std::move(prim));
+                }
+            }
+        } else {
+            Prim box;
+            box.type = PrimType::RoundRect;
+            box.radius = element.queue
+                             ? (element.y + element.height - bodyTop) * 0.5f
+                             : 8.0f * scale;
+            box.x1 = element.x;
+            box.y1 = bodyTop;
+            box.x2 = element.x + element.width;
+            box.y2 = element.y + element.height;
+            box.fill = Role::Custom;
+            box.customR = colors.bgR;
+            box.customG = colors.bgG;
+            box.customB = colors.bgB;
+            result.prims.push_back(box);
         }
 
-        float textTop = bodyTop + (element.db ? 16.0f : 8.0f) * scale;
+        float textTop = bodyTop + (element.db ? 20.0f : 8.0f) * scale;
         float textLeft = element.x + 12.0f * scale;
         float textRight = element.x + element.width - 12.0f * scale;
         Size labelSize = measure(element.label, labelStyle, wrap);
@@ -1502,29 +1554,15 @@ Built buildArchitecture(std::string_view source, const Measure& measure,
                        });
         float stroke = 1.6f * scale;
         if (kind == "database" || kind == "disk") {
-            float lidH = icon * (kind == "disk" ? 0.30f : 0.22f);
+            float lidH = icon * (kind == "disk" ? 0.34f : 0.24f);
             float bodyTop = kind == "disk" ? y + icon * 0.18f : y;
             float bodyBottom = y + icon - (kind == "disk" ? icon * 0.18f : 0);
-            Prim body;
-            body.type = PrimType::RoundRect;
-            body.radius = 10.0f * scale;
-            body.x1 = x;
-            body.y1 = bodyTop;
-            body.x2 = x + icon;
-            body.y2 = bodyBottom;
-            body.fill = Role::Fill;
-            body.stroke = Role::Stroke;
-            body.strokeWidth = stroke;
-            result.prims.push_back(std::move(body));
-            Prim lid;
-            lid.type = PrimType::Ellipse;
-            lid.x1 = x;
-            lid.y1 = bodyTop;
-            lid.x2 = x + icon;
-            lid.y2 = bodyTop + lidH;
-            lid.stroke = Role::Stroke;
-            lid.strokeWidth = stroke;
-            result.prims.push_back(std::move(lid));
+            Prim paint;
+            paint.fill = Role::Fill;
+            paint.stroke = Role::Stroke;
+            paint.strokeWidth = stroke;
+            emitCylinder(result.prims, paint, x, bodyTop, x + icon,
+                         bodyBottom, lidH);
         } else if (kind == "cloud") {
             Prim shape;
             shape.type = PrimType::Polygon;

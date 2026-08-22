@@ -403,24 +403,11 @@ void emitLeaf(BlockEmitCtx& ctx, BlockItem& item) {
             shape.x2 = cx + d * 0.5f; shape.y2 = cy + d * 0.5f;
             break;
         }
-        case BlockShape::Cylinder: {
-            // Body plus an ellipse lid reads as a cylinder
-            shape.type = PrimType::RoundRect;
-            shape.radius = 9.0f * scale;
-            shape.x1 = x1; shape.y1 = y1; shape.x2 = x2; shape.y2 = y2;
-            ctx.shapes->push_back(shape);
-            Prim lid;
-            lid.type = PrimType::Ellipse;
-            lid.x1 = x1;
-            lid.y1 = y1;
-            lid.x2 = x2;
-            lid.y2 = y1 + 12.0f * scale;
-            lid.stroke = Role::Stroke;
-            lid.strokeWidth = 1.2f * scale;
-            ctx.shapes->push_back(std::move(lid));
+        case BlockShape::Cylinder:
+            emitCylinder(*ctx.shapes, shape, x1, y1, x2, y2,
+                         std::min(12.0f * scale, h * 0.3f));
             shape.type = PrimType::Text;  // sentinel: already pushed
             break;
-        }
         case BlockShape::Diamond:
             shape.type = PrimType::Polygon;
             shape.pts = {{(x1 + x2) * 0.5f, y1},
