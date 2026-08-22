@@ -60,10 +60,18 @@ struct Edge {
     float strokeScale = 1.0f;
 };
 
+struct Subgraph {
+    std::string id;
+    std::string label;
+    size_t parent = SIZE_MAX;    // enclosing subgraph, SIZE_MAX = top level
+    std::vector<size_t> nodes;   // nodes first defined inside this subgraph
+};
+
 struct Diagram {
     Direction direction = Direction::TopToBottom;
     std::vector<Node> nodes;
     std::vector<Edge> edges;
+    std::vector<Subgraph> subgraphs;
     std::unordered_map<std::string, Style> classStyles;
 };
 

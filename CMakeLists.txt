@@ -56,6 +56,10 @@ set(SOURCES
     src/mermaid_gantt.cpp
     src/mermaid_charts.cpp
     src/mermaid_narrative.cpp
+    src/mermaid_grid.cpp
+    src/mermaid_charts2.cpp
+    src/mermaid_block.cpp
+    src/mermaid_c4.cpp
     src/document.cpp
     src/inline_style.cpp
     src/print.cpp
@@ -63,6 +67,8 @@ set(SOURCES
     src/selection.cpp
     src/math_render.cpp
     src/tabs.cpp
+    src/export_html.cpp
+    src/export_docx.cpp
 )
 
 set(HEADERS
@@ -114,6 +120,7 @@ target_link_libraries(tinta PRIVATE
     d3d11
     dwmapi
     comdlg32
+    shlwapi
     winspool
 )
 
@@ -134,6 +141,10 @@ if(BUILD_TESTING)
         src/mermaid_gantt.cpp
         src/mermaid_charts.cpp
         src/mermaid_narrative.cpp
+        src/mermaid_grid.cpp
+        src/mermaid_charts2.cpp
+        src/mermaid_block.cpp
+        src/mermaid_c4.cpp
     )
     target_include_directories(mermaid_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include

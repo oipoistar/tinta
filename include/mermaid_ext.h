@@ -31,6 +31,15 @@ enum class Kind {
     Journey,
     Quadrant,
     XyChart,
+    Packet,
+    Kanban,
+    Treemap,
+    Radar,
+    Sankey,
+    Block,
+    Requirement,
+    C4,
+    Architecture,
 };
 
 // Inspects the first meaningful line's keyword.
@@ -94,7 +103,7 @@ struct Prim {
     Role fill = Role::None;
     Role stroke = Role::None;
     int seriesIndex = 0;
-    float customR = 0.0f, customG = 0.0f, customB = 0.0f;
+    float customR = 0.0f, customG = 0.0f, customB = 0.0f, customA = 1.0f;
     float strokeWidth = 0.0f;
     bool dashed = false;
     bool arrow = false;      // Line: filled arrowhead at (x2,y2)
@@ -133,6 +142,12 @@ bool startsWithWord(std::string_view line, std::string_view word,
 // diagram width to match (notes and markers can overhang the layout box).
 void normalizeLeft(Built& built);
 
+// Cylinder silhouette (top ellipse, straight sides, bottom arc) plus the
+// lid seam, sampled into a polygon and short lines. `paint` supplies the
+// fill/stroke roles and widths; lidHeight is the full top-ellipse height.
+void emitCylinder(std::vector<Prim>& out, const Prim& paint, float x1,
+                  float y1, float x2, float y2, float lidHeight);
+
 Built buildSequence(std::string_view source, const Measure& measure,
                     float scale);
 Built buildPie(std::string_view source, const Measure& measure, float scale);
@@ -154,6 +169,23 @@ Built buildQuadrant(std::string_view source, const Measure& measure,
                     float scale);
 Built buildXyChart(std::string_view source, const Measure& measure,
                    float scale);
+Built buildPacket(std::string_view source, const Measure& measure,
+                  float scale);
+Built buildKanban(std::string_view source, const Measure& measure,
+                  float scale);
+Built buildTreemap(std::string_view source, const Measure& measure,
+                   float scale);
+Built buildRadar(std::string_view source, const Measure& measure,
+                 float scale);
+Built buildSankey(std::string_view source, const Measure& measure,
+                  float scale);
+Built buildBlock(std::string_view source, const Measure& measure,
+                 float scale);
+Built buildRequirement(std::string_view source, const Measure& measure,
+                       float scale);
+Built buildC4(std::string_view source, const Measure& measure, float scale);
+Built buildArchitecture(std::string_view source, const Measure& measure,
+                        float scale);
 
 }  // namespace detail
 

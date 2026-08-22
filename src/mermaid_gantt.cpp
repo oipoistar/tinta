@@ -50,11 +50,24 @@ void civilFromDays(long long z, int& y, unsigned& m, unsigned& d) {
 
 struct DateFormat {
     int yearIndex = 0, monthIndex = 1, dayIndex = 2;  // token order
+    bool numeric = false;  // dateFormat X: plain numbers on a linear axis
 };
 
 // Parses "2014-01-06" style strings against the token order
 bool parseDate(std::string_view text, const DateFormat& format,
                double& outDays) {
+    if (format.numeric) {
+        if (text.empty()) return false;
+        try {
+            size_t used = 0;
+            double value = std::stod(std::string(text), &used);
+            if (used != text.size()) return false;
+            outDays = value;
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
     int numbers[3] = {0, 0, 0};
     int count = 0;
     size_t i = 0;
@@ -146,6 +159,11 @@ Built buildGantt(std::string_view source, const Measure& measure,
             continue;
         }
         if (startsWithWord(line, "dateFormat", &rest)) {
+            // "X"/"x" mean plain numbers (unix stamps) on a linear axis
+            if (rest == "X" || rest == "x") {
+                dateFormat.numeric = true;
+                continue;
+            }
             // token order of YYYY / MM / DD in the format string
             std::string format(rest);
             size_t yearAt = format.find('Y');
@@ -340,6 +358,46 @@ Built buildGantt(std::string_view source, const Measure& measure,
     float rowStride = (kRowHeight + kRowGap) * scale;
     float chartBottom = chartTop + tasks.size() * rowStride;
 
+    // Numeric axis: 1-2-5 stepped ticks with plain number labels
+    if (dateFormat.numeric) {
+        double roughStep = span / 8.0;
+        double magnitude =
+            std::pow(10.0, std::floor(std::log10(std::max(roughStep, 1e-6))));
+        double normalized = roughStep / magnitude;
+        double step = normalized <= 1.0 ? 1.0
+                      : normalized <= 2.0 ? 2.0
+                      : normalized <= 5.0 ? 5.0
+                                          : 10.0;
+        step *= magnitude;
+        double first = std::ceil(minDay / step) * step;
+        for (double value = first; value <= maxDay + step * 0.001;
+             value += step) {
+            float x = dayX(value);
+            if (x < gutter - 1.0f || x > gutter + chartWidth + 1.0f) continue;
+            Prim grid;
+            grid.type = PrimType::Line;
+            grid.x1 = x;
+            grid.y1 = chartTop;
+            grid.x2 = x;
+            grid.y2 = chartBottom + 4.0f * scale;
+            grid.stroke = Role::Muted;
+            grid.strokeWidth = 0.5f * scale;
+            result.prims.push_back(grid);
+            char buffer[32];
+            snprintf(buffer, sizeof(buffer), "%g", value);
+            Size size = measure(buffer, axisStyle, 0.0f);
+            Prim label;
+            label.type = PrimType::Text;
+            label.text = buffer;
+            label.style = axisStyle;
+            label.fill = Role::Muted;
+            label.x1 = x - size.w * 0.5f - 2.0f;
+            label.y1 = chartBottom + 6.0f * scale;
+            label.x2 = x + size.w * 0.5f + 2.0f;
+            label.y2 = chartBottom + 6.0f * scale + size.h;
+            result.prims.push_back(std::move(label));
+        }
+    } else
     // Gridlines: daily under 21 days, weekly under 130, else monthly
     {
         long long firstDay = static_cast<long long>(std::floor(minDay));

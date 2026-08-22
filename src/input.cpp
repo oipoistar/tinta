@@ -10,6 +10,7 @@
 #include "render.h"
 #include "overlays.h"
 #include "print.h"
+#include "export.h"
 #include "i18n.h"
 #include "selection.h"
 
@@ -1351,6 +1352,10 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
         case CTX_PRINT:
             closeSearchIfOpen(app);
             openPrintPreview(app, hwnd);
+            break;
+        case CTX_EXPORT:
+            closeSearchIfOpen(app);
+            exportDocumentAs(app, hwnd);
             break;
         case CTX_EDIT:
             closeSearchIfOpen(app);

@@ -9,6 +9,7 @@
 #include <limits>
 #include <numeric>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace mermaid {
 namespace {
@@ -284,8 +285,11 @@ bool parseStyleList(std::string_view value, Style& style, std::string& error) {
         if (!item.empty()) {
             size_t colon = item.find(':');
             if (colon == std::string_view::npos) {
-                error = "Expected ':' in style declaration";
-                return false;
+                // Continuation of an unknown comma-valued property
+                // (stroke-dasharray: 9,5): skip it like the property itself
+                if (comma == value.size()) break;
+                position = comma + 1;
+                continue;
             }
 
             std::string_view key = trim(item.substr(0, colon));
@@ -434,8 +438,30 @@ bool parseNodeSpec(std::string_view line, size_t& position, size_t sourceOffset,
 }
 
 bool parseArrow(std::string_view line, size_t& position, ArrowSpec& arrow,
-                std::string& error) {
+                std::string& error,
+                std::unordered_set<std::string>* edgeIds = nullptr) {
     skipSpaces(line, position);
+
+    // Mermaid 11 edge IDs ("A e1@--> B") name the edge for styling and
+    // animation; the name itself has nothing to draw
+    {
+        size_t probe = position;
+        while (probe < line.size() &&
+               (std::isalnum(static_cast<unsigned char>(line[probe])) ||
+                line[probe] == '_')) {
+            probe++;
+        }
+        if (probe > position && probe + 1 < line.size() &&
+            line[probe] == '@' &&
+            (line[probe + 1] == '-' || line[probe + 1] == '=' ||
+             line[probe + 1] == '.')) {
+            if (edgeIds) {
+                edgeIds->insert(
+                    std::string(line.substr(position, probe - position)));
+            }
+            position = probe + 1;
+        }
+    }
 
     if (startsWithAt(line, position, "-.->")) {
         arrow.directed = true;
@@ -594,6 +620,8 @@ ParseResult parse(std::string_view source) {
 
     ParseResult result;
     std::unordered_map<std::string, size_t> nodeIds;
+    std::unordered_set<std::string> edgeIds;
+    std::vector<size_t> subgraphStack;
     bool foundHeader = false;
 
     size_t lineNumber = 0;
@@ -653,7 +681,8 @@ ParseResult parse(std::string_view source) {
                     size_t comma = ids.find(',', idPosition);
                     if (comma == std::string_view::npos) comma = ids.size();
                     std::string_view id = trim(ids.substr(idPosition, comma - idPosition));
-                    if (!id.empty()) {
+                    if (!id.empty() &&
+                        edgeIds.find(std::string(id)) == edgeIds.end()) {
                         NodeSpec spec;
                         spec.id = std::string(id);
                         spec.label = spec.id;
@@ -681,14 +710,99 @@ ParseResult parse(std::string_view source) {
                 spec.sourceOffset = lineOffset;
                 size_t nodeIndex = ensureNode(result.diagram, nodeIds, spec);
                 mergeStyle(result.diagram.nodes[nodeIndex].style, style);
-            } else if (equalsIgnoreCase(keyword, "subgraph") ||
-                       equalsIgnoreCase(keyword, "end") ||
+            } else if (equalsIgnoreCase(keyword, "subgraph")) {
+                std::string_view rest = trim(line.substr(position));
+                if (rest.empty()) {
+                    return fail(std::move(result), lineNumber,
+                                "Expected a subgraph name");
+                }
+                Subgraph subgraph;
+                size_t bracket = rest.find('[');
+                if (bracket != std::string_view::npos && rest.back() == ']') {
+                    subgraph.id = std::string(trim(rest.substr(0, bracket)));
+                    std::string_view label = trim(rest.substr(
+                        bracket + 1, rest.size() - bracket - 2));
+                    if (label.size() >= 2 &&
+                        (label.front() == '"' || label.front() == '\'') &&
+                        label.back() == label.front()) {
+                        label = label.substr(1, label.size() - 2);
+                    }
+                    subgraph.label = decodeLabel(label);
+                } else {
+                    subgraph.id = std::string(rest);
+                    subgraph.label = decodeLabel(rest);
+                }
+                subgraph.parent = subgraphStack.empty() ? SIZE_MAX
+                                                        : subgraphStack.back();
+                result.diagram.subgraphs.push_back(std::move(subgraph));
+                subgraphStack.push_back(result.diagram.subgraphs.size() - 1);
+            } else if (equalsIgnoreCase(keyword, "end")) {
+                if (subgraphStack.empty()) {
+                    return fail(std::move(result), lineNumber,
+                                "Unmatched subgraph end");
+                }
+                subgraphStack.pop_back();
+            } else if (equalsIgnoreCase(keyword, "direction") ||
                        equalsIgnoreCase(keyword, "click") ||
                        equalsIgnoreCase(keyword, "linkStyle")) {
-                return fail(std::move(result), lineNumber,
-                            "This Mermaid flowchart statement is not supported");
+                // Direction hints inside subgraphs, click handlers, and edge
+                // styling have nothing to draw natively; the diagram itself
+                // still renders
+            } else if (std::string configName; [&] {
+                           // Mermaid 11 config: "e1@{ animate: true }" for
+                           // edges, "A@{ img: ..., label: ... }" for nodes
+                           size_t at = line.find("@{");
+                           if (at == std::string_view::npos ||
+                               line.back() != '}') {
+                               return false;
+                           }
+                           std::string_view name = trim(line.substr(0, at));
+                           if (name.empty()) return false;
+                           for (char c : name) {
+                               if (!std::isalnum(
+                                       static_cast<unsigned char>(c)) &&
+                                   c != '_') {
+                                   return false;
+                               }
+                           }
+                           configName = std::string(name);
+                           return true;
+                       }()) {
+                // Edge configs are presentation only; node configs keep the
+                // node, with its label when one is given (images and fancy
+                // shapes degrade to a plain box)
+                if (edgeIds.find(configName) == edgeIds.end()) {
+                    std::string label = configName;
+                    size_t labelKey = line.find("label");
+                    if (labelKey != std::string_view::npos) {
+                        size_t quote = line.find('"', labelKey);
+                        size_t close = quote == std::string_view::npos
+                            ? std::string_view::npos
+                            : line.find('"', quote + 1);
+                        if (close != std::string_view::npos) {
+                            label = decodeLabel(
+                                line.substr(quote + 1, close - quote - 1));
+                        }
+                    }
+                    size_t nodesBefore = result.diagram.nodes.size();
+                    NodeSpec spec;
+                    spec.id = configName;
+                    spec.label = label;
+                    spec.hasDefinition = label != configName;
+                    spec.sourceOffset = lineOffset;
+                    ensureNode(result.diagram, nodeIds, spec);
+                    if (!subgraphStack.empty()) {
+                        auto& owner =
+                            result.diagram.subgraphs[subgraphStack.back()];
+                        for (size_t i = nodesBefore;
+                             i < result.diagram.nodes.size(); i++) {
+                            owner.nodes.push_back(i);
+                        }
+                    }
+                }
             } else {
                 position = 0;
+                size_t nodesBefore = result.diagram.nodes.size();
                 NodeSpec currentSpec;
                 std::string error;
                 if (!parseNodeSpec(line, position, lineOffset, currentSpec, error)) {
@@ -701,7 +815,7 @@ ParseResult parse(std::string_view source) {
                     if (position >= line.size()) break;
 
                     ArrowSpec arrow;
-                    if (!parseArrow(line, position, arrow, error)) {
+                    if (!parseArrow(line, position, arrow, error, &edgeIds)) {
                         return fail(std::move(result), lineNumber, std::move(error));
                     }
 
@@ -719,6 +833,16 @@ ParseResult parse(std::string_view source) {
                         arrow.strokeScale,
                     });
                     currentNode = nextNode;
+                }
+
+                // Nodes first defined inside an open subgraph belong to it
+                if (!subgraphStack.empty()) {
+                    auto& owner =
+                        result.diagram.subgraphs[subgraphStack.back()];
+                    for (size_t i = nodesBefore;
+                         i < result.diagram.nodes.size(); i++) {
+                        owner.nodes.push_back(i);
+                    }
                 }
             }
         }
@@ -790,6 +914,15 @@ Layout layout(const Diagram& diagram, const std::vector<Size>& nodeSizes,
     for (size_t i = 0; i < nodeCount; i++) ranks[rank[i]].push_back(i);
     result.ranks = rank;
 
+    // Subgraph members must stay adjacent within a rank so their group box
+    // encloses them without swallowing strangers
+    std::vector<int> subgraphOf(nodeCount, -1);
+    for (size_t s = 0; s < diagram.subgraphs.size(); s++) {
+        for (size_t node : diagram.subgraphs[s].nodes) {
+            if (node < nodeCount) subgraphOf[node] = static_cast<int>(s);
+        }
+    }
+
     std::vector<float> order(nodeCount, 0.0f);
     for (size_t level = 0; level < ranks.size(); level++) {
         if (level > 0) {
@@ -811,6 +944,32 @@ Layout layout(const Diagram& diagram, const std::vector<Size>& nodeSizes,
                                          : static_cast<float>(node);
                     };
                     return barycenter(left) < barycenter(right);
+                });
+        }
+        if (!diagram.subgraphs.empty() && ranks[level].size() > 1) {
+            std::vector<float> position(nodeCount, 0.0f);
+            for (size_t i = 0; i < ranks[level].size(); i++) {
+                position[ranks[level][i]] = static_cast<float>(i);
+            }
+            std::vector<float> groupTotal(diagram.subgraphs.size(), 0.0f);
+            std::vector<int> groupCount(diagram.subgraphs.size(), 0);
+            for (size_t node : ranks[level]) {
+                int group = subgraphOf[node];
+                if (group >= 0) {
+                    groupTotal[group] += position[node];
+                    groupCount[group]++;
+                }
+            }
+            auto sortKey = [&](size_t node) {
+                int group = subgraphOf[node];
+                if (group < 0 || groupCount[group] == 0) {
+                    return position[node];
+                }
+                return groupTotal[group] / groupCount[group];
+            };
+            std::stable_sort(ranks[level].begin(), ranks[level].end(),
+                [&](size_t left, size_t right) {
+                    return sortKey(left) < sortKey(right);
                 });
         }
         for (size_t i = 0; i < ranks[level].size(); i++) {

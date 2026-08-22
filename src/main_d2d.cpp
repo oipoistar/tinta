@@ -30,6 +30,7 @@
 #include "input.h"
 #include "editor.h"
 #include "print.h"
+#include "export.h"
 #include "i18n.h"
 #include "tabs.h"
 #include <dbghelp.h>
@@ -1503,6 +1504,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     bool startInEditMode = false; // open straight into the editor
     bool quickNote = false;       // Ctrl+N: untitled buffer, no backing file
     std::wstring printPagesDir;   // debug: render print pages as PNGs and exit
+    std::wstring exportHtmlPath;  // debug: write the HTML export and exit
+    std::wstring exportDocxPath;  // debug: write the DOCX export and exit
+    std::wstring exportPdfPath;   // debug: write the PDF export and exit
     int posX = 0, posY = 0;       // --pos: spawn position (tab drag-out)
     bool hasPos = false;
 
@@ -1527,6 +1531,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             quickNote = true;
         } else if (arg == L"--printpages" && i + 1 < argc) {
             printPagesDir = argv[++i];
+        } else if (arg == L"--exporthtml" && i + 1 < argc) {
+            exportHtmlPath = argv[++i];
+        } else if (arg == L"--exportdocx" && i + 1 < argc) {
+            exportDocxPath = argv[++i];
+        } else if (arg == L"--exportpdf" && i + 1 < argc) {
+            exportPdfPath = argv[++i];
         } else if (arg == L"--pos" && i + 2 < argc) {
             // Drag-out spawn: place the new window at the drop point
             posX = _wtoi(argv[++i]);
@@ -1545,7 +1555,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // new tab (Win11 Notepad model). --new/--cascade windows and the
     // openInTabs=false setting keep the one-window-per-document behavior.
     if (!inputFile.empty() && !quickNote && !cascadeWindow &&
-        printPagesDir.empty() && savedSettings.openInTabs) {
+        printPagesDir.empty() && exportHtmlPath.empty() &&
+        exportDocxPath.empty() && exportPdfPath.empty() &&
+        savedSettings.openInTabs) {
         HWND existing = FindWindowW(L"Tinta", nullptr);
         if (existing) {
             // Resolve to an absolute path: the receiving window has its own
@@ -1820,6 +1832,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         swprintf_s(msg, L"printpages: %d", pages);
         OutputDebugStringW(msg);
         return pages > 0 ? 0 : 1;
+    }
+
+    // Debug: write the HTML export and exit (#export_as harness)
+    if (!exportHtmlPath.empty()) {
+        bool ok = exportHtmlFile(app, exportHtmlPath);
+        return ok ? 0 : 1;
+    }
+    if (!exportDocxPath.empty()) {
+        bool ok = exportDocxFile(app, exportDocxPath);
+        return ok ? 0 : 1;
+    }
+    if (!exportPdfPath.empty()) {
+        bool ok = exportPdfFile(app, exportPdfPath);
+        return ok ? 0 : 1;
     }
 
     // First frame is on screen — now pay for the GPU in the background

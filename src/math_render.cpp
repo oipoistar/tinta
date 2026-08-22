@@ -15,6 +15,13 @@ namespace {
 struct MathRun {
     IDWriteTextLayout* layout = nullptr;  // owned by the MathBox
     float x = 0, y = 0;                   // top-left, box-relative
+    // Captured at creation so exporters can reproduce the run without
+    // Direct2D (SVG needs the source text and metrics back)
+    std::wstring text;
+    float size = 0.0f;
+    bool italic = false;
+    bool bold = false;
+    float baseline = 0.0f;                // run-internal baseline offset
 };
 
 struct MathRule {   // fraction bars, overlines, radical bars
@@ -538,7 +545,8 @@ Metrics emitRun(LayoutCtx& ctx, const std::wstring& text, float size,
         makeRunLayout(ctx.app, text, size, italic, bold, runBaseline, m);
     if (!layout) return m;
     if (record) {
-        ctx.box.runs.push_back({layout, x, baselineY - runBaseline});
+        ctx.box.runs.push_back({layout, x, baselineY - runBaseline, text,
+                                size, italic, bold, runBaseline});
     } else {
         layout->Release();
     }
@@ -668,7 +676,8 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
                     // center the glyph on the content's vertical center
                     float centerY = baselineY - (cm.ascent - cm.descent) / 2;
                     float top = centerY - (dm.ascent + dm.descent) / 2;
-                    ctx.box.runs.push_back({layout, cx, top});
+                    ctx.box.runs.push_back({layout, cx, top, dt, glyphSize,
+                                            false, false, bl});
                 } else {
                     layout->Release();
                 }
@@ -706,7 +715,9 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
                                        (rm.height() - (cm.height() + gap + ruleH)) * 0.5f;
                         // anchor: radical bottom near content bottom
                         radTop = baselineY + cm.descent - rm.height();
-                        ctx.box.runs.push_back({rad, cx, radTop});
+                        ctx.box.runs.push_back({rad, cx, radTop,
+                                                std::wstring(L"\u221A"),
+                                                radSize, false, false, bl});
                     } else {
                         rad->Release();
                     }
@@ -809,27 +820,33 @@ float mathBoxWidth(const MathBoxPtr& box) { return box ? box->width : 0; }
 float mathBoxHeight(const MathBoxPtr& box) { return box ? box->height : 0; }
 float mathBoxBaseline(const MathBoxPtr& box) { return box ? box->baseline : 0; }
 
-void mathBoxDraw(App& app, const MathBoxPtr& box, float x, float y,
-                 const D2D1_COLOR_F& color) {
-    if (!box || !app.renderTarget || !app.brush) return;
-    app.brush->SetColor(color);
+void mathBoxDrawTo(ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush,
+                   const MathBoxPtr& box, float x, float y,
+                   const D2D1_COLOR_F& color) {
+    if (!box || !target || !brush) return;
+    brush->SetColor(color);
     for (const auto& run : box->runs) {
-        app.renderTarget->DrawTextLayout(
-            D2D1::Point2F(x + run.x, y + run.y), run.layout, app.brush,
+        target->DrawTextLayout(
+            D2D1::Point2F(x + run.x, y + run.y), run.layout, brush,
             D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
     }
     for (const auto& rule : box->rules) {
-        app.renderTarget->FillRectangle(
+        target->FillRectangle(
             D2D1::RectF(x + rule.x, y + rule.y, x + rule.x + rule.w,
                         y + rule.y + rule.h),
-            app.brush);
+            brush);
     }
     for (const auto& line : box->lines) {
-        app.renderTarget->DrawLine(
+        target->DrawLine(
             D2D1::Point2F(x + line.x1, y + line.y1),
-            D2D1::Point2F(x + line.x2, y + line.y2), app.brush,
+            D2D1::Point2F(x + line.x2, y + line.y2), brush,
             std::max(1.0f, mathBoxHeight(box) * 0.02f));
     }
+}
+
+void mathBoxDraw(App& app, const MathBoxPtr& box, float x, float y,
+                 const D2D1_COLOR_F& color) {
+    mathBoxDrawTo(app.renderTarget, app.brush, box, x, y, color);
 }
 
 void mathBoxRetain(App& app, const MathBoxPtr& box, float x, float y,
@@ -864,4 +881,72 @@ void mathBoxRetain(App& app, const MathBoxPtr& box, float x, float y,
 
 void mathClearCache() {
     g_mathCache.clear();
+}
+
+// --- SVG export (#export_as) ---
+
+namespace {
+
+std::string svgUtf8(const std::wstring& wide) {
+    if (wide.empty()) return {};
+    int len = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), (int)wide.size(),
+                                  nullptr, 0, nullptr, nullptr);
+    std::string out(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), (int)wide.size(), out.data(),
+                        len, nullptr, nullptr);
+    return out;
+}
+
+std::string svgEscape(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (char c : text) {
+        switch (c) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '"': out += "&quot;"; break;
+            default: out += c;
+        }
+    }
+    return out;
+}
+
+std::string svgNum(float v) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.2f", v);
+    return buf;
+}
+
+}  // namespace
+
+std::string mathBoxSvg(const MathBoxPtr& box, const std::string& colorCss,
+                       const std::string& fontFamilyCss) {
+    if (!box) return {};
+    std::string s;
+    s += "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" +
+         svgNum(box->width) + "\" height=\"" + svgNum(box->height) +
+         "\" viewBox=\"0 0 " + svgNum(box->width) + " " +
+         svgNum(box->height) + "\" role=\"math\">";
+    for (const auto& r : box->rules) {
+        s += "<rect x=\"" + svgNum(r.x) + "\" y=\"" + svgNum(r.y) +
+             "\" width=\"" + svgNum(r.w) + "\" height=\"" + svgNum(r.h) +
+             "\" fill=\"" + colorCss + "\"/>";
+    }
+    for (const auto& l : box->lines) {
+        s += "<line x1=\"" + svgNum(l.x1) + "\" y1=\"" + svgNum(l.y1) +
+             "\" x2=\"" + svgNum(l.x2) + "\" y2=\"" + svgNum(l.y2) +
+             "\" stroke=\"" + colorCss + "\" stroke-width=\"1.2\"/>";
+    }
+    for (const auto& r : box->runs) {
+        s += "<text x=\"" + svgNum(r.x) + "\" y=\"" +
+             svgNum(r.y + r.baseline) + "\" font-size=\"" + svgNum(r.size) +
+             "\" font-family=\"" + fontFamilyCss + "\" fill=\"" + colorCss +
+             "\"";
+        if (r.italic) s += " font-style=\"italic\"";
+        if (r.bold) s += " font-weight=\"bold\"";
+        s += ">" + svgEscape(svgUtf8(r.text)) + "</text>";
+    }
+    s += "</svg>";
+    return s;
 }

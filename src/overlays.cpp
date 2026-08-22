@@ -1305,6 +1305,7 @@ const ContextMenuEntry CTX_ENTRIES[CTX_ITEM_COUNT] = {
     { L"Select All",         L"Ctrl+A", true  },
     { L"New File",           L"N",      false },
     { L"Print / PDF",        L"Ctrl+P", false },
+    { L"Export as...",       L"",       false },
     { L"Edit",               L":",      false },
     { L"Search",             L"F",      false },
     { L"Table of Contents",  L"Tab",    true  },
@@ -1403,9 +1404,9 @@ void renderContextMenu(App& app) {
 
     // Labels come from the translation table (order matches ContextMenuItem)
     static const char* kCtxKeys[CTX_ITEM_COUNT] = {
-        "ctx.copy", "ctx.select_all", "ctx.new", "ctx.print", "ctx.edit",
-        "ctx.search", "ctx.toc", "ctx.browse", "ctx.reveal", "ctx.theme",
-        "ctx.settings", "ctx.help",
+        "ctx.copy", "ctx.select_all", "ctx.new", "ctx.print", "ctx.export",
+        "ctx.edit", "ctx.search", "ctx.toc", "ctx.browse", "ctx.reveal",
+        "ctx.theme", "ctx.settings", "ctx.help",
     };
 
     // Shortcut hints reflect the user keymap ([Keys] in settings.ini)
