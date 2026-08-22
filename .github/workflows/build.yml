@@ -55,11 +55,12 @@ jobs:
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
             ### What's included
+            - Export as HTML, DOCX, or PDF from the context menu
+            - 22 natively rendered Mermaid diagram families
             - Tabbed interface with drag, session restore, and a tab context menu
-            - 13 natively rendered Mermaid diagram families
             - 10 beautiful themes (5 light, 5 dark) plus custom themes
             - Hardware-accelerated rendering via Direct2D
-            - Single portable executable about 1.4 MB, no dependencies
+            - Single portable executable about 1.8 MB, no dependencies
           files: build/Release/tinta.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
