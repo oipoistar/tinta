@@ -18,6 +18,10 @@ void exportDocumentAs(App& app, HWND hwnd);
 // Direct writers (also callable from tests/tools)
 bool exportHtmlFile(App& app, const std::wstring& path);
 bool exportDocxFile(App& app, const std::wstring& path);
+// PDF rides the print pipeline into the Microsoft Print to PDF driver with
+// the job output redirected to the file: vector pages, embedded fonts, no
+// dialog (print.cpp)
+bool exportPdfFile(App& app, const std::wstring& path);
 
 // Any native diagram source -> prims at the given scale; flowcharts go
 // through their export mirror, other families through mermaidext. ok=false

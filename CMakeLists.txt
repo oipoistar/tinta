@@ -120,6 +120,7 @@ target_link_libraries(tinta PRIVATE
     d3d11
     dwmapi
     comdlg32
+    shlwapi
     winspool
 )
 

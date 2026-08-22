@@ -6,6 +6,7 @@
 
 #include <commdlg.h>
 #include <documenttarget.h>
+#include <shlwapi.h>
 #include <wincodec.h>
 #include <winspool.h>
 
@@ -830,4 +831,78 @@ int printDebugPages(App& app, const std::wstring& outDir) {
     pageBitmap->Release();
     rasterDc->Release();
     return pages;
+}
+
+// --- Export as PDF (#export_as) ---
+//
+// The print pipeline already produces vector pages with driver-side font
+// embedding; routing the same job to the Microsoft Print to PDF driver
+// with the job output redirected into a file stream yields the PDF at the
+// chosen path with no dialog. Pages use the last print-preview paper
+// choice, or the locale default before any preview ran.
+bool exportPdfFile(App& app, const std::wstring& path) {
+    if (!app.root || !app.deviceContext) return false;
+    if (app.editMode) {
+        editorReparse(app);  // include unsaved edits, like the preview
+    }
+
+    PageGeometry geo{};
+    if (app.printPreviewPaper >= 0 &&
+        app.printPreviewPaper < PRINT_PAPER_COUNT) {
+        const PrintPaper& paper = PRINT_PAPERS[app.printPreviewPaper];
+        geo.pageW = app.printPreviewLandscape ? paper.h : paper.w;
+        geo.pageH = app.printPreviewLandscape ? paper.w : paper.h;
+        geo.contentW = geo.pageW - kPageMarginDips * 2;
+        geo.contentH = geo.pageH - kPageMarginDips * 2;
+    } else {
+        geo = defaultPageGeometry();
+    }
+
+    IStream* fileStream = nullptr;
+    if (FAILED(SHCreateStreamOnFileEx(
+            path.c_str(), STGM_CREATE | STGM_WRITE | STGM_SHARE_EXCLUSIVE,
+            FILE_ATTRIBUTE_NORMAL, TRUE, nullptr, &fileStream))) {
+        return false;
+    }
+
+    IPrintDocumentPackageTargetFactory* factory = nullptr;
+    if (FAILED(CoCreateInstance(
+            __uuidof(PrintDocumentPackageTargetFactory), nullptr,
+            CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) {
+        fileStream->Release();
+        return false;
+    }
+    std::wstring jobName = L"Tinta - " + toWide(app.currentFile);
+    IPrintDocumentPackageTarget* target = nullptr;
+    HRESULT hr = factory->CreateDocumentPackageTargetForPrintJob(
+        L"Microsoft Print to PDF", jobName.c_str(), fileStream, nullptr,
+        &target);
+    factory->Release();
+    if (FAILED(hr) || !target) {
+        fileStream->Release();
+        return false;
+    }
+
+    ID2D1Device* device = nullptr;
+    app.deviceContext->GetDevice(&device);
+    ID2D1PrintControl* printControl = nullptr;
+    if (device) {
+        device->CreatePrintControl(app.wicFactory, target, nullptr,
+                                   &printControl);
+        device->Release();
+    }
+
+    bool ok = false;
+    if (printControl) {
+        int pages = renderPages(app, geo, [&](ID2D1CommandList* list, int) {
+            return SUCCEEDED(printControl->AddPage(
+                list, D2D1::SizeF(geo.pageW, geo.pageH), nullptr));
+        });
+        ok = pages > 0 && SUCCEEDED(printControl->Close());
+        printControl->Release();
+    }
+    target->Release();
+    fileStream->Commit(STGC_DEFAULT);
+    fileStream->Release();
+    return ok;
 }

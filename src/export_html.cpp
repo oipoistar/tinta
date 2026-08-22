@@ -1438,7 +1438,8 @@ void exportDocumentAs(App& app, HWND hwnd) {
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
     ofn.lpstrFilter =
-        L"Web page (*.html)\0*.html\0Word document (*.docx)\0*.docx\0";
+        L"Web page (*.html)\0*.html\0Word document (*.docx)\0*.docx\0"
+        L"PDF document (*.pdf)\0*.pdf\0";
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
@@ -1451,15 +1452,22 @@ void exportDocumentAs(App& app, HWND hwnd) {
         return chosen.size() >= n &&
                _wcsicmp(chosen.c_str() + chosen.size() - n, suffix) == 0;
     };
-    bool docx = ofn.nFilterIndex == 2;
-    if (endsWith(L".docx")) docx = true;
-    else if (endsWith(L".html") || endsWith(L".htm")) docx = false;
+    enum class Format { Html, Docx, Pdf };
+    Format format = ofn.nFilterIndex == 2   ? Format::Docx
+                    : ofn.nFilterIndex == 3 ? Format::Pdf
+                                            : Format::Html;
+    if (endsWith(L".docx")) format = Format::Docx;
+    else if (endsWith(L".pdf")) format = Format::Pdf;
+    else if (endsWith(L".html") || endsWith(L".htm")) format = Format::Html;
     else {
-        chosen += docx ? L".docx" : L".html";
+        chosen += format == Format::Docx  ? L".docx"
+                  : format == Format::Pdf ? L".pdf"
+                                          : L".html";
     }
 
-    bool ok = docx ? exportDocxFile(app, chosen)
-                   : exportHtmlFile(app, chosen);
+    bool ok = format == Format::Docx  ? exportDocxFile(app, chosen)
+              : format == Format::Pdf ? exportPdfFile(app, chosen)
+                                      : exportHtmlFile(app, chosen);
 
     app.copiedNotificationKey = ok ? "toast.exported" : "toast.save_failed";
     app.showCopiedNotification = true;
