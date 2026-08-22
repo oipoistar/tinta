@@ -9,6 +9,7 @@
 #include <limits>
 #include <numeric>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace mermaid {
 namespace {
@@ -284,8 +285,11 @@ bool parseStyleList(std::string_view value, Style& style, std::string& error) {
         if (!item.empty()) {
             size_t colon = item.find(':');
             if (colon == std::string_view::npos) {
-                error = "Expected ':' in style declaration";
-                return false;
+                // Continuation of an unknown comma-valued property
+                // (stroke-dasharray: 9,5): skip it like the property itself
+                if (comma == value.size()) break;
+                position = comma + 1;
+                continue;
             }
 
             std::string_view key = trim(item.substr(0, colon));
@@ -434,7 +438,8 @@ bool parseNodeSpec(std::string_view line, size_t& position, size_t sourceOffset,
 }
 
 bool parseArrow(std::string_view line, size_t& position, ArrowSpec& arrow,
-                std::string& error) {
+                std::string& error,
+                std::unordered_set<std::string>* edgeIds = nullptr) {
     skipSpaces(line, position);
 
     // Mermaid 11 edge IDs ("A e1@--> B") name the edge for styling and
@@ -450,6 +455,10 @@ bool parseArrow(std::string_view line, size_t& position, ArrowSpec& arrow,
             line[probe] == '@' &&
             (line[probe + 1] == '-' || line[probe + 1] == '=' ||
              line[probe + 1] == '.')) {
+            if (edgeIds) {
+                edgeIds->insert(
+                    std::string(line.substr(position, probe - position)));
+            }
             position = probe + 1;
         }
     }
@@ -611,6 +620,7 @@ ParseResult parse(std::string_view source) {
 
     ParseResult result;
     std::unordered_map<std::string, size_t> nodeIds;
+    std::unordered_set<std::string> edgeIds;
     std::vector<size_t> subgraphStack;
     bool foundHeader = false;
 
@@ -671,7 +681,8 @@ ParseResult parse(std::string_view source) {
                     size_t comma = ids.find(',', idPosition);
                     if (comma == std::string_view::npos) comma = ids.size();
                     std::string_view id = trim(ids.substr(idPosition, comma - idPosition));
-                    if (!id.empty()) {
+                    if (!id.empty() &&
+                        edgeIds.find(std::string(id)) == edgeIds.end()) {
                         NodeSpec spec;
                         spec.id = std::string(id);
                         spec.label = spec.id;
@@ -737,8 +748,9 @@ ParseResult parse(std::string_view source) {
                 // Direction hints inside subgraphs, click handlers, and edge
                 // styling have nothing to draw natively; the diagram itself
                 // still renders
-            } else if ([&] {
-                           // Mermaid 11 edge config: "e1@{ animate: true }"
+            } else if (std::string configName; [&] {
+                           // Mermaid 11 config: "e1@{ animate: true }" for
+                           // edges, "A@{ img: ..., label: ... }" for nodes
                            size_t at = line.find("@{");
                            if (at == std::string_view::npos ||
                                line.back() != '}') {
@@ -753,9 +765,41 @@ ParseResult parse(std::string_view source) {
                                    return false;
                                }
                            }
+                           configName = std::string(name);
                            return true;
                        }()) {
-                // Edge animation config, presentation only
+                // Edge configs are presentation only; node configs keep the
+                // node, with its label when one is given (images and fancy
+                // shapes degrade to a plain box)
+                if (edgeIds.find(configName) == edgeIds.end()) {
+                    std::string label = configName;
+                    size_t labelKey = line.find("label");
+                    if (labelKey != std::string_view::npos) {
+                        size_t quote = line.find('"', labelKey);
+                        size_t close = quote == std::string_view::npos
+                            ? std::string_view::npos
+                            : line.find('"', quote + 1);
+                        if (close != std::string_view::npos) {
+                            label = decodeLabel(
+                                line.substr(quote + 1, close - quote - 1));
+                        }
+                    }
+                    size_t nodesBefore = result.diagram.nodes.size();
+                    NodeSpec spec;
+                    spec.id = configName;
+                    spec.label = label;
+                    spec.hasDefinition = label != configName;
+                    spec.sourceOffset = lineOffset;
+                    ensureNode(result.diagram, nodeIds, spec);
+                    if (!subgraphStack.empty()) {
+                        auto& owner =
+                            result.diagram.subgraphs[subgraphStack.back()];
+                        for (size_t i = nodesBefore;
+                             i < result.diagram.nodes.size(); i++) {
+                            owner.nodes.push_back(i);
+                        }
+                    }
+                }
             } else {
                 position = 0;
                 size_t nodesBefore = result.diagram.nodes.size();
@@ -771,7 +815,7 @@ ParseResult parse(std::string_view source) {
                     if (position >= line.size()) break;
 
                     ArrowSpec arrow;
-                    if (!parseArrow(line, position, arrow, error)) {
+                    if (!parseArrow(line, position, arrow, error, &edgeIds)) {
                         return fail(std::move(result), lineNumber, std::move(error));
                     }
 
