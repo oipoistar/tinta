@@ -1505,6 +1505,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     bool quickNote = false;       // Ctrl+N: untitled buffer, no backing file
     std::wstring printPagesDir;   // debug: render print pages as PNGs and exit
     std::wstring exportHtmlPath;  // debug: write the HTML export and exit
+    std::wstring exportDocxPath;  // debug: write the DOCX export and exit
     int posX = 0, posY = 0;       // --pos: spawn position (tab drag-out)
     bool hasPos = false;
 
@@ -1531,6 +1532,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             printPagesDir = argv[++i];
         } else if (arg == L"--exporthtml" && i + 1 < argc) {
             exportHtmlPath = argv[++i];
+        } else if (arg == L"--exportdocx" && i + 1 < argc) {
+            exportDocxPath = argv[++i];
         } else if (arg == L"--pos" && i + 2 < argc) {
             // Drag-out spawn: place the new window at the drop point
             posX = _wtoi(argv[++i]);
@@ -1550,7 +1553,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // openInTabs=false setting keep the one-window-per-document behavior.
     if (!inputFile.empty() && !quickNote && !cascadeWindow &&
         printPagesDir.empty() && exportHtmlPath.empty() &&
-        savedSettings.openInTabs) {
+        exportDocxPath.empty() && savedSettings.openInTabs) {
         HWND existing = FindWindowW(L"Tinta", nullptr);
         if (existing) {
             // Resolve to an absolute path: the receiving window has its own
@@ -1830,6 +1833,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // Debug: write the HTML export and exit (#export_as harness)
     if (!exportHtmlPath.empty()) {
         bool ok = exportHtmlFile(app, exportHtmlPath);
+        return ok ? 0 : 1;
+    }
+    if (!exportDocxPath.empty()) {
+        bool ok = exportDocxFile(app, exportDocxPath);
         return ok ? 0 : 1;
     }
 

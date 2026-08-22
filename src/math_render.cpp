@@ -820,27 +820,33 @@ float mathBoxWidth(const MathBoxPtr& box) { return box ? box->width : 0; }
 float mathBoxHeight(const MathBoxPtr& box) { return box ? box->height : 0; }
 float mathBoxBaseline(const MathBoxPtr& box) { return box ? box->baseline : 0; }
 
-void mathBoxDraw(App& app, const MathBoxPtr& box, float x, float y,
-                 const D2D1_COLOR_F& color) {
-    if (!box || !app.renderTarget || !app.brush) return;
-    app.brush->SetColor(color);
+void mathBoxDrawTo(ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush,
+                   const MathBoxPtr& box, float x, float y,
+                   const D2D1_COLOR_F& color) {
+    if (!box || !target || !brush) return;
+    brush->SetColor(color);
     for (const auto& run : box->runs) {
-        app.renderTarget->DrawTextLayout(
-            D2D1::Point2F(x + run.x, y + run.y), run.layout, app.brush,
+        target->DrawTextLayout(
+            D2D1::Point2F(x + run.x, y + run.y), run.layout, brush,
             D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
     }
     for (const auto& rule : box->rules) {
-        app.renderTarget->FillRectangle(
+        target->FillRectangle(
             D2D1::RectF(x + rule.x, y + rule.y, x + rule.x + rule.w,
                         y + rule.y + rule.h),
-            app.brush);
+            brush);
     }
     for (const auto& line : box->lines) {
-        app.renderTarget->DrawLine(
+        target->DrawLine(
             D2D1::Point2F(x + line.x1, y + line.y1),
-            D2D1::Point2F(x + line.x2, y + line.y2), app.brush,
+            D2D1::Point2F(x + line.x2, y + line.y2), brush,
             std::max(1.0f, mathBoxHeight(box) * 0.02f));
     }
+}
+
+void mathBoxDraw(App& app, const MathBoxPtr& box, float x, float y,
+                 const D2D1_COLOR_F& color) {
+    mathBoxDrawTo(app.renderTarget, app.brush, box, x, y, color);
 }
 
 void mathBoxRetain(App& app, const MathBoxPtr& box, float x, float y,

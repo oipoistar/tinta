@@ -1593,7 +1593,8 @@ D2D1_COLOR_F resolveDiagramRoleImpl(const App& app,
             color.a = 0.30f;
             break;
         case mermaidext::Role::Custom:
-            color = D2D1::ColorF(prim.customR, prim.customG, prim.customB);
+            color = D2D1::ColorF(prim.customR, prim.customG, prim.customB,
+                                 prim.customA);
             break;
         case mermaidext::Role::None:
             color.a = 0.0f;

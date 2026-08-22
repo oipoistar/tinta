@@ -68,6 +68,7 @@ set(SOURCES
     src/math_render.cpp
     src/tabs.cpp
     src/export_html.cpp
+    src/export_docx.cpp
 )
 
 set(HEADERS

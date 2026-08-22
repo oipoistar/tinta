@@ -133,109 +133,44 @@ std::string prpaint(const App& app, const mermaidext::Prim& p) {
         s += " fill=\"none\"";
     }
     if (p.stroke != mermaidext::Role::None) {
+        float width = p.strokeWidth > 0 ? p.strokeWidth : 1.2f;
         s += " stroke=\"" + colorCss(resolveDiagramRole(app, p, p.stroke)) +
-             "\" stroke-width=\"" +
-             num(p.strokeWidth > 0 ? p.strokeWidth : 1.2f) + "\"";
-        if (p.dashed) s += " stroke-dasharray=\"4 3\"";
+             "\" stroke-width=\"" + num(width) + "\"";
+        if (p.dashed) {
+            // D2D's stock DASH pattern: 2-on 2-off in stroke-width units
+            s += " stroke-dasharray=\"" + num(width * 2.0f) + " " +
+                 num(width * 2.0f) + "\"";
+        }
     }
     return s;
 }
 
-void emitDiagramText(DiagramCtx& ctx, const mermaidext::Prim& p,
-                     std::string& s) {
-    // The viewer sets 14px body / 13px mono at scale 1
-    float fontSize = (p.style.mono ? 13.0f : kDiagramFontSize) *
-                     (p.style.scale > 0 ? p.style.scale : 1.0f);
-    float lineH = fontSize * 1.35f;
-
-    std::vector<std::string> lines;
-    {
-        std::string cur;
-        for (char c : p.text) {
-            if (c == '\n') {
-                lines.push_back(cur);
-                cur.clear();
-            } else {
-                cur += c;
-            }
-        }
-        lines.push_back(cur);
-    }
-    float blockH = lines.size() * lineH;
-    float top;
-    if (p.alignV < 0) top = p.y1;
-    else if (p.alignV > 0) top = p.y2 - blockH;
-    else top = (p.y1 + p.y2) * 0.5f - blockH * 0.5f;
-
-    float x;
-    const char* anchor;
-    if (p.alignH < 0) { x = p.x1; anchor = "start"; }
-    else if (p.alignH > 0) { x = p.x2; anchor = "end"; }
-    else { x = (p.x1 + p.x2) * 0.5f; anchor = "middle"; }
-
-    D2D1_COLOR_F color = resolveDiagramRole(
-        ctx.app, p,
-        p.fill != mermaidext::Role::None ? p.fill : mermaidext::Role::Text);
-    const std::string& family =
-        p.style.mono ? ctx.monoFontCss : ctx.bodyFontCss;
-
-    for (size_t i = 0; i < lines.size(); i++) {
-        if (lines[i].empty()) continue;
-        float baseline = top + lineH * i + fontSize * 0.85f;
-        s += "<text x=\"" + num(x) + "\" y=\"" + num(baseline) +
-             "\" text-anchor=\"" + anchor + "\" font-size=\"" +
-             num(fontSize) + "\" font-family=\"" + family + "\" fill=\"" +
-             colorCss(color) + "\"";
-        if (p.style.bold) s += " font-weight=\"600\"";
-        if (p.style.italic) s += " font-style=\"italic\"";
-        s += ">" + htmlEscape(lines[i]) + "</text>";
-    }
+// The viewer's diagram text base: 14px body / 13px mono at scale 1
+float diagramFontSize(const mermaidext::TextStyle& style, float scale) {
+    return (style.mono ? 13.0f : kDiagramFontSize) *
+           (style.scale > 0 ? style.scale : 1.0f) * scale;
 }
 
-void emitArrowHead(const App& app, const mermaidext::Prim& p, std::string& s) {
-    float dx = p.x2 - p.x1, dy = p.y2 - p.y1;
-    float len = std::sqrt(dx * dx + dy * dy);
-    if (len < 0.01f) return;
-    float ux = dx / len, uy = dy / len;
-    float size = 8.0f, half = 3.6f;
-    float bx = p.x2 - ux * size, by = p.y2 - uy * size;
-    float px = -uy, py = ux;
-    D2D1_COLOR_F color = resolveDiagramRole(
-        app, p,
-        p.stroke != mermaidext::Role::None ? p.stroke
-                                           : mermaidext::Role::Text);
-    if (p.openArrow) {
-        s += "<path d=\"M " + num(bx + px * half) + " " + num(by + py * half) +
-             " L " + num(p.x2) + " " + num(p.y2) + " L " +
-             num(bx - px * half) + " " + num(by - py * half) +
-             "\" fill=\"none\" stroke=\"" + colorCss(color) +
-             "\" stroke-width=\"1.2\"/>";
-    } else {
-        s += "<polygon points=\"" + num(p.x2) + "," + num(p.y2) + " " +
-             num(bx + px * half) + "," + num(by + py * half) + " " +
-             num(bx - px * half) + "," + num(by - py * half) + "\" fill=\"" +
-             colorCss(color) + "\"/>";
-    }
-}
-
-// --- flowchart SVG (mirrors layoutMermaidDiagram in render.cpp, scale 1) ---
-
-// Wrapped label broken into physical lines so each becomes one <text>
-struct FlowLines {
+// Wrapped text broken into physical lines with their DirectWrite baselines,
+// so SVG <text> rows land where the viewer's text layout puts them
+struct WrappedLines {
     std::vector<std::string> lines;
     std::vector<float> baselines;  // from block top
     float width = 0.0f;
     float height = 0.0f;
 };
 
-FlowLines flowMeasure(App& app, const std::wstring& text, float wrapWidth) {
-    FlowLines out;
+WrappedLines wrapLines(App& app, const std::wstring& text, float wrapWidth,
+                       const mermaidext::TextStyle& style, float scale) {
+    WrappedLines out;
     if (text.empty() || !app.dwriteFactory) return out;
     constexpr float kHuge = 100000.0f;
     IDWriteTextFormat* format = nullptr;
     app.dwriteFactory->CreateTextFormat(
-        app.theme.fontFamily, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 16.0f, L"en-us",
+        style.mono ? app.theme.codeFontFamily : app.theme.fontFamily, nullptr,
+        style.bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+        style.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, diagramFontSize(style, scale), L"en-us",
         &format);
     if (!format) return out;
     IDWriteTextLayout* layout = nullptr;
@@ -269,24 +204,79 @@ FlowLines flowMeasure(App& app, const std::wstring& text, float wrapWidth) {
     return out;
 }
 
-// Centered both ways inside the rect, like createWrappedLayout's
-// CENTER/CENTER alignment
-void flowEmitText(App& app, const std::wstring& text, float left, float top,
-                  float right, float bottom, const std::string& color,
-                  const std::string& family, std::string& s) {
-    // Boxes are sized so the measured lines fit exactly; half a pixel of
-    // slack keeps DirectWrite from re-wrapping on the float boundary
-    FlowLines fl = flowMeasure(app, text, right - left + 0.5f);
-    float cx = (left + right) * 0.5f;
-    float blockTop = top + ((bottom - top) - fl.height) * 0.5f;
-    for (size_t i = 0; i < fl.lines.size(); i++) {
-        if (fl.lines[i].empty()) continue;
-        s += "<text x=\"" + num(cx) + "\" y=\"" +
-             num(blockTop + fl.baselines[i]) +
-             "\" text-anchor=\"middle\" font-size=\"16\" font-family=\"" +
-             family + "\" fill=\"" + color + "\">" + htmlEscape(fl.lines[i]) +
-             "</text>";
+void emitDiagramText(DiagramCtx& ctx, const mermaidext::Prim& p,
+                     std::string& s) {
+    float fontSize = diagramFontSize(p.style, 1.0f);
+    // Half a pixel of slack: boxes sized to exactly fit measured text must
+    // not re-wrap on the float boundary
+    WrappedLines wrapped = wrapLines(ctx.app, toWide(p.text),
+                                     p.x2 - p.x1 + 0.5f, p.style, 1.0f);
+    float top;
+    if (p.alignV < 0) top = p.y1;
+    else if (p.alignV > 0) top = p.y2 - wrapped.height;
+    else top = (p.y1 + p.y2) * 0.5f - wrapped.height * 0.5f;
+
+    float x;
+    const char* anchor;
+    if (p.alignH < 0) { x = p.x1; anchor = "start"; }
+    else if (p.alignH > 0) { x = p.x2; anchor = "end"; }
+    else { x = (p.x1 + p.x2) * 0.5f; anchor = "middle"; }
+
+    D2D1_COLOR_F color = resolveDiagramRole(
+        ctx.app, p,
+        p.fill != mermaidext::Role::None ? p.fill : mermaidext::Role::Text);
+    const std::string& family =
+        p.style.mono ? ctx.monoFontCss : ctx.bodyFontCss;
+
+    for (size_t i = 0; i < wrapped.lines.size(); i++) {
+        if (wrapped.lines[i].empty()) continue;
+        s += "<text x=\"" + num(x) + "\" y=\"" +
+             num(top + wrapped.baselines[i]) + "\" text-anchor=\"" + anchor +
+             "\" font-size=\"" + num(fontSize) + "\" font-family=\"" +
+             family + "\" fill=\"" + colorCss(color) + "\"";
+        if (p.style.bold) s += " font-weight=\"600\"";
+        if (p.style.italic) s += " font-style=\"italic\"";
+        s += ">" + htmlEscape(wrapped.lines[i]) + "</text>";
     }
+}
+
+void emitArrowHead(const App& app, const mermaidext::Prim& p, std::string& s) {
+    float dx = p.x2 - p.x1, dy = p.y2 - p.y1;
+    float len = std::sqrt(dx * dx + dy * dy);
+    if (len < 0.01f) return;
+    float ux = dx / len, uy = dy / len;
+    float size = 8.0f, half = 3.6f;
+    float bx = p.x2 - ux * size, by = p.y2 - uy * size;
+    float px = -uy, py = ux;
+    D2D1_COLOR_F color = resolveDiagramRole(
+        app, p,
+        p.stroke != mermaidext::Role::None ? p.stroke
+                                           : mermaidext::Role::Text);
+    if (p.openArrow) {
+        s += "<path d=\"M " + num(bx + px * half) + " " + num(by + py * half) +
+             " L " + num(p.x2) + " " + num(p.y2) + " L " +
+             num(bx - px * half) + " " + num(by - py * half) +
+             "\" fill=\"none\" stroke=\"" + colorCss(color) +
+             "\" stroke-width=\"1.2\"/>";
+    } else {
+        s += "<polygon points=\"" + num(p.x2) + "," + num(p.y2) + " " +
+             num(bx + px * half) + "," + num(by + py * half) + " " +
+             num(bx - px * half) + "," + num(by - py * half) + "\" fill=\"" +
+             colorCss(color) + "\"/>";
+    }
+}
+
+// --- flowchart primitives (mirrors layoutMermaidDiagram in render.cpp) ---
+// The flowchart engine draws through the app's layout structures in the
+// viewer; for export it is mirrored once into mermaidext prims that both
+// the SVG emitter and the DOCX rasterizer consume.
+
+constexpr float kFlowTextScale = 16.0f / 14.0f;  // body font over diagram base
+
+mermaidext::TextStyle flowTextStyle() {
+    mermaidext::TextStyle style;
+    style.scale = kFlowTextScale;
+    return style;
 }
 
 D2D1_COLOR_F flowColor(const mermaid::Color& color) {
@@ -300,20 +290,34 @@ struct FlowStyle {
     D2D1_COLOR_F stroke{};
     D2D1_COLOR_F text{};
     float strokeWidth = 1.5f;
+    bool customFill = false;
+    bool customStroke = false;
+    bool customText = false;
 };
 
 FlowStyle flowResolveStyle(const App& app, const mermaid::Diagram& diagram,
-                           const mermaid::Node& node) {
+                           const mermaid::Node& node, float scale) {
     FlowStyle resolved;
     resolved.fill = app.theme.codeBackground;
     resolved.stroke = app.theme.accent;
     resolved.text = app.theme.text;
-    resolved.strokeWidth = 1.5f;
+    resolved.strokeWidth = 1.5f * scale;
     auto apply = [&](const mermaid::Style& style) {
-        if (style.hasFill) resolved.fill = flowColor(style.fill);
-        if (style.hasStroke) resolved.stroke = flowColor(style.stroke);
-        if (style.hasText) resolved.text = flowColor(style.text);
-        if (style.hasStrokeWidth) resolved.strokeWidth = style.strokeWidth;
+        if (style.hasFill) {
+            resolved.fill = flowColor(style.fill);
+            resolved.customFill = true;
+        }
+        if (style.hasStroke) {
+            resolved.stroke = flowColor(style.stroke);
+            resolved.customStroke = true;
+        }
+        if (style.hasText) {
+            resolved.text = flowColor(style.text);
+            resolved.customText = true;
+        }
+        if (style.hasStrokeWidth) {
+            resolved.strokeWidth = style.strokeWidth * scale;
+        }
     };
     auto defaultStyle = diagram.classStyles.find("default");
     if (defaultStyle != diagram.classStyles.end()) apply(defaultStyle->second);
@@ -325,20 +329,91 @@ FlowStyle flowResolveStyle(const App& app, const mermaid::Diagram& diagram,
     return resolved;
 }
 
-std::string flowchartSvg(App& app, const std::string& source,
-                         const std::string& bodyFontCss) {
+void primCustom(mermaidext::Prim& prim, const D2D1_COLOR_F& color) {
+    prim.customR = color.r;
+    prim.customG = color.g;
+    prim.customB = color.b;
+    prim.customA = color.a;
+}
+
+// One node outline as a prim (geometry only; paint set by the caller)
+mermaidext::Prim flowShapePrim(const mermaid::Node& node,
+                               const mermaid::Rect& rect, float scale) {
+    using mermaidext::Prim;
+    using mermaidext::PrimType;
+    Prim shape;
+    float w = rect.right - rect.left;
+    float h = rect.bottom - rect.top;
+    switch (node.shape) {
+        case mermaid::NodeShape::Diamond:
+            shape.type = PrimType::Polygon;
+            shape.pts = {{rect.left + w * 0.5f, rect.top},
+                         {rect.right, rect.top + h * 0.5f},
+                         {rect.left + w * 0.5f, rect.bottom},
+                         {rect.left, rect.top + h * 0.5f}};
+            break;
+        case mermaid::NodeShape::Hexagon: {
+            float inset = w * 0.18f;
+            shape.type = PrimType::Polygon;
+            shape.pts = {{rect.left + inset, rect.top},
+                         {rect.right - inset, rect.top},
+                         {rect.right, rect.top + h * 0.5f},
+                         {rect.right - inset, rect.bottom},
+                         {rect.left + inset, rect.bottom},
+                         {rect.left, rect.top + h * 0.5f}};
+            break;
+        }
+        case mermaid::NodeShape::Circle:
+            shape.type = PrimType::Ellipse;
+            shape.x1 = rect.left;
+            shape.y1 = rect.top;
+            shape.x2 = rect.right;
+            shape.y2 = rect.bottom;
+            break;
+        case mermaid::NodeShape::Stadium:
+        case mermaid::NodeShape::RoundedRectangle:
+            shape.type = PrimType::RoundRect;
+            shape.radius = node.shape == mermaid::NodeShape::Stadium
+                               ? h * 0.5f
+                               : 8.0f * scale;
+            shape.x1 = rect.left;
+            shape.y1 = rect.top;
+            shape.x2 = rect.right;
+            shape.y2 = rect.bottom;
+            break;
+        case mermaid::NodeShape::Rectangle:
+        default:
+            shape.type = PrimType::Rect;
+            shape.x1 = rect.left;
+            shape.y1 = rect.top;
+            shape.x2 = rect.right;
+            shape.y2 = rect.bottom;
+            break;
+    }
+    return shape;
+}
+
+}  // namespace
+
+mermaidext::Built buildFlowchartPrims(App& app, const std::string& source,
+                                      float scale) {
+    using mermaidext::Prim;
+    using mermaidext::PrimType;
+    using mermaidext::Role;
+    mermaidext::Built result;
     auto parsed = mermaid::parse(source);
-    if (!parsed.success || parsed.diagram.nodes.empty()) return {};
+    if (!parsed.success || parsed.diagram.nodes.empty()) return result;
     const auto& diagram = parsed.diagram;
 
-    constexpr float kMaxLabelWidth = 280.0f;
-    constexpr float kPaddingX = 18.0f;
-    constexpr float kPaddingY = 12.0f;
-    constexpr float kMinWidth = 120.0f;
-    constexpr float kMinHeight = 52.0f;
-    constexpr float kLabelPadX = 6.0f;
-    constexpr float kLabelPadY = 4.0f;
-    constexpr float kArrowSize = 8.0f;
+    const float maxLabelWidth = 280.0f * scale;
+    const float paddingX = 18.0f * scale;
+    const float paddingY = 12.0f * scale;
+    const float minWidth = 120.0f * scale;
+    const float minHeight = 52.0f * scale;
+    const float labelPadX = 6.0f * scale;
+    const float labelPadY = 4.0f * scale;
+    const float arrowSize = 8.0f * scale;
+    mermaidext::TextStyle textStyle = flowTextStyle();
 
     std::vector<std::wstring> labels;
     std::vector<mermaid::Size> nodeSizes;
@@ -348,14 +423,15 @@ std::string flowchartSvg(App& app, const std::string& source,
     styles.reserve(diagram.nodes.size());
     for (const auto& node : diagram.nodes) {
         std::wstring label = toWide(node.label.empty() ? node.id : node.label);
-        FlowLines measured = flowMeasure(app, label, kMaxLabelWidth);
-        float width = std::max(kMinWidth, measured.width + kPaddingX * 2.0f);
-        float height = std::max(kMinHeight, measured.height + kPaddingY * 2.0f);
+        WrappedLines measured =
+            wrapLines(app, label, maxLabelWidth, textStyle, scale);
+        float width = std::max(minWidth, measured.width + paddingX * 2.0f);
+        float height = std::max(minHeight, measured.height + paddingY * 2.0f);
         if (node.shape == mermaid::NodeShape::Diamond) {
-            width = std::max(width * 1.28f, 150.0f);
-            height = std::max(height * 1.45f, 82.0f);
+            width = std::max(width * 1.28f, 150.0f * scale);
+            height = std::max(height * 1.45f, 82.0f * scale);
         } else if (node.shape == mermaid::NodeShape::Hexagon) {
-            width += 40.0f;
+            width += 40.0f * scale;
         } else if (node.shape == mermaid::NodeShape::Circle) {
             float diameter = std::max(width, height);
             width = diameter;
@@ -363,7 +439,7 @@ std::string flowchartSvg(App& app, const std::string& source,
         }
         labels.push_back(std::move(label));
         nodeSizes.push_back({width, height});
-        styles.push_back(flowResolveStyle(app, diagram, node));
+        styles.push_back(flowResolveStyle(app, diagram, node, scale));
     }
 
     bool vertical = diagram.direction == mermaid::Direction::TopToBottom ||
@@ -373,26 +449,29 @@ std::string flowchartSvg(App& app, const std::string& source,
         float width = 0.0f;
         float height = 0.0f;
     };
-    float rankGap = 78.0f;
+    float rankGap = 78.0f * scale;
     std::vector<FlowEdgeLabel> edgeLabels(diagram.edges.size());
     for (size_t i = 0; i < diagram.edges.size(); i++) {
         if (diagram.edges[i].label.empty()) continue;
         auto& edgeLabel = edgeLabels[i];
         edgeLabel.text = toWide(diagram.edges[i].label);
-        FlowLines single = flowMeasure(app, edgeLabel.text, 0.0f);
+        WrappedLines single =
+            wrapLines(app, edgeLabel.text, 0.0f, textStyle, scale);
         edgeLabel.width = std::min(
-            180.0f,
-            std::max(60.0f, single.width + kLabelPadX * 2.0f));
-        FlowLines wrapped = flowMeasure(
-            app, edgeLabel.text, edgeLabel.width - kLabelPadX * 2.0f);
-        edgeLabel.height = std::max(28.0f, wrapped.height + kLabelPadY * 2.0f);
+            180.0f * scale,
+            std::max(60.0f * scale, single.width + labelPadX * 2.0f));
+        WrappedLines wrapped = wrapLines(
+            app, edgeLabel.text, edgeLabel.width - labelPadX * 2.0f,
+            textStyle, scale);
+        edgeLabel.height =
+            std::max(28.0f * scale, wrapped.height + labelPadY * 2.0f);
         float labelExtent = vertical ? edgeLabel.height : edgeLabel.width;
-        rankGap = std::max(rankGap, labelExtent + 20.0f);
+        rankGap = std::max(rankGap, labelExtent + 20.0f * scale);
     }
 
     mermaid::Layout graphLayout =
-        mermaid::layout(diagram, nodeSizes, 32.0f, rankGap);
-    if (graphLayout.nodes.size() != diagram.nodes.size()) return {};
+        mermaid::layout(diagram, nodeSizes, 32.0f * scale, rankGap);
+    if (graphLayout.nodes.size() != diagram.nodes.size()) return result;
     const auto& nodeRects = graphLayout.nodes;
 
     // Subgraph group boxes, finalized leaves-first exactly like the viewer
@@ -400,8 +479,8 @@ std::string flowchartSvg(App& app, const std::string& source,
     std::vector<mermaid::Rect> subBoxes(
         diagram.subgraphs.size(), {kNoBox, kNoBox, -kNoBox, -kNoBox});
     {
-        const float boxPad = 10.0f;
-        const float titleHeight = 20.0f;
+        const float boxPad = 10.0f * scale;
+        const float titleHeight = 20.0f * scale;
         auto grow = [](mermaid::Rect& box, const mermaid::Rect& rect) {
             box.left = std::min(box.left, rect.left);
             box.top = std::min(box.top, rect.top);
@@ -432,6 +511,12 @@ std::string flowchartSvg(App& app, const std::string& source,
     connectorColor.a = app.theme.isDark ? 0.7f : 0.6f;
     D2D1_COLOR_F chipStroke = connectorColor;
     chipStroke.a *= 0.6f;
+    D2D1_COLOR_F groupFill = app.theme.codeBackground;
+    groupFill.a *= 0.55f;
+    D2D1_COLOR_F groupBorder = app.theme.text;
+    groupBorder.a = 0.28f;
+    D2D1_COLOR_F groupTitle = app.theme.text;
+    groupTitle.a = 0.78f;
 
     struct FlowConn {
         std::vector<D2D1_POINT_2F> points;
@@ -466,7 +551,7 @@ std::string flowchartSvg(App& app, const std::string& source,
         const auto& from = nodeRects[edge.from];
         const auto& to = nodeRects[edge.to];
         FlowConn conn;
-        conn.stroke = 1.4f * edge.strokeScale;
+        conn.stroke = 1.4f * scale * edge.strokeScale;
         conn.directed = edge.directed;
         conn.dashed = edge.dashed;
 
@@ -491,7 +576,7 @@ std::string flowchartSvg(App& app, const std::string& source,
                 (topToBottom ? toCenterY > fromCenterY
                              : toCenterY < fromCenterY);
             if (selfLoop) {
-                float lane = 36.0f + exteriorLane++ * 14.0f;
+                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
                 D2D1_POINT_2F start = D2D1::Point2F(from.right, fromCenterY);
                 D2D1_POINT_2F end = D2D1::Point2F(fromCenterX, from.bottom);
                 float laneX = from.right + lane;
@@ -516,7 +601,7 @@ std::string flowchartSvg(App& app, const std::string& source,
                     end,
                 };
             } else {
-                float lane = 36.0f + exteriorLane++ * 14.0f;
+                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
                 D2D1_POINT_2F start = D2D1::Point2F(from.right, fromCenterY);
                 D2D1_POINT_2F end = D2D1::Point2F(to.right, toCenterY);
                 float laneX = std::max(from.right, to.right) + lane;
@@ -534,7 +619,7 @@ std::string flowchartSvg(App& app, const std::string& source,
                 (leftToRight ? toCenterX > fromCenterX
                              : toCenterX < fromCenterX);
             if (selfLoop) {
-                float lane = 36.0f + exteriorLane++ * 14.0f;
+                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
                 D2D1_POINT_2F start = D2D1::Point2F(fromCenterX, from.bottom);
                 D2D1_POINT_2F end = D2D1::Point2F(from.right, fromCenterY);
                 float laneX = from.right + lane;
@@ -559,7 +644,7 @@ std::string flowchartSvg(App& app, const std::string& source,
                     end,
                 };
             } else {
-                float lane = 36.0f + exteriorLane++ * 14.0f;
+                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
                 D2D1_POINT_2F start = D2D1::Point2F(fromCenterX, from.bottom);
                 D2D1_POINT_2F end = D2D1::Point2F(toCenterX, to.bottom);
                 float laneY = std::max(from.bottom, to.bottom) + lane;
@@ -573,10 +658,10 @@ std::string flowchartSvg(App& app, const std::string& source,
         }
 
         for (const auto& point : conn.points) {
-            boundsL = std::min(boundsL, point.x - kArrowSize);
-            boundsT = std::min(boundsT, point.y - kArrowSize);
-            boundsR = std::max(boundsR, point.x + kArrowSize);
-            boundsB = std::max(boundsB, point.y + kArrowSize);
+            boundsL = std::min(boundsL, point.x - arrowSize);
+            boundsT = std::min(boundsT, point.y - arrowSize);
+            boundsR = std::max(boundsR, point.x + arrowSize);
+            boundsB = std::max(boundsB, point.y + arrowSize);
         }
 
         if (!edge.label.empty()) {
@@ -594,8 +679,10 @@ std::string flowchartSvg(App& app, const std::string& source,
             mermaid::Rect labelRect = chipAt(centerX, centerY);
             bool segVertical = std::abs(middleEnd.x - middleStart.x) <
                                std::abs(middleEnd.y - middleStart.y);
-            float stepX = segVertical ? 0.0f : edgeLabel.width + 8.0f;
-            float stepY = segVertical ? edgeLabel.height + 8.0f : 0.0f;
+            float stepX =
+                segVertical ? 0.0f : edgeLabel.width + 8.0f * scale;
+            float stepY =
+                segVertical ? edgeLabel.height + 8.0f * scale : 0.0f;
             auto overlapsPlaced = [&](const mermaid::Rect& rect) {
                 for (const auto& placed : placedLabelRects) {
                     if (rect.left < placed.right && rect.right > placed.left &&
@@ -622,48 +709,60 @@ std::string flowchartSvg(App& app, const std::string& source,
         conns.push_back(std::move(conn));
     }
 
-    std::string connCss = colorCss(connectorColor);
-    std::string s = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" +
-                    num(boundsR - boundsL) + "\" height=\"" +
-                    num(boundsB - boundsT) + "\" viewBox=\"0 0 " +
-                    num(boundsR - boundsL) + " " + num(boundsB - boundsT) +
-                    "\"><g transform=\"translate(" + num(-boundsL) + " " +
-                    num(-boundsT) + ")\">";
+    // Emission order = viewer draw order: group boxes, edges, chips and
+    // node shapes, text last
+    std::vector<Prim> texts;
+    for (size_t sub = 0; sub < subBoxes.size(); sub++) {
+        const auto& box = subBoxes[sub];
+        if (box.left == kNoBox) continue;
+        Prim fill;
+        fill.type = PrimType::Rect;
+        fill.x1 = box.left;
+        fill.y1 = box.top;
+        fill.x2 = box.right;
+        fill.y2 = box.bottom;
+        fill.fill = Role::Custom;
+        primCustom(fill, groupFill);
+        result.prims.push_back(std::move(fill));
+        Prim border;
+        border.type = PrimType::Rect;
+        border.x1 = box.left;
+        border.y1 = box.top;
+        border.x2 = box.right;
+        border.y2 = box.bottom;
+        border.stroke = Role::Custom;
+        border.strokeWidth = 1.2f * scale;
+        primCustom(border, groupBorder);
+        result.prims.push_back(std::move(border));
 
-    // Subgraph boxes first: fill and border under everything, like the
-    // viewer's background pass
-    {
-        D2D1_COLOR_F groupFill = app.theme.codeBackground;
-        groupFill.a *= 0.55f;
-        D2D1_COLOR_F groupBorder = app.theme.text;
-        groupBorder.a = 0.28f;
-        for (const auto& box : subBoxes) {
-            if (box.left == kNoBox) continue;
-            s += "<rect x=\"" + num(box.left) + "\" y=\"" + num(box.top) +
-                 "\" width=\"" + num(box.right - box.left) + "\" height=\"" +
-                 num(box.bottom - box.top) + "\" fill=\"" +
-                 colorCss(groupFill) + "\" stroke=\"" +
-                 colorCss(groupBorder) + "\" stroke-width=\"1.2\"/>";
-        }
+        Prim title;
+        title.type = PrimType::Text;
+        title.text = diagram.subgraphs[sub].label;
+        title.style = textStyle;
+        title.fill = Role::Custom;
+        primCustom(title, groupTitle);
+        title.x1 = box.left + 8.0f * scale;
+        title.y1 = box.top + 2.0f * scale;
+        title.x2 = box.right - 8.0f * scale;
+        title.y2 = box.top + 22.0f * scale;
+        texts.push_back(std::move(title));
     }
 
-    // Same z-order as the viewer: edges under, chips and nodes over, text last
     for (const auto& conn : conns) {
-        if (conn.points.size() < 2) continue;
-        std::string d;
-        for (size_t i = 0; i < conn.points.size(); i++) {
-            d += (i ? " L " : "M ") + num(conn.points[i].x) + " " +
-                 num(conn.points[i].y);
+        for (size_t i = 1; i < conn.points.size(); i++) {
+            Prim segment;
+            segment.type = PrimType::Line;
+            segment.x1 = conn.points[i - 1].x;
+            segment.y1 = conn.points[i - 1].y;
+            segment.x2 = conn.points[i].x;
+            segment.y2 = conn.points[i].y;
+            segment.stroke = Role::Custom;
+            primCustom(segment, connectorColor);
+            segment.strokeWidth = conn.stroke;
+            segment.dashed = conn.dashed;
+            result.prims.push_back(std::move(segment));
         }
-        s += "<path d=\"" + d + "\" fill=\"none\" stroke=\"" + connCss +
-             "\" stroke-width=\"" + num(conn.stroke) + "\"";
-        if (conn.dashed) {
-            // D2D's stock DASH pattern: 2-on 2-off in stroke-width units
-            s += " stroke-dasharray=\"" + num(conn.stroke * 2.0f) + " " +
-                 num(conn.stroke * 2.0f) + "\"";
-        }
-        s += "/>";
-        if (conn.directed) {
+        if (conn.directed && conn.points.size() >= 2) {
             const auto& tip = conn.points.back();
             const auto& previous = conn.points[conn.points.size() - 2];
             float dx = tip.x - previous.x;
@@ -672,134 +771,137 @@ std::string flowchartSvg(App& app, const std::string& source,
             if (length > 0.001f) {
                 dx /= length;
                 dy /= length;
-                float wing = kArrowSize * 0.5f;
-                float leftX = tip.x - dx * kArrowSize + dy * wing;
-                float leftY = tip.y - dy * kArrowSize - dx * wing;
-                float rightX = tip.x - dx * kArrowSize - dy * wing;
-                float rightY = tip.y - dy * kArrowSize + dx * wing;
-                s += "<path d=\"M " + num(leftX) + " " + num(leftY) + " L " +
-                     num(tip.x) + " " + num(tip.y) + " L " + num(rightX) +
-                     " " + num(rightY) + "\" fill=\"none\" stroke=\"" +
-                     connCss + "\" stroke-width=\"" + num(conn.stroke) +
-                     "\"/>";
+                float wing = arrowSize * 0.5f;
+                const float wings[2][2] = {{dy, -dx}, {-dy, dx}};
+                for (const auto& side : wings) {
+                    Prim stroke;
+                    stroke.type = PrimType::Line;
+                    stroke.x1 = tip.x - dx * arrowSize + side[0] * wing;
+                    stroke.y1 = tip.y - dy * arrowSize + side[1] * wing;
+                    stroke.x2 = tip.x;
+                    stroke.y2 = tip.y;
+                    stroke.stroke = Role::Custom;
+                    primCustom(stroke, connectorColor);
+                    stroke.strokeWidth = conn.stroke;
+                    result.prims.push_back(std::move(stroke));
+                }
             }
         }
     }
 
-    std::string chipFill = colorCss(app.theme.codeBackground);
-    std::string chipStrokeCss = colorCss(chipStroke);
     for (const auto& chip : chips) {
-        s += "<rect x=\"" + num(chip.rect.left) + "\" y=\"" +
-             num(chip.rect.top) + "\" width=\"" +
-             num(chip.rect.right - chip.rect.left) + "\" height=\"" +
-             num(chip.rect.bottom - chip.rect.top) +
-             "\" rx=\"4\" fill=\"" + chipFill + "\" stroke=\"" +
-             chipStrokeCss + "\" stroke-width=\"1.2\"/>";
+        Prim box;
+        box.type = PrimType::RoundRect;
+        box.radius = 4.0f * scale;
+        box.x1 = chip.rect.left;
+        box.y1 = chip.rect.top;
+        box.x2 = chip.rect.right;
+        box.y2 = chip.rect.bottom;
+        box.fill = Role::Fill;
+        box.stroke = Role::Custom;
+        primCustom(box, chipStroke);
+        box.strokeWidth = 1.2f * scale;
+        result.prims.push_back(std::move(box));
+
+        Prim label;
+        label.type = PrimType::Text;
+        label.text = toUtf8(chip.text);
+        label.style = textStyle;
+        label.fill = Role::Text;
+        label.x1 = chip.rect.left + labelPadX;
+        label.y1 = chip.rect.top + labelPadY;
+        label.x2 = chip.rect.right - labelPadX;
+        label.y2 = chip.rect.bottom - labelPadY;
+        texts.push_back(std::move(label));
     }
 
     for (size_t i = 0; i < diagram.nodes.size(); i++) {
         const auto& node = diagram.nodes[i];
         const auto& rect = nodeRects[i];
         const auto& style = styles[i];
-        float w = rect.right - rect.left;
-        float h = rect.bottom - rect.top;
-        std::string paint = " fill=\"" + colorCss(style.fill) +
-                            "\" stroke=\"" + colorCss(style.stroke) +
-                            "\" stroke-width=\"" + num(style.strokeWidth) +
-                            "\"";
-        switch (node.shape) {
-            case mermaid::NodeShape::Diamond:
-                s += "<polygon points=\"" + num(rect.left + w * 0.5f) + "," +
-                     num(rect.top) + " " + num(rect.right) + "," +
-                     num(rect.top + h * 0.5f) + " " +
-                     num(rect.left + w * 0.5f) + "," + num(rect.bottom) +
-                     " " + num(rect.left) + "," + num(rect.top + h * 0.5f) +
-                     "\"" + paint + "/>";
-                break;
-            case mermaid::NodeShape::Hexagon: {
-                float inset = w * 0.18f;
-                s += "<polygon points=\"" + num(rect.left + inset) + "," +
-                     num(rect.top) + " " + num(rect.right - inset) + "," +
-                     num(rect.top) + " " + num(rect.right) + "," +
-                     num(rect.top + h * 0.5f) + " " +
-                     num(rect.right - inset) + "," + num(rect.bottom) + " " +
-                     num(rect.left + inset) + "," + num(rect.bottom) + " " +
-                     num(rect.left) + "," + num(rect.top + h * 0.5f) + "\"" +
-                     paint + "/>";
-                break;
-            }
-            case mermaid::NodeShape::Circle:
-                s += "<ellipse cx=\"" + num(rect.left + w * 0.5f) +
-                     "\" cy=\"" + num(rect.top + h * 0.5f) + "\" rx=\"" +
-                     num(w * 0.5f) + "\" ry=\"" + num(h * 0.5f) + "\"" +
-                     paint + "/>";
-                break;
-            case mermaid::NodeShape::Stadium:
-            case mermaid::NodeShape::RoundedRectangle: {
-                float radius =
-                    node.shape == mermaid::NodeShape::Stadium ? h * 0.5f
-                                                              : 8.0f;
-                s += "<rect x=\"" + num(rect.left) + "\" y=\"" +
-                     num(rect.top) + "\" width=\"" + num(w) +
-                     "\" height=\"" + num(h) + "\" rx=\"" + num(radius) +
-                     "\"" + paint + "/>";
-                break;
-            }
-            case mermaid::NodeShape::Rectangle:
-            default:
-                s += "<rect x=\"" + num(rect.left) + "\" y=\"" +
-                     num(rect.top) + "\" width=\"" + num(w) +
-                     "\" height=\"" + num(h) + "\"" + paint + "/>";
-                break;
-        }
-    }
 
-    std::string textCss = colorCss(app.theme.text);
-    {
-        D2D1_COLOR_F groupTitle = app.theme.text;
-        groupTitle.a = 0.78f;
-        std::string titleCss = colorCss(groupTitle);
-        for (size_t sub = 0; sub < diagram.subgraphs.size(); sub++) {
-            const auto& box = subBoxes[sub];
-            if (box.left == kNoBox) continue;
-            flowEmitText(app, toWide(diagram.subgraphs[sub].label),
-                         box.left + 8.0f, box.top + 2.0f, box.right - 8.0f,
-                         box.top + 22.0f, titleCss, bodyFontCss, s);
+        // Fill and stroke may carry different custom colors; a prim holds
+        // one custom slot, so styled nodes split into two prims
+        if (style.customFill || style.customStroke) {
+            Prim fill = flowShapePrim(node, rect, scale);
+            if (style.customFill) {
+                fill.fill = Role::Custom;
+                primCustom(fill, style.fill);
+            } else {
+                fill.fill = Role::Fill;
+            }
+            result.prims.push_back(std::move(fill));
+            Prim stroke = flowShapePrim(node, rect, scale);
+            if (style.customStroke) {
+                stroke.stroke = Role::Custom;
+                primCustom(stroke, style.stroke);
+            } else {
+                stroke.stroke = Role::Stroke;
+            }
+            stroke.strokeWidth = style.strokeWidth;
+            result.prims.push_back(std::move(stroke));
+        } else {
+            Prim shape = flowShapePrim(node, rect, scale);
+            shape.fill = Role::Fill;
+            shape.stroke = Role::Stroke;
+            shape.strokeWidth = style.strokeWidth;
+            result.prims.push_back(std::move(shape));
         }
-    }
-    for (const auto& chip : chips) {
-        flowEmitText(app, chip.text, chip.rect.left + kLabelPadX,
-                     chip.rect.top + kLabelPadY, chip.rect.right - kLabelPadX,
-                     chip.rect.bottom - kLabelPadY, textCss, bodyFontCss, s);
-    }
-    for (size_t i = 0; i < diagram.nodes.size(); i++) {
-        const auto& node = diagram.nodes[i];
-        const auto& rect = nodeRects[i];
-        float insetX = kPaddingX;
-        float insetY = kPaddingY;
+
+        float insetX = paddingX;
+        float insetY = paddingY;
         if (node.shape == mermaid::NodeShape::Diamond) {
             insetX = (rect.right - rect.left) * 0.18f;
             insetY = (rect.bottom - rect.top) * 0.18f;
         } else if (node.shape == mermaid::NodeShape::Hexagon) {
             insetX = (rect.right - rect.left) * 0.18f;
         }
-        flowEmitText(app, labels[i], rect.left + insetX, rect.top + insetY,
-                     rect.right - insetX, rect.bottom - insetY,
-                     colorCss(styles[i].text), bodyFontCss, s);
+        Prim label;
+        label.type = PrimType::Text;
+        label.text = toUtf8(labels[i]);
+        label.style = textStyle;
+        if (style.customText) {
+            label.fill = Role::Custom;
+            primCustom(label, style.text);
+        } else {
+            label.fill = Role::Text;
+        }
+        label.x1 = rect.left + insetX;
+        label.y1 = rect.top + insetY;
+        label.x2 = rect.right - insetX;
+        label.y2 = rect.bottom - insetY;
+        texts.push_back(std::move(label));
     }
+    for (auto& text : texts) result.prims.push_back(std::move(text));
 
-    s += "</g></svg>";
-    return s;
+    // Shift everything into positive coordinates
+    float shiftX = -boundsL;
+    float shiftY = -boundsT;
+    for (auto& prim : result.prims) {
+        prim.x1 += shiftX;
+        prim.x2 += shiftX;
+        prim.y1 += shiftY;
+        prim.y2 += shiftY;
+        for (auto& point : prim.pts) {
+            point.x += shiftX;
+            point.y += shiftY;
+        }
+    }
+    result.width = boundsR - boundsL;
+    result.height = boundsB - boundsT;
+    result.ok = true;
+    return result;
 }
 
-// Native diagram -> standalone SVG; empty string = caller shows the source
-std::string diagramSvg(App& app, const std::string& sourceUtf8,
-                       const std::string& bodyFontCss,
-                       const std::string& monoFontCss) {
+// Any native diagram source -> prims at the given scale (flowcharts via
+// their own mirror, every other family via mermaidext). ok=false means the
+// caller should fall back to the source block.
+mermaidext::Built buildDiagramPrims(App& app, const std::string& sourceUtf8,
+                                    float scale) {
     mermaidext::Kind kind = mermaidext::detectKind(sourceUtf8);
     if (kind == mermaidext::Kind::None) return {};
     if (kind == mermaidext::Kind::Flowchart)
-        return flowchartSvg(app, sourceUtf8, bodyFontCss);
+        return buildFlowchartPrims(app, sourceUtf8, scale);
 
     auto measure = [&](const std::string& text,
                        const mermaidext::TextStyle& style,
@@ -814,9 +916,7 @@ std::string diagramSvg(App& app, const std::string& sourceUtf8,
             style.bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD
                        : DWRITE_FONT_WEIGHT_NORMAL,
             style.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL,
-            (style.mono ? 13.0f : kDiagramFontSize) *
-                (style.scale > 0 ? style.scale : 1.0f),
+            DWRITE_FONT_STRETCH_NORMAL, diagramFontSize(style, scale),
             L"en-us", &format);
         if (!format) return {};
         constexpr float kHuge = 100000.0f;
@@ -835,8 +935,16 @@ std::string diagramSvg(App& app, const std::string& sourceUtf8,
         return {metrics.widthIncludingTrailingWhitespace, metrics.height};
     };
 
-    mermaidext::Built built =
-        mermaidext::build(kind, sourceUtf8, measure, 1.0f);
+    return mermaidext::build(kind, sourceUtf8, measure, scale);
+}
+
+namespace {
+
+// Native diagram -> standalone SVG; empty string = caller shows the source
+std::string diagramSvg(App& app, const std::string& sourceUtf8,
+                       const std::string& bodyFontCss,
+                       const std::string& monoFontCss) {
+    mermaidext::Built built = buildDiagramPrims(app, sourceUtf8, 1.0f);
     if (!built.ok || built.prims.empty()) return {};
 
     DiagramCtx ctx{app, bodyFontCss, monoFontCss};
@@ -1329,14 +1437,29 @@ void exportDocumentAs(App& app, HWND hwnd) {
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = L"Web page (*.html)\0*.html\0";
+    ofn.lpstrFilter =
+        L"Web page (*.html)\0*.html\0Word document (*.docx)\0*.docx\0";
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrDefExt = L"html";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (!GetSaveFileNameW(&ofn)) return;
 
-    bool ok = exportHtmlFile(app, path);
+    // The chosen filter decides the format; a typed extension wins
+    std::wstring chosen = path;
+    auto endsWith = [&](const wchar_t* suffix) {
+        size_t n = wcslen(suffix);
+        return chosen.size() >= n &&
+               _wcsicmp(chosen.c_str() + chosen.size() - n, suffix) == 0;
+    };
+    bool docx = ofn.nFilterIndex == 2;
+    if (endsWith(L".docx")) docx = true;
+    else if (endsWith(L".html") || endsWith(L".htm")) docx = false;
+    else {
+        chosen += docx ? L".docx" : L".html";
+    }
+
+    bool ok = docx ? exportDocxFile(app, chosen)
+                   : exportHtmlFile(app, chosen);
 
     app.copiedNotificationKey = ok ? "toast.exported" : "toast.save_failed";
     app.showCopiedNotification = true;
