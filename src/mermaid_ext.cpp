@@ -194,6 +194,33 @@ Kind detectKind(std::string_view source) {
             if (keyword == "xychart" || keyword == "xychart-beta") {
                 return Kind::XyChart;
             }
+            if (keyword == "packet" || keyword == "packet-beta") {
+                return Kind::Packet;
+            }
+            if (keyword == "kanban") return Kind::Kanban;
+            if (keyword == "requirementdiagram") return Kind::Requirement;
+            if (keyword.rfind("c4", 0) == 0 &&
+                (keyword == "c4context" || keyword == "c4container" ||
+                 keyword == "c4component" || keyword == "c4dynamic" ||
+                 keyword == "c4deployment")) {
+                return Kind::C4;
+            }
+            if (keyword == "architecture" ||
+                keyword == "architecture-beta") {
+                return Kind::Architecture;
+            }
+            if (keyword == "block" || keyword == "block-beta") {
+                return Kind::Block;
+            }
+            if (keyword == "radar" || keyword == "radar-beta") {
+                return Kind::Radar;
+            }
+            if (keyword == "sankey" || keyword == "sankey-beta") {
+                return Kind::Sankey;
+            }
+            if (keyword == "treemap" || keyword == "treemap-beta") {
+                return Kind::Treemap;
+            }
             return Kind::None;
         }
         if (newline == source.size()) break;
@@ -218,6 +245,17 @@ Built build(Kind kind, std::string_view source, const Measure& measure,
         case Kind::Journey: return buildJourney(source, measure, scale);
         case Kind::Quadrant: return buildQuadrant(source, measure, scale);
         case Kind::XyChart: return buildXyChart(source, measure, scale);
+        case Kind::Packet: return buildPacket(source, measure, scale);
+        case Kind::Kanban: return buildKanban(source, measure, scale);
+        case Kind::Treemap: return buildTreemap(source, measure, scale);
+        case Kind::Radar: return buildRadar(source, measure, scale);
+        case Kind::Sankey: return buildSankey(source, measure, scale);
+        case Kind::Block: return buildBlock(source, measure, scale);
+        case Kind::Requirement:
+            return buildRequirement(source, measure, scale);
+        case Kind::C4: return buildC4(source, measure, scale);
+        case Kind::Architecture:
+            return buildArchitecture(source, measure, scale);
         default: break;
     }
     Built failed;

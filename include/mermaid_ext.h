@@ -31,6 +31,15 @@ enum class Kind {
     Journey,
     Quadrant,
     XyChart,
+    Packet,
+    Kanban,
+    Treemap,
+    Radar,
+    Sankey,
+    Block,
+    Requirement,
+    C4,
+    Architecture,
 };
 
 // Inspects the first meaningful line's keyword.
@@ -154,6 +163,23 @@ Built buildQuadrant(std::string_view source, const Measure& measure,
                     float scale);
 Built buildXyChart(std::string_view source, const Measure& measure,
                    float scale);
+Built buildPacket(std::string_view source, const Measure& measure,
+                  float scale);
+Built buildKanban(std::string_view source, const Measure& measure,
+                  float scale);
+Built buildTreemap(std::string_view source, const Measure& measure,
+                   float scale);
+Built buildRadar(std::string_view source, const Measure& measure,
+                 float scale);
+Built buildSankey(std::string_view source, const Measure& measure,
+                  float scale);
+Built buildBlock(std::string_view source, const Measure& measure,
+                 float scale);
+Built buildRequirement(std::string_view source, const Measure& measure,
+                       float scale);
+Built buildC4(std::string_view source, const Measure& measure, float scale);
+Built buildArchitecture(std::string_view source, const Measure& measure,
+                        float scale);
 
 }  // namespace detail
 

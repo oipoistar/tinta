@@ -258,7 +258,12 @@ void testDetectKind() {
           "quadrantChart detected");
     check(detectKind("xychart-beta\nbar [1]") == Kind::XyChart,
           "xychart-beta detected");
-    check(detectKind("C4Context\n...") == Kind::None,
+    check(detectKind("packet-beta\n0-15: \"x\"") == Kind::Packet,
+          "packet-beta detected");
+    check(detectKind("kanban\n  Todo") == Kind::Kanban, "kanban detected");
+    check(detectKind("treemap-beta\n\"A\"") == Kind::Treemap,
+          "treemap-beta detected");
+    check(detectKind("zenuml\n...") == Kind::None,
           "unsupported kinds report None");
 }
 
@@ -305,6 +310,22 @@ void testExtBuilders() {
          "    A: [0.3, 0.6]\n"},
         {Kind::XyChart, "xychart",
          "xychart-beta\n    x-axis [a, b]\n    bar [1, 2]\n    line [2, 1]\n"},
+        {Kind::Packet, "packet",
+         "packet-beta\ntitle UDP\n0-15: \"Source Port\"\n"
+         "16-31: \"Destination Port\"\n32-63: \"Data\"\n"},
+        {Kind::Kanban, "kanban",
+         "kanban\n  Todo\n    [Write docs]\n    id2[Fix bug]@{ ticket: "
+         "'MC-1', assigned: 'knsv', priority: 'High' }\n  [Done]\n"
+         "    [Ship it]\n"},
+        {Kind::Treemap, "treemap",
+         "treemap-beta\ntitle T\n\"Section 1\"\n    \"Leaf 1.1\": 12\n"
+         "    \"Leaf 1.2\": 8\n\"Section 2\"\n    \"Leaf 2.1\": 10\n"},
+        {Kind::Radar, "radar",
+         "radar-beta\ntitle Grades\naxis m[\"Math\"], s[\"Science\"], "
+         "e[\"English\"]\ncurve a[\"Alice\"]{85, 90, 80}\n"
+         "curve b{70, 75, 85}\nmax 100\nmin 0\n"},
+        {Kind::Sankey, "sankey",
+         "sankey-beta\nA,B,10\nA,C,5\nB,D,8\nC,D,5\n\"E, e\",D,2\n"},
     };
     for (const auto& testCase : kCases) {
         auto built = mermaidext::build(testCase.kind, testCase.source,
