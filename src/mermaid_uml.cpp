@@ -1063,6 +1063,11 @@ Built buildClass(std::string_view source, const Measure& measure,
     graph.diagram.direction = mermaid::Direction::TopToBottom;
     std::map<size_t, ClassMembers> members;
     std::vector<EdgeDecor> decors;
+    struct ClassNote {
+        std::string text;
+        size_t target = SIZE_MAX;  // SIZE_MAX = floating
+    };
+    std::vector<ClassNote> notes;
     size_t openBlock = SIZE_MAX;  // class whose { } block is open
 
     auto stripCss = [](std::string_view id) {
@@ -1115,8 +1120,27 @@ Built buildClass(std::string_view source, const Measure& measure,
             continue;  // interactivity/styling metadata, nothing to draw
         }
         if (startsWithWord(line, "note", &rest)) {
-            result.error = "Class notes are not supported";
-            return result;
+            // note "text" | note for ClassName "text"
+            ClassNote note;
+            std::string_view spec = rest;
+            std::string_view target;
+            if (startsWithWord(spec, "for", &target)) {
+                size_t quote = target.find('"');
+                if (quote == std::string_view::npos) {
+                    result.error = "Bad class note";
+                    return result;
+                }
+                note.target = ensureClass(trimView(target.substr(0, quote)));
+                spec = target.substr(quote);
+            }
+            std::string text = takeLeadingQuoted(spec);
+            if (text.empty()) {
+                result.error = "Bad class note";
+                return result;
+            }
+            note.text = cleanLabel(text);
+            notes.push_back(std::move(note));
+            continue;
         }
         if (startsWithWord(line, "namespace", &rest)) {
             result.error = "Namespaces are not supported";
@@ -1377,6 +1401,68 @@ Built buildClass(std::string_view source, const Measure& measure,
             };
             compartment(classMembers->attributes, node.attrHeight);
             compartment(classMembers->methods, node.methodHeight);
+        }
+    }
+
+    // Notes: targeted ones hang under their class on a dashed link,
+    // floating ones stack under the diagram
+    if (!notes.empty()) {
+        TextStyle noteStyle;
+        noteStyle.scale = 0.85f;
+        float notePad = 8.0f * scale;
+        float noteWrap = 240.0f * scale;
+        float floatCursorY = maxBottom + 16.0f * scale;
+        for (const auto& note : notes) {
+            Size size = measure(note.text, noteStyle, noteWrap);
+            float width = std::min(size.w, noteWrap) + notePad * 2.0f;
+            float height = size.h + notePad * 2.0f;
+            float x, top;
+            if (note.target != SIZE_MAX &&
+                note.target < layout.nodes.size()) {
+                const auto& rect = layout.nodes[note.target];
+                float centerX = (rect.left + rect.right) * 0.5f;
+                x = centerX - width * 0.5f;
+                top = rect.bottom + 18.0f * scale;
+                Prim link;
+                link.type = PrimType::Line;
+                link.x1 = centerX;
+                link.y1 = rect.bottom;
+                link.x2 = centerX;
+                link.y2 = top;
+                link.stroke = Role::Muted;
+                link.strokeWidth = 1.2f * scale;
+                link.dashed = true;
+                result.prims.push_back(std::move(link));
+            } else {
+                x = 0.0f;
+                top = floatCursorY;
+                floatCursorY += height + 10.0f * scale;
+            }
+            Prim box;
+            box.type = PrimType::RoundRect;
+            box.radius = 4.0f * scale;
+            box.x1 = x;
+            box.y1 = top;
+            box.x2 = x + width;
+            box.y2 = top + height;
+            box.fill = Role::AccentSoft;
+            box.stroke = Role::Stroke;
+            box.strokeWidth = 1.0f * scale;
+            result.prims.push_back(box);
+            Prim text;
+            text.type = PrimType::Text;
+            text.text = note.text;
+            text.style = noteStyle;
+            text.fill = Role::Text;
+            text.alignH = -1;
+            text.alignV = -1;
+            text.x1 = x + notePad;
+            text.y1 = top + notePad;
+            text.x2 = x + width - notePad;
+            text.y2 = top + height - notePad;
+            result.prims.push_back(std::move(text));
+            maxRight = std::max(maxRight, x + width);
+            maxBottom = std::max(maxBottom, top + height);
         }
     }
 

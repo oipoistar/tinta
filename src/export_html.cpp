@@ -143,7 +143,9 @@ std::string prpaint(const App& app, const mermaidext::Prim& p) {
 
 void emitDiagramText(DiagramCtx& ctx, const mermaidext::Prim& p,
                      std::string& s) {
-    float fontSize = kDiagramFontSize * (p.style.scale > 0 ? p.style.scale : 1.0f);
+    // The viewer sets 14px body / 13px mono at scale 1
+    float fontSize = (p.style.mono ? 13.0f : kDiagramFontSize) *
+                     (p.style.scale > 0 ? p.style.scale : 1.0f);
     float lineH = fontSize * 1.35f;
 
     std::vector<std::string> lines;
@@ -184,7 +186,7 @@ void emitDiagramText(DiagramCtx& ctx, const mermaidext::Prim& p,
              "\" text-anchor=\"" + anchor + "\" font-size=\"" +
              num(fontSize) + "\" font-family=\"" + family + "\" fill=\"" +
              colorCss(color) + "\"";
-        if (p.style.bold) s += " font-weight=\"bold\"";
+        if (p.style.bold) s += " font-weight=\"600\"";
         if (p.style.italic) s += " font-style=\"italic\"";
         s += ">" + htmlEscape(lines[i]) + "</text>";
     }
@@ -393,6 +395,39 @@ std::string flowchartSvg(App& app, const std::string& source,
     if (graphLayout.nodes.size() != diagram.nodes.size()) return {};
     const auto& nodeRects = graphLayout.nodes;
 
+    // Subgraph group boxes, finalized leaves-first exactly like the viewer
+    constexpr float kNoBox = 3.0e38f;
+    std::vector<mermaid::Rect> subBoxes(
+        diagram.subgraphs.size(), {kNoBox, kNoBox, -kNoBox, -kNoBox});
+    {
+        const float boxPad = 10.0f;
+        const float titleHeight = 20.0f;
+        auto grow = [](mermaid::Rect& box, const mermaid::Rect& rect) {
+            box.left = std::min(box.left, rect.left);
+            box.top = std::min(box.top, rect.top);
+            box.right = std::max(box.right, rect.right);
+            box.bottom = std::max(box.bottom, rect.bottom);
+        };
+        for (size_t sub = diagram.subgraphs.size(); sub-- > 0;) {
+            for (size_t node : diagram.subgraphs[sub].nodes) {
+                if (node < nodeRects.size()) {
+                    grow(subBoxes[sub], nodeRects[node]);
+                }
+            }
+            for (size_t c = sub + 1; c < diagram.subgraphs.size(); c++) {
+                if (diagram.subgraphs[c].parent == sub &&
+                    subBoxes[c].left != kNoBox) {
+                    grow(subBoxes[sub], subBoxes[c]);
+                }
+            }
+            if (subBoxes[sub].left == kNoBox) continue;
+            subBoxes[sub].left -= boxPad;
+            subBoxes[sub].top -= boxPad + titleHeight;
+            subBoxes[sub].right += boxPad;
+            subBoxes[sub].bottom += boxPad;
+        }
+    }
+
     D2D1_COLOR_F connectorColor = app.theme.text;
     connectorColor.a = app.theme.isDark ? 0.7f : 0.6f;
     D2D1_COLOR_F chipStroke = connectorColor;
@@ -414,6 +449,13 @@ std::string flowchartSvg(App& app, const std::string& source,
 
     float boundsL = 0.0f, boundsT = 0.0f;
     float boundsR = graphLayout.width, boundsB = graphLayout.height;
+    for (const auto& box : subBoxes) {
+        if (box.left == kNoBox) continue;
+        boundsL = std::min(boundsL, box.left);
+        boundsT = std::min(boundsT, box.top);
+        boundsR = std::max(boundsR, box.right);
+        boundsB = std::max(boundsB, box.bottom);
+    }
     size_t exteriorLane = 0;
     std::vector<mermaid::Rect> placedLabelRects;
     placedLabelRects.reserve(diagram.edges.size());
@@ -588,6 +630,23 @@ std::string flowchartSvg(App& app, const std::string& source,
                     "\"><g transform=\"translate(" + num(-boundsL) + " " +
                     num(-boundsT) + ")\">";
 
+    // Subgraph boxes first: fill and border under everything, like the
+    // viewer's background pass
+    {
+        D2D1_COLOR_F groupFill = app.theme.codeBackground;
+        groupFill.a *= 0.55f;
+        D2D1_COLOR_F groupBorder = app.theme.text;
+        groupBorder.a = 0.28f;
+        for (const auto& box : subBoxes) {
+            if (box.left == kNoBox) continue;
+            s += "<rect x=\"" + num(box.left) + "\" y=\"" + num(box.top) +
+                 "\" width=\"" + num(box.right - box.left) + "\" height=\"" +
+                 num(box.bottom - box.top) + "\" fill=\"" +
+                 colorCss(groupFill) + "\" stroke=\"" +
+                 colorCss(groupBorder) + "\" stroke-width=\"1.2\"/>";
+        }
+    }
+
     // Same z-order as the viewer: edges under, chips and nodes over, text last
     for (const auto& conn : conns) {
         if (conn.points.size() < 2) continue;
@@ -696,6 +755,18 @@ std::string flowchartSvg(App& app, const std::string& source,
     }
 
     std::string textCss = colorCss(app.theme.text);
+    {
+        D2D1_COLOR_F groupTitle = app.theme.text;
+        groupTitle.a = 0.78f;
+        std::string titleCss = colorCss(groupTitle);
+        for (size_t sub = 0; sub < diagram.subgraphs.size(); sub++) {
+            const auto& box = subBoxes[sub];
+            if (box.left == kNoBox) continue;
+            flowEmitText(app, toWide(diagram.subgraphs[sub].label),
+                         box.left + 8.0f, box.top + 2.0f, box.right - 8.0f,
+                         box.top + 22.0f, titleCss, bodyFontCss, s);
+        }
+    }
     for (const auto& chip : chips) {
         flowEmitText(app, chip.text, chip.rect.left + kLabelPadX,
                      chip.rect.top + kLabelPadY, chip.rect.right - kLabelPadX,
@@ -740,10 +811,12 @@ std::string diagramSvg(App& app, const std::string& sourceUtf8,
             style.mono ? app.theme.codeFontFamily : app.theme.fontFamily;
         app.dwriteFactory->CreateTextFormat(
             family, nullptr,
-            style.bold ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+            style.bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD
+                       : DWRITE_FONT_WEIGHT_NORMAL,
             style.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
-            kDiagramFontSize * (style.scale > 0 ? style.scale : 1.0f),
+            (style.mono ? 13.0f : kDiagramFontSize) *
+                (style.scale > 0 ? style.scale : 1.0f),
             L"en-us", &format);
         if (!format) return {};
         constexpr float kHuge = 100000.0f;

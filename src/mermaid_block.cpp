@@ -239,8 +239,9 @@ void measureItem(BlockMeasureCtx& ctx, BlockItem& item, float& cellWidth,
                  float& height) {
     float scale = ctx.scale;
     if (item.space) {
+        // A space consumes a real cell; spacer-only rows keep some height
         cellWidth = kBlockMinCell * 0.5f * scale;
-        height = 0.0f;
+        height = kBlockMinHeight * 0.6f * scale;
         return;
     }
     if (item.container) {

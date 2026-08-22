@@ -1125,6 +1125,69 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
     D2D1_COLOR_F connectorColor = app.theme.text;
     connectorColor.a = app.theme.isDark ? 0.7f : 0.6f;
 
+    // Subgraph group boxes: fill goes through layoutRects (drawn before the
+    // connectors), the border rides with the node shapes, the title with the
+    // node labels. Children were declared after their parents, so a reverse
+    // pass finalizes leaves first and parents grow around them.
+    if (!diagram.subgraphs.empty()) {
+        float boxPad = 10.0f * scale;
+        float titleHeight = 20.0f * scale;
+        constexpr float kEmpty = std::numeric_limits<float>::max();
+        std::vector<D2D1_RECT_F> boxes(
+            diagram.subgraphs.size(),
+            D2D1::RectF(kEmpty, kEmpty, -kEmpty, -kEmpty));
+        auto grow = [](D2D1_RECT_F& box, const D2D1_RECT_F& rect) {
+            box.left = std::min(box.left, rect.left);
+            box.top = std::min(box.top, rect.top);
+            box.right = std::max(box.right, rect.right);
+            box.bottom = std::max(box.bottom, rect.bottom);
+        };
+        for (size_t s = diagram.subgraphs.size(); s-- > 0;) {
+            for (size_t node : diagram.subgraphs[s].nodes) {
+                if (node < nodeRects.size()) grow(boxes[s], nodeRects[node]);
+            }
+            for (size_t c = s + 1; c < diagram.subgraphs.size(); c++) {
+                if (diagram.subgraphs[c].parent == s &&
+                    boxes[c].left != kEmpty) {
+                    grow(boxes[s], boxes[c]);
+                }
+            }
+            if (boxes[s].left == kEmpty) continue;
+            boxes[s].left -= boxPad;
+            boxes[s].top -= boxPad + titleHeight;
+            boxes[s].right += boxPad;
+            boxes[s].bottom += boxPad;
+        }
+        D2D1_COLOR_F groupFill = app.theme.codeBackground;
+        groupFill.a *= 0.55f;
+        D2D1_COLOR_F groupBorder = app.theme.text;
+        groupBorder.a = 0.28f;
+        D2D1_COLOR_F groupTitle = app.theme.text;
+        groupTitle.a = 0.78f;
+        for (size_t s = 0; s < diagram.subgraphs.size(); s++) {
+            if (boxes[s].left == kEmpty) continue;
+            app.layoutRects.push_back({boxes[s], groupFill});
+            app.layoutShapes.push_back({
+                App::LayoutShapeType::Rectangle,
+                boxes[s],
+                D2D1::ColorF(0, 0, 0, 0),
+                groupBorder,
+                1.2f * scale,
+                0.0f,
+            });
+            D2D1_RECT_F titleRect = D2D1::RectF(
+                boxes[s].left + 8.0f * scale, boxes[s].top + 2.0f * scale,
+                boxes[s].right - 8.0f * scale,
+                boxes[s].top + titleHeight + 2.0f * scale);
+            textItems.push_back({toWide(diagram.subgraphs[s].label),
+                                 titleRect, groupTitle});
+            diagramLeft = std::min(diagramLeft, boxes[s].left);
+            diagramTop = std::min(diagramTop, boxes[s].top);
+            diagramRight = std::max(diagramRight, boxes[s].right);
+            diagramBottom = std::max(diagramBottom, boxes[s].bottom);
+        }
+    }
+
     app.layoutConnectors.reserve(
         app.layoutConnectors.size() + diagram.edges.size());
     size_t exteriorLane = 0;

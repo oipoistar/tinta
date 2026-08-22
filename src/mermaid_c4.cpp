@@ -297,8 +297,12 @@ Built buildRequirement(std::string_view source, const Measure& measure,
         rowCursor[node.rank] += node.width + nodeGap;
     }
 
-    // Edges first, boxes cover their ends
+    // Edges first, boxes cover their ends. Rank-skipping relations would
+    // cut straight through the boxes between them; those detour through an
+    // exterior lane on the right like the flowchart engine
     std::vector<Prim> texts;
+    size_t exteriorLane = 0;
+    float rightExtent = diagramWidth;
     for (const auto& edge : edges) {
         const auto& from = nodes[edge.from];
         const auto& to = nodes[edge.to];
@@ -306,28 +310,70 @@ Built buildRequirement(std::string_view source, const Measure& measure,
         float fy = from.y + from.height * 0.5f;
         float tx = to.x + to.width * 0.5f;
         float ty = to.y + to.height * 0.5f;
-        Point start = clipRect(fx, fy, tx, ty, from.x, from.y,
-                               from.x + from.width, from.y + from.height);
-        Point end = clipRect(tx, ty, fx, fy, to.x, to.y, to.x + to.width,
-                             to.y + to.height);
-        Prim line;
-        line.type = PrimType::Line;
-        line.x1 = start.x;
-        line.y1 = start.y;
-        line.x2 = end.x;
-        line.y2 = end.y;
-        line.stroke = Role::Muted;
-        line.strokeWidth = 1.3f * scale;
-        line.dashed = true;
-        line.openArrow = true;
-        result.prims.push_back(std::move(line));
+        int rankSpan = nodes[edge.to].rank - nodes[edge.from].rank;
+        float cx, cy;
+        if (rankSpan > 1 || rankSpan < -1) {
+            float lane = diagramWidth +
+                         (24.0f + exteriorLane++ * 14.0f) * scale;
+            float startY = fy;
+            float endY = ty;
+            Prim out;
+            out.type = PrimType::Line;
+            out.x1 = from.x + from.width;
+            out.y1 = startY;
+            out.x2 = lane;
+            out.y2 = startY;
+            out.stroke = Role::Muted;
+            out.strokeWidth = 1.3f * scale;
+            out.dashed = true;
+            result.prims.push_back(out);
+            Prim down = out;
+            down.x1 = lane;
+            down.y1 = startY;
+            down.x2 = lane;
+            down.y2 = endY;
+            result.prims.push_back(down);
+            Prim in = out;
+            in.x1 = lane;
+            in.y1 = endY;
+            in.x2 = to.x + to.width;
+            in.y2 = endY;
+            in.openArrow = true;
+            result.prims.push_back(in);
+            cx = lane;
+            cy = (startY + endY) * 0.5f;
+            rightExtent = std::max(rightExtent, lane + 8.0f * scale);
+        } else {
+            Point start = clipRect(fx, fy, tx, ty, from.x, from.y,
+                                   from.x + from.width,
+                                   from.y + from.height);
+            Point end = clipRect(tx, ty, fx, fy, to.x, to.y,
+                                 to.x + to.width, to.y + to.height);
+            Prim line;
+            line.type = PrimType::Line;
+            line.x1 = start.x;
+            line.y1 = start.y;
+            line.x2 = end.x;
+            line.y2 = end.y;
+            line.stroke = Role::Muted;
+            line.strokeWidth = 1.3f * scale;
+            line.dashed = true;
+            line.openArrow = true;
+            result.prims.push_back(std::move(line));
+            cx = (start.x + end.x) * 0.5f;
+            cy = (start.y + end.y) * 0.5f;
+        }
 
         TextStyle labelStyle;
         labelStyle.scale = 0.78f;
         labelStyle.italic = true;
         Size size = measure(edge.label, labelStyle, 0.0f);
-        float cx = (start.x + end.x) * 0.5f;
-        float cy = (start.y + end.y) * 0.5f;
+        if (rankSpan > 1 || rankSpan < -1) {
+            // Lane chips sit fully right of the lane, clear of the boxes
+            cx += size.w * 0.5f + 8.0f * scale;
+            rightExtent = std::max(rightExtent,
+                                   cx + size.w * 0.5f + 8.0f * scale);
+        }
         Prim chip;
         chip.type = PrimType::Rect;
         chip.x1 = cx - size.w * 0.5f - 4.0f * scale;
@@ -419,7 +465,7 @@ Built buildRequirement(std::string_view source, const Measure& measure,
     }
     for (auto& text : texts) result.prims.push_back(std::move(text));
 
-    result.width = diagramWidth;
+    result.width = rightExtent;
     result.height = rowTop[maxRank] + rowHeights[maxRank] + 8.0f * scale;
     result.ok = true;
     normalizeLeft(result);
@@ -449,8 +495,8 @@ struct C4Element {
 struct C4Boundary {
     std::string label;
     std::string type;
-    std::vector<size_t> elements;    // indices into elements
-    std::vector<size_t> children;    // indices into boundaries
+    // Members in declaration order: true = element index, false = boundary
+    std::vector<std::pair<bool, size_t>> members;
     size_t parent = SIZE_MAX;
     float x = 0, y = 0, width = 0, height = 0;
 };
@@ -583,8 +629,8 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
             }
             boundary.parent = stack.back();
             boundaries.push_back(std::move(boundary));
-            boundaries[stack.back()].children.push_back(
-                boundaries.size() - 1);
+            boundaries[stack.back()].members.push_back(
+                {false, boundaries.size() - 1});
             stack.push_back(boundaries.size() - 1);
             if (!opensScope) stack.pop_back();  // empty boundary
             continue;
@@ -658,7 +704,8 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
             element.descr = cleanLabel(args[2]);
         }
         elements.push_back(std::move(element));
-        boundaries[stack.back()].elements.push_back(elements.size() - 1);
+        boundaries[stack.back()].members.push_back(
+            {true, elements.size() - 1});
     }
     if (elements.empty()) {
         result.error = "Empty C4 diagram";
@@ -708,13 +755,15 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
     std::function<SizeF(size_t)> measureBoundary =
         [&](size_t index) -> SizeF {
         auto& boundary = boundaries[index];
-        // Row members: element boxes then child boundaries, in order
+        // Members flow in rows in declaration order
         std::vector<SizeF> members;
-        for (size_t e : boundary.elements) {
-            members.push_back({elements[e].width, elements[e].height});
-        }
-        for (size_t child : boundary.children) {
-            members.push_back(measureBoundary(child));
+        for (const auto& member : boundary.members) {
+            if (member.first) {
+                members.push_back({elements[member.second].width,
+                                   elements[member.second].height});
+            } else {
+                members.push_back(measureBoundary(member.second));
+            }
         }
         float width = 0.0f, height = 0.0f;
         float rowWidth = 0.0f, rowHeight = 0.0f;
@@ -761,13 +810,16 @@ Built buildC4(std::string_view source, const Measure& measure, float scale) {
             float w, h;
         };
         std::vector<Member> members;
-        for (size_t e : boundary.elements) {
-            members.push_back(
-                {true, e, elements[e].width, elements[e].height});
-        }
-        for (size_t child : boundary.children) {
-            members.push_back({false, child, boundaries[child].width,
-                               boundaries[child].height});
+        for (const auto& member : boundary.members) {
+            if (member.first) {
+                members.push_back({true, member.second,
+                                   elements[member.second].width,
+                                   elements[member.second].height});
+            } else {
+                members.push_back({false, member.second,
+                                   boundaries[member.second].width,
+                                   boundaries[member.second].height});
+            }
         }
         float rowTop = innerY;
         size_t start = 0;

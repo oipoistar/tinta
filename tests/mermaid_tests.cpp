@@ -110,6 +110,36 @@ void testLayoutDirections() {
           "LR target is right of source");
 }
 
+void testSubgraphs() {
+    const char* source = R"(flowchart TB
+subgraph one [Group One]
+    A --> B
+end
+subgraph two
+    direction LR
+    C --> D
+end
+A e1@--> C
+e1@{ animate: true }
+click A callback
+linkStyle 0 stroke:#f00
+)";
+    auto result = mermaid::parse(source);
+    check(result.success, "subgraph flowchart parses");
+    if (!result.success) return;
+    check(result.diagram.subgraphs.size() == 2, "both subgraphs captured");
+    if (result.diagram.subgraphs.size() == 2) {
+        check(result.diagram.subgraphs[0].label == "Group One",
+              "bracket label captured");
+        check(result.diagram.subgraphs[0].nodes.size() == 2,
+              "first subgraph owns its two nodes");
+        check(result.diagram.subgraphs[1].id == "two",
+              "bare subgraph name is the id");
+    }
+    check(result.diagram.edges.size() == 3,
+          "edge-ID edge parses alongside subgraph edges");
+}
+
 void testUnsupportedDiagram() {
     auto result = mermaid::parse("sequenceDiagram\nAlice->>Bob: Hello\n");
     check(!result.success, "unsupported Mermaid diagram is rejected");
@@ -364,6 +394,7 @@ int main(int argc, char** argv) {
     testStyledFlowchart();
     testGraphAliasesAndChaining();
     testLayoutDirections();
+    testSubgraphs();
     testUnsupportedDiagram();
     testBomAndSemicolonStatements();
     testCyclicLayout();
