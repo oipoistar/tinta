@@ -1094,8 +1094,13 @@ void renderAnnotationEditor(App& app) {
 
 void annotationsCopyForAgent(App& app, HWND hwnd) {
     if (app.annotations.empty() || app.currentFile.empty()) return;
+    // A short task preamble so any agent knows what to do with the list
     std::wstring out = toWide(app.currentFile);
     out += L"\n";
+    out += L"Address each review remark below in this file. The L numbers "
+           L"are source lines and the quoted text locates the passage. "
+           L"After addressing a remark, delete its matching "
+           L"\"<!-- review ... -->\" comment line from the file.\n";
     for (const auto& a : app.annotations) {
         out += L"L" + std::to_wstring(a.lineFrom);
         if (a.lineTo > a.lineFrom) out += L"-L" + std::to_wstring(a.lineTo);
