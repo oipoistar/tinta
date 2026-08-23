@@ -2515,8 +2515,10 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
     std::vector<std::vector<float>> cellNatural(rows.size(), std::vector<float>(colCount, 0.0f));
     std::vector<std::vector<uint8_t>> cellSimple(rows.size(), std::vector<uint8_t>(colCount, 0));
 
+    std::wstring tsv;  // per-cell plain text doubles as the copy payload
     for (size_t r = 0; r < rows.size(); r++) {
         const auto& row = rows[r];
+        if (r > 0) tsv += L"\n";
         for (size_t c = 0; c < row->children.size() && c < (size_t)colCount; c++) {
             const auto& cell = row->children[c];
             cellAligns[r][c] = cell->align;
@@ -2529,6 +2531,13 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
                 else for (const auto& ch : e->children) extract(ch);
             };
             for (const auto& ch : cell->children) extract(ch);
+
+            if (c > 0) tsv += L"\t";
+            std::wstring tsvCell = text;
+            for (wchar_t& ch : tsvCell) {
+                if (ch == L'\t' || ch == L'\n' || ch == L'\r') ch = L' ';
+            }
+            tsv += tsvCell;
 
             // Measure natural width
             bool isHeader = (r == 0);
@@ -2716,6 +2725,13 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
                                        borderColor, borderStroke});
             if (c < colCount) vx += colWidths[c];
         }
+
+        // Copy-as-TSV hover button hit region
+        App::TableInfo info;
+        info.bounds =
+            D2D1::RectF(indent, tableStartY, indent + totalWidth, tableEndY);
+        info.tsv = std::move(tsv);
+        app.tableRects.push_back(std::move(info));
     }
 
     app.docText += L"\n";

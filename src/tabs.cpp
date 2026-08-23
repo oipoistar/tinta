@@ -263,6 +263,13 @@ void tabOpenQuickNote(App& app, HWND hwnd) {
 namespace {
 
 float captionButtonWidth(const App& app) { return dpi(app, 46.0f); }
+// Always-on-top pin, left of the caption buttons
+float pinButtonWidth(const App& app) { return dpi(app, 34.0f); }
+D2D1_RECT_F pinButtonRect(const App& app) {
+    float right = (float)app.width - captionButtonWidth(app) * 3.0f;
+    return D2D1::RectF(right - pinButtonWidth(app), 0.0f, right,
+                       chromeTopHeight(app));
+}
 
 struct StripMetrics {
     float height = 0.0f;
@@ -278,7 +285,7 @@ StripMetrics stripMetrics(const App& app) {
     StripMetrics m;
     m.height = chromeTopHeight(app);
     m.tabsLeft = dpi(app, 40.0f);
-    float buttons = captionButtonWidth(app) * 3.0f;
+    float buttons = captionButtonWidth(app) * 3.0f + pinButtonWidth(app);
     float plusW = dpi(app, 30.0f);
     float chevronW = dpi(app, 32.0f);
     float gap = dpi(app, 2.0f);
@@ -460,7 +467,8 @@ void renderTabStrip(App& app) {
         }
         float textLeft = iconCell + dpi(app, 4.0f);
         float textRight = textLeft;
-        float maxRight = (float)app.width - captionButtonWidth(app) * 3;
+        float maxRight = (float)app.width - captionButtonWidth(app) * 3 -
+                         pinButtonWidth(app);
         if (app.folderBrowserFormat) {
             app.brush->SetColor(muted);
             app.renderTarget->DrawText(
@@ -687,6 +695,49 @@ void renderTabStrip(App& app) {
             drawCloseGlyph(app, cx, cy, dpi(app, 4.5f), glyph);
         }
     }
+
+    // Always-on-top pin: an upright pushpin, accent-filled while pinned
+    {
+        D2D1_RECT_F r = pinButtonRect(app);
+        bool hover = (float)app.mouseX >= r.left && (float)app.mouseX < r.right &&
+                     (float)app.mouseY >= r.top && (float)app.mouseY < r.bottom;
+        if (hover) {
+            D2D1_COLOR_F bg = text;
+            bg.a = 0.07f;
+            app.brush->SetColor(bg);
+            app.renderTarget->FillRectangle(r, app.brush);
+        }
+        float cx = (r.left + r.right) * 0.5f;
+        float cy = (r.top + r.bottom) * 0.5f - dpi(app, 1.0f);
+        D2D1_COLOR_F pin = app.alwaysOnTop ? app.theme.accent : text;
+        if (!app.alwaysOnTop && !hover) pin.a = 0.45f;
+        app.brush->SetColor(pin);
+        float bw = dpi(app, 3.0f);   // body half-width
+        float bh = dpi(app, 4.0f);   // body half-height
+        D2D1_RECT_F body = D2D1::RectF(cx - bw, cy - bh, cx + bw, cy + bh - 1);
+        if (app.alwaysOnTop) {
+            app.renderTarget->FillRectangle(body, app.brush);
+        } else {
+            app.renderTarget->DrawRectangle(body, app.brush, dpi(app, 1.0f));
+        }
+        // Head bar, flange, and needle
+        app.renderTarget->DrawLine(
+            D2D1::Point2F(cx - bw - dpi(app, 1.0f), cy - bh),
+            D2D1::Point2F(cx + bw + dpi(app, 1.0f), cy - bh), app.brush,
+            dpi(app, 1.2f));
+        app.renderTarget->DrawLine(
+            D2D1::Point2F(cx - bw - dpi(app, 2.0f), cy + bh - 1),
+            D2D1::Point2F(cx + bw + dpi(app, 2.0f), cy + bh - 1), app.brush,
+            dpi(app, 1.2f));
+        app.renderTarget->DrawLine(
+            D2D1::Point2F(cx, cy + bh - 1),
+            D2D1::Point2F(cx, cy + bh + dpi(app, 4.0f)), app.brush,
+            dpi(app, 1.2f));
+        App::TabHit pinHit;
+        pinHit.rect = r;
+        pinHit.index = -4;
+        app.tabHits.push_back(pinHit);
+    }
 }
 
 void renderTabSwitcher(App& app) {
@@ -834,6 +885,18 @@ bool tabStripMouseDown(App& app, HWND hwnd, int x, int y, bool middle) {
             if (!middle) {
                 app.showTabSwitcher = !app.showTabSwitcher;
                 app.tabSwitcherHover = -1;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return true;
+        }
+        if (hit.index == -4) {
+            // Pin: toggle always-on-top for this window
+            if (!middle) {
+                app.alwaysOnTop = !app.alwaysOnTop;
+                SetWindowPos(hwnd,
+                             app.alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+                             0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return true;
