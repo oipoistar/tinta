@@ -455,6 +455,11 @@ void renderAnnotations(App& app) {
         float firstY = -1.0f;   // screen center of the first visible fragment
         float lastY = -1.0f;
         float lastRight = 0.0f; // screen x of the last fragment's right edge
+        // Screen bounding box of the visible tint, for popup placement
+        float boxLeft = 1e9f;
+        float boxRight = -1e9f;
+        float boxTop = 1e9f;
+        float boxBottom = -1e9f;
         bool visible = false;
     };
     std::vector<Anchor> anchors(app.annotations.size());
@@ -481,6 +486,10 @@ void renderAnnotations(App& app) {
             an.visible = true;
             an.lastY = (sy0 + sy1) * 0.5f;
             an.lastRight = sx1;
+            an.boxLeft = std::min(an.boxLeft, sx0);
+            an.boxRight = std::max(an.boxRight, sx1);
+            an.boxTop = std::min(an.boxTop, sy0);
+            an.boxBottom = std::max(an.boxBottom, sy1);
             app.brush->SetColor(tint);
             app.renderTarget->FillRectangle(
                 D2D1::RectF(sx0 - 1, sy0, sx1 + 1, sy1), app.brush);
@@ -650,18 +659,13 @@ void renderAnnotations(App& app) {
         app.annotCopyBtnRect = btn;
     }
 
-    // Hover preview: quote header plus the note, left of the rail
+    // Hover preview: quote header plus the note, anchored to the tinted
+    // text itself; the rail-side spot is kept for parked squares whose
+    // text is off-screen
     if (app.hoveredAnnotation >= 0 &&
         app.hoveredAnnotation < (int)app.annotations.size() &&
         !app.annotEditorOpen && app.folderBrowserFormat && app.dwriteFactory) {
         const auto& a = app.annotations[app.hoveredAnnotation];
-        float y = topBound + dpi(app, 40.0f);
-        for (const auto& mark : app.annotationMarks) {
-            if (mark.index == app.hoveredAnnotation) {
-                y = mark.square.top;
-                break;
-            }
-        }
         float w = dpi(app, 300.0f);
         float pad = dpi(app, 10.0f);
         std::wstring quote = toWide(a.quote);
@@ -683,8 +687,39 @@ void renderAnnotations(App& app) {
         noteH = std::min(noteH, dpi(app, 200.0f));
         float quoteH = dpi(app, 18.0f);
         float h = pad * 2 + quoteH + dpi(app, 4.0f) + noteH;
-        float px = railLeft - w - dpi(app, 10.0f);
-        float py = std::min(y, (float)app.height - h - dpi(app, 8.0f));
+
+        float gap = dpi(app, 8.0f);
+        float px, py;
+        const Anchor& an = anchors[app.hoveredAnnotation];
+        if (an.visible) {
+            if (an.lastRight + gap + w <= railLeft - gap) {
+                // Beside the end of the tinted text
+                px = an.lastRight + gap;
+                py = an.lastY - h * 0.5f;
+            } else if (an.boxTop - h - gap >= topBound) {
+                // No room to the right: above the section
+                px = an.boxLeft;
+                py = an.boxTop - h - gap;
+            } else {
+                // Pinned near the top of the window: below the section
+                px = an.boxLeft;
+                py = an.boxBottom + gap;
+            }
+            px = std::max(viewX + gap, std::min(px, railLeft - w - gap));
+            py = std::max(topBound + dpi(app, 4.0f),
+                          std::min(py, (float)app.height - h - gap));
+        } else {
+            // Parked square: beside the rail at the square's height
+            float y = topBound + dpi(app, 40.0f);
+            for (const auto& mark : app.annotationMarks) {
+                if (mark.index == app.hoveredAnnotation) {
+                    y = mark.square.top;
+                    break;
+                }
+            }
+            px = railLeft - w - dpi(app, 10.0f);
+            py = std::min(y, (float)app.height - h - gap);
+        }
 
         D2D1_RECT_F panel = D2D1::RectF(px, py, px + w, py + h);
         D2D1_COLOR_F bg = app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)

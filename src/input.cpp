@@ -3034,6 +3034,14 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 InvalidateRect(hwnd, nullptr, FALSE);
                 break;
+            case 'A':
+                // Annotate the current selection (#126)
+                if (!app.showSearch && !app.showThemeChooser && !app.showToc &&
+                    !app.showFolderBrowser) {
+                    annotationBeginCreate(app);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                break;
             case 'F':
                 // F to open search (when not in search mode)
                 if (!app.showSearch && !app.showThemeChooser) {

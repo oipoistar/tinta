@@ -1417,6 +1417,7 @@ void renderContextMenu(App& app) {
     // Shortcut hints reflect the user keymap ([Keys] in settings.ini)
     auto shortcutLabel = [&](int item) -> std::wstring {
         switch (item) {
+            case CTX_ANNOTATE: return keyLabel(app.keymap[KA_ANNOTATE]);
             case CTX_NEW:    return keyLabel(app.keymap[KA_NEWFILE]);
             case CTX_EDIT:   return keyLabel(app.keymap[KA_EDIT]);
             case CTX_SEARCH: return keyLabel(app.keymap[KA_SEARCH]);
@@ -2522,6 +2523,7 @@ static const char* shortcutActionNameKey(int i) {
         case KA_SCROLLDOWN: return "help.nav.scroll_down";
         case KA_EDIT:       return "help.edit.enter_edit";
         case KA_HELP:       return "help.view.help";
+        case KA_ANNOTATE:   return "ctx.annotate";
     }
     return "help.view.help";
 }

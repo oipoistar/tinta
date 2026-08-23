@@ -34,11 +34,13 @@ inline constexpr KeyActionDef KEY_ACTIONS[] = {
     {"scrolldown", 'J',    false},
     {"edit",       ':',    true},
     {"help",       '?',    true},
+    {"annotate",   'A',    false},
 };
-inline constexpr int KEY_ACTION_COUNT = 12;
+inline constexpr int KEY_ACTION_COUNT = 13;
 enum KeyActionIndex {
     KA_SEARCH = 0, KA_BROWSE, KA_TOC, KA_THEME, KA_STATS, KA_QUIT,
-    KA_NEWFILE, KA_ZEN, KA_SCROLLUP, KA_SCROLLDOWN, KA_EDIT, KA_HELP
+    KA_NEWFILE, KA_ZEN, KA_SCROLLUP, KA_SCROLLDOWN, KA_EDIT, KA_HELP,
+    KA_ANNOTATE
 };
 
 // Shortcut profiles: Tinta grew from a keyboard-first viewer into a full
@@ -51,9 +53,9 @@ struct KeyProfileDef {
     unsigned keys[KEY_ACTION_COUNT];    // same order as KEY_ACTIONS
 };
 inline constexpr KeyProfileDef KEY_PROFILES[] = {
-    // search browse toc     theme stats quit newfile zen     up   down edit help
-    {"windows", {'F', 'B', VK_TAB, 'T', 'S', 'Q', 'N', VK_F11, 'K', 'J', 'E', VK_F1}},
-    {"vim",     {'/', 'B', VK_TAB, 'T', 'S', 'Q', 'N', VK_F11, 'K', 'J', ':', '?'}},
+    // search browse toc     theme stats quit newfile zen     up   down edit help  annotate
+    {"windows", {'F', 'B', VK_TAB, 'T', 'S', 'Q', 'N', VK_F11, 'K', 'J', 'E', VK_F1, 'A'}},
+    {"vim",     {'/', 'B', VK_TAB, 'T', 'S', 'Q', 'N', VK_F11, 'K', 'J', ':', '?', 'A'}},
 };
 inline constexpr int KEY_PROFILE_COUNT = 2;
 // Index into KEY_PROFILES, or -1 for the custom [Keys] profile
