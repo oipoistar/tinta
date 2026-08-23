@@ -1302,7 +1302,8 @@ struct ContextMenuEntry {
 
 const ContextMenuEntry CTX_ENTRIES[CTX_ITEM_COUNT] = {
     { L"Copy",               L"Ctrl+C", false },
-    { L"Select All",         L"Ctrl+A", true  },
+    { L"Select All",         L"Ctrl+A", false },
+    { L"Annotate",           L"",       true  },
     { L"New File",           L"N",      false },
     { L"Print / PDF",        L"Ctrl+P", false },
     { L"Export as...",       L"",       false },
@@ -1345,6 +1346,10 @@ float ctxItemTop(const App& app, int index) {
 bool contextMenuItemEnabled(const App& app, int item) {
     switch (item) {
         case CTX_COPY:   return app.hasSelection && app.selAnchor != app.selFocus;
+        case CTX_ANNOTATE:
+            // Viewer-only: annotating writes a comment into the file (#126)
+            return !app.editMode && !app.currentFile.empty() &&
+                   app.hasSelection && app.selAnchor != app.selFocus;
         case CTX_REVEAL: return !app.currentFile.empty();
         default:         return item >= 0 && item < CTX_ITEM_COUNT;
     }
@@ -1404,14 +1409,15 @@ void renderContextMenu(App& app) {
 
     // Labels come from the translation table (order matches ContextMenuItem)
     static const char* kCtxKeys[CTX_ITEM_COUNT] = {
-        "ctx.copy", "ctx.select_all", "ctx.new", "ctx.print", "ctx.export",
-        "ctx.edit", "ctx.search", "ctx.toc", "ctx.browse", "ctx.reveal",
-        "ctx.theme", "ctx.settings", "ctx.help",
+        "ctx.copy", "ctx.select_all", "ctx.annotate", "ctx.new", "ctx.print",
+        "ctx.export", "ctx.edit", "ctx.search", "ctx.toc", "ctx.browse",
+        "ctx.reveal", "ctx.theme", "ctx.settings", "ctx.help",
     };
 
     // Shortcut hints reflect the user keymap ([Keys] in settings.ini)
     auto shortcutLabel = [&](int item) -> std::wstring {
         switch (item) {
+            case CTX_ANNOTATE: return keyLabel(app.keymap[KA_ANNOTATE]);
             case CTX_NEW:    return keyLabel(app.keymap[KA_NEWFILE]);
             case CTX_EDIT:   return keyLabel(app.keymap[KA_EDIT]);
             case CTX_SEARCH: return keyLabel(app.keymap[KA_SEARCH]);
@@ -2517,6 +2523,7 @@ static const char* shortcutActionNameKey(int i) {
         case KA_SCROLLDOWN: return "help.nav.scroll_down";
         case KA_EDIT:       return "help.edit.enter_edit";
         case KA_HELP:       return "help.view.help";
+        case KA_ANNOTATE:   return "ctx.annotate";
     }
     return "help.view.help";
 }

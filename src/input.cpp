@@ -1,4 +1,5 @@
 #include "input.h"
+#include "annotations.h"
 #include "tabs.h"
 #include "document.h"
 #include "editor.h"
@@ -253,6 +254,11 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     buffer << file.rdbuf();
     auto result = parseDocument(app.parser, buffer.str(), fullPath);
     if (!result.success) return false;
+
+    // Review annotations (#126): keep the raw source and derive marks from it
+    app.sourceText = buffer.str();
+    annotationsParseSource(app);
+    if (app.annotEditorOpen) annotationEditorCancel(app);
 
     // Reading position memory (#77): keep the old document's position,
     // resume the new one's
@@ -1052,6 +1058,20 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         return;
     }
 
+    // Annotation editor: hand over its buttons, beam over the note field
+    if (app.annotEditorOpen && !app.editMode) {
+        if (annotationEditorButtonAt(app, (float)app.mouseX,
+                                     (float)app.mouseY) != 0) {
+            SetCursor(cursorHand);
+        } else if (annotationEditorContains(app, (float)app.mouseX,
+                                            (float)app.mouseY)) {
+            SetCursor(cursorIBeam);
+        } else {
+            SetCursor(cursorArrow);
+        }
+        return;
+    }
+
     // Edit mode: handle separator drag, editor selection, cursor shape
     if (app.editMode) {
         handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
@@ -1231,6 +1251,17 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         }
     }
 
+    // Annotation hover: rail squares first, then tinted text (#126)
+    int prevHoveredAnnotation = app.hoveredAnnotation;
+    app.hoveredAnnotation = -1;
+    if (!app.annotations.empty() && !app.editMode) {
+        app.hoveredAnnotation =
+            annotationRailHit(app, (float)app.mouseX, (float)app.mouseY);
+        if (app.hoveredAnnotation < 0) {
+            app.hoveredAnnotation = annotationAtDocPoint(app, docX, docY);
+        }
+    }
+
     // Update cursor (using cached handles)
     if (app.showFolderBrowser) {
         float panelWidth = folderBrowserPanelWidth(app);
@@ -1259,6 +1290,12 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     } else if (app.scrollbarHovered || app.scrollbarDragging ||
         app.hScrollbarHovered || app.hScrollbarDragging) {
         SetCursor(cursorArrow);
+    } else if (!app.annotationMarks.empty() &&
+               (annotationRailHit(app, (float)app.mouseX,
+                                  (float)app.mouseY) >= 0 ||
+                annotationCopyButtonHit(app, (float)app.mouseX,
+                                        (float)app.mouseY))) {
+        SetCursor(cursorHand);
     } else if (taskRectAt(app) != nullptr) {
         SetCursor(cursorHand);
     } else if (app.hoveredCodeBlock >= 0) {
@@ -1288,7 +1325,8 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     if (wasHovered != app.scrollbarHovered ||
         wasHHovered != app.hScrollbarHovered ||
         prevHoveredLink != app.hoveredLink ||
-        prevHoveredCodeBlock != app.hoveredCodeBlock) {
+        prevHoveredCodeBlock != app.hoveredCodeBlock ||
+        prevHoveredAnnotation != app.hoveredAnnotation) {
         InvalidateRect(hwnd, nullptr, FALSE);
     }
 }
@@ -1344,6 +1382,9 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
                 app.selFocus = app.docText.size();
                 app.hasSelection = true;
             }
+            break;
+        case CTX_ANNOTATE:
+            annotationBeginCreate(app);
             break;
         case CTX_NEW:
             closeSearchIfOpen(app);
@@ -1520,6 +1561,25 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         return;
     }
 
+    // Annotation editor is modal: buttons act, outside dismisses (#126)
+    if (app.annotEditorOpen && !app.editMode) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        app.swallowNextMouseUp = true;
+        int btn = annotationEditorButtonAt(app, mx, my);
+        if (btn == 1) {
+            annotationEditorConfirm(app, hwnd);
+        } else if (btn == 2) {
+            annotationEditorCancel(app);
+        } else if (btn == 3) {
+            annotationEditorDelete(app, hwnd);
+        } else if (!annotationEditorContains(app, mx, my)) {
+            annotationEditorCancel(app);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Edit mode: route to editor or preview
     if (app.editMode) {
         int x = GET_X_LPARAM(lParam);
@@ -1559,6 +1619,44 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             return;
         }
         // Fall through for preview pane clicks
+    }
+
+    // Annotation rail: squares open the note editor, the pinned button
+    // copies every annotation for an agent (#126)
+    if (!app.editMode && !app.showThemeChooser && !app.showHelp &&
+        !app.confirmExitPending && !app.annotations.empty()) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        bool underSearchBar =
+            app.showSearch && my < chromeTopHeight(app) + dpi(app, 70.0f);
+        if (!underSearchBar) {
+            if (annotationCopyButtonHit(app, mx, my)) {
+                app.swallowNextMouseUp = true;
+                annotationsCopyForAgent(app, hwnd);
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+            int railIdx = annotationRailHit(app, mx, my);
+            if (railIdx >= 0) {
+                app.swallowNextMouseUp = true;
+                // A parked square (annotation off-screen) scrolls to its
+                // text; a square level with its text opens the editor
+                bool onText = false;
+                for (const auto& mark : app.annotationMarks) {
+                    if (mark.index == railIdx) {
+                        onText = mark.onText;
+                        break;
+                    }
+                }
+                if (onText) {
+                    annotationOpenEditor(app, railIdx);
+                } else {
+                    annotationScrollTo(app, railIdx);
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+        }
     }
 
     // Folder search: the bar's toggle button and result-panel clicks
@@ -2418,6 +2516,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                     handleLinkClick(app);
                 }
                 app.hasSelection = false;
+            } else if (annotationAtDocPoint(app, docX, docY) >= 0) {
+                // A click on annotated text opens its note editor (#126)
+                annotationOpenEditor(app, annotationAtDocPoint(app, docX, docY));
+                app.hasSelection = false;
             } else {
                 app.hasSelection = false;
             }
@@ -2430,6 +2532,12 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         } else {
             handleLinkClick(app);
         }
+    } else if (!app.editMode && !app.annotations.empty()) {
+        // A click on annotated text opens its note editor (#126)
+        float docX = (app.mouseX - documentViewportX(app)) + app.scrollX;
+        float docY = app.mouseY + app.scrollY;
+        int annotHit = annotationAtDocPoint(app, docX, docY);
+        if (annotHit >= 0) annotationOpenEditor(app, annotHit);
     }
 
     app.mouseDown = false;
@@ -2467,6 +2575,13 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     float pageSize = app.height * 0.8f;
     float maxScroll = std::max(0.0f, app.contentHeight - app.height);
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+
+    // Annotation note editor owns the keyboard while open (#126)
+    if (app.annotEditorOpen && !app.editMode) {
+        annotationEditorKeyDown(app, hwnd, wParam, ctrl);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
 
     // Print preview captures the whole keyboard while open
     if (app.showPrintPreview) {
@@ -2919,6 +3034,14 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 InvalidateRect(hwnd, nullptr, FALSE);
                 break;
+            case 'A':
+                // Annotate the current selection (#126)
+                if (!app.showSearch && !app.showThemeChooser && !app.showToc &&
+                    !app.showFolderBrowser) {
+                    annotationBeginCreate(app);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                break;
             case 'F':
                 // F to open search (when not in search mode)
                 if (!app.showSearch && !app.showThemeChooser) {
@@ -2992,6 +3115,13 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 }
 
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
+    // Annotation note editor takes all typing (#126)
+    if (app.annotEditorOpen && !app.editMode) {
+        annotationEditorChar(app, wParam);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Print preview: all shortcuts are handled as key-downs
     if (app.showPrintPreview) return;
 
@@ -3238,6 +3368,9 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
                     app.layoutDirty = true;
                     app.scrollY = savedScroll;
                     app.targetScrollY = savedTargetScroll;
+                    // Annotations re-derive from the fresh source (#126)
+                    app.sourceText = buffer.str();
+                    annotationsParseSource(app);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
             }

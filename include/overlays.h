@@ -65,6 +65,7 @@ void renderConfirmExitDialog(App& app);
 enum ContextMenuItem {
     CTX_COPY = 0,
     CTX_SELECT_ALL,
+    CTX_ANNOTATE,
     CTX_NEW,
     CTX_PRINT,
     CTX_EXPORT,

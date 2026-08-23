@@ -556,6 +556,42 @@ struct App {
     std::vector<NavEntry> navBack;
     std::vector<NavEntry> navForward;
 
+    // Review annotations (#126 experiment): notes stored as HTML comments
+    // in the source markdown; rendered as tinted text plus a marker rail
+    // beside the scrollbar. The file is the only model — every change is
+    // written to disk and re-derived on the watcher reload.
+    struct Annotation {
+        std::string quote;        // whitespace-collapsed anchor (may elide " ... ")
+        std::string note;         // raw markdown note
+        size_t commentStart = 0;  // byte range of the comment in sourceText
+        size_t commentEnd = 0;
+        int commentLine = 0;      // 1-based source line of the comment
+        int lineFrom = 0;         // reported selection lines (block above comment)
+        int lineTo = 0;
+        size_t docStart = (size_t)-1;  // anchor in docText; (size_t)-1 = unresolved
+        size_t docEnd = (size_t)-1;
+        bool anchorTried = false;
+    };
+    std::vector<Annotation> annotations;
+    std::string sourceText;       // raw markdown of currentFile (viewer)
+    int hoveredAnnotation = -1;
+    bool annotEditorOpen = false;
+    int annotEditorIndex = -1;    // -1 = creating a new annotation
+    std::wstring annotEditorText;
+    size_t annotEditorCaret = 0;
+    size_t annotPendingInsert = (size_t)-1;  // source offset for the new comment line
+    std::string annotPendingQuote;
+    int annotPendingLineFrom = 0;
+    int annotPendingLineTo = 0;
+    // Rebuilt each frame by renderAnnotations (screen coords, hit-testing)
+    struct AnnotationMark {
+        D2D1_RECT_F square{};
+        int index = -1;
+        bool onText = false;  // level with visible text vs parked at an edge
+    };
+    std::vector<AnnotationMark> annotationMarks;
+    D2D1_RECT_F annotCopyBtnRect{};  // zero-sized while the rail is hidden
+
     // Print preview overlay. While it is open the document is held in print
     // layout — width, theme, zoom and scroll are hijacked by enterPrintLayout —
     // and the real screen state lives in printSaved. Screen dimensions and UI
@@ -964,6 +1000,10 @@ struct App {
         headings.clear();
         headingSlugCounts.clear();
         fileRefCache.clear();
+        for (auto& a : annotations) {
+            a.docStart = a.docEnd = (size_t)-1;
+            a.anchorTried = false;  // re-anchor against the fresh docText
+        }
     }
 
     void releaseOverlayFormats() {

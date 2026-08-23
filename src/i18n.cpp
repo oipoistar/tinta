@@ -186,6 +186,10 @@ const Entry kEntries[] = {
     // ----- Context menu (post-#84 surface) -----
     { "ctx.copy", L"Copy", L"\u590D\u5236", L"\u30B3\u30D4\u30FC", L"\uBCF5\uC0AC" },
     { "ctx.select_all", L"Select All", L"\u5168\u9009", L"\u3059\u3079\u3066\u9078\u629E", L"\uBAA8\uB450 \uC120\uD0DD" },
+    { "ctx.annotate", L"Annotate", L"\u6DFB\u52A0\u6279\u6CE8", L"\u6CE8\u91C8\u3092\u8FFD\u52A0", L"\uC8FC\uC11D \uCD94\uAC00" },
+    { "annot.note_hint", L"Note (markdown)", L"\u6279\u6CE8\uFF08Markdown\uFF09", L"\u30E1\u30E2\uFF08Markdown\uFF09", L"\uBA54\uBAA8 (Markdown)" },
+    { "annot.nolocate", L"Couldn't locate selection", L"\u65E0\u6CD5\u5B9A\u4F4D\u6240\u9009\u5185\u5BB9", L"\u9078\u629E\u7BC4\u56F2\u3092\u7279\u5B9A\u3067\u304D\u307E\u305B\u3093", L"\uC120\uD0DD \uC601\uC5ED\uC744 \uCC3E\uC744 \uC218 \uC5C6\uC74C" },
+    { "toast.agent_copied", L"Copied for agent", L"\u5DF2\u590D\u5236\u7ED9\u667A\u80FD\u4F53", L"\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u7528\u306B\u30B3\u30D4\u30FC", L"\uC5D0\uC774\uC804\uD2B8\uC6A9\uC73C\uB85C \uBCF5\uC0AC\uB428" },
     { "ctx.new", L"New File", L"\u65B0\u5EFA\u6587\u4EF6", L"\u65B0\u898F\u30D5\u30A1\u30A4\u30EB", L"\uC0C8 \uD30C\uC77C" },
     { "ctx.print", L"Print / PDF", L"\u6253\u5370 / PDF", L"\u5370\u5237 / PDF", L"\uCD9C\uB825 / PDF" },
     { "ctx.edit", L"Edit", L"\u7F16\u8F91", L"\u7DE8\u96C6", L"\uD3B8\uC9D1" },
