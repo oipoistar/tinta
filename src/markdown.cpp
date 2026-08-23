@@ -580,6 +580,133 @@ static void splitWikiLinks(const ElementPtr& parent) {
     if (changed) parent->children = std::move(rebuilt);
 }
 
+// Plain-text references to local Markdown files ("docs/auth.md",
+// "./setup.md") become fileref: Link elements; layout resolves the target
+// against the current file's folder and badges it live or broken (#127).
+// Agent-written notes drop these in constantly without wrapping them as
+// links. Runs after the wiki pass, skipping code the same way.
+
+static bool isFileRefChar(char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_' ||
+           c == '-' || c == '.' || c == '/' || c == '\\' || c == '~' ||
+           c == ':';
+}
+
+// The extension ends at `end` (exclusive): the next character must not
+// extend the file name (".mdx", "setup.md.bak" are different files; a
+// sentence-ending ".md." is fine)
+static bool fileRefBoundary(const std::string& text, size_t end) {
+    if (end >= text.size()) return true;
+    char next = text[end];
+    if (std::isalnum(static_cast<unsigned char>(next)) || next == '_' ||
+        next == '-') {
+        return false;
+    }
+    if (next == '.' && end + 1 < text.size() &&
+        std::isalnum(static_cast<unsigned char>(text[end + 1]))) {
+        return false;
+    }
+    return true;
+}
+
+// Token shape check: a plausible local path, not a URL, not UNC (a dead
+// server would stall the existence check), drive colon only as "C:"
+static bool isFileRefToken(const std::string& token, size_t extLength) {
+    if (token.size() <= extLength) return false;  // bare ".md"
+    if (token.find("://") != std::string::npos) return false;
+    if (token.rfind("//", 0) == 0 || token.rfind("\\\\", 0) == 0) {
+        return false;
+    }
+    char beforeExt = token[token.size() - extLength - 1];
+    if (beforeExt == '/' || beforeExt == '\\') return false;  // "docs/.md"
+    for (size_t i = 0; i < token.size(); i++) {
+        if (token[i] == ':' &&
+            !(i == 1 && std::isalpha(static_cast<unsigned char>(token[0])))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void splitFileRefs(const ElementPtr& parent) {
+    if (parent->type == ElementType::Code ||
+        parent->type == ElementType::CodeBlock ||
+        parent->type == ElementType::MermaidDiagram ||
+        parent->type == ElementType::Link) {
+        return;
+    }
+
+    static const char* kExtensions[] = {".markdown", ".mmd", ".md"};
+
+    std::vector<ElementPtr> rebuilt;
+    bool changed = false;
+    for (auto& child : parent->children) {
+        if (child->type != ElementType::Text) {
+            splitFileRefs(child);
+            rebuilt.push_back(child);
+            continue;
+        }
+
+        const std::string& text = child->text;
+        size_t cursor = 0;
+        bool any = false;
+        size_t scan = 0;
+        while (scan < text.size()) {
+            size_t dot = text.find('.', scan);
+            if (dot == std::string::npos) break;
+            size_t extLength = 0;
+            for (const char* extension : kExtensions) {
+                size_t length = strlen(extension);
+                if (dot + length <= text.size() &&
+                    _strnicmp(text.c_str() + dot, extension, length) == 0 &&
+                    fileRefBoundary(text, dot + length)) {
+                    extLength = length;
+                    break;
+                }
+            }
+            if (extLength == 0) {
+                scan = dot + 1;
+                continue;
+            }
+            size_t end = dot + extLength;
+            size_t start = dot;
+            while (start > 0 && isFileRefChar(text[start - 1])) start--;
+            // ':' and '-' cannot open a path
+            while (start < dot &&
+                   (text[start] == ':' || text[start] == '-')) {
+                start++;
+            }
+            std::string token = text.substr(start, end - start);
+            if (start < cursor || !isFileRefToken(token, extLength)) {
+                scan = end;
+                continue;
+            }
+            any = true;
+            if (start > cursor) {
+                rebuilt.push_back(makeTextElement(
+                    text.substr(cursor, start - cursor), parent.get()));
+            }
+            auto link = std::make_shared<Element>(ElementType::Link);
+            link->parent = parent.get();
+            link->url = "fileref:" + token;
+            link->children.push_back(makeTextElement(token, link.get()));
+            rebuilt.push_back(std::move(link));
+            cursor = end;
+            scan = end;
+        }
+        if (!any) {
+            rebuilt.push_back(child);
+            continue;
+        }
+        changed = true;
+        if (cursor < text.size()) {
+            rebuilt.push_back(
+                makeTextElement(text.substr(cursor), parent.get()));
+        }
+    }
+    if (changed) parent->children = std::move(rebuilt);
+}
+
 } // namespace
 
 MarkdownParser::MarkdownParser() = default;
@@ -633,6 +760,7 @@ ParseResult MarkdownParser::parse(const std::string& markdown) {
     ctx.flushText();
     splitInlineExtensions(ctx.root);
     splitWikiLinks(ctx.root);
+    splitFileRefs(ctx.root);
     detectGitHubAlerts(ctx.root);
     result.root = ctx.root;
     result.success = true;

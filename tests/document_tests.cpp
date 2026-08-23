@@ -153,6 +153,46 @@ int main() {
           markdown.root->children[0]->type == qmd::ElementType::Heading,
           ".md content keeps Markdown parsing");
 
+    // Plain-text .md references become fileref: links (#127)
+    {
+        auto refs = parseDocument(parser,
+            "See docs/auth.md and ./setup.md plus C:\\notes\\a.md here.\n"
+            "Not these: `code.md` or https://x.com/y.md or file.mdx or "
+            "bare .md or v2.md.bak\n"
+            "Sentence ends with index.md.\n",
+            "notes.md");
+        check(refs.success, "fileref test parses");
+        std::vector<std::string> found;
+        std::function<void(const qmd::ElementPtr&)> walk =
+            [&](const qmd::ElementPtr& node) {
+            if (node->type == qmd::ElementType::Link &&
+                node->url.rfind("fileref:", 0) == 0) {
+                found.push_back(node->url.substr(8));
+            }
+            if (node->type != qmd::ElementType::Code &&
+                node->type != qmd::ElementType::CodeBlock) {
+                for (const auto& child : node->children) walk(child);
+            }
+        };
+        if (refs.root) walk(refs.root);
+        check(found.size() == 4, "exactly the four real references detected");
+        auto has = [&](const char* token) {
+            for (const auto& item : found) {
+                if (item == token) return true;
+            }
+            return false;
+        };
+        check(has("docs/auth.md"), "bare relative path detected");
+        check(has("./setup.md"), "dot-relative path detected");
+        check(has("C:\\notes\\a.md"), "absolute path detected");
+        check(has("index.md"), "sentence-ending path detected sans period");
+        check(!has("code.md"), "code spans are left alone");
+        check(!has("y.md"), "URLs are left alone");
+        check(!has("file.mdx"), "longer extensions are not references");
+        check(!has(".md"), "a bare extension is not a reference");
+        check(!has("v2.md"), "dotted archive names are not references");
+    }
+
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return 1;

@@ -790,7 +790,12 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
         }
         case ElementType::Link: {
             bool wiki = elem->url.rfind("wiki:", 0) == 0;
-            if (wiki) {
+            if (elem->url.rfind("fileref:", 0) == 0) {
+                // Detected plain-text .md reference (#127): stays plain
+                for (const auto& child : elem->children) {
+                    walkInline(ctx, child, props, out);
+                }
+            } else if (wiki) {
                 RunProps wikiProps = props;
                 wikiProps.color = ctx.linkHex;
                 for (const auto& child : elem->children) {

@@ -802,6 +802,10 @@ struct App {
     float layoutMaxWidth = 0.0f;
     size_t layoutTimeUs = 0;      // total layout time for the current cycle
 
+    // Plain-text .md reference existence per resolved path (#127); cleared
+    // with the layout so reload and file changes re-check the disk
+    std::unordered_map<std::string, bool> fileRefCache;
+
     // Scroll sync anchors: source byte offset → rendered Y position
     struct ScrollAnchor {
         size_t sourceOffset;
@@ -949,6 +953,7 @@ struct App {
         docTextLower.clear();
         headings.clear();
         headingSlugCounts.clear();
+        fileRefCache.clear();
     }
 
     void releaseOverlayFormats() {
