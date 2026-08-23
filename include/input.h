@@ -16,6 +16,9 @@ void handleDropFiles(App& app, HWND hwnd, WPARAM wParam);
 // Load a document into the viewer, saving the outgoing reading position
 // and restoring the incoming one (shared with tabs.cpp)
 bool openDocumentInViewer(App& app, const std::wstring& fullPath);
+// Mouse XBUTTON / Alt+arrow navigation across link jumps (viewer)
+void navigateBack(App& app, HWND hwnd);
+void navigateForward(App& app, HWND hwnd);
 // First clipboard line as text (shared by the search and path inputs)
 std::wstring clipboardLine(HWND hwnd);
 void handleFileWatchTimer(App& app, HWND hwnd);

@@ -546,6 +546,16 @@ struct App {
     // contentHeight, so applying immediately would clamp to a partial height)
     float pendingScrollRestore = -1.0f;
 
+    // Mouse back/forward navigation: link jumps push where they came from;
+    // XBUTTON1/Alt+Left walks back, XBUTTON2/Alt+Right forward, each entry
+    // restoring its document and scroll position
+    struct NavEntry {
+        std::string path;
+        float scrollY = 0.0f;
+    };
+    std::vector<NavEntry> navBack;
+    std::vector<NavEntry> navForward;
+
     // Print preview overlay. While it is open the document is held in print
     // layout — width, theme, zoom and scroll are hijacked by enterPrintLayout —
     // and the real screen state lives in printSaved. Screen dimensions and UI
