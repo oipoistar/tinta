@@ -711,6 +711,26 @@ void renderToc(App& app) {
             D2D1::RectF(panelX + padding, headerY, panelX + panelWidth - padding, headerY + headerHeight),
             app.brush);
 
+        // Active filter, right-aligned in the header
+        if (!app.tocFilter.empty() && app.dwriteFactory) {
+            IDWriteTextLayout* filterLayout = nullptr;
+            app.dwriteFactory->CreateTextLayout(
+                app.tocFilter.c_str(), (UINT32)app.tocFilter.size(),
+                tocNormal, panelWidth, headerHeight, &filterLayout);
+            if (filterLayout) {
+                DWRITE_TEXT_METRICS fm{};
+                filterLayout->GetMetrics(&fm);
+                D2D1_COLOR_F filterColor = app.theme.accent;
+                filterColor.a = anim;
+                app.brush->SetColor(filterColor);
+                app.renderTarget->DrawTextLayout(
+                    D2D1::Point2F(panelX + panelWidth - padding - fm.width,
+                                  headerY + dpi(app, 2.0f)),
+                    filterLayout, app.brush);
+                filterLayout->Release();
+            }
+        }
+
         // Divider
         float dividerY = headerY + headerHeight;
         app.brush->SetColor(borderColor);
@@ -733,23 +753,71 @@ void renderToc(App& app) {
                 D2D1::RectF(panelX + padding, listStartY + dpi(app, 8.0f), panelX + panelWidth - padding, listStartY + dpi(app, 40.0f)),
                 app.brush);
         } else {
-            float totalItemsHeight = app.headings.size() * itemHeight;
+            // Typing filters the list; the section under the reading line
+            // stays highlighted and in view (scroll-spy)
+            std::vector<int> visible;
+            visible.reserve(app.headings.size());
+            std::wstring needle = toLower(app.tocFilter);
+            for (size_t i = 0; i < app.headings.size(); i++) {
+                if (needle.empty() ||
+                    toLower(app.headings[i].text).find(needle) !=
+                        std::wstring::npos) {
+                    visible.push_back((int)i);
+                }
+            }
 
-            // Clamp scroll
+            int currentIdx = -1;
+            float spyLine = app.scrollY + (float)app.height * 0.25f;
+            for (size_t i = 0; i < app.headings.size(); i++) {
+                if (app.headings[i].y <= spyLine) currentIdx = (int)i;
+            }
+            if (currentIdx < 0 && !app.headings.empty()) currentIdx = 0;
+
+            float totalItemsHeight = visible.size() * itemHeight;
             float maxScroll = std::max(0.0f, totalItemsHeight - listHeight);
+
+            // Follow the document: when the current section changes, keep
+            // its row inside the list viewport
+            static int lastSpyIndex = -1;
+            if (currentIdx != lastSpyIndex && app.tocFilter.empty()) {
+                lastSpyIndex = currentIdx;
+                for (size_t row = 0; row < visible.size(); row++) {
+                    if (visible[row] != currentIdx) continue;
+                    float rowTop = (float)row * itemHeight;
+                    if (rowTop < app.tocScroll ||
+                        rowTop + itemHeight > app.tocScroll + listHeight) {
+                        app.tocScroll = rowTop - listHeight * 0.4f;
+                    }
+                    break;
+                }
+            }
             app.tocScroll = std::max(0.0f, std::min(app.tocScroll, maxScroll));
 
             app.hoveredTocIndex = -1;
 
-            for (size_t i = 0; i < app.headings.size(); i++) {
-                float itemY = listStartY + i * itemHeight - app.tocScroll;
+            if (visible.empty()) {
+                D2D1_COLOR_F dimColor = app.theme.text;
+                dimColor.a = 0.5f * anim;
+                app.brush->SetColor(dimColor);
+                const wchar_t* tocEmpty = tr(app, "toc.empty");
+                app.renderTarget->DrawText(tocEmpty, (UINT32)wcslen(tocEmpty),
+                    tocNormal,
+                    D2D1::RectF(panelX + padding, listStartY + dpi(app, 8.0f),
+                                panelX + panelWidth - padding,
+                                listStartY + dpi(app, 40.0f)),
+                    app.brush);
+            }
+
+            for (size_t row = 0; row < visible.size(); row++) {
+                float itemY = listStartY + row * itemHeight - app.tocScroll;
 
                 // Skip items outside visible area
                 if (itemY + itemHeight < listStartY || itemY > panelHeight - padding) continue;
 
-                const auto& heading = app.headings[i];
+                const auto& heading = app.headings[visible[row]];
                 float indent = (heading.level - 1) * dpi(app, 16.0f);
                 float itemX = panelX + padding + indent;
+                bool isCurrent = visible[row] == currentIdx;
 
                 // Check hover (use full item width for hit area)
                 float hitX = panelX + padding;
@@ -759,7 +827,7 @@ void renderToc(App& app) {
                                   app.mouseY >= listStartY && app.mouseY <= panelHeight - padding);
 
                 if (isHovered) {
-                    app.hoveredTocIndex = (int)i;
+                    app.hoveredTocIndex = visible[row];
 
                     // Hover highlight
                     D2D1_COLOR_F hoverColor = app.theme.accent;
@@ -768,6 +836,28 @@ void renderToc(App& app) {
                     app.renderTarget->FillRoundedRectangle(
                         D2D1::RoundedRect(D2D1::RectF(panelX + padding - dpi(app, 4.0f), itemY,
                             panelX + panelWidth - padding + dpi(app, 4.0f), itemY + itemHeight), 4, 4),
+                        app.brush);
+                } else if (isCurrent) {
+                    // Scroll-spy highlight: softer than hover
+                    D2D1_COLOR_F spyColor = app.theme.accent;
+                    spyColor.a = 0.08f * anim;
+                    app.brush->SetColor(spyColor);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(D2D1::RectF(panelX + padding - dpi(app, 4.0f), itemY,
+                            panelX + panelWidth - padding + dpi(app, 4.0f), itemY + itemHeight), 4, 4),
+                        app.brush);
+                }
+                if (isCurrent) {
+                    D2D1_COLOR_F barColor = app.theme.accent;
+                    barColor.a = anim;
+                    app.brush->SetColor(barColor);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(
+                            D2D1::RectF(panelX + padding - dpi(app, 8.0f),
+                                        itemY + dpi(app, 5.0f),
+                                        panelX + padding - dpi(app, 5.0f),
+                                        itemY + itemHeight - dpi(app, 5.0f)),
+                            1.5f, 1.5f),
                         app.brush);
                 }
 
@@ -778,7 +868,7 @@ void renderToc(App& app) {
                     textColor = app.theme.heading;
                 } else if (heading.level == 3) {
                     textColor = app.theme.text;
-                    textColor.a = 0.7f * anim;
+                    textColor.a = (isCurrent ? 1.0f : 0.7f) * anim;
                 } else {
                     textColor = app.theme.text;
                     textColor.a = anim;
@@ -806,6 +896,61 @@ void renderToc(App& app) {
             }
         }
     }
+}
+
+// --- Image lightbox ---
+
+void openLightbox(App& app, ID2D1Bitmap* bitmap) {
+    if (!bitmap) return;
+    closeLightbox(app);
+    bitmap->AddRef();
+    app.lightboxBitmap = bitmap;
+    app.showLightbox = true;
+    app.lightboxZoom = 1.0f;
+    app.lightboxPanX = 0.0f;
+    app.lightboxPanY = 0.0f;
+    app.lightboxDragging = false;
+}
+
+void closeLightbox(App& app) {
+    if (app.lightboxBitmap) {
+        app.lightboxBitmap->Release();
+        app.lightboxBitmap = nullptr;
+    }
+    app.showLightbox = false;
+    app.lightboxDragging = false;
+}
+
+D2D1_RECT_F lightboxImageRect(const App& app) {
+    if (!app.lightboxBitmap) return D2D1_RECT_F{};
+    D2D1_SIZE_F size = app.lightboxBitmap->GetSize();
+    float availW = (float)app.width * 0.94f;
+    float availH = (float)app.height - chromeTopHeight(app) - dpi(app, 24.0f);
+    // Fit large images to the view, keep small ones at natural size
+    float fit = std::min(1.0f, std::min(availW / std::max(1.0f, size.width),
+                                        availH / std::max(1.0f, size.height)));
+    float scale = fit * app.lightboxZoom;
+    float w = size.width * scale;
+    float h = size.height * scale;
+    float cx = (float)app.width * 0.5f + app.lightboxPanX;
+    float cy = (chromeTopHeight(app) + (float)app.height) * 0.5f +
+               app.lightboxPanY;
+    return D2D1::RectF(cx - w * 0.5f, cy - h * 0.5f, cx + w * 0.5f,
+                       cy + h * 0.5f);
+}
+
+void renderLightbox(App& app) {
+    if (!app.lightboxBitmap || !app.renderTarget || !app.brush) return;
+    app.brush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.82f));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
+    D2D1_RECT_F dest = lightboxImageRect(app);
+    app.renderTarget->DrawBitmap(
+        app.lightboxBitmap, dest, 1.0f,
+        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, nullptr);
+    // Thin border so light images do not bleed into the backdrop
+    app.brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.18f));
+    app.renderTarget->DrawRectangle(dest, app.brush, 1.0f);
 }
 
 float tocPanelX(const App& app, float panelWidth) {

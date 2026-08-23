@@ -992,6 +992,7 @@ render_document:
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
     if (app.showSettings) renderSettingsOverlay(app);
+    if (app.showLightbox) renderLightbox(app);
     if (app.showThemeEditor) renderThemeEditor(app);
     if (app.showShortcutEditor) renderShortcutEditor(app);
 

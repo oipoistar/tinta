@@ -81,6 +81,13 @@ enum ContextMenuItem {
 };
 void renderContextMenu(App& app);
 
+// Image lightbox (click an inline image)
+void openLightbox(App& app, ID2D1Bitmap* bitmap);
+void closeLightbox(App& app);
+void renderLightbox(App& app);
+// Where the image currently draws, in screen coordinates
+D2D1_RECT_F lightboxImageRect(const App& app);
+
 // Folder-wide search results beside the search bar; the toggle button sits
 // at the bar's right edge (geometry shared with input hit-testing)
 void renderFolderSearchResults(App& app);

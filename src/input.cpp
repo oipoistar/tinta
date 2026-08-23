@@ -34,6 +34,19 @@ static const App::TaskRect* taskRectAt(const App& app);
 static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY);
 static bool diagramPngButtonAt(const App& app, int mouseX, int mouseY);
 
+// Inline image under the document point, or nullptr (viewer lightbox)
+static const App::LayoutBitmap* layoutBitmapAt(const App& app, float docX,
+                                               float docY) {
+    for (const auto& lb : app.layoutBitmaps) {
+        if (lb.bitmap && docX >= lb.destRect.left &&
+            docX <= lb.destRect.right && docY >= lb.destRect.top &&
+            docY <= lb.destRect.bottom) {
+            return &lb;
+        }
+    }
+    return nullptr;
+}
+
 static bool cursorPointInRect(float x, float y, const D2D1_RECT_F& rect) {
     return x >= rect.left && x <= rect.right &&
            y >= rect.top && y <= rect.bottom;
@@ -261,6 +274,7 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     app.sourceText = buffer.str();
     annotationsParseSource(app);
     if (app.annotEditorOpen) annotationEditorCancel(app);
+    if (app.showLightbox) closeLightbox(app);
 
     // Reading position memory (#77): keep the old document's position,
     // resume the new one's
@@ -740,6 +754,16 @@ static WPARAM translateActionKey(App& app, WPARAM key, bool isChar) {
 }
 
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Lightbox: the wheel zooms the image
+    if (app.showLightbox) {
+        float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+        float factor = delta > 0 ? 1.15f : 1.0f / 1.15f;
+        app.lightboxZoom =
+            std::max(0.2f, std::min(app.lightboxZoom * factor, 10.0f));
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Theme editor: wheel scrolls the font list
     if (app.showThemeEditor) {
         float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
@@ -885,6 +909,25 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // An armed tab drag owns the mouse until release (capture held)
     if (app.tabDragIndex >= 0) {
         tabDragMove(app, hwnd, app.mouseX, app.mouseY);
+        return;
+    }
+
+    // Lightbox: drag pans the image
+    if (app.showLightbox) {
+        if (app.lightboxDragging) {
+            int dx = app.mouseX - app.lightboxDragStartX;
+            int dy = app.mouseY - app.lightboxDragStartY;
+            if (abs(dx) > 3 || abs(dy) > 3) app.lightboxDragMoved = true;
+            app.lightboxPanX = app.lightboxDragPanX + (float)dx;
+            app.lightboxPanY = app.lightboxDragPanY + (float)dy;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        D2D1_RECT_F img = lightboxImageRect(app);
+        bool over = (float)app.mouseX >= img.left &&
+                    (float)app.mouseX <= img.right &&
+                    (float)app.mouseY >= img.top &&
+                    (float)app.mouseY <= img.bottom;
+        SetCursor(over || app.lightboxDragging ? cursorHand : cursorArrow);
         return;
     }
 
@@ -1334,6 +1377,8 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         SetCursor(cursorHand);
     } else if (!app.hoveredLink.empty()) {
         SetCursor(cursorHand);
+    } else if (!app.editMode && layoutBitmapAt(app, docX, docY) != nullptr) {
+        SetCursor(cursorHand);
     } else if (app.overText) {
         SetCursor(cursorIBeam);
     } else {
@@ -1438,6 +1483,7 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             app.showToc = true;
             app.tocAnimation = 0;
             app.tocScroll = 0;
+            app.tocFilter.clear();
             app.hoveredTocIndex = -1;
             break;
         case CTX_BROWSE:
@@ -1541,6 +1587,27 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             return;
         }
     }
+    // Lightbox: press on the image arms a pan, elsewhere closes
+    if (app.showLightbox) {
+        int mx = GET_X_LPARAM(lParam);
+        int my = GET_Y_LPARAM(lParam);
+        D2D1_RECT_F img = lightboxImageRect(app);
+        if ((float)mx >= img.left && (float)mx <= img.right &&
+            (float)my >= img.top && (float)my <= img.bottom) {
+            app.lightboxDragging = true;
+            app.lightboxDragMoved = false;
+            app.lightboxDragStartX = mx;
+            app.lightboxDragStartY = my;
+            app.lightboxDragPanX = app.lightboxPanX;
+            app.lightboxDragPanY = app.lightboxPanY;
+            SetCapture(hwnd);
+        } else {
+            closeLightbox(app);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Theme and shortcut editors: everything acts on the release
     if (app.showThemeEditor || app.showShortcutEditor) return;
     // Unsaved-changes dialog is modal: buttons act on the release
@@ -2126,6 +2193,17 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         return;
     }
 
+    // Lightbox: a plain click closes, a pan drag just ends
+    if (app.showLightbox) {
+        if (app.lightboxDragging) {
+            app.lightboxDragging = false;
+            if (GetCapture() == hwnd) ReleaseCapture();
+            if (!app.lightboxDragMoved) closeLightbox(app);
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return;
+    }
+
     // Unsaved-changes dialog: resolve its buttons; clicks elsewhere keep
     // the dialog up (it is modal, and dismissal must be deliberate)
     if (app.editMode && app.confirmExitPending) {
@@ -2315,11 +2393,13 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 // Close TOC
                 app.showToc = false;
                 app.tocAnimation = 0;
+                app.tocFilter.clear();
             }
         } else {
             // Click outside panel = close TOC
             app.showToc = false;
             app.tocAnimation = 0;
+            app.tocFilter.clear();
         }
 
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -2607,6 +2687,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 // A click on annotated text opens its note editor (#126)
                 annotationOpenEditor(app, annotationAtDocPoint(app, docX, docY));
                 app.hasSelection = false;
+            } else if (const App::LayoutBitmap* img =
+                           layoutBitmapAt(app, docX, docY)) {
+                // Inline image: view it full size
+                openLightbox(app, img->bitmap);
+                app.hasSelection = false;
             } else {
                 app.hasSelection = false;
             }
@@ -2619,12 +2704,18 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         } else {
             handleLinkClick(app);
         }
-    } else if (!app.editMode && !app.annotations.empty()) {
-        // A click on annotated text opens its note editor (#126)
+    } else if (!app.editMode) {
+        // A click on annotated text opens its note editor (#126); a
+        // click on an inline image opens the lightbox
         float docX = (app.mouseX - documentViewportX(app)) + app.scrollX;
         float docY = app.mouseY + app.scrollY;
         int annotHit = annotationAtDocPoint(app, docX, docY);
-        if (annotHit >= 0) annotationOpenEditor(app, annotHit);
+        if (annotHit >= 0) {
+            annotationOpenEditor(app, annotHit);
+        } else if (const App::LayoutBitmap* img =
+                       layoutBitmapAt(app, docX, docY)) {
+            openLightbox(app, img->bitmap);
+        }
     }
 
     app.mouseDown = false;
@@ -2662,6 +2753,16 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     float pageSize = app.height * 0.8f;
     float maxScroll = std::max(0.0f, app.contentHeight - app.height);
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+
+    // Lightbox: dismiss keys close it, everything else is swallowed
+    if (app.showLightbox) {
+        if (wParam == VK_ESCAPE || wParam == VK_RETURN ||
+            wParam == VK_SPACE) {
+            closeLightbox(app);
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return;
+    }
 
     // Annotation note editor owns the keyboard while open (#126)
     if (app.annotEditorOpen && !app.editMode) {
@@ -3021,6 +3122,37 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             }
             return;
         }
+        // TOC filter: printable keys narrow the heading list via WM_CHAR,
+        // Backspace edits, Enter jumps to the first match
+        if (app.showToc && !app.editMode) {
+            if (wParam == VK_BACK) {
+                if (!app.tocFilter.empty()) app.tocFilter.pop_back();
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+            if (wParam == VK_RETURN) {
+                std::wstring needle = toLower(app.tocFilter);
+                for (const auto& heading : app.headings) {
+                    if (needle.empty() ||
+                        toLower(heading.text).find(needle) !=
+                            std::wstring::npos) {
+                        ensureLayoutComplete(app);
+                        scrollToHeadingY(app, heading.y);
+                        app.showToc = false;
+                        app.tocAnimation = 0;
+                        app.tocFilter.clear();
+                        break;
+                    }
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+            if ((wParam >= 'A' && wParam <= 'Z') ||
+                (wParam >= '0' && wParam <= '9') || wParam == VK_SPACE) {
+                return;  // swallowed here; WM_CHAR feeds the filter
+            }
+        }
+
         wParam = translateActionKey(app, wParam, false);
         switch (wParam) {
             case VK_ESCAPE:
@@ -3043,8 +3175,12 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.showFolderBrowser = false;
                     app.folderBrowserAnimation = 0;
                 } else if (app.showToc) {
-                    app.showToc = false;
-                    app.tocAnimation = 0;
+                    if (!app.tocFilter.empty()) {
+                        app.tocFilter.clear();  // first Esc clears the filter
+                    } else {
+                        app.showToc = false;
+                        app.tocAnimation = 0;
+                    }
                 } else if (app.showThemeChooser) {
                     app.showThemeChooser = false;
                     app.themeChooserAnimation = 0;
@@ -3103,6 +3239,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             case VK_TAB:
                 if (!app.showSearch && !app.showThemeChooser && !app.showFolderBrowser) {
                     app.showToc = !app.showToc;
+                    app.tocFilter.clear();
                     if (app.showToc) {
                         ensureLayoutComplete(app);  // headings list is built during layout
                         app.tocAnimation = 0;
@@ -3253,6 +3390,17 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
     // Edit mode: ':' enters edit mode, otherwise route to editor
     if (app.editMode) {
         handleEditorCharInput(app, hwnd, wParam);
+        return;
+    }
+
+    // TOC filter: typing narrows the heading list
+    if (app.showToc && !app.showSearch) {
+        wchar_t ch = (wchar_t)wParam;
+        if (ch >= 0x20 && ch != 127) {
+            app.tocFilter += ch;
+            app.tocScroll = 0;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
         return;
     }
 
