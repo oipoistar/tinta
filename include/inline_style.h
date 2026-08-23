@@ -25,6 +25,7 @@ struct InlineStyle {
     bool bold = false;
     bool italic = false;
     bool fixedSize = false;  // ^sup^/~sub~ own their font size
+    int fileRefBadge = 0;    // local .md reference: 1 = live, 2 = broken (#127)
 };
 
 struct StyledRun {

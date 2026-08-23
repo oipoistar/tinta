@@ -2338,6 +2338,9 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 // It was just a click on a link
                 if (app.hoveredLink.rfind("wiki:", 0) == 0) {
                     openWikiLink(app, app.hoveredLink.substr(5));
+                } else if (app.hoveredLink.rfind("fileref-ok:", 0) == 0) {
+                    // Live .md reference (#127): join as a tab
+                    tabOpenPath(app, hwnd, app.hoveredLink.substr(11), true);
                 } else {
                     handleLinkClick(app);
                 }
@@ -2349,7 +2352,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         InvalidateRect(hwnd, nullptr, FALSE);
     } else if (!app.hoveredLink.empty()) {
         // Click on link
-        handleLinkClick(app);
+        if (app.hoveredLink.rfind("fileref-ok:", 0) == 0) {
+            tabOpenPath(app, hwnd, app.hoveredLink.substr(11), true);
+        } else {
+            handleLinkClick(app);
+        }
     }
 
     app.mouseDown = false;

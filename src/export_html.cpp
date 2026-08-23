@@ -1255,7 +1255,12 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
             break;
         case ElementType::Link: {
             bool wiki = elem->url.rfind("wiki:", 0) == 0;
-            if (wiki) {
+            bool fileRef = elem->url.rfind("fileref:", 0) == 0;
+            if (fileRef) {
+                // Detected plain-text .md reference (#127): it was plain
+                // text in the source, it stays plain text in the export
+                walkChildren(ctx, elem);
+            } else if (wiki) {
                 // Single-file export: wiki targets stay as styled text
                 ctx.out += "<span class=\"wikilink\">";
                 walkChildren(ctx, elem);
