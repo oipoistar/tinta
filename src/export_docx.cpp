@@ -1430,3 +1430,82 @@ bool exportDocxFile(App& app, const std::wstring& path) {
     out.write(package.data(), package.size());
     return out.good();
 }
+
+// Rasterizes the diagram exactly like the DOCX path, then hands the pixels
+// to the clipboard as CF_DIB (universal) plus a "PNG" stream (kept by apps
+// that prefer lossless with metadata)
+bool copyDiagramImage(App& app, HWND hwnd, const std::string& sourceUtf8) {
+    mermaidext::Built built = buildDiagramPrims(app, sourceUtf8, kRasterScale);
+    if (!built.ok || built.prims.empty()) return false;
+    RasterTarget rt;
+    if (!rt.open(app, built.width, built.height)) return false;
+    rt.target->BeginDraw();
+    rt.target->Clear(app.theme.background);
+    drawPrims(app, rt, built, kRasterScale);
+    if (FAILED(rt.target->EndDraw())) return false;
+
+    UINT stride = rt.width * 4;
+    std::vector<BYTE> pixels((size_t)stride * rt.height);
+    if (FAILED(rt.bitmap->CopyPixels(nullptr, stride, (UINT)pixels.size(),
+                                     pixels.data()))) {
+        return false;
+    }
+
+    // CF_DIB: header plus bottom-up 32bpp rows (background is opaque, so
+    // the ignored alpha byte is 255 everywhere)
+    HGLOBAL dib = GlobalAlloc(GMEM_MOVEABLE,
+                              sizeof(BITMAPINFOHEADER) + pixels.size());
+    if (!dib) return false;
+    if (BYTE* out = (BYTE*)GlobalLock(dib)) {
+        BITMAPINFOHEADER hdr{};
+        hdr.biSize = sizeof(hdr);
+        hdr.biWidth = (LONG)rt.width;
+        hdr.biHeight = (LONG)rt.height;
+        hdr.biPlanes = 1;
+        hdr.biBitCount = 32;
+        hdr.biCompression = BI_RGB;
+        hdr.biSizeImage = (DWORD)pixels.size();
+        memcpy(out, &hdr, sizeof(hdr));
+        for (UINT row = 0; row < rt.height; row++) {
+            memcpy(out + sizeof(hdr) + (size_t)row * stride,
+                   pixels.data() + (size_t)(rt.height - 1 - row) * stride,
+                   stride);
+        }
+        GlobalUnlock(dib);
+    } else {
+        GlobalFree(dib);
+        return false;
+    }
+
+    std::string png = encodeWicPng(app, rt.bitmap, rt.width, rt.height);
+    HGLOBAL pngGlobal = nullptr;
+    if (!png.empty()) {
+        pngGlobal = GlobalAlloc(GMEM_MOVEABLE, png.size());
+        if (pngGlobal) {
+            if (void* bits = GlobalLock(pngGlobal)) {
+                memcpy(bits, png.data(), png.size());
+                GlobalUnlock(pngGlobal);
+            } else {
+                GlobalFree(pngGlobal);
+                pngGlobal = nullptr;
+            }
+        }
+    }
+
+    if (!OpenClipboard(hwnd)) {
+        GlobalFree(dib);
+        if (pngGlobal) GlobalFree(pngGlobal);
+        return false;
+    }
+    EmptyClipboard();
+    bool ok = SetClipboardData(CF_DIB, dib) != nullptr;
+    if (!ok) GlobalFree(dib);
+    if (pngGlobal) {
+        UINT pngFormat = RegisterClipboardFormatW(L"PNG");
+        if (!pngFormat || !SetClipboardData(pngFormat, pngGlobal)) {
+            GlobalFree(pngGlobal);
+        }
+    }
+    CloseClipboard();
+    return ok;
+}

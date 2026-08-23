@@ -2003,7 +2003,7 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
                 &renderedBounds);
         }
         if (rendered) {
-            app.codeBlocks.push_back({renderedBounds, toWide(code)});
+            app.codeBlocks.push_back({renderedBounds, toWide(code), true});
             return;
         }
     }

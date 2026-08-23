@@ -32,6 +32,7 @@ static HCURSOR cursorSizeWE = LoadCursor(nullptr, IDC_SIZEWE);
 
 static const App::TaskRect* taskRectAt(const App& app);
 static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY);
+static bool diagramPngButtonAt(const App& app, int mouseX, int mouseY);
 
 static bool cursorPointInRect(float x, float y, const D2D1_RECT_F& rect) {
     return x >= rect.left && x <= rect.right &&
@@ -1319,8 +1320,9 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         float btnPad = 8.0f * app.contentScale * app.zoomFactor;
         float btnX = cb.bounds.right - btnW - btnPad;
         float btnY = cb.bounds.top + btnPad;
-        if (docX >= btnX && docX <= btnX + btnW &&
-            docY >= btnY && docY <= btnY + btnH) {
+        if ((docX >= btnX && docX <= btnX + btnW &&
+             docY >= btnY && docY <= btnY + btnH) ||
+            diagramPngButtonAt(app, app.mouseX, app.mouseY)) {
             SetCursor(cursorHand);
         } else if (app.overText) {
             SetCursor(cursorIBeam);
@@ -2069,6 +2071,29 @@ static bool codeCopyButtonAt(const App& app, int mouseX, int mouseY) {
            docY >= btnY && docY <= btnY + btnH;
 }
 
+// True when (mouseX, mouseY) is on the hovered diagram's copy-as-image
+// button (drawn left of the source copy button)
+static bool diagramPngButtonAt(const App& app, int mouseX, int mouseY) {
+    if (app.hoveredCodeBlock < 0 ||
+        app.hoveredCodeBlock >= (int)app.codeBlocks.size()) {
+        return false;
+    }
+    const auto& cb = app.codeBlocks[app.hoveredCodeBlock];
+    if (!cb.isDiagram) return false;
+    float previewOffsetX = documentViewportX(app);
+    float docX = (mouseX - previewOffsetX) + app.scrollX;
+    float docY = mouseY + app.scrollY;
+    float btnW = dpi(app, 72.0f);
+    float btnH = dpi(app, 26.0f);
+    float btnPad = 8.0f * app.contentScale * app.zoomFactor;
+    float copyX = cb.bounds.right - btnW - btnPad;
+    float pngW = dpi(app, 52.0f);
+    float pngX = copyX - pngW - dpi(app, 6.0f);
+    float btnY = cb.bounds.top + btnPad;
+    return docX >= pngX && docX <= pngX + pngW &&
+           docY >= btnY && docY <= btnY + btnH;
+}
+
 // True when (mouseX, mouseY) is on the hovered table's copy-as-TSV button
 static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY) {
     if (app.hoveredTable < 0 ||
@@ -2508,6 +2533,19 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         app.showCopiedNotification = true;
         app.copiedNotificationStart = std::chrono::steady_clock::now();
         startNotificationTimer(app);
+        app.hoveredCodeBlock = -1;
+        app.selecting = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
+    } else if (diagramPngButtonAt(app, app.mouseX, app.mouseY)) {
+        // Diagram image button: 2x raster to the clipboard
+        if (copyDiagramImage(
+                app, hwnd,
+                toUtf8(app.codeBlocks[app.hoveredCodeBlock].codeText))) {
+            app.copiedNotificationKey = "diagram.copied";
+            app.showCopiedNotification = true;
+            app.copiedNotificationStart = std::chrono::steady_clock::now();
+            startNotificationTimer(app);
+        }
         app.hoveredCodeBlock = -1;
         app.selecting = false;
         InvalidateRect(hwnd, nullptr, FALSE);
