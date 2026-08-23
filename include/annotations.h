@@ -27,6 +27,8 @@ int annotationRailHit(const App& app, float x, float y);
 bool annotationCopyButtonHit(const App& app, float x, float y);
 
 void annotationOpenEditor(App& app, int index);
+// Smooth-scroll the annotation's anchor into the upper third of the view
+void annotationScrollTo(App& app, int index);
 // From the current selection; false when the selection can't be located
 // in the source (nothing opens in that case)
 bool annotationBeginCreate(App& app);

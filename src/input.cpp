@@ -1639,7 +1639,20 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             int railIdx = annotationRailHit(app, mx, my);
             if (railIdx >= 0) {
                 app.swallowNextMouseUp = true;
-                annotationOpenEditor(app, railIdx);
+                // A parked square (annotation off-screen) scrolls to its
+                // text; a square level with its text opens the editor
+                bool onText = false;
+                for (const auto& mark : app.annotationMarks) {
+                    if (mark.index == railIdx) {
+                        onText = mark.onText;
+                        break;
+                    }
+                }
+                if (onText) {
+                    annotationOpenEditor(app, railIdx);
+                } else {
+                    annotationScrollTo(app, railIdx);
+                }
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
             }

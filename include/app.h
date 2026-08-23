@@ -587,6 +587,7 @@ struct App {
     struct AnnotationMark {
         D2D1_RECT_F square{};
         int index = -1;
+        bool onText = false;  // level with visible text vs parked at an edge
     };
     std::vector<AnnotationMark> annotationMarks;
     D2D1_RECT_F annotCopyBtnRect{};  // zero-sized while the rail is hidden

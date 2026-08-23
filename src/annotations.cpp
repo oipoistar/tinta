@@ -544,11 +544,24 @@ void renderAnnotations(App& app) {
         marks.push_back({y, (int)ai, onText, an.lastY, an.lastRight});
     }
     std::sort(marks.begin(), marks.end(),
-              [](const Mark& a, const Mark& b) { return a.y < b.y; });
+              [](const Mark& a, const Mark& b) {
+                  if (a.y != b.y) return a.y < b.y;
+                  return a.index < b.index;  // deterministic tie-break
+              });
+    float spacing = sq + dpi(app, 3.0f);
     float prevY = -1000.0f;
     for (auto& m : marks) {
-        if (m.y < prevY + sq + dpi(app, 3.0f)) m.y = prevY + sq + dpi(app, 3.0f);
+        if (m.y < prevY + spacing) m.y = prevY + spacing;
         prevY = m.y;
+    }
+    // A cluster parked at the bottom edge stacks upward from it instead
+    // of the overflow running off screen
+    if (!marks.empty()) {
+        float limit = (float)app.height - sq * 2.0f;
+        for (size_t i = marks.size(); i-- > 0;) {
+            if (marks[i].y > limit) marks[i].y = limit;
+            limit = marks[i].y - spacing;
+        }
     }
 
     for (const auto& m : marks) {
@@ -572,7 +585,7 @@ void renderAnnotations(App& app) {
                                        m.y + sq * 0.5f + grow);
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(rect, 2, 2), app.brush);
-        app.annotationMarks.push_back({rect, m.index});
+        app.annotationMarks.push_back({rect, m.index, m.onText});
     }
 
     // Copy-for-agent button pinned above the rail: copy glyph + agent glyph
@@ -740,6 +753,35 @@ bool annotationCopyButtonHit(const App& app, float x, float y) {
     const D2D1_RECT_F& r = app.annotCopyBtnRect;
     if (r.right <= r.left) return false;
     return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+void annotationScrollTo(App& app, int index) {
+    if (index < 0 || index >= (int)app.annotations.size()) return;
+    // The anchor may live in a chunk that has not laid out yet
+    ensureLayoutComplete(app);
+    App::Annotation& a = app.annotations[index];
+    if (a.docStart == kNone) findQuote(app, a.quote, a.docStart, a.docEnd);
+    float docY = -1.0f;
+    if (a.docStart != kNone) {
+        for (const auto& trc : app.textRects) {
+            if (trc.docLength == 0) continue;
+            if (trc.docStart + trc.docLength > a.docStart) {
+                docY = trc.rect.top;
+                break;
+            }
+        }
+    }
+    if (docY < 0.0f) {
+        int total = std::max(1, lineOfOffset(app.sourceText,
+                                             app.sourceText.size()));
+        docY = ((float)a.commentLine / (float)total) * app.contentHeight;
+    }
+    // Land the annotation in the upper third (scrolling is immediate in
+    // the viewer, same as search navigation)
+    float target = docY - (float)app.height * 0.35f;
+    float maxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
+    app.targetScrollY = std::max(0.0f, std::min(target, maxScroll));
+    app.scrollY = app.targetScrollY;
 }
 
 void annotationOpenEditor(App& app, int index) {
