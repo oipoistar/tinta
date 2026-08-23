@@ -34,6 +34,16 @@ static const App::TaskRect* taskRectAt(const App& app);
 static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY);
 static bool diagramPngButtonAt(const App& app, int mouseX, int mouseY);
 
+// Drops the link-peek popup and its rendered bitmap
+static void clearLinkPeek(App& app) {
+    app.linkPeekActive = false;
+    app.linkPeekUrl.clear();
+    if (app.linkPeekBitmap) {
+        app.linkPeekBitmap->Release();
+        app.linkPeekBitmap = nullptr;
+    }
+}
+
 // Inline image under the document point, or nullptr (viewer lightbox)
 static const App::LayoutBitmap* layoutBitmapAt(const App& app, float docX,
                                                float docY) {
@@ -275,6 +285,7 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     annotationsParseSource(app);
     if (app.annotEditorOpen) annotationEditorCancel(app);
     if (app.showLightbox) closeLightbox(app);
+    clearLinkPeek(app);
 
     // Reading position memory (#77): keep the old document's position,
     // resume the new one's
@@ -762,6 +773,13 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             std::max(0.2f, std::min(app.lightboxZoom * factor, 10.0f));
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
+    }
+
+    // Scrolling moves the document under a stationary cursor: drop any
+    // link peek so it cannot go stale
+    if (app.linkPeekActive || !app.linkPeekUrl.empty()) {
+        clearLinkPeek(app);
+        KillTimer(hwnd, TIMER_LINK_PEEK);
     }
 
     // Theme editor: wheel scrolls the font list
@@ -1271,12 +1289,29 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
 
     // Check link hover
     std::string prevHoveredLink = app.hoveredLink;
+    D2D1_RECT_F hoveredLinkBounds{};
     app.hoveredLink.clear();
     for (const auto& lr : app.linkRects) {
         if (docX >= lr.bounds.left && docX <= lr.bounds.right &&
             docY >= lr.bounds.top && docY <= lr.bounds.bottom) {
             app.hoveredLink = lr.url;
+            hoveredLinkBounds = lr.bounds;
             break;
+        }
+    }
+
+    // Link peek: dwelling on a local .md link arms the preview timer
+    if (app.hoveredLink != prevHoveredLink) {
+        clearLinkPeek(app);
+        bool peekable = !app.editMode &&
+                        (app.hoveredLink.rfind("fileref-ok:", 0) == 0 ||
+                         app.hoveredLink.rfind("wiki:", 0) == 0);
+        if (peekable) {
+            app.linkPeekUrl = app.hoveredLink;
+            app.linkPeekAnchorDoc = hoveredLinkBounds;
+            SetTimer(hwnd, TIMER_LINK_PEEK, 450, nullptr);
+        } else {
+            KillTimer(hwnd, TIMER_LINK_PEEK);
         }
     }
 
@@ -3523,6 +3558,67 @@ void handleDropFiles(App& app, HWND hwnd, WPARAM wParam) {
     }
     if (activated) InvalidateRect(hwnd, nullptr, FALSE);
     DragFinish(hDrop);
+}
+
+void handleLinkPeekTimer(App& app, HWND hwnd) {
+    KillTimer(hwnd, TIMER_LINK_PEEK);
+    if (app.linkPeekUrl.empty() || app.hoveredLink != app.linkPeekUrl) return;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path target;
+    if (app.linkPeekUrl.rfind("fileref-ok:", 0) == 0) {
+        target = toWide(app.linkPeekUrl.substr(11));
+    } else if (app.linkPeekUrl.rfind("wiki:", 0) == 0 &&
+               !app.currentFile.empty()) {
+        std::wstring t = toWide(app.linkPeekUrl.substr(5));
+        fs::path dir = fs::path(toWide(app.currentFile)).parent_path();
+        if (fs::exists(dir / t, ec)) {
+            target = dir / t;
+        } else if (fs::exists(dir / (t + L".md"), ec)) {
+            target = dir / (t + L".md");
+        } else if (fs::exists(dir / (t + L".markdown"), ec)) {
+            target = dir / (t + L".markdown");
+        }
+    }
+    if (target.empty() || !fs::exists(target, ec)) return;
+
+    // Place the panel to the right of the link, never past the right
+    // edge; when the link leaves no room there, right-align it instead
+    float viewX = documentViewportX(app);
+    float chrome = chromeTopHeight(app);
+    float rightLimit = viewX + documentViewportWidth(app) - dpi(app, 22.0f);
+    float anchorRight =
+        app.linkPeekAnchorDoc.right - app.scrollX + viewX + dpi(app, 14.0f);
+    float anchorTop = app.linkPeekAnchorDoc.top - app.scrollY;
+    float maxW = dpi(app, 520.0f);
+    float h = std::min(dpi(app, 460.0f),
+                       (float)app.height - chrome - dpi(app, 24.0f));
+    float w = rightLimit - anchorRight;
+    float px;
+    if (w >= dpi(app, 300.0f)) {
+        w = std::min(w, maxW);
+        px = anchorRight;
+    } else {
+        w = std::min(maxW, rightLimit - viewX - dpi(app, 22.0f));
+        px = rightLimit - w;
+    }
+    float py = std::max(chrome + dpi(app, 10.0f),
+                        std::min(anchorTop - dpi(app, 30.0f),
+                                 (float)app.height - h - dpi(app, 12.0f)));
+    app.linkPeekPanel = D2D1::RectF(px, py, px + w, py + h);
+
+    float titleH = dpi(app, 22.0f);
+    float contentH = h - titleH - 2.0f;
+    ID2D1Bitmap* bitmap =
+        renderPeekBitmap(app, target.wstring(), w - 2.0f, contentH);
+    if (!bitmap) return;
+    // The render may have shrunk to the target's real height
+    app.linkPeekPanel.bottom = py + titleH + contentH + 2.0f;
+    if (app.linkPeekBitmap) app.linkPeekBitmap->Release();
+    app.linkPeekBitmap = bitmap;
+    app.linkPeekTitle = target.filename().wstring();
+    app.linkPeekActive = true;
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 void handleFileWatchTimer(App& app, HWND hwnd) {

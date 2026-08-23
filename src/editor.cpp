@@ -10,6 +10,9 @@
 #include "i18n.h"
 #include "input.h"
 
+#include "export.h"
+
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
@@ -1506,6 +1509,41 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 return;
             case 'V': {
                 std::wstring paste = editorGetClipboard(hwnd);
+                // A bitmap without text (a screenshot) saves as PNG beside
+                // the document and pastes as its markdown link
+                if (paste.empty() && !app.currentFile.empty() &&
+                    IsClipboardFormatAvailable(CF_BITMAP)) {
+                    namespace fs = std::filesystem;
+                    fs::path doc(toWide(app.currentFile));
+                    std::wstring stem = doc.stem().wstring();
+                    std::wstring name;
+                    fs::path target;
+                    for (int i = 1; i < 100; i++) {
+                        wchar_t suffix[24];
+                        swprintf_s(suffix, _countof(suffix),
+                                   L"-img-%02d.png", i);
+                        std::wstring candidate = stem + suffix;
+                        fs::path p = doc.parent_path() / candidate;
+                        std::error_code ec;
+                        if (!fs::exists(p, ec)) {
+                            name = candidate;
+                            target = p;
+                            break;
+                        }
+                    }
+                    if (!name.empty() &&
+                        clipboardImageToPngFile(app, hwnd,
+                                                target.wstring())) {
+                        std::wstring linkName = name;
+                        size_t sp = 0;  // spaces break the link target
+                        while ((sp = linkName.find(L' ', sp)) !=
+                               std::wstring::npos) {
+                            linkName.replace(sp, 1, L"%20");
+                            sp += 3;
+                        }
+                        paste = L"![image](" + linkName + L")";
+                    }
+                }
                 if (!paste.empty()) {
                     if (app.editorHasSelection) editorDeleteSelection(app);
                     size_t before = app.editorCursorPos;

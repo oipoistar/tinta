@@ -1509,3 +1509,32 @@ bool copyDiagramImage(App& app, HWND hwnd, const std::string& sourceUtf8) {
     CloseClipboard();
     return ok;
 }
+
+// Ctrl+V in the editor with a bitmap on the clipboard: encode it as PNG
+// into the given file (screenshots land beside the document)
+bool clipboardImageToPngFile(App& app, HWND hwnd, const std::wstring& path) {
+    if (!IsClipboardFormatAvailable(CF_BITMAP) || !app.wicFactory) {
+        return false;
+    }
+    if (!OpenClipboard(hwnd)) return false;
+    bool ok = false;
+    if (HBITMAP hbm = (HBITMAP)GetClipboardData(CF_BITMAP)) {
+        IWICBitmap* bitmap = nullptr;
+        if (SUCCEEDED(app.wicFactory->CreateBitmapFromHBITMAP(
+                hbm, nullptr, WICBitmapIgnoreAlpha, &bitmap))) {
+            UINT w = 0, h = 0;
+            bitmap->GetSize(&w, &h);
+            std::string png = encodeWicPng(app, bitmap, w, h);
+            bitmap->Release();
+            if (!png.empty()) {
+                std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                if (out) {
+                    out.write(png.data(), (std::streamsize)png.size());
+                    ok = out.good();
+                }
+            }
+        }
+    }
+    CloseClipboard();
+    return ok;
+}

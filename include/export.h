@@ -35,4 +35,7 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& sourceUtf8,
 // a PNG stream, for pasting into slides/chats/documents (export_docx.cpp)
 bool copyDiagramImage(App& app, HWND hwnd, const std::string& sourceUtf8);
 
+// Clipboard bitmap -> PNG file (editor image paste; export_docx.cpp)
+bool clipboardImageToPngFile(App& app, HWND hwnd, const std::wstring& path);
+
 #endif  // TINTA_EXPORT_H

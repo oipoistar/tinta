@@ -898,6 +898,53 @@ void renderToc(App& app) {
     }
 }
 
+// --- Link peek ---
+
+void renderLinkPeek(App& app) {
+    if (!app.linkPeekActive || !app.linkPeekBitmap ||
+        app.hoveredLink != app.linkPeekUrl || !app.folderBrowserFormat) {
+        return;
+    }
+    const D2D1_RECT_F& p = app.linkPeekPanel;
+    float titleH = dpi(app, 22.0f);
+
+    // Soft drop shadow so the page reads as floating above the document
+    D2D1_COLOR_F shadow = D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.28f);
+    app.brush->SetColor(shadow);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(D2D1::RectF(p.left + 4, p.top + 5, p.right + 4,
+                                      p.bottom + 5),
+                          4, 4),
+        app.brush);
+
+    D2D1_COLOR_F bg = app.theme.isDark ? hexColor(0x1E1E1E, 1.0f)
+                                       : hexColor(0xFCFCFA, 1.0f);
+    app.brush->SetColor(bg);
+    app.renderTarget->FillRectangle(p, app.brush);
+
+    // Title strip: the target's file name
+    D2D1_COLOR_F titleColor = app.theme.accent;
+    app.brush->SetColor(titleColor);
+    app.renderTarget->DrawText(
+        app.linkPeekTitle.c_str(), (UINT32)app.linkPeekTitle.size(),
+        app.folderBrowserFormat,
+        D2D1::RectF(p.left + dpi(app, 10.0f), p.top + dpi(app, 3.0f),
+                    p.right - dpi(app, 10.0f), p.top + titleH),
+        app.brush);
+
+    // The rendered page
+    app.renderTarget->DrawBitmap(
+        app.linkPeekBitmap,
+        D2D1::RectF(p.left + 1.0f, p.top + titleH, p.right - 1.0f,
+                    p.bottom - 1.0f),
+        1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, nullptr);
+
+    D2D1_COLOR_F border = app.theme.accent;
+    border.a = 0.55f;
+    app.brush->SetColor(border);
+    app.renderTarget->DrawRectangle(p, app.brush, 1.0f);
+}
+
 // --- Image lightbox ---
 
 void openLightbox(App& app, ID2D1Bitmap* bitmap) {

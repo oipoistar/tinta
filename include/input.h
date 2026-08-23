@@ -23,5 +23,7 @@ void navigateForward(App& app, HWND hwnd);
 std::wstring clipboardLine(HWND hwnd);
 void handleFileWatchTimer(App& app, HWND hwnd);
 void handleSelectScrollTimer(App& app, HWND hwnd);
+// Dwell timer fired over a local .md link: load the peek preview
+void handleLinkPeekTimer(App& app, HWND hwnd);
 
 #endif // TINTA_INPUT_H
