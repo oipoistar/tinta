@@ -27,6 +27,7 @@
 #include "render.h"
 #include "file_utils.h"
 #include "overlays.h"
+#include "annotations.h"
 #include "input.h"
 #include "editor.h"
 #include "print.h"
@@ -763,6 +764,9 @@ render_document:
         app.renderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
     }
 
+    // Review annotations: text tint, marker rail, hover preview (#126)
+    renderAnnotations(app);
+
     // Localized copy notification with fade out.
     if (app.showCopiedNotification) {
         auto now = std::chrono::steady_clock::now();
@@ -858,6 +862,7 @@ render_document:
     }
     if (app.showFolderBrowser) renderFolderBrowser(app);
     if (app.showToc) renderToc(app);
+    if (app.annotEditorOpen) renderAnnotationEditor(app);
     if (app.showContextMenu) renderContextMenu(app);
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
@@ -1740,6 +1745,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         if (result.success) {
             app.root = result.root;
             app.parseTimeUs = result.parseTimeUs;
+            // Review annotations derive from the raw source (#126)
+            app.sourceText = content;
+            annotationsParseSource(app);
         }
         return result.success;
     };

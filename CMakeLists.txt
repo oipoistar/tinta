@@ -69,6 +69,7 @@ set(SOURCES
     src/tabs.cpp
     src/export_html.cpp
     src/export_docx.cpp
+    src/annotations.cpp
 )
 
 set(HEADERS
