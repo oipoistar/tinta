@@ -928,14 +928,24 @@ ID2D1Bitmap* renderPeekBitmap(App& app, const std::wstring& path,
     std::string savedFile = app.currentFile;
     SavedView saved{};
     enterPrintLayout(app, saved);
-    app.theme = saved.theme;  // keep the screen palette, not print white
+    // The peek must look exactly like the screen: keep the palette, the
+    // DPI scale, and the zoom instead of the print defaults; the reading
+    // column stays full width inside the small panel
+    app.theme = saved.theme;
+    app.contentScale = saved.contentScale;
+    app.zoomFactor = saved.zoomFactor;
+    int savedPct = app.readingWidthPct;
+    app.readingWidthPct = 100;
     updateTextFormats(app);
     app.root = parsed.root;
     app.currentFile = toUtf8(path);  // relative images resolve at the target
     layoutAtPrintWidth(app, widthDips);
-    // Short targets shrink the peek to their real height
+    // The layout starts below the (invisible) title strip; the peek slice
+    // begins there and shrinks to short targets
+    float topPad = chromeTopHeight(app);
     heightDips = std::max(dpi(app, 60.0f),
-                          std::min(heightDips, app.contentHeight + 6.0f));
+                          std::min(heightDips,
+                                   app.contentHeight - topPad + dpi(app, 8.0f)));
 
     ID2D1Device* device = nullptr;
     app.deviceContext->GetDevice(&device);
@@ -953,13 +963,14 @@ ID2D1Bitmap* renderPeekBitmap(App& app, const std::wstring& path,
                                      (UINT32)(heightDips * 2.0f));
         if (SUCCEEDED(dc->CreateBitmap(px, nullptr, 0, &props, &bitmap))) {
             dc->SetTarget(bitmap);
+            dc->SetDpi(192.0f, 192.0f);  // 1 DIP = 2px: the 2x crispness
             dc->BeginDraw();
             dc->Clear(app.theme.background);
             ID2D1SolidColorBrush* brush = nullptr;
             dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
             if (brush) {
-                drawDocumentRange(app, dc, brush, 0.0f, heightDips, 0.0f,
-                                  0.0f);
+                drawDocumentRange(app, dc, brush, topPad, topPad + heightDips,
+                                  0.0f, 0.0f);
                 brush->Release();
             }
             if (SUCCEEDED(dc->EndDraw())) {
@@ -974,6 +985,7 @@ ID2D1Bitmap* renderPeekBitmap(App& app, const std::wstring& path,
 
     app.root = savedRoot;
     app.currentFile = savedFile;
+    app.readingWidthPct = savedPct;
     leavePrintLayout(app, saved);
     return result;
 }
