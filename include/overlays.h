@@ -81,6 +81,9 @@ enum ContextMenuItem {
 };
 void renderContextMenu(App& app);
 
+// Hovering a local .md link for a beat previews the target's first lines
+void renderLinkPeek(App& app);
+
 // Image lightbox (click an inline image)
 void openLightbox(App& app, ID2D1Bitmap* bitmap);
 void closeLightbox(App& app);
