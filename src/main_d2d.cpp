@@ -604,6 +604,52 @@ render_document:
         }
     }
 
+    // Table copy-as-TSV button on hover (same pattern as code blocks;
+    // wide tables clamp the button into the visible viewport)
+    if (app.hoveredTable >= 0 && app.hoveredTable < (int)app.tableRects.size()) {
+        const auto& tb = app.tableRects[app.hoveredTable];
+        if (tb.bounds.bottom >= viewportTop - cullMargin &&
+            tb.bounds.top <= viewportBottom + cullMargin) {
+            float btnW = dpi(app, 88.0f);
+            float btnH = dpi(app, 26.0f);
+            float btnPad = 8.0f * app.contentScale * app.zoomFactor;
+            float rightEdge = std::min(
+                tb.bounds.right, app.scrollX + documentViewportWidth(app));
+            float btnX = rightEdge - btnW - btnPad - app.scrollX;
+            float btnY = tb.bounds.top + btnPad - app.scrollY;
+
+            app.brush->SetColor(D2D1::ColorF(
+                app.theme.isDark ? 0.3f : 0.85f,
+                app.theme.isDark ? 0.3f : 0.85f,
+                app.theme.isDark ? 0.3f : 0.85f,
+                0.9f));
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(
+                    D2D1::RectF(btnX, btnY, btnX + btnW, btnY + btnH), 4, 4),
+                app.brush);
+
+            app.brush->SetColor(D2D1::ColorF(
+                app.theme.isDark ? 0.9f : 0.15f,
+                app.theme.isDark ? 0.9f : 0.15f,
+                app.theme.isDark ? 0.9f : 0.15f,
+                1.0f));
+            IDWriteTextLayout* btnLayout = nullptr;
+            const wchar_t* copyLabel = tr(app, "table.copy");
+            app.dwriteFactory->CreateTextLayout(
+                copyLabel, (UINT32)wcslen(copyLabel), app.codeFormat, btnW,
+                btnH, &btnLayout);
+            if (btnLayout) {
+                btnLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                btnLayout->SetParagraphAlignment(
+                    DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                app.renderTarget->DrawTextLayout(
+                    D2D1::Point2F(btnX, btnY), btnLayout, app.brush);
+                btnLayout->Release();
+            }
+            app.drawCalls++;
+        }
+    }
+
     // Determine scrollbar visibility
     bool needsVScroll = app.verticalScrollbarVisible;
     bool needsHScroll = app.contentWidth > documentWidth;
@@ -633,6 +679,52 @@ render_document:
                                           documentWidth - dpi(app, 4.0f), sbY + sbHeight), 3, 3),
             app.brush);
         app.drawCalls++;
+
+        // Find-match ticks along the track: the document's match silhouette
+        // at a glance (overview-ruler pattern). Dense results thin out so a
+        // one-letter query cannot flood the frame with fills.
+        if (app.showSearch && !app.searchQuery.empty() &&
+            !app.searchMatches.empty() && !app.editMode) {
+            size_t step =
+                std::max<size_t>(1, app.searchMatches.size() / 400);
+            float tickLeft = documentWidth - dpi(app, 12.0f);
+            float tickRight = documentWidth - dpi(app, 2.0f);
+            auto tickY = [&](const App::SearchMatch& m, float& ty) {
+                float docY;
+                if (m.highlightRect.bottom > m.highlightRect.top) {
+                    docY = m.highlightRect.top;
+                } else if (!app.docText.empty()) {
+                    docY = (float)m.startPos / (float)app.docText.size() *
+                           scrollExtent;
+                } else {
+                    return false;
+                }
+                ty = trackTop + docY / scrollExtent * trackHeight;
+                ty = std::min(ty, trackTop + trackHeight - dpi(app, 2.0f));
+                return true;
+            };
+            app.brush->SetColor(D2D1::ColorF(1.0f, 0.82f, 0.0f, 0.55f));
+            for (size_t i = 0; i < app.searchMatches.size(); i += step) {
+                float ty;
+                if (!tickY(app.searchMatches[i], ty)) continue;
+                app.renderTarget->FillRectangle(
+                    D2D1::RectF(tickLeft, ty, tickRight, ty + dpi(app, 2.0f)),
+                    app.brush);
+            }
+            // The current match always gets its tick, stepping or not
+            if (app.searchCurrentIndex >= 0 &&
+                app.searchCurrentIndex < (int)app.searchMatches.size()) {
+                float ty;
+                if (tickY(app.searchMatches[app.searchCurrentIndex], ty)) {
+                    app.brush->SetColor(D2D1::ColorF(1.0f, 0.6f, 0.0f, 0.95f));
+                    app.renderTarget->FillRectangle(
+                        D2D1::RectF(tickLeft, ty - dpi(app, 0.5f), tickRight,
+                                    ty + dpi(app, 2.5f)),
+                        app.brush);
+                }
+            }
+            app.drawCalls++;
+        }
     }
 
     // Draw horizontal scrollbar

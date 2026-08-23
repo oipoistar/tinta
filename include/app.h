@@ -395,6 +395,9 @@ struct App {
         bool hasClose = false;
     };
     std::vector<TabHit> tabHits;       // refreshed by renderTabStrip
+    // Pin button in the title bar: keeps this window above every other
+    // (per-window, not persisted)
+    bool alwaysOnTop = false;
     std::vector<std::pair<D2D1_RECT_F, int>> tabSwitcherHits;
     // Closing a dirty tab routes through the unsaved-changes dialog; the
     // close completes from confirmExitAction once the user decides
@@ -677,6 +680,14 @@ struct App {
     };
     std::vector<CodeBlockInfo> codeBlocks;
     int hoveredCodeBlock = -1;
+
+    // Tables - tracked for the copy-as-TSV button
+    struct TableInfo {
+        D2D1_RECT_F bounds{};  // document coordinates
+        std::wstring tsv;      // cells joined by tabs, rows by newlines
+    };
+    std::vector<TableInfo> tableRects;
+    int hoveredTable = -1;
 
     // Text bounds - tracked for cursor changes and selection (document coordinates)
     struct TextRect {
@@ -993,6 +1004,7 @@ struct App {
         taskRects.clear();
         linkRects.clear();
         codeBlocks.clear();
+        tableRects.clear();
         textRects.clear();
         lineBuckets.clear();
         docText.clear();

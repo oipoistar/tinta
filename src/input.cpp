@@ -31,6 +31,7 @@ static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
 static HCURSOR cursorSizeWE = LoadCursor(nullptr, IDC_SIZEWE);
 
 static const App::TaskRect* taskRectAt(const App& app);
+static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY);
 
 static bool cursorPointInRect(float x, float y, const D2D1_RECT_F& rect) {
     return x >= rect.left && x <= rect.right &&
@@ -1251,6 +1252,18 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         }
     }
 
+    // Table hover (shows the copy-as-TSV button)
+    int prevHoveredTable = app.hoveredTable;
+    app.hoveredTable = -1;
+    for (int i = 0; i < (int)app.tableRects.size(); i++) {
+        const auto& tb = app.tableRects[i];
+        if (docX >= tb.bounds.left && docX <= tb.bounds.right &&
+            docY >= tb.bounds.top && docY <= tb.bounds.bottom) {
+            app.hoveredTable = i;
+            break;
+        }
+    }
+
     // Annotation hover: rail squares first, then tinted text (#126)
     int prevHoveredAnnotation = app.hoveredAnnotation;
     app.hoveredAnnotation = -1;
@@ -1314,6 +1327,9 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         } else {
             SetCursor(cursorArrow);
         }
+    } else if (app.hoveredTable >= 0 &&
+               tableCopyButtonAt(app, app.mouseX, app.mouseY)) {
+        SetCursor(cursorHand);
     } else if (!app.hoveredLink.empty()) {
         SetCursor(cursorHand);
     } else if (app.overText) {
@@ -1326,6 +1342,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         wasHHovered != app.hScrollbarHovered ||
         prevHoveredLink != app.hoveredLink ||
         prevHoveredCodeBlock != app.hoveredCodeBlock ||
+        prevHoveredTable != app.hoveredTable ||
         prevHoveredAnnotation != app.hoveredAnnotation) {
         InvalidateRect(hwnd, nullptr, FALSE);
     }
@@ -2052,6 +2069,27 @@ static bool codeCopyButtonAt(const App& app, int mouseX, int mouseY) {
            docY >= btnY && docY <= btnY + btnH;
 }
 
+// True when (mouseX, mouseY) is on the hovered table's copy-as-TSV button
+static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY) {
+    if (app.hoveredTable < 0 ||
+        app.hoveredTable >= (int)app.tableRects.size()) {
+        return false;
+    }
+    const auto& tb = app.tableRects[app.hoveredTable];
+    float previewOffsetX = documentViewportX(app);
+    float docX = (mouseX - previewOffsetX) + app.scrollX;
+    float docY = mouseY + app.scrollY;
+    float btnW = dpi(app, 88.0f);
+    float btnH = dpi(app, 26.0f);
+    float btnPad = 8.0f * app.contentScale * app.zoomFactor;
+    float rightEdge =
+        std::min(tb.bounds.right, app.scrollX + documentViewportWidth(app));
+    float btnX = rightEdge - btnW - btnPad;
+    float btnY = tb.bounds.top + btnPad;
+    return docX >= btnX && docX <= btnX + btnW &&
+           docY >= btnY && docY <= btnY + btnH;
+}
+
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // A tab drag ends on release (its press already consumed the click)
     if (app.tabDragIndex >= 0) {
@@ -2471,6 +2509,17 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         app.copiedNotificationStart = std::chrono::steady_clock::now();
         startNotificationTimer(app);
         app.hoveredCodeBlock = -1;
+        app.selecting = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
+    } else if (tableCopyButtonAt(app, app.mouseX, app.mouseY)) {
+        // Table copy button: cells joined by tabs paste into a
+        // spreadsheet as a grid
+        copyToClipboard(hwnd, app.tableRects[app.hoveredTable].tsv);
+        app.copiedNotificationKey = "table.copied";
+        app.showCopiedNotification = true;
+        app.copiedNotificationStart = std::chrono::steady_clock::now();
+        startNotificationTimer(app);
+        app.hoveredTable = -1;
         app.selecting = false;
         InvalidateRect(hwnd, nullptr, FALSE);
     } else if (app.selecting) {
