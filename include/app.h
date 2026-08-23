@@ -284,6 +284,20 @@ struct App {
     };
     std::vector<LayoutBitmap> layoutBitmaps;
 
+    // Image lightbox: clicking an inline image views it full size over a
+    // dimmed backdrop; wheel zooms, drag pans, Esc or a click closes
+    bool showLightbox = false;
+    ID2D1Bitmap* lightboxBitmap = nullptr;  // AddRef'd while open
+    float lightboxZoom = 1.0f;              // multiplier over fit-to-view
+    float lightboxPanX = 0.0f;
+    float lightboxPanY = 0.0f;
+    bool lightboxDragging = false;
+    int lightboxDragStartX = 0;
+    int lightboxDragStartY = 0;
+    float lightboxDragPanX = 0.0f;
+    float lightboxDragPanY = 0.0f;
+    bool lightboxDragMoved = false;
+
     // DirectWrite
     IDWriteFactory* dwriteFactory = nullptr;
     IDWriteFontFallback* fontFallback = nullptr;  // For emoji font fallback
@@ -645,6 +659,8 @@ struct App {
     std::unordered_map<std::string, int> headingSlugCounts;
     int hoveredTocIndex = -1;
     float tocScroll = 0.0f;
+    // Typed while the panel is open: case-insensitive substring filter
+    std::wstring tocFilter;
 
     // Mouse
     bool mouseDown = false;
@@ -1051,6 +1067,10 @@ struct App {
     }
 
     void shutdown() {
+        if (lightboxBitmap) {
+            lightboxBitmap->Release();
+            lightboxBitmap = nullptr;
+        }
         clearLayoutCache();
         releaseOverlayFormats();
         releaseImageCache();
