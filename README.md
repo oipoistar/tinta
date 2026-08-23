@@ -23,7 +23,7 @@
 
 <br>
 
-Tinta is a **fast, lightweight Markdown and Mermaid viewer for Windows**, built with Direct2D and DirectWrite for hardware-accelerated rendering. A single native executable of about 1.8 MB that opens instantly — no Electron, no web engine, no installer.
+Tinta is a **fast, lightweight Markdown and Mermaid viewer for Windows**, built with Direct2D and DirectWrite for hardware-accelerated rendering. A single native executable of about 1.9 MB that opens instantly — no Electron, no web engine, no installer.
 
 <p align="center">
   <img src="https://tinta.cc/img/screenshots/paper.png" width="49%" alt="Tinta markdown viewer on Windows — Paper light theme">
@@ -56,7 +56,7 @@ Most markdown apps ship an entire browser to render text. Tinta uses the GPU-acc
 |  | Tinta | Typora | Obsidian | VS Code |
 |---|---|---|---|---|
 | Startup | **<100 ms** | ~1.5 s | ~3 s | ~2 s |
-| Install size | **~1.8 MB** | ~90 MB | ~250 MB | ~350 MB |
+| Install size | **~1.9 MB** | ~90 MB | ~250 MB | ~350 MB |
 | Runtime | **Native Direct2D** | Electron | Electron | Electron |
 
 It's a viewer first: perfect as the double-click default for `.md` and `.mmd` files, for reading documentation and diagrams — with an edit mode when you need it.
@@ -71,12 +71,20 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Focused editing** - Hide the preview pane while writing (Ctrl+E)
 - **Native Mermaid diagrams** - 22 diagram families, from flowcharts with subgraphs through sequence, class, state, ER, gantt, and pie to C4, sankey, kanban, and radar - rendered without a web engine
 - **Export as HTML, DOCX, or PDF** - Right-click and pick "Export as..." for a self-contained web page, a Word document that opens natively, or a vector PDF; diagrams and math come along in every format
+- **Review annotations** - Select text and press `A` to attach a note, stored as an invisible HTML comment in the file itself. Annotated passages get a tint and a marker rail beside the scrollbar; hover previews, click edits, and a copy-for-agent button turns the whole review into a paste-ready task list for any coding agent - as the agent fixes items and deletes the comments, the marks vanish live
+- **File references** - Plain-text paths like `docs/plan.md` become real links: live targets open as tabs, missing ones render as faded ghosts. Mouse back/forward (or Alt+arrows) walks your jumps with exact scroll restore
+- **Link peek** - Rest the pointer on a local `.md` or wiki link and the target appears fully rendered in a panel beside it, no tab opened
+- **Image lightbox** - Click any inline image to view it full size: wheel zooms, drag pans, Esc closes
+- **Copy tables as TSV** - Hover a table for a copy button that pastes into Excel or Sheets as a real grid
+- **Copy diagrams as images** - Hover a diagram for an Image button that puts a crisp 2x PNG on the clipboard
+- **Paste screenshots** - Ctrl+V a bitmap in edit mode and it saves as a PNG beside the document with the link inserted
+- **Pin on top** - A pushpin in the title bar keeps the window above every other app
 - **Rich tables** - Tables with bold, italic, code, and clickable links in cells
 - **Tabs** - Win11 Notepad-style tabs in the title bar: files opened from Explorer join the window as tabs, Ctrl+Tab cycles, Ctrl+W closes, middle-click closes, Ctrl+T opens the file browser into a new tab, unsaved buffers show a dot, and dragging reorders tabs. Right-click a tab for close operations (close, close all but this, close all to the left/right) plus copy path and reveal in Explorer. Pulling a tab out of the strip floats it as a card: drop it on open space for a new window (which keeps the tab row), or onto another Tinta window to move it there — and dropping a single-file window onto a tab strip merges it back. Single-file windows stay tabless; turn the Explorer behavior off with the "Open files in tabs" setting
 - **Folder browser** - Press B to browse and open Markdown or Mermaid files (Ctrl+click a file to open it in a new tab)
-- **Table of contents** - Press Tab to see document headings, click to jump
+- **Table of contents** - Press Tab to see document headings, click to jump; the panel follows your reading position, and typing filters the headings
 - **Edit mode** - Press `:` to edit markdown with live preview, search works in editor too
-- **Search** - Find text with F or Ctrl+F, cycle through matches with Enter
+- **Search** - Find text with F or Ctrl+F, cycle through matches with Enter; every match shows as a tick on the scrollbar
 - **Persistent settings** - Remembers your theme, zoom level, and window position
 - **Localized interface** - English, Simplified Chinese, Japanese, Korean, German, French, and Italian UI; follows Windows or a chosen language
 - **Text selection & copy** - Select text and copy to clipboard
@@ -89,7 +97,8 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | Key | Action |
 |-----|--------|
 | `B` | Toggle folder browser |
-| `Tab` | Toggle table of contents |
+| `Tab` | Toggle table of contents (type to filter, Enter jumps) |
+| `A` | Annotate the selected text |
 | `F` / `Ctrl+F` | Open search |
 | `Enter` | Next search match |
 | `ESC` | Close overlay / Quit |
@@ -99,6 +108,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Ctrl+A` | Select all text |
 | `Ctrl+Scroll` | Zoom in/out |
 | `Arrow keys` / `J/K` | Scroll |
+| `Mouse back/forward` / `Alt+←/→` | Walk link jumps with scroll restore |
 | `Page Up/Down` | Page scroll |
 | `Home/End` | Jump to start/end |
 | `:` | Enter edit mode |

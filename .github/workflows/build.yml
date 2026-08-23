@@ -45,14 +45,36 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.**
-
-            A fast, lightweight Markdown and Mermaid reader for Windows.
+            **Markdown, distilled.** The review release: annotations, file references, and a dozen quality-of-life touches for reading (and reviewing) agent-written Markdown.
 
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
+
+            ### Review annotations (#126)
+            - Select text and press `A` (or right-click, Annotate) to attach a note; annotated text gets a soft tint and a square on a rail beside the scrollbar, with a line pointing at the passage
+            - Notes are stored as invisible HTML comments in the file itself, so nothing else renders them and the file stays the only source of truth
+            - Hover a square for a preview beside the section; click it (or the tinted text) to edit or delete; off-screen annotations park at the rail's edges and clicking a parked square jumps to its text
+            - The copy-for-agent button puts the file path, a task instruction, and every remark with line numbers on the clipboard: paste it into any coding agent, and as the agent fixes items and deletes the comments, the squares vanish live
+
+            ### File references (#127)
+            - Plain-text paths like `docs/plan.md` in agent-written notes become real links: existing targets show the link color with a dashed underline and open as a tab on click; missing targets render as faded, inert ghosts
+            - `[text](target.md)` links to local files get the same live/missing treatment and open as tabs instead of shelling out
+            - Mouse back/forward (or Alt+Left / Alt+Right) walks your link jumps with exact scroll restore, and reopens the document if its tab was closed
+
+            ### Link peek
+            - Rest the pointer on a local `.md` or wiki link for half a second and the target opens fully rendered in a panel beside the link - headings, tables, diagrams, your theme - without opening a tab
+
+            ### Quality of life
+            - Pin on top: a pushpin in the title bar keeps the window above every other app
+            - Image lightbox: click any inline image to view it full size - wheel zooms, drag pans, Esc closes
+            - Table of contents follows your reading position, and typing while it is open filters the headings (Enter jumps to the first match)
+            - Find-in-page paints every match as a tick on the scrollbar, the current match brighter
+            - Tables grow a Copy TSV button on hover: paste straight into Excel or Sheets as a grid
+            - Diagrams grow an Image button: a crisp 2x PNG lands on the clipboard for slides and chats
+            - Paste a screenshot in edit mode and it saves as a PNG beside the document with the Markdown link inserted
+            - The Annotate key is rebindable like every other shortcut, in both keymap profiles
 
             ### What's included
             - Export as HTML, DOCX, or PDF from the context menu
@@ -60,7 +82,7 @@ jobs:
             - Tabbed interface with drag, session restore, and a tab context menu
             - 10 beautiful themes (5 light, 5 dark) plus custom themes
             - Hardware-accelerated rendering via Direct2D
-            - Single portable executable about 1.8 MB, no dependencies
+            - Single portable executable about 1.9 MB, no dependencies
           files: build/Release/tinta.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
