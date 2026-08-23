@@ -600,6 +600,39 @@ render_document:
                     D2D1::Point2F(btnX, btnY), btnLayout, app.brush);
                 btnLayout->Release();
             }
+
+            // Diagrams add a copy-as-image button beside the source copy
+            if (cb.isDiagram) {
+                float pngW = dpi(app, 52.0f);
+                float pngX = btnX - pngW - dpi(app, 6.0f);
+                app.brush->SetColor(D2D1::ColorF(
+                    app.theme.isDark ? 0.3f : 0.85f,
+                    app.theme.isDark ? 0.3f : 0.85f,
+                    app.theme.isDark ? 0.3f : 0.85f,
+                    0.9f));
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(
+                        D2D1::RectF(pngX, btnY, pngX + pngW, btnY + btnH), 4, 4),
+                    app.brush);
+                app.brush->SetColor(D2D1::ColorF(
+                    app.theme.isDark ? 0.9f : 0.15f,
+                    app.theme.isDark ? 0.9f : 0.15f,
+                    app.theme.isDark ? 0.9f : 0.15f,
+                    1.0f));
+                IDWriteTextLayout* pngLayout = nullptr;
+                const wchar_t* pngLabel = tr(app, "diagram.png");
+                app.dwriteFactory->CreateTextLayout(
+                    pngLabel, (UINT32)wcslen(pngLabel), app.codeFormat, pngW,
+                    btnH, &pngLayout);
+                if (pngLayout) {
+                    pngLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                    pngLayout->SetParagraphAlignment(
+                        DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                    app.renderTarget->DrawTextLayout(
+                        D2D1::Point2F(pngX, btnY), pngLayout, app.brush);
+                    pngLayout->Release();
+                }
+            }
             app.drawCalls++;
         }
     }

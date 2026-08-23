@@ -31,4 +31,8 @@ mermaidext::Built buildDiagramPrims(App& app, const std::string& sourceUtf8,
 mermaidext::Built buildFlowchartPrims(App& app, const std::string& sourceUtf8,
                                       float scale);
 
+// Rasterizes a diagram at 2x and puts it on the clipboard as CF_DIB plus
+// a PNG stream, for pasting into slides/chats/documents (export_docx.cpp)
+bool copyDiagramImage(App& app, HWND hwnd, const std::string& sourceUtf8);
+
 #endif  // TINTA_EXPORT_H

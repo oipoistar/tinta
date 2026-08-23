@@ -676,7 +676,8 @@ struct App {
     // Code block info - tracked for copy button
     struct CodeBlockInfo {
         D2D1_RECT_F bounds;       // Full background rect in document coordinates
-        std::wstring codeText;    // The code content
+        std::wstring codeText;    // The code content (diagram source for diagrams)
+        bool isDiagram = false;   // adds the copy-as-image button
     };
     std::vector<CodeBlockInfo> codeBlocks;
     int hoveredCodeBlock = -1;
