@@ -35,6 +35,7 @@ inline int64_t usElapsed(Clock::time_point start) {
 #define TIMER_IMAGE_REFLOW 6
 #define TIMER_FOLDER_SEARCH 7
 #define TIMER_SELECT_SCROLL 8
+#define TIMER_LINK_PEEK 9
 
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
@@ -593,6 +594,15 @@ struct App {
     std::string sourceText;       // raw markdown of currentFile (viewer)
     int hoveredAnnotation = -1;
     bool annotEditorOpen = false;
+
+    // Link peek: dwelling on a local .md link previews the target, fully
+    // rendered at the live theme beside the link
+    std::string linkPeekUrl;    // hoveredLink value the dwell timer armed for
+    std::wstring linkPeekTitle;
+    bool linkPeekActive = false;
+    ID2D1Bitmap* linkPeekBitmap = nullptr;  // owned while active
+    D2D1_RECT_F linkPeekAnchorDoc{};        // hovered link rect (doc coords)
+    D2D1_RECT_F linkPeekPanel{};            // placed panel (screen coords)
     int annotEditorIndex = -1;    // -1 = creating a new annotation
     std::wstring annotEditorText;
     size_t annotEditorCaret = 0;
@@ -1070,6 +1080,10 @@ struct App {
         if (lightboxBitmap) {
             lightboxBitmap->Release();
             lightboxBitmap = nullptr;
+        }
+        if (linkPeekBitmap) {
+            linkPeekBitmap->Release();
+            linkPeekBitmap = nullptr;
         }
         clearLayoutCache();
         releaseOverlayFormats();

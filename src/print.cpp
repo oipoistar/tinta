@@ -1,8 +1,12 @@
 #include "print.h"
 #include "render.h"
 #include "d2d_init.h"
+#include "document.h"
 #include "editor.h"
 #include "utils.h"
+
+#include <fstream>
+#include <sstream>
 
 #include <commdlg.h>
 #include <documenttarget.h>
@@ -905,4 +909,83 @@ bool exportPdfFile(App& app, const std::wstring& path) {
     fileStream->Commit(STGC_DEFAULT);
     fileStream->Release();
     return ok;
+}
+
+// Link peek: renders the top of another markdown file at the live theme
+// into a 2x bitmap. The document swap rides the print-layout save/restore
+// (the palette switch is undone so the peek matches the screen).
+ID2D1Bitmap* renderPeekBitmap(App& app, const std::wstring& path,
+                              float widthDips, float& heightDips) {
+    if (!app.deviceContext || !app.root) return nullptr;
+    std::ifstream file(path);
+    if (!file) return nullptr;
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    auto parsed = parseDocument(app.parser, buffer.str(), path);
+    if (!parsed.success || !parsed.root) return nullptr;
+
+    qmd::ElementPtr savedRoot = app.root;
+    std::string savedFile = app.currentFile;
+    SavedView saved{};
+    enterPrintLayout(app, saved);
+    // The peek must look exactly like the screen: keep the palette, the
+    // DPI scale, and the zoom instead of the print defaults; the reading
+    // column stays full width inside the small panel
+    app.theme = saved.theme;
+    app.contentScale = saved.contentScale;
+    app.zoomFactor = saved.zoomFactor;
+    int savedPct = app.readingWidthPct;
+    app.readingWidthPct = 100;
+    updateTextFormats(app);
+    app.root = parsed.root;
+    app.currentFile = toUtf8(path);  // relative images resolve at the target
+    layoutAtPrintWidth(app, widthDips);
+    // The layout starts below the (invisible) title strip; the peek slice
+    // begins there and shrinks to short targets
+    float topPad = chromeTopHeight(app);
+    heightDips = std::max(dpi(app, 60.0f),
+                          std::min(heightDips,
+                                   app.contentHeight - topPad + dpi(app, 8.0f)));
+
+    ID2D1Device* device = nullptr;
+    app.deviceContext->GetDevice(&device);
+    ID2D1DeviceContext* dc = nullptr;
+    ID2D1Bitmap1* bitmap = nullptr;
+    ID2D1Bitmap* result = nullptr;
+    if (device && SUCCEEDED(device->CreateDeviceContext(
+                      D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc))) {
+        D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_TARGET,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                              D2D1_ALPHA_MODE_PREMULTIPLIED),
+            192.0f, 192.0f);
+        D2D1_SIZE_U px = D2D1::SizeU((UINT32)(widthDips * 2.0f),
+                                     (UINT32)(heightDips * 2.0f));
+        if (SUCCEEDED(dc->CreateBitmap(px, nullptr, 0, &props, &bitmap))) {
+            dc->SetTarget(bitmap);
+            dc->SetDpi(192.0f, 192.0f);  // 1 DIP = 2px: the 2x crispness
+            dc->BeginDraw();
+            dc->Clear(app.theme.background);
+            ID2D1SolidColorBrush* brush = nullptr;
+            dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
+            if (brush) {
+                drawDocumentRange(app, dc, brush, topPad, topPad + heightDips,
+                                  0.0f, 0.0f);
+                brush->Release();
+            }
+            if (SUCCEEDED(dc->EndDraw())) {
+                result = bitmap;
+                bitmap = nullptr;
+            }
+        }
+    }
+    if (bitmap) bitmap->Release();
+    if (dc) dc->Release();
+    if (device) device->Release();
+
+    app.root = savedRoot;
+    app.currentFile = savedFile;
+    app.readingWidthPct = savedPct;
+    leavePrintLayout(app, saved);
+    return result;
 }

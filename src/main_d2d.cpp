@@ -892,6 +892,9 @@ render_document:
     // Review annotations: text tint, marker rail, hover preview (#126)
     renderAnnotations(app);
 
+    // Link peek popup (dwell over a local .md link)
+    renderLinkPeek(app);
+
     // Localized copy notification with fade out.
     if (app.showCopiedNotification) {
         auto now = std::chrono::steady_clock::now();
@@ -1358,6 +1361,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_TIMER:
+            if (wParam == TIMER_LINK_PEEK && app) handleLinkPeekTimer(*app, hwnd);
             if (wParam == TIMER_FILE_WATCH && app) handleFileWatchTimer(*app, hwnd);
             if (wParam == 2 && app) editorReparse(*app); // TIMER_EDITOR_REPARSE
             if (wParam == TIMER_CURSOR_BLINK && app) {
