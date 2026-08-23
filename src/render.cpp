@@ -385,12 +385,28 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
     auto addLinkSegment = [&](float lineStartX, float lineEndX, float lineY,
                               const std::string& linkUrl, D2D1_COLOR_F color) {
         if (lineEndX <= lineStartX) return;
-        // Broken .md references stay inert: no underline, no click (#127)
-        if (linkUrl.rfind("fileref-missing:", 0) == 0) return;
+        bool refLive = linkUrl.rfind("fileref-ok:", 0) == 0;
+        bool refMissing = linkUrl.rfind("fileref-missing:", 0) == 0;
         float underlineY = lineY + lineHeight - 2;
-        app.layoutLines.push_back({D2D1::Point2F(lineStartX, underlineY),
-                                   D2D1::Point2F(lineEndX, underlineY),
-                                   color, 1.0f});
+        if (refLive || refMissing) {
+            // .md references underline dashed; a missing target keeps a
+            // faint ghost of the same treatment and no click surface (#127)
+            D2D1_COLOR_F dashColor = color;
+            dashColor.a *= 0.55f;
+            float dash = lineHeight * 0.16f;
+            float gap = lineHeight * 0.12f;
+            for (float sx = lineStartX; sx < lineEndX; sx += dash + gap) {
+                float ex = std::min(sx + dash, lineEndX);
+                app.layoutLines.push_back({D2D1::Point2F(sx, underlineY),
+                                           D2D1::Point2F(ex, underlineY),
+                                           dashColor, 1.0f});
+            }
+        } else {
+            app.layoutLines.push_back({D2D1::Point2F(lineStartX, underlineY),
+                                       D2D1::Point2F(lineEndX, underlineY),
+                                       color, 1.0f});
+        }
+        if (refMissing) return;
         App::LinkRect lr;
         lr.bounds = D2D1::RectF(lineStartX, lineY, lineEndX, lineY + lineHeight);
         lr.url = linkUrl;
@@ -405,52 +421,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
     std::vector<StyledRun> runs;
     flattenInline(app, elements, rootStyle, lineHeight, runs);
 
-    // Live/broken badge after the last run of a .md reference (#127): a
-    // small arrow that opens the file in a tab, or a cross for a target
-    // the disk does not have
-    auto badgeDue = [&](size_t index) -> int {
-        const InlineStyle& style = runs[index].style;
-        if (!style.fileRefBadge) return 0;
-        if (index + 1 < runs.size() &&
-            runs[index + 1].style.fileRefBadge == style.fileRefBadge &&
-            runs[index + 1].style.linkUrl == style.linkUrl) {
-            return 0;
-        }
-        return style.fileRefBadge;
-    };
-    auto emitFileRefBadge = [&](int badge, const std::string& linkUrl) {
-        std::wstring glyph = badge == 1 ? L"\u2197" : L"\u2715";
-        D2D1_COLOR_F badgeColor =
-            badge == 1 ? app.theme.accent
-            : app.theme.isDark ? D2D1::ColorF(0.95f, 0.45f, 0.42f)
-                               : D2D1::ColorF(0.78f, 0.20f, 0.16f);
-        IDWriteTextFormat* badgeFormat =
-            app.supSubFormat ? app.supSubFormat : baseFormat;
-        LayoutInfo info =
-            createLayout(app, glyph, badgeFormat, lineHeight, app.bodyTypography);
-        if (x + info.width > maxX && x > startX) {
-            x = startX;
-            y += lineHeight;
-        }
-        D2D1_RECT_F bounds = D2D1::RectF(x, y, x + info.width, y + lineHeight);
-        addTextRun(app, std::move(info), D2D1::Point2F(x + 1, y), bounds,
-                   badgeColor, app.docText.size(), 0, false);
-        if (badge == 1) {
-            App::LinkRect lr;
-            lr.bounds = bounds;
-            lr.url = linkUrl;
-            app.linkRects.push_back(lr);
-        }
-        x += info.width + 2;
-    };
-
     for (size_t runIndex = 0; runIndex < runs.size(); runIndex++) {
-        if (runIndex > 0) {
-            int badge = badgeDue(runIndex - 1);
-            if (badge) {
-                emitFileRefBadge(badge, runs[runIndex - 1].style.linkUrl);
-            }
-        }
         const auto& run = runs[runIndex];
         const ElementPtr& elem = run.elem;
         IDWriteTextFormat* format = run.style.format;
@@ -852,10 +823,6 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         if (isLink && lastWordEndX > linkLineStartX) {
             addLinkSegment(linkLineStartX, lastWordEndX, linkLineY, linkUrl, color);
         }
-    }
-    if (!runs.empty()) {
-        int badge = badgeDue(runs.size() - 1);
-        if (badge) emitFileRefBadge(badge, runs.back().style.linkUrl);
     }
 
     y += lineHeight;

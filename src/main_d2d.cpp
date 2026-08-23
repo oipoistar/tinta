@@ -1190,6 +1190,27 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) handleKeyDown(*app, hwnd, wParam);
             return 0;
 
+        case WM_XBUTTONUP:
+            // Mouse side buttons walk back/forward across link jumps
+            if (app) {
+                if (GET_XBUTTON_WPARAM(wParam) == XBUTTON1) {
+                    navigateBack(*app, hwnd);
+                } else if (GET_XBUTTON_WPARAM(wParam) == XBUTTON2) {
+                    navigateForward(*app, hwnd);
+                }
+            }
+            return TRUE;
+
+        case WM_SYSKEYDOWN:
+            // Alt+Left / Alt+Right mirror the mouse side buttons
+            if (app && (lParam & (1 << 29)) &&
+                (wParam == VK_LEFT || wParam == VK_RIGHT)) {
+                if (wParam == VK_LEFT) navigateBack(*app, hwnd);
+                else navigateForward(*app, hwnd);
+                return 0;
+            }
+            break;
+
         case WM_CHAR:
             if (app) handleCharInput(*app, hwnd, wParam);
             return 0;

@@ -1786,8 +1786,8 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 // Resolves an Obsidian [[wiki link]] target against the current file's
 // folder and opens it: the name as written, then with .md / .markdown
 // appended, then a case-insensitive scan of the directory listing.
-static void openWikiLink(App& app, const std::string& target) {
-    if (app.editMode || app.currentFile.empty()) return;
+static bool openWikiLink(App& app, const std::string& target) {
+    if (app.editMode || app.currentFile.empty()) return false;
     namespace fs = std::filesystem;
     std::error_code ec;
     std::wstring wideTarget = toWide(target);
@@ -1797,9 +1797,9 @@ static void openWikiLink(App& app, const std::string& target) {
         return fs::exists(p, ec) && !fs::is_directory(p, ec) &&
                openDocumentInViewer(app, p.wstring());
     };
-    if (tryOpen(dir / wideTarget)) return;
-    if (tryOpen(dir / (wideTarget + L".md"))) return;
-    if (tryOpen(dir / (wideTarget + L".markdown"))) return;
+    if (tryOpen(dir / wideTarget)) return true;
+    if (tryOpen(dir / (wideTarget + L".md"))) return true;
+    if (tryOpen(dir / (wideTarget + L".markdown"))) return true;
 
     auto lower = [](std::wstring s) {
         for (auto& c : s) c = (wchar_t)std::towlower(c);
@@ -1811,11 +1811,80 @@ static void openWikiLink(App& app, const std::string& target) {
         std::wstring stem = lower(entry.path().stem().wstring());
         std::wstring name = lower(entry.path().filename().wstring());
         if (stem == want || name == want) {
-            if (openDocumentInViewer(app, entry.path().wstring())) return;
+            if (openDocumentInViewer(app, entry.path().wstring())) return true;
         }
     }
     // Target doesn't exist: leave the document as-is (a viewer doesn't
     // create notes the way Obsidian would)
+    return false;
+}
+
+// Link jumps remember where they came from so mouse-back (XBUTTON1) can
+// return to the same document and position
+static void navRecordJump(App& app, const std::string& fromPath,
+                          float fromScroll) {
+    if (fromPath.empty()) return;
+    app.navBack.push_back({fromPath, fromScroll});
+    if (app.navBack.size() > 64) app.navBack.erase(app.navBack.begin());
+    app.navForward.clear();
+}
+
+// A live .md reference joins the window as a tab (#127)
+static void openFileRefTarget(App& app, HWND hwnd, const std::string& path) {
+    if (_stricmp(app.currentFile.c_str(), path.c_str()) != 0) {
+        navRecordJump(app, app.currentFile, app.scrollY);
+    }
+    tabOpenPath(app, hwnd, path, true);
+}
+
+// Lands on entry.path with the least motion: the same document is scroll
+// only, an open tab is activated, anything else replaces the current
+// document; the scroll position rides the #77 deferred restore
+static bool navOpenEntry(App& app, HWND hwnd, const App::NavEntry& entry) {
+    if (_stricmp(app.currentFile.c_str(), entry.path.c_str()) != 0) {
+        bool found = false;
+        for (size_t i = 0; i < app.tabs.size(); i++) {
+            const std::string& existing =
+                (int)i == app.activeTab ? app.currentFile : app.tabs[i].path;
+            if (_stricmp(existing.c_str(), entry.path.c_str()) == 0) {
+                tabActivate(app, hwnd, (int)i);
+                found = true;
+                break;
+            }
+        }
+        if (!found && !openDocumentInViewer(app, toWide(entry.path))) {
+            return false;  // deleted since the jump: caller tries older entries
+        }
+    }
+    app.pendingScrollRestore = entry.scrollY;
+    InvalidateRect(hwnd, nullptr, FALSE);
+    return true;
+}
+
+void navigateBack(App& app, HWND hwnd) {
+    if (app.editMode) return;
+    while (!app.navBack.empty()) {
+        App::NavEntry entry = app.navBack.back();
+        app.navBack.pop_back();
+        App::NavEntry here{app.currentFile, app.scrollY};
+        if (navOpenEntry(app, hwnd, entry)) {
+            if (!here.path.empty()) app.navForward.push_back(here);
+            return;
+        }
+    }
+}
+
+void navigateForward(App& app, HWND hwnd) {
+    if (app.editMode) return;
+    while (!app.navForward.empty()) {
+        App::NavEntry entry = app.navForward.back();
+        app.navForward.pop_back();
+        App::NavEntry here{app.currentFile, app.scrollY};
+        if (navOpenEntry(app, hwnd, entry)) {
+            if (!here.path.empty()) app.navBack.push_back(here);
+            return;
+        }
+    }
 }
 
 // Task checkbox under the mouse, or nullptr (viewer mode only)
@@ -2337,10 +2406,14 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             } else if (!app.hoveredLink.empty()) {
                 // It was just a click on a link
                 if (app.hoveredLink.rfind("wiki:", 0) == 0) {
-                    openWikiLink(app, app.hoveredLink.substr(5));
+                    std::string fromPath = app.currentFile;
+                    float fromScroll = app.scrollY;
+                    if (openWikiLink(app, app.hoveredLink.substr(5))) {
+                        navRecordJump(app, fromPath, fromScroll);
+                    }
                 } else if (app.hoveredLink.rfind("fileref-ok:", 0) == 0) {
                     // Live .md reference (#127): join as a tab
-                    tabOpenPath(app, hwnd, app.hoveredLink.substr(11), true);
+                    openFileRefTarget(app, hwnd, app.hoveredLink.substr(11));
                 } else {
                     handleLinkClick(app);
                 }
@@ -2353,7 +2426,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     } else if (!app.hoveredLink.empty()) {
         // Click on link
         if (app.hoveredLink.rfind("fileref-ok:", 0) == 0) {
-            tabOpenPath(app, hwnd, app.hoveredLink.substr(11), true);
+            openFileRefTarget(app, hwnd, app.hoveredLink.substr(11));
         } else {
             handleLinkClick(app);
         }

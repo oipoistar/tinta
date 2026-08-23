@@ -165,14 +165,11 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                 if (!target.empty()) {
                     std::string resolved;
                     if (resolveFileRef(app, target, resolved)) {
-                        st.fileRefBadge = 1;
                         st.linkUrl = "fileref-ok:" + resolved;
                     } else {
-                        // Broken reference: muted, badged, inert
-                        st.fileRefBadge = 2;
+                        // Missing target: a ghost of the link color, inert
                         st.linkUrl = "fileref-missing:" + resolved;
-                        st.color = app.theme.text;
-                        st.color.a *= 0.62f;
+                        st.color.a *= 0.45f;
                     }
                 }
                 break;
