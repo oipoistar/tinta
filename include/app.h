@@ -437,6 +437,10 @@ struct App {
     std::string updateDismissedVersion;
     D2D1_RECT_F updateChipRect{};   // screen coords, zero while hidden
     D2D1_RECT_F updateCloseRect{};
+    // Draft recovery: crash leftovers found at startup, offered via a chip
+    std::vector<std::wstring> recoveredDrafts;
+    D2D1_RECT_F draftChipRect{};    // screen coords, zero while hidden
+    D2D1_RECT_F draftCloseRect{};
     std::vector<std::pair<D2D1_RECT_F, int>> tabSwitcherHits;
     // Closing a dirty tab routes through the unsaved-changes dialog; the
     // close completes from confirmExitAction once the user decides
@@ -972,6 +976,16 @@ struct App {
     // so ESC-smashing lands on a visible, stable dialog
     std::chrono::steady_clock::time_point confirmExitOpenedAt;
     std::vector<std::pair<D2D1_RECT_F, int>> confirmExitHits;  // rebuilt each paint
+
+    // Create-missing-reference dialog: a clicked ghost ref offers to
+    // create its target and start typing
+    bool createRefPending = false;
+    std::string createRefPath;  // resolved absolute target
+    std::vector<std::pair<D2D1_RECT_F, int>> createRefHits;  // rebuilt each paint
+    // WM_CHARs arriving in this window are dropped so the keystroke that
+    // resolved the dialog cannot type into the editor it just opened
+    // (one keydown can yield more than one WM_CHAR)
+    std::chrono::steady_clock::time_point swallowCharsUntil{};
 
     // Editor notification
     bool showEditModeNotification = false;

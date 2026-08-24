@@ -28,6 +28,7 @@
 #include "file_utils.h"
 #include "overlays.h"
 #include "annotations.h"
+#include "drafts.h"
 
 #include <appmodel.h>
 #include <winhttp.h>
@@ -1100,6 +1101,79 @@ render_document:
         }
     }
 
+    // Draft-recovery chip: same shape as the update chip, stacked above
+    // it when both are visible; a click restores the drafts as dirty
+    // edit tabs, the cross discards them for good
+    app.draftChipRect = D2D1_RECT_F{};
+    app.draftCloseRect = D2D1_RECT_F{};
+    if (!app.recoveredDrafts.empty() && !app.zenMode &&
+        !app.showPrintPreview && !app.showLightbox && app.dwriteFactory &&
+        (app.folderBrowserFormat || app.textFormat)) {
+        wchar_t label[96];
+        swprintf_s(label, _countof(label), tr(app, "draft.recovered"),
+                   (int)app.recoveredDrafts.size());
+        IDWriteTextLayout* layout = nullptr;
+        app.dwriteFactory->CreateTextLayout(
+            label, (UINT32)wcslen(label),
+            app.folderBrowserFormat ? app.folderBrowserFormat
+                                    : app.textFormat,
+            600.0f, 40.0f, &layout);
+        if (layout) {
+            layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            DWRITE_TEXT_METRICS m{};
+            layout->GetMetrics(&m);
+            float pad = dpi(app, 12.0f);
+            float closeW = dpi(app, 20.0f);
+            float chipH = dpi(app, 32.0f);
+            float chipW =
+                pad + m.width + dpi(app, 8.0f) + closeW + pad * 0.5f;
+            float cx = (float)app.width - chipW - dpi(app, 18.0f);
+            float cy = (float)app.height - chipH - dpi(app, 18.0f) -
+                       (app.showStats ? dpi(app, 55.0f) : 0.0f);
+            if (app.updateChipRect.right > app.updateChipRect.left) {
+                cy = app.updateChipRect.top - chipH - dpi(app, 10.0f);
+            }
+            D2D1_RECT_F chip = D2D1::RectF(cx, cy, cx + chipW, cy + chipH);
+
+            D2D1_COLOR_F bg = app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
+                                               : hexColor(0xF8F8F8, 0.97f);
+            app.brush->SetColor(bg);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(chip, chipH * 0.5f, chipH * 0.5f),
+                app.brush);
+            D2D1_COLOR_F border = app.theme.accent;
+            border.a = 0.6f;
+            app.brush->SetColor(border);
+            app.renderTarget->DrawRoundedRectangle(
+                D2D1::RoundedRect(chip, chipH * 0.5f, chipH * 0.5f),
+                app.brush, 1.0f);
+
+            app.brush->SetColor(app.theme.text);
+            app.renderTarget->DrawTextLayout(
+                D2D1::Point2F(cx + pad, cy + (chipH - m.height) * 0.5f),
+                layout, app.brush);
+            layout->Release();
+
+            float ccx = cx + pad + m.width + dpi(app, 8.0f) + closeW * 0.5f;
+            float ccy = cy + chipH * 0.5f;
+            float s = dpi(app, 4.0f);
+            D2D1_COLOR_F cross = app.theme.text;
+            cross.a = 0.6f;
+            app.brush->SetColor(cross);
+            app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy - s),
+                                       D2D1::Point2F(ccx + s, ccy + s),
+                                       app.brush, 1.4f);
+            app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy + s),
+                                       D2D1::Point2F(ccx + s, ccy - s),
+                                       app.brush, 1.4f);
+
+            app.draftChipRect = chip;
+            app.draftCloseRect = D2D1::RectF(ccx - closeW * 0.5f, cy,
+                                             ccx + closeW * 0.5f,
+                                             cy + chipH);
+        }
+    }
+
     if (app.showStats) {
         wchar_t stats[768];
         wchar_t statsLine1[256];
@@ -1174,6 +1248,7 @@ render_document:
 
     // Unsaved-changes dialog above it all (also entered from tab closes)
     if (app.confirmExitPending) renderConfirmExitDialog(app);
+    if (app.createRefPending) renderCreateRefDialog(app);
 
     app.renderTarget->EndDraw();
 }
@@ -1632,6 +1707,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 KillTimer(hwnd, TIMER_UPDATE_CHECK);
                 std::thread(updateCheckWorker, hwnd).detach();
             }
+            if (wParam == TIMER_DRAFT_SAVE && app) {
+                draftsSweep(*app);
+            }
             if (wParam == TIMER_SELECT_SCROLL && app) {
                 handleSelectScrollTimer(*app, hwnd);
             }
@@ -1717,6 +1795,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             KillTimer(hwnd, TIMER_CURSOR_BLINK);
             KillTimer(hwnd, TIMER_NOTIFICATION);
             KillTimer(hwnd, TIMER_ZOOM_APPLY);
+            KillTimer(hwnd, TIMER_DRAFT_SAVE);
+            // A graceful close resolved every dirty buffer through the
+            // unsaved-changes flow; leftover drafts would resurrect
+            // content the user already decided about
+            if (app) draftsDeleteAll(*app);
             {
                 // Load existing settings to preserve values like hasAskedFileAssociation
                 Settings settings = loadSettings();
@@ -2264,6 +2347,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         app.updateLastCheck != todayString()) {
         SetTimer(app.hwnd, TIMER_UPDATE_CHECK, 10000, nullptr);
     }
+
+    // Draft autosave sweep (crash recovery), and the offer to restore
+    // whatever a crashed instance left behind
+    SetTimer(app.hwnd, TIMER_DRAFT_SAVE, DRAFT_SAVE_INTERVAL_MS, nullptr);
+    draftsScanForRecovery(app);
 
     app.metrics.totalStartupUs = usElapsed(startupStart);
 

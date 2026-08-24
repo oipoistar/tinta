@@ -1,5 +1,6 @@
 #include "input.h"
 #include "annotations.h"
+#include "drafts.h"
 #include "tabs.h"
 #include "document.h"
 #include "editor.h"
@@ -1401,6 +1402,10 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
                cursorPointInRect((float)app.mouseX, (float)app.mouseY,
                                  app.updateChipRect)) {
         SetCursor(cursorHand);
+    } else if (!app.recoveredDrafts.empty() &&
+               cursorPointInRect((float)app.mouseX, (float)app.mouseY,
+                                 app.draftChipRect)) {
+        SetCursor(cursorHand);
     } else if (!app.annotationMarks.empty() &&
                (annotationRailHit(app, (float)app.mouseX,
                                   (float)app.mouseY) >= 0 ||
@@ -1722,6 +1727,24 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                     L"https://github.com/oipoistar/tinta/releases/latest",
                     nullptr, nullptr, SW_SHOWNORMAL);
                 app.updateDismissed = true;
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+    }
+
+    // Draft-recovery chip: a click restores the drafts as edit tabs, the
+    // cross discards them for good
+    if (!app.recoveredDrafts.empty() &&
+        app.draftChipRect.right > app.draftChipRect.left) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        if (cursorPointInRect(mx, my, app.draftChipRect)) {
+            app.swallowNextMouseUp = true;
+            if (cursorPointInRect(mx, my, app.draftCloseRect)) {
+                draftsDiscardAll(app);
+            } else {
+                draftsRecoverAll(app, hwnd);
             }
             InvalidateRect(hwnd, nullptr, FALSE);
             return;
@@ -2102,6 +2125,29 @@ static void openFileRefTarget(App& app, HWND hwnd, const std::string& path) {
     tabOpenPath(app, hwnd, path, true);
 }
 
+// Create-missing-reference dialog outcome: 1 = create the file and start
+// typing in a fresh tab, 2 = cancel
+static void createRefAction(App& app, HWND hwnd, int action) {
+    app.createRefPending = false;
+    if (action == 1 && !app.createRefPath.empty()) {
+        std::filesystem::path target(toWide(app.createRefPath));
+        std::error_code ec;
+        if (target.has_parent_path()) {
+            std::filesystem::create_directories(target.parent_path(), ec);
+        }
+        std::ofstream out(target, std::ios::binary);
+        if (out) {
+            out.close();
+            // The layout cached this path as missing; the ghost turns live
+            app.fileRefCache.erase(app.createRefPath);
+            openFileRefTarget(app, hwnd, app.createRefPath);
+            enterEditMode(app);
+        }
+    }
+    app.createRefPath.clear();
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 // Lands on entry.path with the least motion: the same document is scroll
 // only, an open tab is activated, anything else replaces the current
 // document; the scroll position rides the #77 deferred restore
@@ -2350,6 +2396,23 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             if (!app.lightboxDragMoved) closeLightbox(app);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
+        return;
+    }
+
+    // Create-missing-reference dialog: buttons act, clicks elsewhere
+    // cancel (unlike unsaved-changes, nothing is at stake)
+    if (app.createRefPending) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        app.swallowNextMouseUp = true;
+        for (const auto& hit : app.createRefHits) {
+            if (mx >= hit.first.left && mx <= hit.first.right &&
+                my >= hit.first.top && my <= hit.first.bottom) {
+                createRefAction(app, hwnd, hit.second);
+                return;
+            }
+        }
+        createRefAction(app, hwnd, 2);
         return;
     }
 
@@ -2836,6 +2899,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 } else if (app.hoveredLink.rfind("fileref-ok:", 0) == 0) {
                     // Live .md reference (#127): join as a tab
                     openFileRefTarget(app, hwnd, app.hoveredLink.substr(11));
+                } else if (app.hoveredLink.rfind("fileref-missing:", 0) ==
+                           0) {
+                    // Ghost reference: offer to create the target
+                    app.createRefPath = app.hoveredLink.substr(16);
+                    app.createRefPending = true;
                 } else {
                     handleLinkClick(app);
                 }
@@ -2858,6 +2926,9 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         // Click on link
         if (app.hoveredLink.rfind("fileref-ok:", 0) == 0) {
             openFileRefTarget(app, hwnd, app.hoveredLink.substr(11));
+        } else if (app.hoveredLink.rfind("fileref-missing:", 0) == 0) {
+            app.createRefPath = app.hoveredLink.substr(16);
+            app.createRefPending = true;
         } else {
             handleLinkClick(app);
         }
@@ -2925,6 +2996,20 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     if (app.annotEditorOpen && !app.editMode) {
         annotationEditorKeyDown(app, hwnd, wParam, ctrl);
         InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
+    // Create-missing-reference dialog owns the keyboard while open
+    if (app.createRefPending) {
+        if (wParam == 'Y' || wParam == VK_RETURN) {
+            app.swallowCharsUntil = std::chrono::steady_clock::now() +
+                                    std::chrono::milliseconds(150);
+            createRefAction(app, hwnd, 1);
+        } else if (wParam == 'N' || wParam == VK_ESCAPE) {
+            app.swallowCharsUntil = std::chrono::steady_clock::now() +
+                                    std::chrono::milliseconds(150);
+            createRefAction(app, hwnd, 2);
+        }
         return;
     }
 
@@ -3496,6 +3581,10 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 }
 
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
+    // The Enter that confirmed the create-reference dialog must not leak
+    // a newline into the editor it just opened
+    if (std::chrono::steady_clock::now() < app.swallowCharsUntil) return;
+
     // Annotation note editor takes all typing (#126)
     if (app.annotEditorOpen && !app.editMode) {
         annotationEditorChar(app, wParam);

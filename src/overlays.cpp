@@ -2719,6 +2719,92 @@ void renderConfirmExitDialog(App& app) {
     }
 }
 
+// --- Create-missing-reference dialog ---
+//
+// Same shell as the unsaved-changes dialog: a clicked ghost reference
+// offers to create the file and start typing. The body line shows the
+// resolved target path.
+void renderCreateRefDialog(App& app) {
+    IDWriteTextFormat* fmt = app.folderBrowserFormat;
+    if (!fmt) return;
+    app.createRefHits.clear();
+    const D2DTheme& base = app.theme;
+
+    float backdropAlpha = base.isDark ? 0.34f : 0.24f;
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, backdropAlpha));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
+
+    struct Btn { std::wstring label; int action; };
+    Btn btns[2] = {
+        {std::wstring(tr(app, "createref.create")) + L"   Enter", 1},
+        {std::wstring(tr(app, "createref.cancel")) + L"   Esc", 2},
+    };
+    float padX = dpi(app, 14.0f);
+    float gap = dpi(app, 10.0f);
+    float btnH = dpi(app, 30.0f);
+    float widths[2];
+    float total = 0;
+    for (int i = 0; i < 2; i++) {
+        widths[i] = measureText(app, btns[i].label, fmt) + padX * 2;
+        total += widths[i];
+    }
+    float panelW = std::max(dpi(app, 440.0f), total + gap + dpi(app, 48.0f));
+    float panelH = dpi(app, 138.0f);
+    float px = (app.width - panelW) / 2, py = (app.height - panelH) / 2;
+    D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(
+        D2D1::RectF(px, py, px + panelW, py + panelH), dpi(app, 12.0f), dpi(app, 12.0f));
+    D2D1_COLOR_F bg = base.background; bg.a = 0.99f;
+    app.brush->SetColor(bg);
+    app.renderTarget->FillRoundedRectangle(panel, app.brush);
+    D2D1_COLOR_F border = base.text; border.a = 0.25f;
+    app.brush->SetColor(border);
+    app.renderTarget->DrawRoundedRectangle(panel, app.brush, 1.0f);
+
+    if (app.themeTitleFormat) {
+        app.themeTitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        D2D1_COLOR_F tc = base.heading; tc.a = 1.0f;
+        app.brush->SetColor(tc);
+        const wchar_t* title = tr(app, "createref.title");
+        app.renderTarget->DrawText(title, (UINT32)wcslen(title), app.themeTitleFormat,
+            D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 16.0f),
+                        px + panelW, py + dpi(app, 50.0f)), app.brush);
+    }
+    {
+        // The resolved path, middle-trimmed by DirectWrite clipping
+        D2D1_COLOR_F c = base.text; c.a = 0.7f;
+        app.brush->SetColor(c);
+        std::wstring body = toWide(app.createRefPath);
+        app.renderTarget->DrawText(body.c_str(), (UINT32)body.size(), fmt,
+            D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 52.0f),
+                        px + panelW - dpi(app, 24.0f), py + dpi(app, 78.0f)), app.brush);
+    }
+
+    float bx = px + (panelW - (total + gap)) / 2;
+    float by = py + panelH - btnH - dpi(app, 18.0f);
+    for (int i = 0; i < 2; i++) {
+        D2D1_RECT_F r = D2D1::RectF(bx, by, bx + widths[i], by + btnH);
+        D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(r, dpi(app, 6.0f), dpi(app, 6.0f));
+        if (btns[i].action == 1) {
+            D2D1_COLOR_F c = base.accent; c.a = 0.92f;
+            app.brush->SetColor(c);
+            app.renderTarget->FillRoundedRectangle(rr, app.brush);
+            app.brush->SetColor(D2D1::ColorF(1, 1, 1, 0.97f));
+        } else {
+            D2D1_COLOR_F c = base.text; c.a = 0.3f;
+            app.brush->SetColor(c);
+            app.renderTarget->DrawRoundedRectangle(rr, app.brush, 1.0f);
+            c.a = 0.9f;
+            app.brush->SetColor(c);
+        }
+        app.renderTarget->DrawText(btns[i].label.c_str(), (UINT32)btns[i].label.size(), fmt,
+            D2D1::RectF(r.left + padX, r.top + dpi(app, 6.0f), r.right, r.bottom),
+            app.brush);
+        app.createRefHits.push_back({r, btns[i].action});
+        bx += widths[i] + gap;
+    }
+}
+
 // --- Shortcut editor (profiles follow-up) ---
 //
 // Twelve action rows with their current binding. Clicking a row arms it;

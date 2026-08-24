@@ -1,5 +1,6 @@
 #include "editor.h"
 #include "document.h"
+#include "drafts.h"
 #include "tabs.h"
 #include "utils.h"
 #include "file_utils.h"
@@ -870,6 +871,25 @@ void enterQuickNoteMode(App& app) {
     updateWindowTitle(app);  // "Tinta - Untitled" until the first save
 }
 
+// Draft recovery: a crash leftover reopens as a dirty edit tab, pointed
+// back at its original file when it had one
+void enterRecoveredDraft(App& app, HWND hwnd, const std::string& content,
+                         const std::string& origPath) {
+    tabOpenQuickNote(app, hwnd);
+    app.currentFile = origPath;
+    enterEditModeWithContent(app, content);
+    app.editorDirty = true;
+    if (!origPath.empty()) {
+        App::DocTab& tab = app.tabs[app.activeTab];
+        tab.path = origPath;
+        size_t slash = origPath.find_last_of("/\\");
+        tab.title = toWide(slash == std::string::npos
+                               ? origPath
+                               : origPath.substr(slash + 1));
+    }
+    updateWindowTitle(app);
+}
+
 void exitEditMode(App& app) {
     if (app.editorDirty) {
         // Unsaved changes: a modal dialog with clickable buttons. The
@@ -1157,6 +1177,10 @@ void saveEditorFile(App& app, HWND hwnd) {
         out.close();
         app.editorDirty = false;
         updateFileWriteTime(app);
+
+        // The saved buffer no longer needs its crash-recovery draft
+        tabsInit(app);
+        draftsDeleteForTab(app, app.tabs[app.activeTab].id);
 
         // Reparse and update preview immediately
         editorReparse(app);
