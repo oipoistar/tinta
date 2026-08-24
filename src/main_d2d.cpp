@@ -29,6 +29,7 @@
 #include "overlays.h"
 #include "annotations.h"
 #include "drafts.h"
+#include "startpage.h"
 
 #include <appmodel.h>
 #include <winhttp.h>
@@ -244,6 +245,12 @@ void render(App& app) {
     if (documentViewportX(app) > 0.0f) {
         app.renderTarget->SetTransform(
             D2D1::Matrix3x2F::Translation(documentViewportX(app), 0));
+    }
+
+    // Start page: the bare-launch launcher draws over the (empty)
+    // document; panels, chips and overlays keep layering above it
+    if (startPageActive(app)) {
+        renderStartPage(app);
     }
 
 render_document:
@@ -1873,70 +1880,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-static const char* sampleMarkdown = R"(# Welcome to Tinta
-
-**Tinta** is a fast, lightweight Markdown and Mermaid viewer for Windows.
-
-## Getting Started
-
-- **Drag & drop** a `.md` or `.mmd` file onto this window
-- Press **B** to browse and open files from a folder
-- Or run `tinta.exe readme.md` from the command line
-- Press **?** for all available keyboard shortcuts
-
-## Features
-
-- 10 beautiful themes — press **T** to choose
-- Native Mermaid flowchart rendering for `.mmd` files
-- Edit mode with live preview — press **:**
-- Search — press **F**
-- Table of contents — press **Tab**
-- Text selection and copy
-- Syntax highlighting in code blocks for C/C++, C#, Python, JavaScript, Rust, Go, and Bash
-
-## Code Example
-
-```cpp
-int main() {
-    printf("Hello, World!\n");
-    return 0;
-}
-```
-
-## Keyboard Shortcuts
-
-Press **?** at any time to see all shortcuts.
-
-### Navigation
-
-- **J / K** - Scroll down / up
-- **Space / PgDn** - Page down
-- **PgUp** - Page up
-- **Home / End** - Jump to start / end
-- **Ctrl+Scroll** - Zoom in / out
-
-### View
-
-- **F** or **Ctrl+F** - Search
-- **Enter** - Next search match
-- **B** - Toggle folder browser
-- **Tab** - Toggle table of contents
-- **T** - Theme chooser
-- **S** - Toggle stats
-
-### Editing
-
-- **:** - Enter edit mode
-- **Ctrl+S** - Save (in edit mode)
-- **ESC ESC** - Exit edit mode
-
-### General
-
-- **Ctrl+A** - Select all
-- **Ctrl+C** - Copy selection
-- **ESC** - Close overlay / Quit
-- **Q** - Quit
-)";
+// The bare-launch tutorial moved to startpage.cpp: failed loads fall
+// back to the start page, which keeps the sample behind a Learn card
 
 // Last-chance handler: writes %LOCALAPPDATA%\Tinta\crash.dmp so crash
 // reports from the field carry a usable stack
@@ -2272,6 +2217,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         if (sessionPaths.empty()) restoreSession = false;
     }
 
+    // Windows that come up with nothing to show land on the start page
+    // (design t7) instead of the old tutorial document
+    auto showStartPage = [&]() {
+        loadDocumentContent(std::string(), {});
+        app.startPageEligible = true;
+        for (const auto& recent : savedSettings.recentFiles) {
+            app.startPageRecents.push_back({recent.path, recent.when});
+        }
+    };
+
     if (quickNote) {
         // Untitled quick note: an empty document, no backing file
         loadDocumentContent(std::string(), {});
@@ -2279,8 +2234,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         if (loadFile(inputFile)) {
             app.currentFile = inputFile;
             app.focusMermaidOnNextLayout = isMermaidDocumentPath(inputFile);
+            persistRecentFile(app.currentFile);
         } else {
-            loadDocumentContent(sampleMarkdown, {});
+            showStartPage();
         }
     } else if (restoreSession) {
         // No file argument: reopen where the last session left off
@@ -2289,14 +2245,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             app.focusMermaidOnNextLayout =
                 isMermaidDocumentPath(sessionPaths[sessionActive]);
         } else {
-            loadDocumentContent(sampleMarkdown, {});
+            showStartPage();
         }
     } else {
         // Try syntax.md
         if (loadFile("syntax.md")) {
             app.currentFile = "syntax.md";
         } else {
-            loadDocumentContent(sampleMarkdown, {});
+            showStartPage();
         }
     }
 

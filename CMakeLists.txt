@@ -71,6 +71,7 @@ set(SOURCES
     src/export_docx.cpp
     src/annotations.cpp
     src/drafts.cpp
+    src/startpage.cpp
 )
 
 set(HEADERS

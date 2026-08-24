@@ -87,6 +87,14 @@ void saveSettings(const Settings& settings) {
         }
     }
 
+    if (!settings.recentFiles.empty()) {
+        // Recently opened files for the start page, most recent first
+        file << "[Recent]\n";
+        for (const auto& recent : settings.recentFiles) {
+            file << "recent=" << recent.when << "|" << recent.path << "\n";
+        }
+    }
+
     if (!settings.readingPositions.empty()) {
         file << "[Positions]\n";
         for (const auto& pos : settings.readingPositions) {
@@ -173,6 +181,34 @@ void persistReadingPosition(const std::string& path, float scrollY,
     if (path.empty()) return;
     Settings settings = loadSettings();
     rememberReadingPosition(settings, path, scrollY, zoom);
+    saveSettings(settings);
+}
+
+// Start page recents: every successful document open moves (or inserts)
+// its path at the head of the [Recent] list
+void persistRecentFile(const std::string& path) {
+    if (path.empty()) return;
+    Settings settings = loadSettings();
+    auto& list = settings.recentFiles;
+    for (size_t i = 0; i < list.size(); i++) {
+        if (_stricmp(list[i].path.c_str(), path.c_str()) == 0) {
+            list.erase(list.begin() + i);
+            break;
+        }
+    }
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ULARGE_INTEGER now;
+    now.LowPart = ft.dwLowDateTime;
+    now.HighPart = ft.dwHighDateTime;
+    list.insert(list.begin(), {now.QuadPart, path});
+    if (list.size() > 10) list.resize(10);
+    saveSettings(settings);
+}
+
+void clearRecentFiles() {
+    Settings settings = loadSettings();
+    settings.recentFiles.clear();
     saveSettings(settings);
 }
 
@@ -279,6 +315,20 @@ Settings loadSettings() {
         } else if (key == "tab") {
             if (!value.empty() && settings.sessionTabs.size() < 64) {
                 settings.sessionTabs.push_back(value);
+            }
+        } else if (key == "recent") {
+            // when(FILETIME)|path, most recent first
+            size_t sep = value.find('|');
+            if (sep != std::string::npos && sep + 1 < value.size() &&
+                settings.recentFiles.size() < 10) {
+                try {
+                    unsigned long long when =
+                        std::stoull(value.substr(0, sep));
+                    std::string recentPath = value.substr(sep + 1);
+                    if (!recentPath.empty()) {
+                        settings.recentFiles.push_back({when, recentPath});
+                    }
+                } catch (...) {}
             }
         } else if (key == "pos") {
             // New format: scrollY|zoom|path; legacy: scrollY|path

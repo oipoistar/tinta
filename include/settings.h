@@ -17,6 +17,10 @@ float findReadingPosition(const Settings& settings, const std::string& path);
 // Per-document zoom, or 0 when the document has none stored
 float findReadingZoom(const Settings& settings, const std::string& path);
 
+// Start page recents ([Recent] section): record an open, or clear the list
+void persistRecentFile(const std::string& path);
+void clearRecentFiles();
+
 // User-remappable single-key actions (#77), written to settings.ini as a
 // [Keys] section. Char actions trigger via WM_CHAR (edit ':', help '?');
 // the rest are WM_KEYDOWN virtual-key codes. Ctrl combos stay fixed.

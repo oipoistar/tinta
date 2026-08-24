@@ -8,6 +8,7 @@
 #include "document.h"
 #include "drafts.h"
 #include "editor.h"
+#include "startpage.h"
 #include "file_utils.h"
 #include "i18n.h"
 #include "input.h"
@@ -38,7 +39,11 @@ void syncActiveTab(App& app) {
     }
     App::DocTab& tab = app.tabs[app.activeTab];
     tab.path = app.currentFile;
-    tab.title = titleForPath(app, app.currentFile);
+    // A pathless viewer tab with a custom title (an embedded Learn
+    // document from the start page) keeps it; quick notes re-derive
+    if (!app.currentFile.empty() || tab.title.empty() || app.editMode) {
+        tab.title = titleForPath(app, app.currentFile);
+    }
     tab.editMode = app.editMode;
     tab.editorDirty = app.editMode && app.editorDirty;
 }
@@ -123,6 +128,10 @@ void tabActivate(App& app, HWND hwnd, int index) {
     if (index < 0 || index >= (int)app.tabs.size()) return;
     if (index == app.activeTab) return;
 
+    // Leaving an embedded Learn document: an empty tab activated later
+    // shows the launcher again
+    app.startPageEmbeddedOpen = false;
+
     syncActiveTab(app);
     parkActiveEditBuffer(app);
     app.activeTab = index;
@@ -144,6 +153,11 @@ void tabActivate(App& app, HWND hwnd, int index) {
         app.scrollY = app.targetScrollY = 0;
         app.scrollX = app.targetScrollX = 0;
         app.layoutDirty = true;
+        // An empty viewer tab in a launcher window shows the start page
+        // again; its label follows suit
+        if (!tab.editMode && startPageActive(app)) {
+            tab.title = L"Tinta";
+        }
     }
     if (tab.editMode) {
         app.editorWordWrap = tab.wordWrap;
@@ -465,7 +479,8 @@ void renderTabStrip(App& app) {
         // Single document: the caption shows the plain window title, with
         // the + button right after it so the tab row is discoverable
         std::wstring title = L"Tinta";
-        if (!app.tabs.empty() && !app.tabs[0].title.empty()) {
+        if (!app.tabs.empty() && !app.tabs[0].title.empty() &&
+            !startPageActive(app)) {
             title = app.tabs[0].title;
             if (app.editMode && app.editorDirty) title = L"* " + title;
         }

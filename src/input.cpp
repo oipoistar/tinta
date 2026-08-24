@@ -1,6 +1,7 @@
 #include "input.h"
 #include "annotations.h"
 #include "drafts.h"
+#include "startpage.h"
 #include "tabs.h"
 #include "document.h"
 #include "editor.h"
@@ -18,6 +19,7 @@
 
 #include <windowsx.h>
 #include <shellapi.h>
+#include <commdlg.h>
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
@@ -32,6 +34,7 @@ static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
 static HCURSOR cursorSizeWE = LoadCursor(nullptr, IDC_SIZEWE);
 
 static const App::TaskRect* taskRectAt(const App& app);
+static void startPageInvoke(App& app, HWND hwnd, int id);
 static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY);
 static bool diagramPngButtonAt(const App& app, int mouseX, int mouseY);
 static bool tableFitButtonAt(const App& app, int mouseX, int mouseY);
@@ -303,6 +306,9 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     int utf8Len = WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
     app.currentFile.resize(utf8Len - 1);
     WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, &app.currentFile[0], utf8Len, nullptr, nullptr);
+    // Start page recents: every open (including tab switches) refreshes
+    // the document's spot at the head of the list
+    persistRecentFile(app.currentFile);
     app.scrollY = 0;
     app.scrollX = 0;
     app.targetScrollY = 0;
@@ -1316,6 +1322,17 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         }
     }
 
+    // Start page hover drives its row and button highlights
+    if (startPageActive(app)) {
+        int hit = startPageHitAt(app, (float)app.mouseX, (float)app.mouseY);
+        if (hit != app.startPageHover) {
+            app.startPageHover = hit;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+    } else if (app.startPageHover != 0) {
+        app.startPageHover = 0;
+    }
+
     // Link peek: dwelling on a local .md link arms the preview timer
     if (app.hoveredLink != prevHoveredLink) {
         clearLinkPeek(app);
@@ -1405,6 +1422,8 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     } else if (!app.recoveredDrafts.empty() &&
                cursorPointInRect((float)app.mouseX, (float)app.mouseY,
                                  app.draftChipRect)) {
+        SetCursor(cursorHand);
+    } else if (startPageActive(app) && app.startPageHover != 0) {
         SetCursor(cursorHand);
     } else if (!app.annotationMarks.empty() &&
                (annotationRailHit(app, (float)app.mouseX,
@@ -2001,6 +2020,15 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         }
         InvalidateRect(hwnd, nullptr, FALSE);
     } else {
+        // Start page: clicks act on its controls, there is nothing to
+        // select underneath
+        if (startPageActive(app)) {
+            int hit = startPageHitAt(app, (float)GET_X_LPARAM(lParam),
+                                     (float)GET_Y_LPARAM(lParam));
+            app.swallowNextMouseUp = true;
+            if (hit) startPageInvoke(app, hwnd, hit);
+            return;
+        }
         // Capture the mouse for the duration of a selection drag: without
         // it, mouse events stop at the window edge and the drag can neither
         // auto-scroll past the viewport nor finalize outside the window
@@ -2123,6 +2151,102 @@ static void openFileRefTarget(App& app, HWND hwnd, const std::string& path) {
         navRecordJump(app, app.currentFile, app.scrollY);
     }
     tabOpenPath(app, hwnd, path, true);
+}
+
+// Start page actions (design t7). Ids match startPageHitAt: 1 open,
+// 2 new document, 3 browse, 4 clear, 5 shortcuts, 10+i recent, 20+i learn.
+static void startPageInvoke(App& app, HWND hwnd, int id) {
+    if (id == 1) {
+        // Open a file: picker, then the picked document takes over the
+        // launcher shell (same handover as the quick-note empty state)
+        wchar_t path[MAX_PATH] = L"";
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = hwnd;
+        ofn.lpstrFilter =
+            L"Documents (*.md;*.mmd;*.txt;*.json;*.yaml;...)\0"
+            L"*.md;*.markdown;*.mmd;*.txt;*.json;*.yaml;*.yml;*.toml;"
+            L"*.ini;*.csv;*.log\0"
+            L"Markdown / Mermaid (*.md;*.markdown;*.mmd)\0"
+            L"*.md;*.markdown;*.mmd\0"
+            L"All files (*.*)\0*.*\0";
+        ofn.lpstrFile = path;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
+                    OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+        if (GetOpenFileNameW(&ofn)) {
+            tabsInit(app);
+            int shellId = app.tabs[app.activeTab].id;
+            tabOpenPath(app, hwnd, toUtf8(path));
+            for (int i = 0; i < (int)app.tabs.size(); i++) {
+                if (app.tabs[i].id == shellId) {
+                    tabCloseIndex(app, hwnd, i);
+                    break;
+                }
+            }
+        }
+    } else if (id == 2) {
+        // New document: the note takes over this window (#121 semantics);
+        // the keystroke's WM_CHAR must not type into the fresh editor
+        app.swallowCharsUntil = std::chrono::steady_clock::now() +
+                                std::chrono::milliseconds(150);
+        tabsInit(app);
+        enterQuickNoteMode(app);
+        app.tabs[app.activeTab].title = tr(app, "title.untitled");
+        updateWindowTitle(app);
+    } else if (id == 3) {
+        if (!app.showFolderBrowser) {
+            closeSearchIfOpen(app);
+            app.showFolderBrowser = true;
+            app.folderBrowserAnimation = 0;
+            wchar_t cwd[MAX_PATH];
+            if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
+                app.folderBrowserPath = cwd;
+            }
+            populateFolderItems(app);
+        }
+    } else if (id == 4) {
+        clearRecentFiles();
+        app.startPageRecents.clear();
+        app.startPageHover = 0;
+    } else if (id == 5) {
+        app.showHelp = true;
+    } else if (id >= 10 && id < 20) {
+        int index = id - 10;
+        if (index < (int)app.startPageRecents.size()) {
+            std::string path = app.startPageRecents[index].path;
+            if (GetFileAttributesW(toWide(path).c_str()) ==
+                INVALID_FILE_ATTRIBUTES) {
+                // Vanished since it was recorded: drop the stale entry
+                Settings stored = loadSettings();
+                for (size_t i = 0; i < stored.recentFiles.size(); i++) {
+                    if (_stricmp(stored.recentFiles[i].path.c_str(),
+                                 path.c_str()) == 0) {
+                        stored.recentFiles.erase(
+                            stored.recentFiles.begin() + i);
+                        break;
+                    }
+                }
+                saveSettings(stored);
+                app.startPageRecents.erase(
+                    app.startPageRecents.begin() + index);
+                app.startPageHover = 0;
+            } else {
+                tabsInit(app);
+                int shellId = app.tabs[app.activeTab].id;
+                tabOpenPath(app, hwnd, path);
+                for (int i = 0; i < (int)app.tabs.size(); i++) {
+                    if (app.tabs[i].id == shellId) {
+                        tabCloseIndex(app, hwnd, i);
+                        break;
+                    }
+                }
+            }
+        }
+    } else if (id >= 20 && id < 23) {
+        startPageOpenEmbedded(app, hwnd, id - 20);
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 // Create-missing-reference dialog outcome: 1 = create the file and start
@@ -3250,6 +3374,11 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 // behind (#121); any real document keeps its window and a
                 // fresh one spawns
                 if (app.currentFile.empty()) {
+                    // The keystroke's WM_CHAR must not type into the
+                    // editor the takeover just opened
+                    app.swallowCharsUntil =
+                        std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(150);
                     tabsInit(app);
                     enterQuickNoteMode(app);
                     app.tabs[app.activeTab].title = tr(app, "title.untitled");
@@ -3392,6 +3521,20 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             if ((wParam >= 'A' && wParam <= 'Z') ||
                 (wParam >= '0' && wParam <= '9') || wParam == VK_SPACE) {
                 return;  // swallowed here; WM_CHAR feeds the filter
+            }
+        }
+
+        // Start page: Ctrl+O opens the picker, 1..5 the recent files.
+        // N, B and ? keep their keymapped meanings, which the page reuses.
+        if (startPageActive(app)) {
+            if (ctrl && wParam == 'O') {
+                startPageInvoke(app, hwnd, 1);
+                return;
+            }
+            if (!ctrl && wParam >= '1' && wParam <= '5' &&
+                (int)(wParam - '1') < (int)app.startPageRecents.size()) {
+                startPageInvoke(app, hwnd, 10 + (int)(wParam - '1'));
+                return;
             }
         }
 

@@ -459,6 +459,10 @@ bool createRenderTarget(App& app) {
         app.titleIconBitmap->Release();
         app.titleIconBitmap = nullptr;
     }
+    if (app.startPageIconBitmap) {
+        app.startPageIconBitmap->Release();
+        app.startPageIconBitmap = nullptr;
+    }
 
     RECT rc;
     GetClientRect(app.hwnd, &rc);

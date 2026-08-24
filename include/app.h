@@ -188,6 +188,10 @@ struct Settings {
     bool checkUpdates = true;
     std::string lastUpdateCheck;   // YYYY-MM-DD of the last completed check
     std::string dismissedUpdate;   // "X.Y.Z" the user dismissed
+    // Recently opened files for the start page: most-recent-first,
+    // capped at 10. when = FILETIME ticks of the last open.
+    struct RecentFile { unsigned long long when = 0; std::string path; };
+    std::vector<RecentFile> recentFiles;
 };
 
 // Application state
@@ -492,6 +496,19 @@ struct App {
     // 16px window icon drawn in the strip (device bitmap: recreated with
     // the render target)
     ID2D1Bitmap* titleIconBitmap = nullptr;
+
+    // Start page (design t7): the bare-launch launcher that replaced the
+    // sample document. Eligible windows show it whenever no document and
+    // no edit buffer is active.
+    bool startPageEligible = false;
+    // An embedded Learn document is showing in place of the launcher;
+    // cleared on tab switches so an empty tab shows the launcher again
+    bool startPageEmbeddedOpen = false;
+    struct RecentDoc { std::string path; unsigned long long when = 0; };
+    std::vector<RecentDoc> startPageRecents;
+    int startPageHover = 0;  // hit id under the mouse, 0 = none
+    std::vector<std::pair<D2D1_RECT_F, int>> startPageHits;  // rebuilt each paint
+    ID2D1Bitmap* startPageIconBitmap = nullptr;  // hero icon (device bitmap)
 
     // Folder browser overlay
     bool showFolderBrowser = false;
@@ -1123,6 +1140,10 @@ struct App {
         if (titleIconBitmap) {
             titleIconBitmap->Release();
             titleIconBitmap = nullptr;
+        }
+        if (startPageIconBitmap) {
+            startPageIconBitmap->Release();
+            startPageIconBitmap = nullptr;
         }
     }
 
