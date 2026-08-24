@@ -23,6 +23,10 @@
 
 #define TIMER_EDITOR_REPARSE 2
 
+// Markdown assists (defined near the char handler)
+static void editorToggleInlineMark(App& app, HWND hwnd,
+                                   const std::wstring& mark);
+
 // --- UTF conversion ---
 
 std::string toUtf8(const std::wstring& wstr) {
@@ -1606,6 +1610,12 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
             }
+            case 'B':
+                editorToggleInlineMark(app, hwnd, L"**");
+                return;
+            case 'I':
+                editorToggleInlineMark(app, hwnd, L"*");
+                return;
             case 'W': {
                 app.editorWordWrap = !app.editorWordWrap;
                 app.clearEditorLineLayoutCache();
@@ -1795,6 +1805,125 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     }
 }
 
+// --- Markdown assists ---
+
+// Start offset of the line containing pos
+static size_t editorLineStartBefore(const App& app, size_t pos) {
+    size_t ls = 0;
+    for (size_t s : app.editorLineStarts) {
+        if (s <= pos) ls = s;
+        else break;
+    }
+    return ls;
+}
+
+// A parsed list marker at the head of one line: "- ", "3. ", "- [ ] "
+struct ListMarkerInfo {
+    bool isList = false;
+    std::wstring indent;      // leading whitespace
+    std::wstring marker;      // marker text incl. trailing space(s)
+    bool ordered = false;
+    int number = 0;
+    wchar_t delim = L'.';     // '.' or ')' for ordered lists
+    bool task = false;
+    size_t contentStart = 0;  // offset from line start past the marker
+};
+
+static ListMarkerInfo parseListMarker(const std::wstring& text,
+                                      size_t lineStart) {
+    ListMarkerInfo info;
+    size_t i = lineStart;
+    while (i < text.size() && (text[i] == L' ' || text[i] == L'\t')) i++;
+    info.indent = text.substr(lineStart, i - lineStart);
+    size_t markerStart = i;
+    if (i < text.size() &&
+        (text[i] == L'-' || text[i] == L'*' || text[i] == L'+')) {
+        if (i + 1 >= text.size() || text[i + 1] != L' ') return info;
+        i += 2;
+        // Task boxes continue as unchecked task items
+        if (i + 4 <= text.size() && text[i] == L'[' &&
+            (text[i + 1] == L' ' || text[i + 1] == L'x' ||
+             text[i + 1] == L'X') &&
+            text[i + 2] == L']' && text[i + 3] == L' ') {
+            info.task = true;
+            i += 4;
+        }
+    } else {
+        size_t d = i;
+        while (d < text.size() && iswdigit(text[d]) && d - i < 9) d++;
+        if (d == i || d >= text.size() ||
+            (text[d] != L'.' && text[d] != L')')) {
+            return info;
+        }
+        if (d + 1 >= text.size() || text[d + 1] != L' ') return info;
+        info.ordered = true;
+        info.number = _wtoi(text.substr(i, d - i).c_str());
+        info.delim = text[d];
+        i = d + 2;
+    }
+    info.isList = true;
+    info.marker = text.substr(markerStart, i - markerStart);
+    info.contentStart = i - lineStart;
+    return info;
+}
+
+// Ctrl+B / Ctrl+I: wrap the selection in mark..mark, unwrap when it (or
+// its immediate surroundings) already carry the mark, or drop an empty
+// pair at the caret
+static void editorToggleInlineMark(App& app, HWND hwnd,
+                                   const std::wstring& mark) {
+    size_t ml = mark.size();
+    if (app.editorHasSelection) {
+        size_t s = std::min(app.editorSelStart, app.editorSelEnd);
+        size_t e = std::max(app.editorSelStart, app.editorSelEnd);
+        std::wstring sel = app.editorText.substr(s, e - s);
+        bool inside = sel.size() >= ml * 2 &&
+                      sel.compare(0, ml, mark) == 0 &&
+                      sel.compare(sel.size() - ml, ml, mark) == 0;
+        bool outside = !inside && s >= ml &&
+                       e + ml <= app.editorText.size() &&
+                       app.editorText.compare(s - ml, ml, mark) == 0 &&
+                       app.editorText.compare(e, ml, mark) == 0;
+        size_t rs = outside ? s - ml : s;
+        size_t re = outside ? e + ml : e;
+        std::wstring repl;
+        if (inside) {
+            repl = sel.substr(ml, sel.size() - ml * 2);
+        } else if (outside) {
+            repl = sel;
+        } else {
+            repl = mark + sel + mark;
+        }
+        std::wstring removed = app.editorText.substr(rs, re - rs);
+        app.editorText.erase(rs, re - rs);
+        pushUndo(app, App::EditAction::Delete, rs, removed, e, rs);
+        app.editorText.insert(rs, repl);
+        pushUndo(app, App::EditAction::Insert, rs, repl, rs,
+                 rs + repl.size());
+        if (inside || outside) {
+            app.editorSelStart = rs;
+            app.editorSelEnd = rs + repl.size();
+        } else {
+            app.editorSelStart = rs + ml;
+            app.editorSelEnd = rs + ml + sel.size();
+        }
+        app.editorCursorPos = app.editorSelEnd;
+        app.editorHasSelection = app.editorSelEnd > app.editorSelStart;
+    } else {
+        size_t before = app.editorCursorPos;
+        std::wstring ins = mark + mark;
+        app.editorText.insert(before, ins);
+        app.editorCursorPos = before + ml;
+        pushUndo(app, App::EditAction::Insert, before, ins, before,
+                 app.editorCursorPos);
+    }
+    rebuildLineStarts(app);
+    app.editorDesiredCol = -1;
+    scheduleReparse(app);
+    editorEnsureCursorVisible(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
     // Swallow characters while confirm-exit prompt is active
     if (app.confirmExitPending) return;
@@ -1871,7 +2000,98 @@ void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
         ch = L'\n';
     }
 
-    if (ch == 9) { // Tab -> 4 spaces
+    // Enter on a list item continues the list; Enter on an empty item
+    // removes its marker and ends it
+    if (ch == L'\n' && !app.editorHasSelection) {
+        size_t ls = editorLineStartBefore(app, app.editorCursorPos);
+        ListMarkerInfo lm = parseListMarker(app.editorText, ls);
+        if (lm.isList && app.editorCursorPos >= ls + lm.contentStart) {
+            size_t le = app.editorText.find(L'\n', ls);
+            if (le == std::wstring::npos) le = app.editorText.size();
+            bool emptyItem = (le == ls + lm.contentStart);
+            if (emptyItem) {
+                std::wstring removed =
+                    app.editorText.substr(ls, lm.contentStart);
+                app.editorText.erase(ls, lm.contentStart);
+                pushUndo(app, App::EditAction::Delete, ls, removed,
+                         app.editorCursorPos, ls);
+                app.editorCursorPos = ls;
+            } else {
+                std::wstring next = lm.marker;
+                if (lm.ordered) {
+                    next = std::to_wstring(lm.number + 1);
+                    next += lm.delim;
+                    next += L' ';
+                } else if (lm.task) {
+                    next = next.substr(0, 2) + L"[ ] ";
+                }
+                std::wstring cont = L"\n" + lm.indent + next;
+                size_t before = app.editorCursorPos;
+                app.editorText.insert(before, cont);
+                app.editorCursorPos = before + cont.size();
+                pushUndo(app, App::EditAction::Insert, before, cont,
+                         before, app.editorCursorPos);
+            }
+            rebuildLineStarts(app);
+            app.editorDesiredCol = -1;
+            scheduleReparse(app);
+            editorEnsureCursorVisible(app);
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+    }
+
+    if (ch == 9) { // Tab
+        // Ctrl+I arrives as the Tab control character: keydown handled it
+        if (GetKeyState(VK_CONTROL) & 0x8000) return;
+        bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (shift) {
+            // Shift+Tab: outdent the caret line by up to 4 spaces / a tab
+            size_t ls = editorLineStartBefore(app, app.editorCursorPos);
+            size_t n = 0;
+            while (n < 4 && ls + n < app.editorText.size() &&
+                   app.editorText[ls + n] == L' ') {
+                n++;
+            }
+            if (n == 0 && ls < app.editorText.size() &&
+                app.editorText[ls] == L'\t') {
+                n = 1;
+            }
+            if (n > 0) {
+                std::wstring removed = app.editorText.substr(ls, n);
+                size_t before = app.editorCursorPos;
+                app.editorText.erase(ls, n);
+                pushUndo(app, App::EditAction::Delete, ls, removed,
+                         before, before > ls + n ? before - n : ls);
+                app.editorCursorPos =
+                    before > ls + n ? before - n : ls;
+                rebuildLineStarts(app);
+                app.editorDesiredCol = -1;
+                scheduleReparse(app);
+                editorEnsureCursorVisible(app);
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return;
+        }
+        if (!app.editorHasSelection) {
+            // Tab on a list item indents the whole line one level
+            size_t ls = editorLineStartBefore(app, app.editorCursorPos);
+            ListMarkerInfo lm = parseListMarker(app.editorText, ls);
+            if (lm.isList) {
+                std::wstring spaces = L"    ";
+                size_t before = app.editorCursorPos;
+                app.editorText.insert(ls, spaces);
+                app.editorCursorPos = before + 4;
+                pushUndo(app, App::EditAction::Insert, ls, spaces, before,
+                         app.editorCursorPos);
+                rebuildLineStarts(app);
+                app.editorDesiredCol = -1;
+                scheduleReparse(app);
+                editorEnsureCursorVisible(app);
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
+        }
         std::wstring spaces = L"    ";
         if (app.editorHasSelection) editorDeleteSelection(app);
         size_t before = app.editorCursorPos;
