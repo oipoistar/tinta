@@ -400,7 +400,8 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         float underlineY = lineY + lineHeight - 2;
         if (refLive || refMissing) {
             // .md references underline dashed; a missing target keeps a
-            // faint ghost of the same treatment and no click surface (#127)
+            // faint ghost of the same treatment, and its click offers to
+            // create the file (#127)
             D2D1_COLOR_F dashColor = color;
             dashColor.a *= 0.55f;
             float dash = lineHeight * 0.16f;
@@ -416,7 +417,6 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                                        D2D1::Point2F(lineEndX, underlineY),
                                        color, 1.0f});
         }
-        if (refMissing) return;
         App::LinkRect lr;
         lr.bounds = D2D1::RectF(lineStartX, lineY, lineEndX, lineY + lineHeight);
         lr.url = linkUrl;

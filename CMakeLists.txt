@@ -70,6 +70,7 @@ set(SOURCES
     src/export_html.cpp
     src/export_docx.cpp
     src/annotations.cpp
+    src/drafts.cpp
 )
 
 set(HEADERS

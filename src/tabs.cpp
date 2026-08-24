@@ -6,6 +6,7 @@
 #include "tabs.h"
 
 #include "document.h"
+#include "drafts.h"
 #include "editor.h"
 #include "file_utils.h"
 #include "i18n.h"
@@ -203,6 +204,9 @@ void tabCloseIndex(App& app, HWND hwnd, int index) {
         PostMessageW(hwnd, WM_CLOSE, 0, 0);
         return;
     }
+
+    // The closed tab's crash-recovery draft goes with it
+    draftsDeleteForTab(app, app.tabs[index].id);
 
     if (index == app.activeTab) {
         // Leave a clean edit session silently before the neighbor loads
