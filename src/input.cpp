@@ -294,6 +294,7 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     if (app.showLightbox) closeLightbox(app);
     clearLinkPeek(app);
     app.fitBlocks.clear();
+    app.startPageEmbeddedOpen = false;  // a real document takes the view
 
     // Reading position memory (#77): keep the old document's position,
     // resume the new one's
@@ -3182,22 +3183,10 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             return;
         }
         if (wParam == 'T') {
-            app.tabNewTabIntent = true;
-            if (!app.showFolderBrowser) {
-                closeSearchIfOpen(app);
-                app.showFolderBrowser = true;
-                app.folderBrowserAnimation = 0;
-                if (!app.currentFile.empty()) {
-                    app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
-                } else {
-                    wchar_t cwd[MAX_PATH];
-                    if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                        app.folderBrowserPath = cwd;
-                    }
-                }
-                populateFolderItems(app);
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
+            // New tab = the start page (browser-style new-tab page); its
+            // Open/Browse/recents land in this tab. The old open-into-a-
+            // new-tab browser flow lives on as Ctrl+click in the browser.
+            tabOpenStartPage(app, hwnd);
             return;
         }
         if (wParam >= '1' && wParam <= '9' && app.tabs.size() > 1) {

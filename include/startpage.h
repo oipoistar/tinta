@@ -10,6 +10,10 @@
 // True while the launcher should draw instead of a document
 bool startPageActive(const App& app);
 
+// Reloads app.startPageRecents from settings.ini; called on every
+// appearance transition so the list is always current
+void startPageRefreshRecents(App& app);
+
 // Draws the page and rebuilds app.startPageHits (screen coordinates)
 void renderStartPage(App& app);
 

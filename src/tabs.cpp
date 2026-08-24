@@ -92,6 +92,8 @@ void tabsInit(App& app) {
     tab.id = ++app.tabIdCounter;
     tab.path = app.currentFile;
     tab.title = titleForPath(app, app.currentFile);
+    // A pathless viewer tab is the start page, not an untitled note
+    if (app.currentFile.empty() && !app.editMode) tab.title = L"Tinta";
     app.tabs.push_back(std::move(tab));
     app.activeTab = 0;
 }
@@ -249,6 +251,32 @@ void tabCycle(App& app, HWND hwnd, int direction) {
     int count = (int)app.tabs.size();
     int next = (app.activeTab + direction + count) % count;
     tabActivate(app, hwnd, next);
+}
+
+// Ctrl+T: a fresh empty viewer tab, which is the start page (the
+// browser-style new-tab page with recents and open actions)
+void tabOpenStartPage(App& app, HWND hwnd) {
+    tabsInit(app);
+    syncActiveTab(app);
+    parkActiveEditBuffer(app);
+    App::DocTab tab;
+    tab.id = ++app.tabIdCounter;
+    tab.title = L"Tinta";
+    app.tabs.push_back(std::move(tab));
+    app.activeTab = (int)app.tabs.size() - 1;
+    app.currentFile.clear();
+    auto result = parseDocument(app.parser, std::string(), app.currentFile);
+    if (result.success) {
+        app.root = result.root;
+        app.parseTimeUs = result.parseTimeUs;
+    }
+    app.scrollY = app.targetScrollY = 0;
+    app.scrollX = app.targetScrollX = 0;
+    app.layoutDirty = true;
+    app.startPageEmbeddedOpen = false;
+    app.showTabSwitcher = false;
+    updateWindowTitle(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 void tabOpenQuickNote(App& app, HWND hwnd) {

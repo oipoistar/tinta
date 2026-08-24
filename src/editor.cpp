@@ -871,6 +871,7 @@ void enterEditMode(App& app) {
 
 void enterQuickNoteMode(App& app) {
     app.currentFile.clear();
+    app.startPageEmbeddedOpen = false;  // the note replaces any Learn doc
     enterEditModeWithContent(app, std::string());
     updateWindowTitle(app);  // "Tinta - Untitled" until the first save
 }
@@ -937,6 +938,11 @@ void exitEditMode(App& app) {
         if (result.success) {
             app.root = result.root;
             app.parseTimeUs = result.parseTimeUs;
+        }
+        // The empty viewer is the start page now; the tab label follows
+        if (!app.tabs.empty() && app.activeTab >= 0 &&
+            app.activeTab < (int)app.tabs.size()) {
+            app.tabs[app.activeTab].title = L"Tinta";
         }
     } else if (file) {
         std::stringstream buf;

@@ -26,6 +26,7 @@ int captionHitTest(const App& app, float x, float y);       // 0 none, 1..3
 D2D1_COLOR_F tabStripBackground(const App& app);
 // + button: a new untitled quick-note tab, straight into the editor
 void tabOpenQuickNote(App& app, HWND hwnd);
+void tabOpenStartPage(App& app, HWND hwnd);
 
 // Rendering (main_d2d render loop)
 void renderTabStrip(App& app);

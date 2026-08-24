@@ -346,8 +346,16 @@ static std::wstring relativeWhen(App& app, unsigned long long when) {
 // --- State ---------------------------------------------------------------
 
 bool startPageActive(const App& app) {
-    return app.startPageEligible && app.currentFile.empty() &&
-           !app.editMode && !app.startPageEmbeddedOpen;
+    return app.currentFile.empty() && !app.editMode &&
+           !app.startPageEmbeddedOpen;
+}
+
+void startPageRefreshRecents(App& app) {
+    app.startPageRecents.clear();
+    Settings stored = loadSettings();
+    for (const auto& recent : stored.recentFiles) {
+        app.startPageRecents.push_back({recent.path, recent.when});
+    }
 }
 
 int startPageHitAt(const App& app, float x, float y) {

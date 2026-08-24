@@ -497,13 +497,15 @@ struct App {
     // the render target)
     ID2D1Bitmap* titleIconBitmap = nullptr;
 
-    // Start page (design t7): the bare-launch launcher that replaced the
-    // sample document. Eligible windows show it whenever no document and
-    // no edit buffer is active.
-    bool startPageEligible = false;
-    // An embedded Learn document is showing in place of the launcher;
-    // cleared on tab switches so an empty tab shows the launcher again
+    // Start page (design t7): the launcher that replaced the sample
+    // document. It is the universal empty state: any tab with no
+    // document and no edit buffer shows it, and Ctrl+T opens one fresh.
+    // An embedded Learn document showing in place of the launcher;
+    // cleared when anything else takes the view over
     bool startPageEmbeddedOpen = false;
+    // Tracks appearance transitions so recents reload from settings.ini
+    // each time the launcher comes back into view
+    bool startPageShowing = false;
     struct RecentDoc { std::string path; unsigned long long when = 0; };
     std::vector<RecentDoc> startPageRecents;
     int startPageHover = 0;  // hit id under the mouse, 0 = none

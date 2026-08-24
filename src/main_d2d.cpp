@@ -206,6 +206,7 @@ void render(App& app) {
 
     // Edit mode: split view rendering
     if (app.editMode) {
+        app.startPageShowing = false;  // recents reload on the way back
         app.renderTarget->Clear(app.theme.background);
 
         float editorWidth = editorPaneWidth(app);
@@ -247,10 +248,17 @@ void render(App& app) {
             D2D1::Matrix3x2F::Translation(documentViewportX(app), 0));
     }
 
-    // Start page: the bare-launch launcher draws over the (empty)
-    // document; panels, chips and overlays keep layering above it
+    // Start page: the launcher draws over the (empty) document; panels,
+    // chips and overlays keep layering above it. Its recents reload on
+    // every appearance so the list is always current.
     if (startPageActive(app)) {
+        if (!app.startPageShowing) {
+            app.startPageShowing = true;
+            startPageRefreshRecents(app);
+        }
         renderStartPage(app);
+    } else {
+        app.startPageShowing = false;
     }
 
 render_document:
@@ -2218,14 +2226,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     }
 
     // Windows that come up with nothing to show land on the start page
-    // (design t7) instead of the old tutorial document
-    auto showStartPage = [&]() {
-        loadDocumentContent(std::string(), {});
-        app.startPageEligible = true;
-        for (const auto& recent : savedSettings.recentFiles) {
-            app.startPageRecents.push_back({recent.path, recent.when});
-        }
-    };
+    // (design t7) instead of the old tutorial document: an empty
+    // document is all it takes, the launcher is the empty state
+    auto showStartPage = [&]() { loadDocumentContent(std::string(), {}); };
 
     if (quickNote) {
         // Untitled quick note: an empty document, no backing file
