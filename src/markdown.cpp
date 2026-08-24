@@ -826,7 +826,10 @@ static void splitFileRefs(const ElementPtr& parent) {
         return;
     }
 
-    static const char* kExtensions[] = {".markdown", ".mmd", ".md"};
+    static const char* kExtensions[] = {
+        ".markdown", ".json", ".yaml", ".toml", ".mmd", ".yml",
+        ".ini",      ".csv",  ".log",  ".txt",  ".md",
+    };
 
     std::vector<ElementPtr> rebuilt;
     bool changed = false;

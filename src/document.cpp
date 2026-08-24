@@ -40,6 +40,41 @@ bool isMermaidPath(std::basic_string_view<Character> path) {
     return hasExtension(path, std::basic_string_view<Character>(extension, 4));
 }
 
+// Lowercased ASCII extension incl. the dot; empty for none or non-ASCII
+template <typename Character>
+std::string extensionLower(std::basic_string_view<Character> path) {
+    size_t dot = path.find_last_of(static_cast<Character>('.'));
+    if (dot == std::basic_string_view<Character>::npos) return {};
+    std::string out;
+    for (size_t i = dot; i < path.size(); i++) {
+        Character c = path[i];
+        if (static_cast<unsigned long>(c) > 127) return {};
+        out += static_cast<char>(lowerAscii(c));
+    }
+    return out;
+}
+
+template <typename Character>
+bool isPlainTextPath(std::basic_string_view<Character> path) {
+    std::string ext = extensionLower(path);
+    return ext == ".txt" || ext == ".json" || ext == ".yaml" ||
+           ext == ".yml" || ext == ".toml" || ext == ".ini" ||
+           ext == ".csv" || ext == ".log";
+}
+
+// Fence language tag for a plain-text document's code block
+template <typename Character>
+const char* plainTextLanguage(std::basic_string_view<Character> path) {
+    std::string ext = extensionLower(path);
+    if (ext == ".json") return "json";
+    if (ext == ".yaml" || ext == ".yml") return "yaml";
+    if (ext == ".toml") return "toml";
+    if (ext == ".ini") return "ini";
+    if (ext == ".csv") return "csv";
+    if (ext == ".log") return "log";
+    return "";
+}
+
 template <typename Character>
 bool isSupportedPath(std::basic_string_view<Character> path) {
     const Character md[] = {
@@ -60,7 +95,32 @@ bool isSupportedPath(std::basic_string_view<Character> path) {
     };
     return hasExtension(path, std::basic_string_view<Character>(md, 3)) ||
         hasExtension(path, std::basic_string_view<Character>(markdown, 9)) ||
-        isMermaidPath(path);
+        isMermaidPath(path) || isPlainTextPath(path);
+}
+
+// A plain-text file becomes one highlighted code block: peek, tabs, and
+// export all reuse the normal code-block path
+qmd::ParseResult createPlainTextDocument(const std::string& content,
+                                         const char* language) {
+    auto start = std::chrono::high_resolution_clock::now();
+
+    qmd::ParseResult result;
+    result.root = std::make_shared<qmd::Element>(qmd::ElementType::Document);
+    auto block = std::make_shared<qmd::Element>(qmd::ElementType::CodeBlock);
+    block->language = language;
+    block->sourceOffset = 0;
+    block->parent = result.root.get();
+    auto text = std::make_shared<qmd::Element>(qmd::ElementType::Text);
+    text->text = content;
+    text->sourceOffset = 0;
+    text->parent = block.get();
+    block->children.push_back(std::move(text));
+    result.root->children.push_back(std::move(block));
+    result.success = true;
+    result.parseTimeUs = static_cast<size_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now() - start).count());
+    return result;
 }
 
 qmd::ParseResult createMermaidDocument(const std::string& content) {
@@ -88,6 +148,14 @@ bool isMermaidDocumentPath(std::string_view path) {
 
 bool isMermaidDocumentPath(std::wstring_view path) {
     return isMermaidPath(path);
+}
+
+bool isPlainTextDocumentPath(std::string_view path) {
+    return isPlainTextPath(path);
+}
+
+bool isPlainTextDocumentPath(std::wstring_view path) {
+    return isPlainTextPath(path);
 }
 
 bool isSupportedDocumentPath(std::string_view path) {
@@ -240,6 +308,9 @@ qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
                                const std::string& content,
                                std::string_view path) {
     if (isMermaidDocumentPath(path)) return createMermaidDocument(content);
+    if (isPlainTextDocumentPath(path)) {
+        return createPlainTextDocument(content, plainTextLanguage(path));
+    }
     std::string cleaned;
     if (blankFrontmatter(content, cleaned)) {
         auto result = parser.parse(cleaned);
@@ -253,6 +324,9 @@ qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
                                const std::string& content,
                                std::wstring_view path) {
     if (isMermaidDocumentPath(path)) return createMermaidDocument(content);
+    if (isPlainTextDocumentPath(path)) {
+        return createPlainTextDocument(content, plainTextLanguage(path));
+    }
     std::string cleaned;
     if (blankFrontmatter(content, cleaned)) {
         auto result = parser.parse(cleaned);

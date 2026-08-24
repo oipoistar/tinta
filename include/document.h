@@ -15,6 +15,10 @@ inline constexpr std::array<std::wstring_view, 3> DOCUMENT_FILE_EXTENSIONS = {
 
 bool isMermaidDocumentPath(std::string_view path);
 bool isMermaidDocumentPath(std::wstring_view path);
+// Plain-text sidecars (.txt/.json/.yaml/...) render as one highlighted
+// code block instead of being parsed as markdown
+bool isPlainTextDocumentPath(std::string_view path);
+bool isPlainTextDocumentPath(std::wstring_view path);
 bool isSupportedDocumentPath(std::string_view path);
 bool isSupportedDocumentPath(std::wstring_view path);
 bool isSupportedDropPath(std::wstring_view path);

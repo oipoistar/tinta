@@ -140,6 +140,8 @@ int detectLanguage(const std::wstring& lang) {
         return 2;  // Python
     if (lower == L"javascript" || lower == L"js" || lower == L"jsx" || lower == L"ts" || lower == L"typescript" || lower == L"tsx")
         return 3;  // JavaScript/TypeScript
+    if (lower == L"json")
+        return 3;  // JSON reads well under the JS rules (strings, numbers, null)
     if (lower == L"rust" || lower == L"rs")
         return 4;  // Rust
     if (lower == L"go" || lower == L"golang")

@@ -22,7 +22,10 @@ int main() {
     check(isMermaidDocumentPath("diagram.mmd"), ".mmd is detected as Mermaid");
     check(!isMermaidDocumentPath("notes.md"), ".md is not detected as Mermaid");
     check(!isSupportedDocumentPath("diagram.mmdd"), "similar extensions are rejected");
-    check(!isSupportedDocumentPath("notes.txt"), ".txt is not shown as a document");
+    check(isSupportedDocumentPath("notes.txt"), ".txt opens as a plain-text document");
+    check(isSupportedDocumentPath("data.JSON"), ".json is case-insensitive");
+    check(isPlainTextDocumentPath(L"config.yaml"), ".yaml is plain text");
+    check(!isPlainTextDocumentPath("notes.md"), ".md is not plain text");
     check(isSupportedDropPath(L"notes.txt"), "existing .txt drag-and-drop remains supported");
 
     qmd::MarkdownParser parser;
@@ -191,6 +194,53 @@ int main() {
         check(!has("file.mdx"), "longer extensions are not references");
         check(!has(".md"), "a bare extension is not a reference");
         check(!has("v2.md"), "dotted archive names are not references");
+    }
+
+    // Plain-text documents become one highlighted code block
+    {
+        auto json = parseDocument(
+            parser, "{\n  \"key\": true\n}\n", "data.json");
+        check(json.success, "json document parses");
+        check(json.root && json.root->children.size() == 1,
+              "json document is a single block");
+        if (json.root && json.root->children.size() == 1) {
+            const auto& block = json.root->children[0];
+            check(block->type == qmd::ElementType::CodeBlock,
+                  "json content becomes a code block");
+            check(block->language == "json",
+                  "json block carries its language tag");
+            check(!block->children.empty() &&
+                      block->children[0]->text.find("\"key\"") !=
+                          std::string::npos,
+                  "json content is preserved verbatim");
+        }
+        auto txt = parseDocument(parser, "# not a heading\n", "notes.txt");
+        check(txt.success && txt.root && !txt.root->children.empty() &&
+                  txt.root->children[0]->type ==
+                      qmd::ElementType::CodeBlock,
+              ".txt content stays literal instead of parsing as markdown");
+    }
+
+    // Text-file references are detected like .md ones (#7)
+    {
+        auto refs = parseDocument(parser,
+            "Check config.yaml and data/out.json plus error.log here.\n",
+            "notes.md");
+        check(refs.success, "text-file ref test parses");
+        std::vector<std::string> found;
+        std::function<void(const qmd::ElementPtr&)> walk =
+            [&](const qmd::ElementPtr& node) {
+            if (node->type == qmd::ElementType::Link &&
+                node->url.rfind("fileref:", 0) == 0) {
+                found.push_back(node->url.substr(8));
+            }
+            if (node->type != qmd::ElementType::Code &&
+                node->type != qmd::ElementType::CodeBlock) {
+                for (const auto& child : node->children) walk(child);
+            }
+        };
+        if (refs.root) walk(refs.root);
+        check(found.size() == 3, "all three text-file references detected");
     }
 
     // Emoji shortcodes become their emoji, code stays literal
