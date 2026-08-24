@@ -964,7 +964,9 @@ render_document:
             app.metrics.d2dInitUs / 1000.0,
             app.metrics.dwriteInitUs / 1000.0,
             app.metrics.fileLoadUs / 1000.0);
-        swprintf_s(stats, _countof(stats), L"%ls\n%ls", statsLine1, statsLine2);
+        swprintf_s(stats, _countof(stats), L"Tinta v%d.%d.%d  |  %ls\n%ls",
+                   TINTA_VERSION_MAJOR, TINTA_VERSION_MINOR,
+                   TINTA_VERSION_PATCH, statsLine1, statsLine2);
 
         float statsWidth = dpi(app, 600.0f);
         float statsHeight = dpi(app, 50.0f);

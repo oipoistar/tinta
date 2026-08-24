@@ -15,9 +15,13 @@
 #include <map>
 #include <string_view>
 #include <filesystem>
+#include <fstream>
 #include <urlmon.h>
 #include <thread>
+#include <d2d1_3.h>
+#include <shlwapi.h>
 #pragma comment(lib, "urlmon.lib")
+#pragma comment(lib, "shlwapi.lib")
 
 namespace {
 constexpr float kHugeWidth = 100000.0f;
@@ -2334,6 +2338,144 @@ static void asyncImageWorker(HWND hwnd, std::string src) {
     CoUninitialize();
 }
 
+// SVG images rasterize at 2x through the Direct2D SVG renderer
+// (ID2D1DeviceContext5, Windows 10 1703+). Shapes, paths, and gradients
+// render; <text> elements are not supported by D2D's SVG subset.
+static bool loadSvgBitmap(App& app, const std::wstring& path,
+                          App::ImageEntry& entry) {
+    if (!app.d2dFactory || !app.wicFactory || !app.renderTarget) return false;
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+    std::string bytes((std::istreambuf_iterator<char>(file)),
+                      std::istreambuf_iterator<char>());
+    if (bytes.empty()) return false;
+
+    auto makeDc5 = [&](UINT w, UINT h, IWICBitmap** wicOut,
+                       ID2D1DeviceContext5** dcOut) -> bool {
+        *wicOut = nullptr;
+        *dcOut = nullptr;
+        if (FAILED(app.wicFactory->CreateBitmap(
+                w, h, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand,
+                wicOut))) {
+            return false;
+        }
+        D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
+            D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                              D2D1_ALPHA_MODE_PREMULTIPLIED),
+            96.0f, 96.0f);
+        ID2D1RenderTarget* rt = nullptr;
+        if (FAILED(app.d2dFactory->CreateWicBitmapRenderTarget(*wicOut, props,
+                                                               &rt))) {
+            (*wicOut)->Release();
+            *wicOut = nullptr;
+            return false;
+        }
+        HRESULT hr = rt->QueryInterface(IID_PPV_ARGS(dcOut));
+        rt->Release();
+        if (FAILED(hr) || !*dcOut) {
+            // Pre-1703 Windows: no Direct2D SVG; the alt text shows instead
+            (*wicOut)->Release();
+            *wicOut = nullptr;
+            return false;
+        }
+        return true;
+    };
+    auto makeStream = [&]() -> IStream* {
+        return SHCreateMemStream((const BYTE*)bytes.data(),
+                                 (UINT)bytes.size());
+    };
+
+    // Pass 1: parse only, to learn the intrinsic size
+    float svgW = 0.0f, svgH = 0.0f;
+    {
+        IWICBitmap* tmp = nullptr;
+        ID2D1DeviceContext5* dc = nullptr;
+        if (!makeDc5(4, 4, &tmp, &dc)) return false;
+        IStream* stream = makeStream();
+        ID2D1SvgDocument* doc = nullptr;
+        if (stream &&
+            SUCCEEDED(dc->CreateSvgDocument(stream, D2D1::SizeF(512, 512),
+                                            &doc)) &&
+            doc) {
+            ID2D1SvgElement* root = nullptr;
+            doc->GetRoot(&root);
+            if (root) {
+                FLOAT w = 0, h = 0;
+                if (SUCCEEDED(root->GetAttributeValue(L"width", &w)) &&
+                    SUCCEEDED(root->GetAttributeValue(L"height", &h)) &&
+                    w > 0 && h > 0) {
+                    svgW = w;
+                    svgH = h;
+                } else {
+                    D2D1_SVG_VIEWBOX vb{};
+                    if (SUCCEEDED(root->GetAttributeValue(
+                            L"viewBox", D2D1_SVG_ATTRIBUTE_POD_TYPE_VIEWBOX,
+                            &vb, sizeof(vb))) &&
+                        vb.width > 0 && vb.height > 0) {
+                        svgW = vb.width;
+                        svgH = vb.height;
+                    }
+                }
+                root->Release();
+            }
+            doc->Release();
+        }
+        if (stream) stream->Release();
+        dc->Release();
+        tmp->Release();
+    }
+    if (svgW <= 0.0f || svgH <= 0.0f) {
+        svgW = 300.0f;  // the SVG spec's replaced-element default
+        svgH = 150.0f;
+    }
+    svgW = std::min(svgW, 4096.0f);
+    svgH = std::min(svgH, 4096.0f);
+
+    // Pass 2: rasterize at 2x for crisp zooming
+    UINT pxW = (UINT)std::ceil(svgW * 2.0f);
+    UINT pxH = (UINT)std::ceil(svgH * 2.0f);
+    IWICBitmap* wicBitmap = nullptr;
+    ID2D1DeviceContext5* dc = nullptr;
+    if (!makeDc5(pxW, pxH, &wicBitmap, &dc)) return false;
+    bool drawn = false;
+    {
+        IStream* stream = makeStream();
+        ID2D1SvgDocument* doc = nullptr;
+        if (stream &&
+            SUCCEEDED(dc->CreateSvgDocument(stream, D2D1::SizeF(svgW, svgH),
+                                            &doc)) &&
+            doc) {
+            dc->BeginDraw();
+            dc->Clear(D2D1::ColorF(0, 0, 0, 0));
+            dc->SetTransform(D2D1::Matrix3x2F::Scale(2.0f, 2.0f));
+            dc->DrawSvgDocument(doc);
+            drawn = SUCCEEDED(dc->EndDraw());
+            doc->Release();
+        }
+        if (stream) stream->Release();
+    }
+    dc->Release();
+
+    if (drawn) {
+        D2D1_BITMAP_PROPERTIES bp = D2D1::BitmapProperties(
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                              D2D1_ALPHA_MODE_PREMULTIPLIED),
+            192.0f, 192.0f);
+        ID2D1Bitmap* bitmap = nullptr;
+        if (SUCCEEDED(app.renderTarget->CreateBitmapFromWicBitmap(
+                wicBitmap, &bp, &bitmap)) &&
+            bitmap) {
+            entry.bitmap = bitmap;
+            entry.width = (int)svgW;
+            entry.height = (int)svgH;
+            entry.failed = false;
+        }
+    }
+    wicBitmap->Release();
+    return !entry.failed;
+}
+
 static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
     auto it = app.imageCache.find(src);
     if (it != app.imageCache.end()) {
@@ -2371,6 +2513,18 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
             widePath = imgPath.wstring();
         } else {
             widePath = wsrc;
+        }
+    }
+
+    // SVG renders through Direct2D's SVG document support instead of WIC
+    {
+        std::wstring lower = widePath;
+        for (auto& c : lower) c = (wchar_t)towlower(c);
+        if (lower.size() > 4 &&
+            lower.compare(lower.size() - 4, 4, L".svg") == 0) {
+            loadSvgBitmap(app, widePath, entry);
+            app.storeImageCacheEntry(src, std::move(entry));
+            return app.imageCache[src];
         }
     }
 
