@@ -58,6 +58,13 @@ void saveSettings(const Settings& settings) {
     file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
     file << "language=" << settings.language << "\n";
     file << "keyProfile=" << settings.keyProfile << "\n";
+    file << "checkUpdates=" << (settings.checkUpdates ? 1 : 0) << "\n";
+    if (!settings.lastUpdateCheck.empty()) {
+        file << "lastUpdateCheck=" << settings.lastUpdateCheck << "\n";
+    }
+    if (!settings.dismissedUpdate.empty()) {
+        file << "dismissedUpdate=" << settings.dismissedUpdate << "\n";
+    }
 
     // Remappable keys ("custom" profile), written with every save so the
     // section documents itself: change a value, restart Tinta
@@ -232,6 +239,12 @@ Settings loadSettings() {
             settings.browserFocusPath = (value == "1");
         } else if (key == "openInTabs") {
             settings.openInTabs = (value == "1");
+        } else if (key == "checkUpdates") {
+            settings.checkUpdates = (value == "1");
+        } else if (key == "lastUpdateCheck") {
+            settings.lastUpdateCheck = value;
+        } else if (key == "dismissedUpdate") {
+            settings.dismissedUpdate = value;
         } else if (key == "followSystemTheme") {
             settings.followSystemTheme = (value == "1");
         } else if (key == "lightThemeIndex") {

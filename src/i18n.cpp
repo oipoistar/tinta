@@ -194,6 +194,7 @@ const Entry kEntries[] = {
     { "table.copied", L"Table copied", L"\u5DF2\u590D\u5236\u8868\u683C", L"\u8868\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F", L"\uD45C \uBCF5\uC0AC\uB428" },
     { "diagram.png", L"Image", L"\u56FE\u7247", L"\u753B\u50CF", L"\uC774\uBBF8\uC9C0" },
     { "diagram.copied", L"Image copied", L"\u5DF2\u590D\u5236\u56FE\u7247", L"\u753B\u50CF\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F", L"\uC774\uBBF8\uC9C0 \uBCF5\uC0AC\uB428" },
+    { "update.available", L"Tinta %ls is available", L"Tinta %ls \u5DF2\u53D1\u5E03", L"Tinta %ls \u304C\u5229\u7528\u53EF\u80FD\u3067\u3059", L"Tinta %ls \uC0AC\uC6A9 \uAC00\uB2A5" },
     { "ctx.new", L"New File", L"\u65B0\u5EFA\u6587\u4EF6", L"\u65B0\u898F\u30D5\u30A1\u30A4\u30EB", L"\uC0C8 \uD30C\uC77C" },
     { "ctx.print", L"Print / PDF", L"\u6253\u5370 / PDF", L"\u5370\u5237 / PDF", L"\uCD9C\uB825 / PDF" },
     { "ctx.edit", L"Edit", L"\u7F16\u8F91", L"\u7DE8\u96C6", L"\uD3B8\uC9D1" },

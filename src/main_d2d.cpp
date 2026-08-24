@@ -28,6 +28,11 @@
 #include "file_utils.h"
 #include "overlays.h"
 #include "annotations.h"
+
+#include <appmodel.h>
+#include <winhttp.h>
+#include <thread>
+#pragma comment(lib, "winhttp.lib")
 #include "input.h"
 #include "editor.h"
 #include "print.h"
@@ -950,6 +955,76 @@ render_document:
     }
 
     // Draw stats
+    // Update-available chip: small, silent, bottom right; the cross
+    // dismisses this version for good, a click opens the release page
+    app.updateChipRect = D2D1_RECT_F{};
+    app.updateCloseRect = D2D1_RECT_F{};
+    if (app.updateAvailable && !app.updateDismissed && !app.zenMode &&
+        !app.showPrintPreview && !app.showLightbox && app.dwriteFactory &&
+        (app.folderBrowserFormat || app.textFormat)) {
+        wchar_t label[96];
+        std::wstring wideVersion = toWide(app.updateVersion);
+        swprintf_s(label, _countof(label), tr(app, "update.available"),
+                   wideVersion.c_str());
+        IDWriteTextLayout* layout = nullptr;
+        app.dwriteFactory->CreateTextLayout(
+            label, (UINT32)wcslen(label),
+            app.folderBrowserFormat ? app.folderBrowserFormat
+                                    : app.textFormat,
+            600.0f, 40.0f, &layout);
+        if (layout) {
+            layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            DWRITE_TEXT_METRICS m{};
+            layout->GetMetrics(&m);
+            float pad = dpi(app, 12.0f);
+            float closeW = dpi(app, 20.0f);
+            float chipH = dpi(app, 32.0f);
+            float chipW =
+                pad + m.width + dpi(app, 8.0f) + closeW + pad * 0.5f;
+            float cx = (float)app.width - chipW - dpi(app, 18.0f);
+            float cy = (float)app.height - chipH - dpi(app, 18.0f) -
+                       (app.showStats ? dpi(app, 55.0f) : 0.0f);
+            D2D1_RECT_F chip = D2D1::RectF(cx, cy, cx + chipW, cy + chipH);
+
+            D2D1_COLOR_F bg = app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
+                                               : hexColor(0xF8F8F8, 0.97f);
+            app.brush->SetColor(bg);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(chip, chipH * 0.5f, chipH * 0.5f),
+                app.brush);
+            D2D1_COLOR_F border = app.theme.accent;
+            border.a = 0.6f;
+            app.brush->SetColor(border);
+            app.renderTarget->DrawRoundedRectangle(
+                D2D1::RoundedRect(chip, chipH * 0.5f, chipH * 0.5f),
+                app.brush, 1.0f);
+
+            app.brush->SetColor(app.theme.text);
+            app.renderTarget->DrawTextLayout(
+                D2D1::Point2F(cx + pad, cy + (chipH - m.height) * 0.5f),
+                layout, app.brush);
+            layout->Release();
+
+            float ccx = cx + pad + m.width + dpi(app, 8.0f) + closeW * 0.5f;
+            float ccy = cy + chipH * 0.5f;
+            float s = dpi(app, 4.0f);
+            D2D1_COLOR_F cross = app.theme.text;
+            cross.a = 0.6f;
+            app.brush->SetColor(cross);
+            app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy - s),
+                                       D2D1::Point2F(ccx + s, ccy + s),
+                                       app.brush, 1.4f);
+            app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy + s),
+                                       D2D1::Point2F(ccx + s, ccy - s),
+                                       app.brush, 1.4f);
+
+            app.updateChipRect = chip;
+            app.updateCloseRect = D2D1::RectF(ccx - closeW * 0.5f, cy,
+                                              ccx + closeW * 0.5f,
+                                              cy + chipH);
+        }
+    }
+
     if (app.showStats) {
         wchar_t stats[768];
         wchar_t statsLine1[256];
@@ -1026,6 +1101,99 @@ render_document:
     if (app.confirmExitPending) renderConfirmExitDialog(app);
 
     app.renderTarget->EndDraw();
+}
+
+// --- Update check ---
+//
+// Portable builds ask GitHub for the latest release tag at most once a
+// day, on a worker thread that starts ten seconds after startup. Store
+// installs update through the Store and skip all of this. The result
+// surfaces as a small dismissable chip in the corner, never a dialog.
+
+static bool isStorePackaged() {
+    UINT32 length = 0;
+    return GetCurrentPackageFullName(&length, nullptr) !=
+           APPMODEL_ERROR_NO_PACKAGE;
+}
+
+static std::string todayString() {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    char buf[16];
+    sprintf_s(buf, _countof(buf), "%04u-%02u-%02u", st.wYear, st.wMonth,
+              st.wDay);
+    return buf;
+}
+
+// "X.Y.Z" newer than the running build?
+static bool isNewerVersion(const std::string& version) {
+    int major = 0, minor = 0, patch = 0;
+    if (sscanf_s(version.c_str(), "%d.%d.%d", &major, &minor, &patch) < 2) {
+        return false;
+    }
+    if (major != TINTA_VERSION_MAJOR) return major > TINTA_VERSION_MAJOR;
+    if (minor != TINTA_VERSION_MINOR) return minor > TINTA_VERSION_MINOR;
+    return patch > TINTA_VERSION_PATCH;
+}
+
+static void updateCheckWorker(HWND hwnd) {
+    std::string version;
+    HINTERNET session = WinHttpOpen(
+        L"tinta-update-check", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (session) {
+        HINTERNET connect = WinHttpConnect(session, L"api.github.com",
+                                           INTERNET_DEFAULT_HTTPS_PORT, 0);
+        if (connect) {
+            HINTERNET request = WinHttpOpenRequest(
+                connect, L"GET", L"/repos/oipoistar/tinta/releases/latest",
+                nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                WINHTTP_FLAG_SECURE);
+            if (request) {
+                if (WinHttpSendRequest(request,
+                                       WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                       WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+                    WinHttpReceiveResponse(request, nullptr)) {
+                    std::string body;
+                    DWORD avail = 0;
+                    while (WinHttpQueryDataAvailable(request, &avail) &&
+                           avail > 0 && body.size() < 262144) {
+                        size_t at = body.size();
+                        body.resize(at + avail);
+                        DWORD got = 0;
+                        if (!WinHttpReadData(request, &body[at], avail,
+                                             &got) ||
+                            got == 0) {
+                            body.resize(at);
+                            break;
+                        }
+                        body.resize(at + got);
+                    }
+                    size_t tag = body.find("\"tag_name\"");
+                    if (tag != std::string::npos) {
+                        size_t colon = body.find(':', tag);
+                        size_t open = body.find('"', colon + 1);
+                        size_t close = open == std::string::npos
+                                           ? std::string::npos
+                                           : body.find('"', open + 1);
+                        if (close != std::string::npos && close > open + 1) {
+                            version = body.substr(open + 1, close - open - 1);
+                            if (!version.empty() && version[0] == 'v') {
+                                version.erase(0, 1);
+                            }
+                        }
+                    }
+                }
+                WinHttpCloseHandle(request);
+            }
+            WinHttpCloseHandle(connect);
+        }
+        WinHttpCloseHandle(session);
+    }
+    auto* result = new std::string(std::move(version));
+    if (!PostMessageW(hwnd, WM_APP_UPDATE_CHECK, 0, (LPARAM)result)) {
+        delete result;
+    }
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -1385,6 +1553,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 KillTimer(hwnd, TIMER_FOLDER_SEARCH);
                 startFolderSearchScan(*app);
             }
+            if (wParam == TIMER_UPDATE_CHECK && app) {
+                KillTimer(hwnd, TIMER_UPDATE_CHECK);
+                std::thread(updateCheckWorker, hwnd).detach();
+            }
             if (wParam == TIMER_SELECT_SCROLL && app) {
                 handleSelectScrollTimer(*app, hwnd);
             }
@@ -1420,6 +1592,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // Folder search worker finished (handler takes ownership)
             if (app) completeFolderSearch(*app, (void*)lParam);
             return 0;
+
+        case WM_APP_UPDATE_CHECK: {
+            // Update worker finished (handler takes ownership). A failed
+            // check does not stamp the day, so it retries next launch.
+            auto* version = (std::string*)lParam;
+            if (app && version && !version->empty()) {
+                app->updateLastCheck = todayString();
+                if (isNewerVersion(*version) &&
+                    *version != app->updateDismissedVersion) {
+                    app->updateVersion = *version;
+                    app->updateAvailable = true;
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+            }
+            delete version;
+            return 0;
+        }
 
         case WM_APP_GPU_READY:
             // Driver is warm: swap the startup software render target for a
@@ -1463,6 +1652,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
+                settings.checkUpdates = app->updateCheckEnabled;
+                settings.lastUpdateCheck = app->updateLastCheck;
+                settings.dismissedUpdate = app->updateDismissedVersion;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
                 settings.browserFocusPath = app->browserFocusPath;
                 settings.openInTabs = app->openInTabs;
@@ -1629,6 +1821,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // Load saved settings
     Settings savedSettings = loadSettings();
     app.followSystemTheme = savedSettings.followSystemTheme;
+
+    // Update check state (the timer arms after the window exists)
+    app.updateCheckEnabled = savedSettings.checkUpdates;
+    app.updateLastCheck = savedSettings.lastUpdateCheck;
+    app.updateDismissedVersion = savedSettings.dismissedUpdate;
     app.lightThemeIndex = savedSettings.lightThemeIndex;
     app.darkThemeIndex = savedSettings.darkThemeIndex;
     app.folderSearchEnabled = savedSettings.folderSearchEnabled;
@@ -1976,6 +2173,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     }
     UpdateWindow(app.hwnd);
     app.metrics.showWindowUs = usElapsed(t0);
+
+    // Update check: portable builds only, at most once a day, and only
+    // long after startup has finished (10 s timer arms a worker thread)
+    if (app.updateCheckEnabled && !isStorePackaged() &&
+        app.updateLastCheck != todayString()) {
+        SetTimer(app.hwnd, TIMER_UPDATE_CHECK, 10000, nullptr);
+    }
 
     app.metrics.totalStartupUs = usElapsed(startupStart);
 
