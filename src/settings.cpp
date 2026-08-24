@@ -184,6 +184,18 @@ void persistReadingPosition(const std::string& path, float scrollY,
     saveSettings(settings);
 }
 
+// A theme change persists immediately: windows spawned afterwards
+// (quick notes, drag-outs) read settings.ini at startup and would
+// otherwise come up in the look from the previous session
+void persistThemeChoice(const App& app) {
+    Settings settings = loadSettings();
+    settings.themeIndex = app.currentThemeIndex;
+    settings.followSystemTheme = app.followSystemTheme;
+    settings.lightThemeIndex = app.lightThemeIndex;
+    settings.darkThemeIndex = app.darkThemeIndex;
+    saveSettings(settings);
+}
+
 // Start page recents: every successful document open moves (or inserts)
 // its path at the head of the [Recent] list
 void persistRecentFile(const std::string& path) {

@@ -1393,6 +1393,7 @@ void renderHelpOverlay(App& app) {
         {L"Ctrl+A",       tr(app, "help.general.select_all")},
         {L"Ctrl+C",       tr(app, "help.general.copy")},
         {L"Ctrl+N",       tr(app, "help.general.new_note")},
+        {L"Ctrl+Shift+N", tr(app, "help.general.new_window")},
         {L"Ctrl+P",       tr(app, "ctx.print")},
         {L"ESC",          tr(app, "help.general.close")},
         {kQuit.c_str(),   tr(app, "help.general.quit")},

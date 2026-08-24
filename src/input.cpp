@@ -2022,8 +2022,11 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         InvalidateRect(hwnd, nullptr, FALSE);
     } else {
         // Start page: clicks act on its controls, there is nothing to
-        // select underneath
+        // select underneath. The capture from this press is let go up
+        // front: the Open action runs a modal picker whose release never
+        // reaches this window.
         if (startPageActive(app)) {
+            if (GetCapture() == hwnd) ReleaseCapture();
             int hit = startPageHitAt(app, (float)GET_X_LPARAM(lParam),
                                      (float)GET_Y_LPARAM(lParam));
             app.swallowNextMouseUp = true;
@@ -2507,6 +2510,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     if (app.tabDragIndex >= 0) {
         tabDragEnd(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
     }
+    // The press captured the mouse (selection drags need it); the release
+    // must let go no matter which branch handles it. A branch that
+    // returned early used to leak the capture, which silently killed the
+    // caption buttons' non-client hit-testing until the next full click.
+    if (GetCapture() == hwnd) ReleaseCapture();
     // Release belonging to a context-menu item click: already handled
     if (app.swallowNextMouseUp) {
         app.swallowNextMouseUp = false;
@@ -2627,6 +2635,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                     }
                     app.themePreviewFormats.clear();
                     applyTheme(app, idx);
+                    persistThemeChoice(app);
                 }
                 closeThemeEditor(app, false);
                 return;
@@ -2923,6 +2932,8 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 if (themeAt(clickedTheme).isDark) app.darkThemeIndex = clickedTheme;
                 else app.lightThemeIndex = clickedTheme;
             }
+            // New windows spawned from here on come up in this theme
+            persistThemeChoice(app);
             app.showThemeChooser = false;
             app.themeChooserAnimation = 0;
         }
@@ -3358,11 +3369,13 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 break;
             case 'N':
-                // Quick note. On the bare-launch welcome document the note
-                // takes over this window instead of leaving the welcome
-                // behind (#121); any real document keeps its window and a
-                // fresh one spawns
-                if (app.currentFile.empty()) {
+                // Quick note, Notepad model: Ctrl+N stays in this window
+                // (the launcher or an empty tab is taken over in place, a
+                // document gets a fresh note tab); Ctrl+Shift+N spawns a
+                // separate window
+                if (GetKeyState(VK_SHIFT) & 0x8000) {
+                    launchQuickNoteWindow();
+                } else if (app.currentFile.empty()) {
                     // The keystroke's WM_CHAR must not type into the
                     // editor the takeover just opened
                     app.swallowCharsUntil =
@@ -3374,7 +3387,10 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     updateWindowTitle(app);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 } else {
-                    launchQuickNoteWindow();
+                    app.swallowCharsUntil =
+                        std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(150);
+                    tabOpenQuickNote(app, hwnd);
                 }
                 break;
             case 'A': {

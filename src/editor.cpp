@@ -1506,7 +1506,16 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 saveEditorFile(app, hwnd);
                 return;
             case 'N':
-                launchQuickNoteWindow();
+                // Notepad model: Ctrl+N opens a fresh note tab (this
+                // buffer parks in its tab), Ctrl+Shift+N a new window
+                if (shift) {
+                    launchQuickNoteWindow();
+                } else {
+                    app.swallowCharsUntil =
+                        std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(150);
+                    tabOpenQuickNote(app, hwnd);
+                }
                 return;
             case 'Z':
                 editorUndo(app);

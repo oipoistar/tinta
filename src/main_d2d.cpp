@@ -1563,6 +1563,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 int want = autoThemeIndex(*app);
                 if (want != app->currentThemeIndex) {
                     applyTheme(*app, want);
+                    persistThemeChoice(*app);
                 }
             }
             return 0;

@@ -21,6 +21,9 @@ float findReadingZoom(const Settings& settings, const std::string& path);
 void persistRecentFile(const std::string& path);
 void clearRecentFiles();
 
+// Theme changes persist immediately so new windows spawn in the same look
+void persistThemeChoice(const App& app);
+
 // User-remappable single-key actions (#77), written to settings.ini as a
 // [Keys] section. Char actions trigger via WM_CHAR (edit ':', help '?');
 // the rest are WM_KEYDOWN virtual-key codes. Ctrl combos stay fixed.

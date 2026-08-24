@@ -75,6 +75,7 @@ const Entry kEntries[] = {
     { "help.general.select_all",   L"Select all text",              L"\u5168\u9009\u6587\u672C",                          L"\u3059\u3079\u3066\u306E\u30C6\u30AD\u30B9\u30C8\u3092\u9078\u629E", L"\uBAA8\uB4E0 \uD14D\uC2A4\uD2B8 \uC120\uD0DD" },
     { "help.general.copy",         L"Copy selection",               L"\u590D\u5236\u9009\u4E2D\u5185\u5BB9",              L"\u9078\u629E\u7BC4\u56F2\u3092\u30B3\u30D4\u30FC", L"\uC120\uD0DD \uB0B4\uC6A9 \uBCF5\uC0AC" },
     { "help.general.new_note",     L"New quick note",               L"\u65B0\u5EFA\u5FEB\u901F\u7B14\u8BB0",              L"\u65B0\u3057\u3044\u30AF\u30A4\u30C3\u30AF\u30CE\u30FC\u30C8", L"\uC0C8 \uBE60\uB978 \uBA54\uBAA8" },
+    { "help.general.new_window",   L"New window",                   L"\u65B0\u5EFA\u7A97\u53E3",                  L"\u65B0\u3057\u3044\u30A6\u30A3\u30F3\u30C9\u30A6", L"\uC0C8 \uCC3D" },
     { "help.general.close",        L"Close overlay / Quit",         L"\u5173\u95ED\u6D6E\u5C42 / \u9000\u51FA",           L"\u30AA\u30FC\u30D0\u30FC\u30EC\u30A4\u3092\u9589\u3058\u308B / \u7D42\u4E86", L"\uC624\uBC84\uB808\uC774 \uB2EB\uAE30 / \uC885\uB8CC" },
     { "help.general.quit",         L"Quit",                         L"\u9000\u51FA",                                      L"\u7D42\u4E86", L"\uC885\uB8CC" },
 
