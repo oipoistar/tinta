@@ -628,6 +628,196 @@ static bool isFileRefToken(const std::string& token, size_t extLength) {
     return true;
 }
 
+// GitHub-style :shortcode: emoji. Names are the common GitHub set; the
+// replacements are UTF-8 byte sequences (DirectWrite's emoji fallback
+// renders them in color).
+struct EmojiEntry {
+    const char* name;
+    const char* utf8;
+};
+static const EmojiEntry kEmoji[] = {
+    {"+1", "\xF0\x9F\x91\x8D"}, {"-1", "\xF0\x9F\x91\x8E"},
+    {"100", "\xF0\x9F\x92\xAF"}, {"airplane", "\xE2\x9C\x88\xEF\xB8\x8F"},
+    {"alarm_clock", "\xE2\x8F\xB0"}, {"alien", "\xF0\x9F\x91\xBD"},
+    {"anchor", "\xE2\x9A\x93"}, {"angry", "\xF0\x9F\x98\xA0"},
+    {"arrow_down", "\xE2\xAC\x87\xEF\xB8\x8F"},
+    {"arrow_left", "\xE2\xAC\x85\xEF\xB8\x8F"},
+    {"arrow_right", "\xE2\x9E\xA1\xEF\xB8\x8F"},
+    {"arrow_up", "\xE2\xAC\x86\xEF\xB8\x8F"},
+    {"art", "\xF0\x9F\x8E\xA8"}, {"balloon", "\xF0\x9F\x8E\x88"},
+    {"bar_chart", "\xF0\x9F\x93\x8A"}, {"battery", "\xF0\x9F\x94\x8B"},
+    {"bear", "\xF0\x9F\x90\xBB"}, {"bee", "\xF0\x9F\x90\x9D"},
+    {"beer", "\xF0\x9F\x8D\xBA"}, {"bell", "\xF0\x9F\x94\x94"},
+    {"bike", "\xF0\x9F\x9A\xB2"}, {"birthday", "\xF0\x9F\x8E\x82"},
+    {"blossom", "\xF0\x9F\x8C\xBC"}, {"blue_circle", "\xF0\x9F\x94\xB5"},
+    {"bomb", "\xF0\x9F\x92\xA3"}, {"book", "\xF0\x9F\x93\x96"},
+    {"bookmark", "\xF0\x9F\x94\x96"}, {"books", "\xF0\x9F\x93\x9A"},
+    {"boom", "\xF0\x9F\x92\xA5"}, {"brain", "\xF0\x9F\xA7\xA0"},
+    {"bug", "\xF0\x9F\x90\x9B"}, {"bulb", "\xF0\x9F\x92\xA1"},
+    {"bus", "\xF0\x9F\x9A\x8C"}, {"butterfly", "\xF0\x9F\xA6\x8B"},
+    {"cake", "\xF0\x9F\x8D\xB0"}, {"calendar", "\xF0\x9F\x93\x85"},
+    {"camera", "\xF0\x9F\x93\xB7"}, {"candle", "\xF0\x9F\x95\xAF\xEF\xB8\x8F"},
+    {"car", "\xF0\x9F\x9A\x97"}, {"cat", "\xF0\x9F\x90\xB1"},
+    {"cd", "\xF0\x9F\x92\xBF"},
+    {"chart_with_downwards_trend", "\xF0\x9F\x93\x89"},
+    {"chart_with_upwards_trend", "\xF0\x9F\x93\x88"},
+    {"checkered_flag", "\xF0\x9F\x8F\x81"},
+    {"clap", "\xF0\x9F\x91\x8F"}, {"clapper", "\xF0\x9F\x8E\xAC"},
+    {"clipboard", "\xF0\x9F\x93\x8B"},
+    {"cloud", "\xE2\x98\x81\xEF\xB8\x8F"},
+    {"clown_face", "\xF0\x9F\xA4\xA1"}, {"coffee", "\xE2\x98\x95"},
+    {"comet", "\xE2\x98\x84\xEF\xB8\x8F"},
+    {"computer", "\xF0\x9F\x92\xBB"},
+    {"construction", "\xF0\x9F\x9A\xA7"},
+    {"crescent_moon", "\xF0\x9F\x8C\x99"},
+    {"crossed_fingers", "\xF0\x9F\xA4\x9E"}, {"crown", "\xF0\x9F\x91\x91"},
+    {"cry", "\xF0\x9F\x98\xA2"}, {"dart", "\xF0\x9F\x8E\xAF"},
+    {"date", "\xF0\x9F\x93\x85"}, {"deciduous_tree", "\xF0\x9F\x8C\xB3"},
+    {"desktop_computer", "\xF0\x9F\x96\xA5\xEF\xB8\x8F"},
+    {"dog", "\xF0\x9F\x90\xB6"}, {"dollar", "\xF0\x9F\x92\xB5"},
+    {"electric_plug", "\xF0\x9F\x94\x8C"},
+    {"email", "\xE2\x9C\x89\xEF\xB8\x8F"},
+    {"envelope", "\xE2\x9C\x89\xEF\xB8\x8F"},
+    {"evergreen_tree", "\xF0\x9F\x8C\xB2"},
+    {"exclamation", "\xE2\x9D\x97"}, {"eyes", "\xF0\x9F\x91\x80"},
+    {"factory", "\xF0\x9F\x8F\xAD"}, {"file_folder", "\xF0\x9F\x93\x81"},
+    {"fire", "\xF0\x9F\x94\xA5"}, {"flashlight", "\xF0\x9F\x94\xA6"},
+    {"floppy_disk", "\xF0\x9F\x92\xBE"},
+    {"four_leaf_clover", "\xF0\x9F\x8D\x80"},
+    {"fox_face", "\xF0\x9F\xA6\x8A"}, {"game_die", "\xF0\x9F\x8E\xB2"},
+    {"gear", "\xE2\x9A\x99\xEF\xB8\x8F"}, {"gem", "\xF0\x9F\x92\x8E"},
+    {"ghost", "\xF0\x9F\x91\xBB"}, {"gift", "\xF0\x9F\x8E\x81"},
+    {"globe_with_meridians", "\xF0\x9F\x8C\x90"},
+    {"green_circle", "\xF0\x9F\x9F\xA2"}, {"grin", "\xF0\x9F\x98\x81"},
+    {"guitar", "\xF0\x9F\x8E\xB8"}, {"hammer", "\xF0\x9F\x94\xA8"},
+    {"handshake", "\xF0\x9F\xA4\x9D"},
+    {"heart", "\xE2\x9D\xA4\xEF\xB8\x8F"},
+    {"heart_eyes", "\xF0\x9F\x98\x8D"},
+    {"heavy_check_mark", "\xE2\x9C\x94\xEF\xB8\x8F"},
+    {"heavy_minus_sign", "\xE2\x9E\x96"},
+    {"heavy_plus_sign", "\xE2\x9E\x95"},
+    {"hospital", "\xF0\x9F\x8F\xA5"}, {"hourglass", "\xE2\x8C\x9B"},
+    {"hourglass_flowing_sand", "\xE2\x8F\xB3"},
+    {"house", "\xF0\x9F\x8F\xA0"}, {"inbox_tray", "\xF0\x9F\x93\xA5"},
+    {"information_source", "\xE2\x84\xB9\xEF\xB8\x8F"},
+    {"iphone", "\xF0\x9F\x93\xB1"}, {"jack_o_lantern", "\xF0\x9F\x8E\x83"},
+    {"joy", "\xF0\x9F\x98\x82"}, {"key", "\xF0\x9F\x94\x91"},
+    {"keyboard", "\xE2\x8C\xA8\xEF\xB8\x8F"},
+    {"label", "\xF0\x9F\x8F\xB7\xEF\xB8\x8F"},
+    {"leaves", "\xF0\x9F\x8D\x83"}, {"link", "\xF0\x9F\x94\x97"},
+    {"lock", "\xF0\x9F\x94\x92"}, {"loud_sound", "\xF0\x9F\x94\x8A"},
+    {"loudspeaker", "\xF0\x9F\x93\xA2"}, {"mag", "\xF0\x9F\x94\x8D"},
+    {"mega", "\xF0\x9F\x93\xA3"}, {"memo", "\xF0\x9F\x93\x9D"},
+    {"microphone", "\xF0\x9F\x8E\xA4"}, {"microscope", "\xF0\x9F\x94\xAC"},
+    {"moneybag", "\xF0\x9F\x92\xB0"}, {"movie_camera", "\xF0\x9F\x8E\xA5"},
+    {"muscle", "\xF0\x9F\x92\xAA"}, {"musical_note", "\xF0\x9F\x8E\xB5"},
+    {"mute", "\xF0\x9F\x94\x87"}, {"neutral_face", "\xF0\x9F\x98\x90"},
+    {"new", "\xF0\x9F\x86\x95"}, {"newspaper", "\xF0\x9F\x93\xB0"},
+    {"no_entry", "\xE2\x9B\x94"}, {"ok", "\xF0\x9F\x86\x97"},
+    {"ok_hand", "\xF0\x9F\x91\x8C"},
+    {"open_file_folder", "\xF0\x9F\x93\x82"},
+    {"outbox_tray", "\xF0\x9F\x93\xA4"}, {"owl", "\xF0\x9F\xA6\x89"},
+    {"package", "\xF0\x9F\x93\xA6"},
+    {"page_facing_up", "\xF0\x9F\x93\x84"},
+    {"panda_face", "\xF0\x9F\x90\xBC"}, {"paperclip", "\xF0\x9F\x93\x8E"},
+    {"pencil2", "\xE2\x9C\x8F\xEF\xB8\x8F"},
+    {"penguin", "\xF0\x9F\x90\xA7"}, {"pill", "\xF0\x9F\x92\x8A"},
+    {"pizza", "\xF0\x9F\x8D\x95"}, {"point_left", "\xF0\x9F\x91\x88"},
+    {"point_right", "\xF0\x9F\x91\x89"}, {"poop", "\xF0\x9F\x92\xA9"},
+    {"popcorn", "\xF0\x9F\x8D\xBF"}, {"pray", "\xF0\x9F\x99\x8F"},
+    {"pushpin", "\xF0\x9F\x93\x8C"}, {"puzzle_piece", "\xF0\x9F\xA7\xA9"},
+    {"question", "\xE2\x9D\x93"}, {"rabbit", "\xF0\x9F\x90\xB0"},
+    {"rainbow", "\xF0\x9F\x8C\x88"}, {"raised_hands", "\xF0\x9F\x99\x8C"},
+    {"recycle", "\xE2\x99\xBB\xEF\xB8\x8F"},
+    {"red_circle", "\xF0\x9F\x94\xB4"}, {"robot", "\xF0\x9F\xA4\x96"},
+    {"rocket", "\xF0\x9F\x9A\x80"}, {"roll_eyes", "\xF0\x9F\x99\x84"},
+    {"rose", "\xF0\x9F\x8C\xB9"},
+    {"rotating_light", "\xF0\x9F\x9A\xA8"},
+    {"round_pushpin", "\xF0\x9F\x93\x8D"}, {"runner", "\xF0\x9F\x8F\x83"},
+    {"satellite", "\xF0\x9F\x9B\xB0\xEF\xB8\x8F"},
+    {"school", "\xF0\x9F\x8F\xAB"}, {"scissors", "\xE2\x9C\x82\xEF\xB8\x8F"},
+    {"scream", "\xF0\x9F\x98\xB1"}, {"seedling", "\xF0\x9F\x8C\xB1"},
+    {"shield", "\xF0\x9F\x9B\xA1\xEF\xB8\x8F"}, {"ship", "\xF0\x9F\x9A\xA2"},
+    {"shrug", "\xF0\x9F\xA4\xB7"}, {"skull", "\xF0\x9F\x92\x80"},
+    {"sleeping", "\xF0\x9F\x98\xB4"}, {"smile", "\xF0\x9F\x98\x84"},
+    {"smirk", "\xF0\x9F\x98\x8F"}, {"snail", "\xF0\x9F\x90\x8C"},
+    {"snowflake", "\xE2\x9D\x84\xEF\xB8\x8F"}, {"sob", "\xF0\x9F\x98\xAD"},
+    {"sos", "\xF0\x9F\x86\x98"}, {"sparkles", "\xE2\x9C\xA8"},
+    {"speech_balloon", "\xF0\x9F\x92\xAC"}, {"star", "\xE2\xAD\x90"},
+    {"star2", "\xF0\x9F\x8C\x9F"}, {"stopwatch", "\xE2\x8F\xB1\xEF\xB8\x8F"},
+    {"sunglasses", "\xF0\x9F\x98\x8E"},
+    {"sunny", "\xE2\x98\x80\xEF\xB8\x8F"},
+    {"sweat_smile", "\xF0\x9F\x98\x85"}, {"tada", "\xF0\x9F\x8E\x89"},
+    {"telephone", "\xE2\x98\x8E\xEF\xB8\x8F"},
+    {"telescope", "\xF0\x9F\x94\xAD"}, {"thinking", "\xF0\x9F\xA4\x94"},
+    {"thought_balloon", "\xF0\x9F\x92\xAD"},
+    {"thumbsdown", "\xF0\x9F\x91\x8E"}, {"thumbsup", "\xF0\x9F\x91\x8D"},
+    {"top", "\xF0\x9F\x94\x9D"}, {"trophy", "\xF0\x9F\x8F\x86"},
+    {"tulip", "\xF0\x9F\x8C\xB7"}, {"turtle", "\xF0\x9F\x90\xA2"},
+    {"umbrella", "\xE2\x98\x94"}, {"unicorn", "\xF0\x9F\xA6\x84"},
+    {"video_camera", "\xF0\x9F\x93\xB9"},
+    {"video_game", "\xF0\x9F\x8E\xAE"},
+    {"warning", "\xE2\x9A\xA0\xEF\xB8\x8F"},
+    {"wastebasket", "\xF0\x9F\x97\x91\xEF\xB8\x8F"},
+    {"wave", "\xF0\x9F\x91\x8B"}, {"whale", "\xF0\x9F\x90\xB3"},
+    {"white_check_mark", "\xE2\x9C\x85"},
+    {"white_circle", "\xE2\x9A\xAA"}, {"wink", "\xF0\x9F\x98\x89"},
+    {"world_map", "\xF0\x9F\x97\xBA\xEF\xB8\x8F"},
+    {"wrench", "\xF0\x9F\x94\xA7"}, {"x", "\xE2\x9D\x8C"},
+    {"yellow_circle", "\xF0\x9F\x9F\xA1"}, {"zap", "\xE2\x9A\xA1"},
+    {"zzz", "\xF0\x9F\x92\xA4"},
+};
+
+static const char* emojiFor(const std::string& name) {
+    for (const auto& entry : kEmoji) {
+        if (name == entry.name) return entry.utf8;
+    }
+    return nullptr;
+}
+
+static bool isEmojiNameChar(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' ||
+           c == '+' || c == '-';
+}
+
+// Replaces :shortcode: with its emoji, in place, in every Text node
+// outside code
+static void splitEmojiShortcodes(const ElementPtr& parent) {
+    if (parent->type == ElementType::Code ||
+        parent->type == ElementType::CodeBlock ||
+        parent->type == ElementType::MermaidDiagram) {
+        return;
+    }
+    for (auto& child : parent->children) {
+        if (child->type != ElementType::Text) {
+            splitEmojiShortcodes(child);
+            continue;
+        }
+        std::string& text = child->text;
+        size_t pos = 0;
+        while ((pos = text.find(':', pos)) != std::string::npos) {
+            size_t end = pos + 1;
+            while (end < text.size() && isEmojiNameChar(text[end]) &&
+                   end - pos <= 40) {
+                end++;
+            }
+            if (end >= text.size() || text[end] != ':' || end == pos + 1) {
+                pos = end;
+                continue;
+            }
+            const char* emoji =
+                emojiFor(text.substr(pos + 1, end - pos - 1));
+            if (emoji) {
+                text.replace(pos, end - pos + 1, emoji);
+                pos += strlen(emoji);
+            } else {
+                // The closing colon may open the next shortcode
+                pos = end;
+            }
+        }
+    }
+}
+
 static void splitFileRefs(const ElementPtr& parent) {
     if (parent->type == ElementType::Code ||
         parent->type == ElementType::CodeBlock ||
@@ -761,6 +951,7 @@ ParseResult MarkdownParser::parse(const std::string& markdown) {
     splitInlineExtensions(ctx.root);
     splitWikiLinks(ctx.root);
     splitFileRefs(ctx.root);
+    splitEmojiShortcodes(ctx.root);
     detectGitHubAlerts(ctx.root);
     result.root = ctx.root;
     result.success = true;

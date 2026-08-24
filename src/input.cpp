@@ -33,6 +33,9 @@ static HCURSOR cursorSizeWE = LoadCursor(nullptr, IDC_SIZEWE);
 static const App::TaskRect* taskRectAt(const App& app);
 static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY);
 static bool diagramPngButtonAt(const App& app, int mouseX, int mouseY);
+static bool tableFitButtonAt(const App& app, int mouseX, int mouseY);
+static bool diagramFitButtonAt(const App& app, int mouseX, int mouseY);
+static void toggleFitBlock(App& app, HWND hwnd, unsigned key);
 
 // Drops the link-peek popup and its rendered bitmap
 static void clearLinkPeek(App& app) {
@@ -286,11 +289,12 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     if (app.annotEditorOpen) annotationEditorCancel(app);
     if (app.showLightbox) closeLightbox(app);
     clearLinkPeek(app);
+    app.fitBlocks.clear();
 
     // Reading position memory (#77): keep the old document's position,
     // resume the new one's
     if (!app.currentFile.empty()) {
-        persistReadingPosition(app.currentFile, app.scrollY);
+        persistReadingPosition(app.currentFile, app.scrollY, app.zoomFactor);
     }
 
     app.root = result.root;
@@ -302,7 +306,18 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     app.scrollX = 0;
     app.targetScrollY = 0;
     app.targetScrollX = 0;
-    app.pendingScrollRestore = findReadingPosition(loadSettings(), app.currentFile);
+    {
+        Settings stored = loadSettings();
+        app.pendingScrollRestore = findReadingPosition(stored, app.currentFile);
+        // Per-document zoom (#zoom-memory): a document remembered at a
+        // different zoom reopens there
+        float zoom = findReadingZoom(stored, app.currentFile);
+        if (zoom > 0.0f && fabsf(zoom - app.zoomFactor) > 0.01f) {
+            app.zoomFactor = zoom;
+            app.appliedZoomFactor = zoom;
+            updateTextFormats(app);
+        }
+    }
     app.focusMermaidOnNextLayout = isMermaidDocumentPath(fullPath);
     app.contentHeight = 0;
     app.verticalScrollbarVisible = false;
@@ -1400,11 +1415,14 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         float btnW = dpi(app, 72.0f);
         float btnH = dpi(app, 26.0f);
         float btnPad = 8.0f * app.contentScale * app.zoomFactor;
-        float btnX = cb.bounds.right - btnW - btnPad;
+        float rightEdge = std::min(cb.bounds.right,
+                                   app.scrollX + documentViewportWidth(app));
+        float btnX = rightEdge - btnW - btnPad;
         float btnY = cb.bounds.top + btnPad;
         if ((docX >= btnX && docX <= btnX + btnW &&
              docY >= btnY && docY <= btnY + btnH) ||
-            diagramPngButtonAt(app, app.mouseX, app.mouseY)) {
+            diagramPngButtonAt(app, app.mouseX, app.mouseY) ||
+            diagramFitButtonAt(app, app.mouseX, app.mouseY)) {
             SetCursor(cursorHand);
         } else if (app.overText) {
             SetCursor(cursorIBeam);
@@ -1412,7 +1430,8 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             SetCursor(cursorArrow);
         }
     } else if (app.hoveredTable >= 0 &&
-               tableCopyButtonAt(app, app.mouseX, app.mouseY)) {
+               (tableCopyButtonAt(app, app.mouseX, app.mouseY) ||
+                tableFitButtonAt(app, app.mouseX, app.mouseY))) {
         SetCursor(cursorHand);
     } else if (!app.hoveredLink.empty()) {
         SetCursor(cursorHand);
@@ -2194,7 +2213,9 @@ static bool codeCopyButtonAt(const App& app, int mouseX, int mouseY) {
     float btnW = dpi(app, 72.0f);
     float btnH = dpi(app, 26.0f);
     float btnPad = 8.0f * app.contentScale * app.zoomFactor;
-    float btnX = cb.bounds.right - btnW - btnPad;
+    float rightEdge =
+        std::min(cb.bounds.right, app.scrollX + documentViewportWidth(app));
+    float btnX = rightEdge - btnW - btnPad;
     float btnY = cb.bounds.top + btnPad;
     return docX >= btnX && docX <= btnX + btnW &&
            docY >= btnY && docY <= btnY + btnH;
@@ -2215,7 +2236,9 @@ static bool diagramPngButtonAt(const App& app, int mouseX, int mouseY) {
     float btnW = dpi(app, 72.0f);
     float btnH = dpi(app, 26.0f);
     float btnPad = 8.0f * app.contentScale * app.zoomFactor;
-    float copyX = cb.bounds.right - btnW - btnPad;
+    float rightEdge =
+        std::min(cb.bounds.right, app.scrollX + documentViewportWidth(app));
+    float copyX = rightEdge - btnW - btnPad;
     float pngW = dpi(app, 52.0f);
     float pngX = copyX - pngW - dpi(app, 6.0f);
     float btnY = cb.bounds.top + btnPad;
@@ -2242,6 +2265,70 @@ static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY) {
     float btnY = tb.bounds.top + btnPad;
     return docX >= btnX && docX <= btnX + btnW &&
            docY >= btnY && docY <= btnY + btnH;
+}
+
+// True when (mouseX, mouseY) is on the hovered diagram's fit-to-width
+// toggle (drawn left of the copy-as-image button)
+static bool diagramFitButtonAt(const App& app, int mouseX, int mouseY) {
+    if (app.hoveredCodeBlock < 0 ||
+        app.hoveredCodeBlock >= (int)app.codeBlocks.size()) {
+        return false;
+    }
+    const auto& cb = app.codeBlocks[app.hoveredCodeBlock];
+    if (!cb.isDiagram || !cb.fitCandidate) return false;
+    float previewOffsetX = documentViewportX(app);
+    float docX = (mouseX - previewOffsetX) + app.scrollX;
+    float docY = mouseY + app.scrollY;
+    float btnW = dpi(app, 72.0f);
+    float btnH = dpi(app, 26.0f);
+    float btnPad = 8.0f * app.contentScale * app.zoomFactor;
+    float rightEdge =
+        std::min(cb.bounds.right, app.scrollX + documentViewportWidth(app));
+    float copyX = rightEdge - btnW - btnPad;
+    float pngW = dpi(app, 52.0f);
+    float pngX = copyX - pngW - dpi(app, 6.0f);
+    float fitW = dpi(app, 44.0f);
+    float fitX = pngX - fitW - dpi(app, 6.0f);
+    float btnY = cb.bounds.top + btnPad;
+    return docX >= fitX && docX <= fitX + fitW &&
+           docY >= btnY && docY <= btnY + btnH;
+}
+
+// True when (mouseX, mouseY) is on the hovered table's fit-to-width
+// toggle (drawn left of the copy-as-TSV button)
+static bool tableFitButtonAt(const App& app, int mouseX, int mouseY) {
+    if (app.hoveredTable < 0 ||
+        app.hoveredTable >= (int)app.tableRects.size()) {
+        return false;
+    }
+    const auto& tb = app.tableRects[app.hoveredTable];
+    if (!tb.fitCandidate) return false;
+    float previewOffsetX = documentViewportX(app);
+    float docX = (mouseX - previewOffsetX) + app.scrollX;
+    float docY = mouseY + app.scrollY;
+    float btnW = dpi(app, 88.0f);
+    float btnH = dpi(app, 26.0f);
+    float btnPad = 8.0f * app.contentScale * app.zoomFactor;
+    float rightEdge =
+        std::min(tb.bounds.right, app.scrollX + documentViewportWidth(app));
+    float btnX = rightEdge - btnW - btnPad;
+    float fitW = dpi(app, 44.0f);
+    float fitX = btnX - fitW - dpi(app, 6.0f);
+    float btnY = tb.bounds.top + btnPad;
+    return docX >= fitX && docX <= fitX + fitW &&
+           docY >= btnY && docY <= btnY + btnH;
+}
+
+// Flip a table/diagram between natural size and fit-to-width and relayout
+static void toggleFitBlock(App& app, HWND hwnd, unsigned key) {
+    auto it = std::find(app.fitBlocks.begin(), app.fitBlocks.end(), key);
+    if (it != app.fitBlocks.end()) {
+        app.fitBlocks.erase(it);
+    } else {
+        app.fitBlocks.push_back(key);
+    }
+    app.layoutDirty = true;
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
@@ -2678,6 +2765,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         app.hoveredCodeBlock = -1;
         app.selecting = false;
         InvalidateRect(hwnd, nullptr, FALSE);
+    } else if (diagramFitButtonAt(app, app.mouseX, app.mouseY)) {
+        toggleFitBlock(app, hwnd,
+                       app.codeBlocks[app.hoveredCodeBlock].fitKey);
+        app.selecting = false;
     } else if (diagramPngButtonAt(app, app.mouseX, app.mouseY)) {
         // Diagram image button: 2x raster to the clipboard
         if (copyDiagramImage(
@@ -2691,6 +2782,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         app.hoveredCodeBlock = -1;
         app.selecting = false;
         InvalidateRect(hwnd, nullptr, FALSE);
+    } else if (tableFitButtonAt(app, app.mouseX, app.mouseY)) {
+        toggleFitBlock(app, hwnd,
+                       app.tableRects[app.hoveredTable].fitKey);
+        app.selecting = false;
     } else if (tableCopyButtonAt(app, app.mouseX, app.mouseY)) {
         // Table copy button: cells joined by tabs paste into a
         // spreadsheet as a grid

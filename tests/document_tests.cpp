@@ -193,6 +193,43 @@ int main() {
         check(!has("v2.md"), "dotted archive names are not references");
     }
 
+    // Emoji shortcodes become their emoji, code stays literal
+    {
+        auto emoji = parseDocument(parser,
+            "Ship it :rocket: with :+1: but `:tada:` stays and "
+            ":not_a_real_code: survives\n"
+            "```\n:fire: in a fence\n```\n",
+            "notes.md");
+        check(emoji.success, "emoji test parses");
+        std::string flat;
+        std::string codeFlat;
+        std::function<void(const qmd::ElementPtr&)> walk =
+            [&](const qmd::ElementPtr& node) {
+            if (node->type == qmd::ElementType::Code ||
+                node->type == qmd::ElementType::CodeBlock) {
+                codeFlat += node->text;
+                for (const auto& child : node->children)
+                    codeFlat += child->text;
+                return;
+            }
+            flat += node->text;
+            for (const auto& child : node->children) walk(child);
+        };
+        if (emoji.root) walk(emoji.root);
+        check(flat.find("\xF0\x9F\x9A\x80") != std::string::npos,
+              ":rocket: replaced with the emoji");
+        check(flat.find("\xF0\x9F\x91\x8D") != std::string::npos,
+              ":+1: replaced with the emoji");
+        check(flat.find(":rocket:") == std::string::npos,
+              "no literal :rocket: remains");
+        check(flat.find(":not_a_real_code:") != std::string::npos,
+              "unknown shortcodes stay literal");
+        check(codeFlat.find(":tada:") != std::string::npos,
+              "inline code shortcodes untouched");
+        check(codeFlat.find(":fire:") != std::string::npos,
+              "fenced code shortcodes untouched");
+    }
+
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";
         return 1;
