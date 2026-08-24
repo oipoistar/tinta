@@ -23,6 +23,12 @@
 #pragma comment(lib, "urlmon.lib")
 #pragma comment(lib, "shlwapi.lib")
 
+// Fit-to-width override lookup for a table/diagram ordinal key
+static bool fitBlockEnabled(const App& app, unsigned key) {
+    return std::find(app.fitBlocks.begin(), app.fitBlocks.end(), key) !=
+           app.fitBlocks.end();
+}
+
 namespace {
 constexpr float kHugeWidth = 100000.0f;
 constexpr float kLineBucketTolerance = 5.0f;
@@ -1037,12 +1043,13 @@ static App::LayoutShapeType mermaidShapeType(mermaid::NodeShape shape) {
 static bool layoutMermaidDiagram(App& app, const std::string& source,
                                  size_t sourceOffset, float& y,
                                  float indent, float maxWidth,
-                                 D2D1_RECT_F* renderedBounds = nullptr) {
+                                 D2D1_RECT_F* renderedBounds = nullptr,
+                                 float scaleMul = 1.0f) {
     auto parsed = mermaid::parse(source);
     if (!parsed.success || parsed.diagram.nodes.empty()) return false;
 
     const auto& diagram = parsed.diagram;
-    float scale = app.contentScale * app.zoomFactor;
+    float scale = app.contentScale * app.zoomFactor * scaleMul;
     float maxLabelWidth = 280.0f * scale;
     float measureHeight = 10000.0f * scale;
     float paddingX = 18.0f * scale;
@@ -1769,8 +1776,9 @@ static bool layoutMermaidExtDiagram(App& app, mermaidext::Kind kind,
                                     const std::string& source,
                                     size_t sourceOffset, float& y,
                                     float indent, float maxWidth,
-                                    D2D1_RECT_F* renderedBounds) {
-    float scale = app.contentScale * app.zoomFactor;
+                                    D2D1_RECT_F* renderedBounds,
+                                    float scaleMul = 1.0f) {
+    float scale = app.contentScale * app.zoomFactor * scaleMul;
     DiagramFormats formats(app);
 
     auto measureFn = [&](const std::string& text,
@@ -1996,20 +2004,52 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
     if (languageName == "mermaid") {
         D2D1_RECT_F renderedBounds{};
         mermaidext::Kind kind = mermaidext::detectKind(code);
+        unsigned fitKey = 0x80000000u | app.layoutDiagramSeq++;
+        bool fitActive = fitBlockEnabled(app, fitKey);
+        bool fitCandidate = false;
         bool rendered = false;
-        if (kind == mermaidext::Kind::Flowchart) {
-            rendered = layoutMermaidDiagram(
-                app, code, elem->sourceOffset, y, indent, maxWidth,
-                &renderedBounds);
-        } else if (kind != mermaidext::Kind::None) {
-            rendered = layoutMermaidExtDiagram(
-                app, kind, code, elem->sourceOffset, y, indent, maxWidth,
-                &renderedBounds);
+        LayoutSnapshot preSnap = takeSnapshot(app);
+        float preY = y;
+        float scaleMul = 1.0f;
+        // Label re-wrapping makes width nonlinear in scale, so fitting
+        // shrinks iteratively from the measured bounds of each pass
+        for (int pass = 0; pass < 4; pass++) {
+            if (kind == mermaidext::Kind::Flowchart) {
+                rendered = layoutMermaidDiagram(
+                    app, code, elem->sourceOffset, y, indent, maxWidth,
+                    &renderedBounds, scaleMul);
+            } else if (kind != mermaidext::Kind::None) {
+                rendered = layoutMermaidExtDiagram(
+                    app, kind, code, elem->sourceOffset, y, indent, maxWidth,
+                    &renderedBounds, scaleMul);
+            }
+            if (!rendered) break;
+            float renderedW = renderedBounds.right - indent;
+            if (renderedW > maxWidth + 1.0f) {
+                if (pass == 0) fitCandidate = true;
+                if (fitActive && scaleMul > 0.15f) {
+                    scaleMul = std::max(
+                        0.15f, scaleMul * (maxWidth / renderedW) * 0.98f);
+                    rollbackTo(app, preSnap);
+                    y = preY;
+                    continue;
+                }
+            }
+            break;
         }
         if (rendered) {
-            app.codeBlocks.push_back({renderedBounds, toWide(code), true});
+            App::CodeBlockInfo info;
+            info.bounds = renderedBounds;
+            info.codeText = toWide(code);
+            info.isDiagram = true;
+            info.fitKey = fitKey;
+            info.fitCandidate = fitCandidate || fitActive;
+            info.fitActive = fitActive;
+            app.codeBlocks.push_back(std::move(info));
             return;
         }
+        rollbackTo(app, preSnap);
+        y = preY;
     }
 
     std::wstring langHint = toWide(elem->language);
@@ -2725,7 +2765,18 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
     float totalWidth = 0;
     for (int c = 0; c < colCount; c++) totalWidth += colWidths[c];
 
-    if (totalWidth > maxWidth) {
+    unsigned fitKey = 0x40000000u | app.layoutTableSeq++;
+    bool fitCandidate = false;
+    bool fitActive = fitBlockEnabled(app, fitKey);
+
+    if (totalWidth > maxWidth && fitActive) {
+        // Fit-to-width override: shrink every column proportionally with
+        // no minimum floor; dense cells wrap hard, nothing scrolls
+        float k = maxWidth / totalWidth;
+        for (int c = 0; c < colCount; c++) colWidths[c] *= k;
+        totalWidth = maxWidth;
+        fitCandidate = true;
+    } else if (totalWidth > maxWidth) {
         // Floor: at least ~2.5 CJK glyphs per line so no column degenerates
         // into a vertical strip
         float minCol = std::max(minColWidth, fontSize * 2.5f + cellPadding * 2);
@@ -2763,6 +2814,8 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
         for (int c = 0; c < colCount; c++) totalWidth += colWidths[c];
         // Minimum widths can push past maxWidth; the table then joins
         // horizontal scrolling instead of squeezing columns unreadably
+        // (unless the fit toggle squeezes it on purpose)
+        if (totalWidth > maxWidth + 1.0f) fitCandidate = true;
         app.contentWidth = std::max(app.contentWidth, indent + totalWidth);
     }
 
@@ -2885,6 +2938,9 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
         info.bounds =
             D2D1::RectF(indent, tableStartY, indent + totalWidth, tableEndY);
         info.tsv = std::move(tsv);
+        info.fitKey = fitKey;
+        info.fitCandidate = fitCandidate || fitActive;
+        info.fitActive = fitActive;
         app.tableRects.push_back(std::move(info));
     }
 
@@ -3097,6 +3153,8 @@ bool layoutBegin(App& app) {
     app.layoutComplete = false;
     app.contentWidth = layoutWidth;
     app.scrollAnchors.clear();
+    app.layoutTableSeq = 0;
+    app.layoutDiagramSeq = 0;
     return true;
 }
 

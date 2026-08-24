@@ -163,8 +163,9 @@ struct Settings {
     // Last session's open tabs, restored on the next plain launch
     std::vector<std::string> sessionTabs;
     int sessionActive = 0;
-    // Reading positions: most-recent-first, capped (#77)
-    struct ReadingPosition { std::string path; float scrollY; };
+    // Reading positions: most-recent-first, capped (#77). zoom = 0 means
+    // "no per-document zoom": the document keeps the current zoom.
+    struct ReadingPosition { std::string path; float scrollY; float zoom = 0.0f; };
     std::vector<ReadingPosition> readingPositions;
     // [Keys] overrides from settings.ini: action name -> key name (#77)
     std::vector<std::pair<std::string, std::string>> keyOverrides;
@@ -727,6 +728,9 @@ struct App {
         D2D1_RECT_F bounds;       // Full background rect in document coordinates
         std::wstring codeText;    // The code content (diagram source for diagrams)
         bool isDiagram = false;   // adds the copy-as-image button
+        unsigned fitKey = 0;      // per-layout ordinal for the fit toggle
+        bool fitCandidate = false;
+        bool fitActive = false;
     };
     std::vector<CodeBlockInfo> codeBlocks;
     int hoveredCodeBlock = -1;
@@ -735,9 +739,18 @@ struct App {
     struct TableInfo {
         D2D1_RECT_F bounds{};  // document coordinates
         std::wstring tsv;      // cells joined by tabs, rows by newlines
+        unsigned fitKey = 0;   // per-layout ordinal for the fit toggle
+        bool fitCandidate = false;  // wider than the column at natural size
+        bool fitActive = false;
     };
     std::vector<TableInfo> tableRects;
     int hoveredTable = -1;
+
+    // Fit-to-width overrides for oversized tables/diagrams, keyed by their
+    // per-layout ordinal (cleared when the document changes)
+    std::vector<unsigned> fitBlocks;
+    unsigned layoutTableSeq = 0;
+    unsigned layoutDiagramSeq = 0;
 
     // Text bounds - tracked for cursor changes and selection (document coordinates)
     struct TextRect {

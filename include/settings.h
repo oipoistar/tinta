@@ -9,9 +9,13 @@ Settings loadSettings();
 
 // Reading position memory (#77): most-recent-first list capped in remember.
 // The persist/lookup helpers load and save settings.ini themselves.
-void rememberReadingPosition(Settings& settings, const std::string& path, float scrollY);
-void persistReadingPosition(const std::string& path, float scrollY);
+void rememberReadingPosition(Settings& settings, const std::string& path,
+                             float scrollY, float zoom = 0.0f);
+void persistReadingPosition(const std::string& path, float scrollY,
+                            float zoom = 0.0f);
 float findReadingPosition(const Settings& settings, const std::string& path);
+// Per-document zoom, or 0 when the document has none stored
+float findReadingZoom(const Settings& settings, const std::string& path);
 
 // User-remappable single-key actions (#77), written to settings.ini as a
 // [Keys] section. Char actions trigger via WM_CHAR (edit ':', help '?');

@@ -90,8 +90,10 @@ void saveSettings(const Settings& settings) {
     if (!settings.readingPositions.empty()) {
         file << "[Positions]\n";
         for (const auto& pos : settings.readingPositions) {
-            // Windows paths cannot contain '|'
-            file << "pos=" << pos.scrollY << "|" << pos.path << "\n";
+            // Windows paths cannot contain '|'; the second field is the
+            // per-document zoom (0 = none)
+            file << "pos=" << pos.scrollY << "|" << pos.zoom << "|"
+                 << pos.path << "\n";
         }
     }
 }
@@ -151,23 +153,26 @@ void applyKeymap(App& app, const Settings& settings) {
     app.keyProfile = settings.keyProfile;
 }
 
-void rememberReadingPosition(Settings& settings, const std::string& path, float scrollY) {
+void rememberReadingPosition(Settings& settings, const std::string& path,
+                             float scrollY, float zoom) {
     if (path.empty()) return;
     auto& list = settings.readingPositions;
     for (size_t i = 0; i < list.size(); i++) {
         if (_stricmp(list[i].path.c_str(), path.c_str()) == 0) {
+            if (zoom <= 0.0f) zoom = list[i].zoom;  // keep a known zoom
             list.erase(list.begin() + i);
             break;
         }
     }
-    list.insert(list.begin(), {path, scrollY});
+    list.insert(list.begin(), {path, scrollY, zoom});
     if (list.size() > 50) list.resize(50);
 }
 
-void persistReadingPosition(const std::string& path, float scrollY) {
+void persistReadingPosition(const std::string& path, float scrollY,
+                            float zoom) {
     if (path.empty()) return;
     Settings settings = loadSettings();
-    rememberReadingPosition(settings, path, scrollY);
+    rememberReadingPosition(settings, path, scrollY, zoom);
     saveSettings(settings);
 }
 
@@ -176,6 +181,13 @@ float findReadingPosition(const Settings& settings, const std::string& path) {
         if (_stricmp(pos.path.c_str(), path.c_str()) == 0) return pos.scrollY;
     }
     return -1.0f;
+}
+
+float findReadingZoom(const Settings& settings, const std::string& path) {
+    for (const auto& pos : settings.readingPositions) {
+        if (_stricmp(pos.path.c_str(), path.c_str()) == 0) return pos.zoom;
+    }
+    return 0.0f;
 }
 
 Settings loadSettings() {
@@ -269,12 +281,20 @@ Settings loadSettings() {
                 settings.sessionTabs.push_back(value);
             }
         } else if (key == "pos") {
+            // New format: scrollY|zoom|path; legacy: scrollY|path
             size_t sep = value.find('|');
             if (sep != std::string::npos && sep + 1 < value.size()) {
                 try {
                     float y = std::stof(value.substr(0, sep));
-                    if (y >= 0.0f) {
-                        settings.readingPositions.push_back({value.substr(sep + 1), y});
+                    float zoom = 0.0f;
+                    std::string path = value.substr(sep + 1);
+                    size_t sep2 = path.find('|');
+                    if (sep2 != std::string::npos && sep2 + 1 < path.size()) {
+                        zoom = std::stof(path.substr(0, sep2));
+                        path = path.substr(sep2 + 1);
+                    }
+                    if (y >= 0.0f && !path.empty()) {
+                        settings.readingPositions.push_back({path, y, zoom});
                     }
                 } catch (...) {}
             }

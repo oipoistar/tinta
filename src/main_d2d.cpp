@@ -575,7 +575,10 @@ render_document:
             float btnW = dpi(app, 72.0f);
             float btnH = dpi(app, 26.0f);
             float btnPad = 8.0f * app.contentScale * app.zoomFactor;
-            float btnX = cb.bounds.right - btnW - btnPad - app.scrollX;
+            // Blocks wider than the viewport keep their buttons reachable
+            float rightEdge = std::min(
+                cb.bounds.right, app.scrollX + documentViewportWidth(app));
+            float btnX = rightEdge - btnW - btnPad - app.scrollX;
             float btnY = cb.bounds.top + btnPad - app.scrollY;
 
             // Button background
@@ -610,6 +613,43 @@ render_document:
             if (cb.isDiagram) {
                 float pngW = dpi(app, 52.0f);
                 float pngX = btnX - pngW - dpi(app, 6.0f);
+
+                // Oversized diagrams add the fit-to-width toggle
+                if (cb.fitCandidate) {
+                    float fitW = dpi(app, 44.0f);
+                    float fitX = pngX - fitW - dpi(app, 6.0f);
+                    app.brush->SetColor(D2D1::ColorF(
+                        app.theme.isDark ? 0.3f : 0.85f,
+                        app.theme.isDark ? 0.3f : 0.85f,
+                        app.theme.isDark ? 0.3f : 0.85f,
+                        0.9f));
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(
+                            D2D1::RectF(fitX, btnY, fitX + fitW,
+                                        btnY + btnH), 4, 4),
+                        app.brush);
+                    app.brush->SetColor(D2D1::ColorF(
+                        app.theme.isDark ? 0.9f : 0.15f,
+                        app.theme.isDark ? 0.9f : 0.15f,
+                        app.theme.isDark ? 0.9f : 0.15f,
+                        1.0f));
+                    const wchar_t* fitLabel =
+                        cb.fitActive ? L"1:1" : L"Fit";
+                    IDWriteTextLayout* fitLayout = nullptr;
+                    app.dwriteFactory->CreateTextLayout(
+                        fitLabel, (UINT32)wcslen(fitLabel), app.codeFormat,
+                        fitW, btnH, &fitLayout);
+                    if (fitLayout) {
+                        fitLayout->SetTextAlignment(
+                            DWRITE_TEXT_ALIGNMENT_CENTER);
+                        fitLayout->SetParagraphAlignment(
+                            DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                        app.renderTarget->DrawTextLayout(
+                            D2D1::Point2F(fitX, btnY), fitLayout,
+                            app.brush);
+                        fitLayout->Release();
+                    }
+                }
                 app.brush->SetColor(D2D1::ColorF(
                     app.theme.isDark ? 0.3f : 0.85f,
                     app.theme.isDark ? 0.3f : 0.85f,
@@ -683,6 +723,41 @@ render_document:
                 app.renderTarget->DrawTextLayout(
                     D2D1::Point2F(btnX, btnY), btnLayout, app.brush);
                 btnLayout->Release();
+            }
+
+            // Oversized tables add the fit-to-width toggle
+            if (tb.fitCandidate) {
+                float fitW = dpi(app, 44.0f);
+                float fitX = btnX - fitW - dpi(app, 6.0f);
+                app.brush->SetColor(D2D1::ColorF(
+                    app.theme.isDark ? 0.3f : 0.85f,
+                    app.theme.isDark ? 0.3f : 0.85f,
+                    app.theme.isDark ? 0.3f : 0.85f,
+                    0.9f));
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(
+                        D2D1::RectF(fitX, btnY, fitX + fitW, btnY + btnH),
+                        4, 4),
+                    app.brush);
+                app.brush->SetColor(D2D1::ColorF(
+                    app.theme.isDark ? 0.9f : 0.15f,
+                    app.theme.isDark ? 0.9f : 0.15f,
+                    app.theme.isDark ? 0.9f : 0.15f,
+                    1.0f));
+                const wchar_t* fitLabel = tb.fitActive ? L"1:1" : L"Fit";
+                IDWriteTextLayout* fitLayout = nullptr;
+                app.dwriteFactory->CreateTextLayout(
+                    fitLabel, (UINT32)wcslen(fitLabel), app.codeFormat,
+                    fitW, btnH, &fitLayout);
+                if (fitLayout) {
+                    fitLayout->SetTextAlignment(
+                        DWRITE_TEXT_ALIGNMENT_CENTER);
+                    fitLayout->SetParagraphAlignment(
+                        DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                    app.renderTarget->DrawTextLayout(
+                        D2D1::Point2F(fitX, btnY), fitLayout, app.brush);
+                    fitLayout->Release();
+                }
             }
             app.drawCalls++;
         }
@@ -1690,7 +1765,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.keyProfile = app->keyProfile;
                 settings.keyOverrides = app->keyOverrides;
                 if (!app->currentFile.empty()) {
-                    rememberReadingPosition(settings, app->currentFile, app->scrollY);
+                    rememberReadingPosition(settings, app->currentFile,
+                                            app->scrollY, app->zoomFactor);
                 }
 
                 // Get window placement for position/size/maximized state
@@ -2147,6 +2223,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // editor at the top instead
     if (!startInEditMode && !app.currentFile.empty()) {
         app.pendingScrollRestore = findReadingPosition(savedSettings, app.currentFile);
+        // Per-document zoom overrides the global one for known documents
+        float docZoom = findReadingZoom(savedSettings, app.currentFile);
+        if (docZoom > 0.0f && fabsf(docZoom - app.zoomFactor) > 0.01f) {
+            app.zoomFactor = docZoom;
+            app.appliedZoomFactor = docZoom;
+            updateTextFormats(app);
+            app.layoutDirty = true;
+        }
     }
 
     // Set window title with filename
