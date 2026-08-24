@@ -1382,6 +1382,10 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     } else if (app.scrollbarHovered || app.scrollbarDragging ||
         app.hScrollbarHovered || app.hScrollbarDragging) {
         SetCursor(cursorArrow);
+    } else if (app.updateAvailable && !app.updateDismissed &&
+               cursorPointInRect((float)app.mouseX, (float)app.mouseY,
+                                 app.updateChipRect)) {
+        SetCursor(cursorHand);
     } else if (!app.annotationMarks.empty() &&
                (annotationRailHit(app, (float)app.mouseX,
                                   (float)app.mouseY) >= 0 ||
@@ -1680,6 +1684,29 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
+    }
+
+    // Update chip: a click opens the release page, the cross dismisses
+    // this version for good
+    if (app.updateAvailable && !app.updateDismissed &&
+        app.updateChipRect.right > app.updateChipRect.left) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        if (cursorPointInRect(mx, my, app.updateChipRect)) {
+            app.swallowNextMouseUp = true;
+            if (cursorPointInRect(mx, my, app.updateCloseRect)) {
+                app.updateDismissed = true;
+                app.updateDismissedVersion = app.updateVersion;
+            } else {
+                ShellExecuteW(
+                    nullptr, L"open",
+                    L"https://github.com/oipoistar/tinta/releases/latest",
+                    nullptr, nullptr, SW_SHOWNORMAL);
+                app.updateDismissed = true;
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
     }
 
     // Annotation editor is modal: buttons act, outside dismisses (#126)

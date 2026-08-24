@@ -36,6 +36,7 @@ inline int64_t usElapsed(Clock::time_point start) {
 #define TIMER_FOLDER_SEARCH 7
 #define TIMER_SELECT_SCROLL 8
 #define TIMER_LINK_PEEK 9
+#define TIMER_UPDATE_CHECK 10
 
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
@@ -52,6 +53,11 @@ inline int64_t usElapsed(Clock::time_point start) {
 // Posted by the folder-search worker with its scan results
 // (lParam = FolderScanMsg*, ownership transfers to the handler)
 #define WM_APP_FOLDER_SEARCH (WM_APP + 4)
+
+// Posted by the update-check worker with the latest release tag
+// (lParam = std::string* "X.Y.Z", ownership transfers to the handler;
+// empty string = the check failed and is retried another day)
+#define WM_APP_UPDATE_CHECK (WM_APP + 5)
 
 // Startup metrics
 struct StartupMetrics {
@@ -175,6 +181,12 @@ struct Settings {
     // because languages.ini languages have no stable numeric index.
     // Credit: multilingual groundwork by wxh-777 (PR #84).
     std::string language = "auto";
+    // Update check: portable builds ask GitHub for the latest release at
+    // most once a day (Store installs update through the Store and never
+    // check). dismissedUpdate remembers a version the user closed away.
+    bool checkUpdates = true;
+    std::string lastUpdateCheck;   // YYYY-MM-DD of the last completed check
+    std::string dismissedUpdate;   // "X.Y.Z" the user dismissed
 };
 
 // Application state
@@ -413,6 +425,17 @@ struct App {
     // Pin button in the title bar: keeps this window above every other
     // (per-window, not persisted)
     bool alwaysOnTop = false;
+
+    // Update-available chip (bottom right): non-blocking, once per
+    // session, absent entirely for Store installs
+    bool updateCheckEnabled = true;
+    bool updateAvailable = false;
+    bool updateDismissed = false;   // this session
+    std::string updateVersion;      // "X.Y.Z" offered by the chip
+    std::string updateLastCheck;    // mirrors Settings on save
+    std::string updateDismissedVersion;
+    D2D1_RECT_F updateChipRect{};   // screen coords, zero while hidden
+    D2D1_RECT_F updateCloseRect{};
     std::vector<std::pair<D2D1_RECT_F, int>> tabSwitcherHits;
     // Closing a dirty tab routes through the unsaved-changes dialog; the
     // close completes from confirmExitAction once the user decides
