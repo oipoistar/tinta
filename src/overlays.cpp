@@ -1313,6 +1313,30 @@ void renderHelpOverlay(App& app) {
             D2D1::RectF(panelX, panelY + dpi(app, 15.0f), panelX + panelWidth, titleBottomY), app.brush);
     }
 
+    // Version badge in the panel's top-right corner (from CMake's
+    // TINTA_VERSION_* defines, the single source of truth)
+    if (app.tocFormat) {
+        wchar_t version[32];
+        swprintf_s(version, _countof(version), L"v%d.%d.%d",
+                   TINTA_VERSION_MAJOR, TINTA_VERSION_MINOR,
+                   TINTA_VERSION_PATCH);
+        IDWriteTextLayout* verLayout = nullptr;
+        app.dwriteFactory->CreateTextLayout(
+            version, (UINT32)wcslen(version), app.tocFormat,
+            panelWidth - dpi(app, 22.0f), dpi(app, 20.0f), &verLayout);
+        if (verLayout) {
+            // Shared formats may carry another overlay's alignment; pin it
+            verLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+            D2D1_COLOR_F verColor = app.theme.text;
+            verColor.a = 0.45f * anim;
+            app.brush->SetColor(verColor);
+            app.renderTarget->DrawTextLayout(
+                D2D1::Point2F(panelX, panelY + dpi(app, 18.0f)), verLayout,
+                app.brush);
+            verLayout->Release();
+        }
+    }
+
     IDWriteTextFormat* boldFmt = app.tocFormatBold;
     IDWriteTextFormat* normalFmt = app.tocFormat;
     if (!boldFmt || !normalFmt) return;
