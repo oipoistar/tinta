@@ -27,6 +27,7 @@ D2D1_COLOR_F tabStripBackground(const App& app);
 // + button: a new untitled quick-note tab, straight into the editor
 void tabOpenQuickNote(App& app, HWND hwnd);
 void tabOpenStartPage(App& app, HWND hwnd);
+void tabBecomeStartPage(App& app, HWND hwnd);
 
 // Rendering (main_d2d render loop)
 void renderTabStrip(App& app);

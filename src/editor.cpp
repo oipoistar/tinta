@@ -1293,12 +1293,19 @@ void confirmExitAction(App& app, HWND hwnd, int action) {
         app.escPressedOnce = false;
     }
     // A tab close that opened this dialog completes once the buffer is
-    // resolved (Keep editing cancels the close)
+    // resolved (Keep editing cancels the close). A resolved LONE tab
+    // lands on the start page directly: the user asked to close the
+    // content, not the window, and after a discard the view may already
+    // be the launcher — re-entering tabCloseIndex would close the window.
     if (app.pendingTabClose >= 0) {
         int tab = app.pendingTabClose;
         app.pendingTabClose = -1;
         if (action != 3 && !app.editMode) {
-            tabCloseIndex(app, hwnd, tab);
+            if ((int)app.tabs.size() <= 1) {
+                tabBecomeStartPage(app, hwnd);
+            } else {
+                tabCloseIndex(app, hwnd, tab);
+            }
         }
     }
     // A Close-others/left/right sweep paused on this dialog: continue with

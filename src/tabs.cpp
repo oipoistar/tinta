@@ -216,13 +216,19 @@ void tabCloseIndex(App& app, HWND hwnd, int index) {
         return;
     }
 
-    if ((int)app.tabs.size() <= 1) {
-        PostMessageW(hwnd, WM_CLOSE, 0, 0);
-        return;
-    }
-
     // The closed tab's crash-recovery draft goes with it
     draftsDeleteForTab(app, app.tabs[index].id);
+
+    if ((int)app.tabs.size() <= 1) {
+        // The last tab closes into the start page instead of taking the
+        // window with it; closing the start page itself closes the window
+        if (startPageActive(app)) {
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        } else {
+            tabBecomeStartPage(app, hwnd);
+        }
+        return;
+    }
 
     if (index == app.activeTab) {
         // Leave a clean edit session silently before the neighbor loads
@@ -251,6 +257,34 @@ void tabCycle(App& app, HWND hwnd, int direction) {
     int count = (int)app.tabs.size();
     int next = (app.activeTab + direction + count) % count;
     tabActivate(app, hwnd, next);
+}
+
+// The lone surviving tab turns into the start page in place: closing
+// the last document lands on the launcher instead of the window
+// vanishing. Idempotent — a tab that is already the launcher stays one.
+void tabBecomeStartPage(App& app, HWND hwnd) {
+    tabsInit(app);
+    parkActiveEditBuffer(app);  // clean editor teardown if one was open
+    App::DocTab& tab = app.tabs[app.activeTab];
+    draftsDeleteForTab(app, tab.id);
+    tab.path.clear();
+    tab.title = L"Tinta";
+    tab.editMode = false;
+    tab.editorDirty = false;
+    tab.editorText.clear();
+    app.currentFile.clear();
+    auto result = parseDocument(app.parser, std::string(), app.currentFile);
+    if (result.success) {
+        app.root = result.root;
+        app.parseTimeUs = result.parseTimeUs;
+    }
+    app.scrollY = app.targetScrollY = 0;
+    app.scrollX = app.targetScrollX = 0;
+    app.layoutDirty = true;
+    app.startPageEmbeddedOpen = false;
+    app.hoveredTab = -1;
+    updateWindowTitle(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 // Ctrl+T: a fresh empty viewer tab, which is the start page (the

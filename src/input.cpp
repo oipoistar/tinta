@@ -3529,11 +3529,17 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             }
         }
 
-        // Start page: Ctrl+O opens the picker, 1..5 the recent files.
-        // N, B and ? keep their keymapped meanings, which the page reuses.
+        // Start page: Ctrl+O opens the picker, 1..5 the recent files, and
+        // the newfile key does what its button chip promises: a new
+        // document in place (elsewhere it opens the naming-row flow).
+        // B and ? keep their keymapped meanings, which the page reuses.
         if (startPageActive(app)) {
             if (ctrl && wParam == 'O') {
                 startPageInvoke(app, hwnd, 1);
+                return;
+            }
+            if (!ctrl && wParam == app.keymap[KA_NEWFILE]) {
+                startPageInvoke(app, hwnd, 2);
                 return;
             }
             if (!ctrl && wParam >= '1' && wParam <= '5' &&
