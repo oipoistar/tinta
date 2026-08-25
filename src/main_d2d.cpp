@@ -192,7 +192,12 @@ void render(App& app) {
         }
 
         float previewMaxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
-        float synced = std::max(0.0f, std::min(targetY, previewMaxScroll));
+        // renderedY includes the chrome strip and the document's top
+        // margin; without subtracting where the editor's top line sits the
+        // first block lands under the strip and the render can never
+        // scroll to its own top (t11 feedback)
+        float alignY = targetY - chromeTopHeight(app) - dpi(app, 8.0f);
+        float synced = std::max(0.0f, std::min(alignY, previewMaxScroll));
         float editorMax = std::max(0.0f, app.editorContentHeight - (float)app.height);
         if (app.editorScrollY >= editorMax - 1.0f) {
             // The editor has bottomed out, but rendered content is taller

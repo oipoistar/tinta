@@ -824,7 +824,7 @@ void renderEditSeam(App& app) {
         D2D1::RectF(seamL, top, seamR, H),
         D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
-    auto drawThread = [&](float ySrc, float yDst, bool caret) {
+    auto drawThread = [&](float ySrc, float yDst, bool caret, float alpha) {
         ID2D1PathGeometry* geo = nullptr;
         app.d2dFactory->CreatePathGeometry(&geo);
         if (!geo) return;
@@ -839,13 +839,14 @@ void renderEditSeam(App& app) {
             sink->Close();
             sink->Release();
             app.brush->SetColor(caret ? th.accent
-                                      : railA(th.text, 0.16f));
+                                      : railA(th.text, alpha));
             app.renderTarget->DrawGeometry(geo, app.brush,
                                            caret ? 1.5f : 1.0f);
         }
         geo->Release();
     };
 
+    float span = std::max(1.0f, H - top);
     for (size_t k = 0; k < app.scrollAnchors.size(); k++) {
         float ySrc =
             seamSourceY(app, app.scrollAnchors[k].sourceOffset, lineHeight);
@@ -859,15 +860,20 @@ void renderEditSeam(App& app) {
             caretSeen = true;
             continue;
         }
-        // Quiet threads only tie blocks visible on BOTH sides — a target
-        // far off-screen would dive near-vertically and read as noise
-        if (ySrc < top - slack || yDst < top - slack || yDst > H + slack) {
-            continue;
-        }
-        drawThread(ySrc, yDst, false);
+        // A thread draws while either end is on screen; render content is
+        // taller than its source, so the two sides drift apart with depth
+        // and the thread fades with that distance — near-aligned pairs
+        // read clearly, far dives become whispers instead of a noise band
+        bool srcVis = ySrc >= top - slack && ySrc <= H + slack;
+        bool dstVis = yDst >= top - slack && yDst <= H + slack;
+        if (!srcVis && !dstVis) continue;
+        float fade =
+            1.0f - std::min(1.0f, fabsf(yDst - ySrc) / (1.5f * span));
+        if (fade <= 0.03f) continue;
+        drawThread(ySrc, yDst, false, 0.05f + 0.11f * fade);
     }
     if (caretSeen) {
-        drawThread(caretSrcY, caretDstY, true);
+        drawThread(caretSrcY, caretDstY, true, 1.0f);
         float r = dpi(app, 2.5f);
         app.brush->SetColor(th.accent);
         app.renderTarget->FillEllipse(
