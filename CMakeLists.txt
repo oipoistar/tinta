@@ -72,6 +72,7 @@ set(SOURCES
     src/annotations.cpp
     src/drafts.cpp
     src/startpage.cpp
+    src/editrail.cpp
 )
 
 set(HEADERS

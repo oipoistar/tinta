@@ -23,6 +23,8 @@ void clearRecentFiles();
 
 // Theme changes persist immediately so new windows spawn in the same look
 void persistThemeChoice(const App& app);
+// Editor mode pill choice (and the assists switch) persist immediately
+void persistEditorMode(const App& app);
 
 // User-remappable single-key actions (#77), written to settings.ini as a
 // [Keys] section. Char actions trigger via WM_CHAR (edit ':', help '?');

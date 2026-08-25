@@ -1,6 +1,7 @@
 #include "input.h"
 #include "annotations.h"
 #include "drafts.h"
+#include "editrail.h"
 #include "startpage.h"
 #include "tabs.h"
 #include "document.h"
@@ -699,6 +700,10 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             break;
         case SET_TOGGLE_OPENTABS:
             app.openInTabs = !app.openInTabs;
+            break;
+        case SET_TOGGLE_ASSISTS:
+            app.editorAssists = !app.editorAssists;
+            persistEditorMode(app);
             break;
         case SET_TOGGLE_FOLLOW:
             app.followSystemTheme = !app.followSystemTheme;
@@ -1638,6 +1643,16 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
             }
         }
         return;  // strip right-clicks never reach the document menu
+    }
+
+    // Raw editor insert menu (design t9): the right-click moves the
+    // caret and the INSERT entries drop their markdown there
+    if (app.editMode && !app.editorWysiwyg && !app.confirmExitPending &&
+        !fromKeyboard && (float)pt.x >= editRailWidth(app) &&
+        (float)pt.x < editorPaneWidth(app)) {
+        openEditCtxMenu(app, hwnd, (float)pt.x, (float)pt.y);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
     }
 
     // Document menu: viewer mode only, and never on top of a modal

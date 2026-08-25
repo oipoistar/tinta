@@ -1384,7 +1384,8 @@ void renderHelpOverlay(App& app) {
     const HelpEntry editEntries[] = {
         {kEdit.c_str(),   tr(app, "help.edit.enter_edit")},
         {L"Ctrl+S",       tr(app, "help.edit.save")},
-        {L"Ctrl+E",       tr(app, "help.edit.preview")},
+        {L"Ctrl+E",       tr(app, "help.edit.mode")},
+        {L"Ctrl+Shift+E", tr(app, "help.edit.preview")},
         {L"Ctrl+W",       tr(app, "help.edit.word_wrap")},
         {L"ESC ESC",      tr(app, "help.edit.exit_edit")},
     };
@@ -2485,6 +2486,13 @@ void renderSettingsOverlay(App& app) {
         settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
                        cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.editorShowPreview, SET_TOGGLE_PREVIEW, anim);
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        cardLabel(tr(app, "settings.editor_assists"),
+                  tr(app, "settings.editor_assists.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
+                       app.editorAssists, SET_TOGGLE_ASSISTS, anim);
     }
 
     // Shortcut profile popup, drawn last so it sits above the rows

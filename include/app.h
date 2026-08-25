@@ -192,6 +192,11 @@ struct Settings {
     // capped at 10. when = FILETIME ticks of the last open.
     struct RecentFile { unsigned long long when = 0; std::string path; };
     std::vector<RecentFile> recentFiles;
+    // Editor (design t8): preferred mode (WYSIWYG canvas vs classic raw
+    // split), remembered across sessions; and the raw-mode markdown
+    // assists (list continuation, Tab indent, Ctrl+B/I) master switch
+    bool editorWysiwyg = false;
+    bool editorAssists = true;
 };
 
 // Application state
@@ -1012,6 +1017,30 @@ struct App {
     std::chrono::steady_clock::time_point editModeNotificationStart;
     std::wstring editorNotificationMsg;
 
+    // Editor mode (design t8): WYSIWYG styled canvas vs classic raw
+    // split; the left tool rail slides in with edit mode
+    bool editorWysiwyg = false;
+    bool editorAssists = true;
+    float editRailAnim = 0.0f;       // rail slide-in 0..1
+    int editRailHover = 0;           // hit id under the mouse, 0 = none
+    std::vector<std::pair<D2D1_RECT_F, int>> editRailHits;  // rebuilt each paint
+    bool editRailMapDragging = false;
+    float editRailMapDragStartY = 0.0f;
+    float editRailMapDragStartScroll = 0.0f;
+
+    // Raw editor insert menu (design t9): right-click drops markdown at
+    // the caret; Table and Diagram open flyout submenus
+    bool editCtxOpen = false;
+    float editCtxX = 0.0f;
+    float editCtxY = 0.0f;
+    int editCtxHover = 0;
+    int editCtxSub = 0;       // 0 none, 1 table grid, 2 diagram templates
+    int editCtxSubHover = 0;
+    int editCtxGridC = 0;     // hovered table size
+    int editCtxGridR = 0;
+    std::vector<std::pair<D2D1_RECT_F, int>> editCtxHits;     // rebuilt each paint
+    std::vector<std::pair<D2D1_RECT_F, int>> editCtxSubHits;
+
     // Editor document
     std::wstring editorText;
     bool editorDirty = false;
@@ -1073,6 +1102,12 @@ struct App {
     IDWriteTextFormat* supSubFormat = nullptr;   // small size for ^sup^/~sub~
     IDWriteTextFormat* editorTextFormat = nullptr;
     float editorCharWidth = 0.0f; // Measured monospace char width
+    // WYSIWYG canvas (design t8): proportional base format; the dim/code
+    // brushes ride styled layouts as drawing effects (device resources —
+    // released with the render target)
+    IDWriteTextFormat* wysiwygTextFormat = nullptr;
+    ID2D1SolidColorBrush* editorDimBrush = nullptr;
+    ID2D1SolidColorBrush* editorCodeBrush = nullptr;
 
     // Metrics
     StartupMetrics metrics;
@@ -1124,6 +1159,7 @@ struct App {
         if (statsFormat) { statsFormat->Release(); statsFormat = nullptr; }
         if (supSubFormat) { supSubFormat->Release(); supSubFormat = nullptr; }
         if (editorTextFormat) { editorTextFormat->Release(); editorTextFormat = nullptr; }
+        if (wysiwygTextFormat) { wysiwygTextFormat->Release(); wysiwygTextFormat = nullptr; }
         for (auto& fmt : themePreviewFormats) {
             if (fmt.name) { fmt.name->Release(); fmt.name = nullptr; }
             if (fmt.preview) { fmt.preview->Release(); fmt.preview = nullptr; }
@@ -1147,6 +1183,16 @@ struct App {
             startPageIconBitmap->Release();
             startPageIconBitmap = nullptr;
         }
+        if (editorDimBrush) {
+            editorDimBrush->Release();
+            editorDimBrush = nullptr;
+        }
+        if (editorCodeBrush) {
+            editorCodeBrush->Release();
+            editorCodeBrush = nullptr;
+        }
+        // Cached editor layouts may carry those brushes as drawing effects
+        clearEditorLineLayoutCache();
     }
 
     void shutdown() {
@@ -1193,9 +1239,24 @@ inline float dpi(const App& app, float value) {
 
 // Width of the editor pane in edit mode (full window when preview is hidden)
 inline float editorPaneWidth(const App& app) {
+    // WYSIWYG (design t8): the styled canvas IS the document, no split
+    if (app.editorWysiwyg) return static_cast<float>(app.width);
     return app.editorShowPreview
         ? app.width * app.editorSplitRatio - 3.0f
         : static_cast<float>(app.width);
+}
+
+// Left tool rail (design t8): slides in with edit mode, carries the
+// formatting tools (WYSIWYG) or the document map (raw) plus the mode pill
+inline float editRailWidth(const App& app) {
+    if (!app.editMode) return 0.0f;
+    return dpi(app, 48.0f) * app.editRailAnim;
+}
+
+// The WYSIWYG canvas always soft-wraps; raw mode follows the Ctrl+W
+// word-wrap preference
+inline bool editorWrapOn(const App& app) {
+    return app.editorWordWrap || app.editorWysiwyg;
 }
 
 // Folder browser panel width — shared by input hit-testing, the panel
@@ -1240,10 +1301,18 @@ inline float documentViewportX(const App& app) {
         }
         return 0.0f;
     }
-    // Preview hidden: zero-width viewport at the right edge — document
+    // Preview hidden (or the WYSIWYG canvas, which owns the whole
+    // window): zero-width viewport at the right edge — document
     // rendering flows through unchanged and clips to nothing
-    if (!app.editorShowPreview) return static_cast<float>(app.width);
+    if (!app.editorShowPreview || app.editorWysiwyg) {
+        return static_cast<float>(app.width);
+    }
     return app.width * app.editorSplitRatio + 3.0f;
+}
+
+// The split preview beside the raw editor; the WYSIWYG canvas has none
+inline bool editorPreviewVisible(const App& app) {
+    return app.editMode && app.editorShowPreview && !app.editorWysiwyg;
 }
 
 inline float documentViewportWidth(const App& app) {

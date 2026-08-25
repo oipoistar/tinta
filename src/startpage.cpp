@@ -403,7 +403,7 @@ void startPageOpenEmbedded(App& app, HWND hwnd, int card) {
 
 // --- Rendering -----------------------------------------------------------
 
-static void ensureStartIcon(App& app) {
+void startPageEnsureIcon(App& app) {
     if (app.startPageIconBitmap || !app.wicFactory || !app.renderTarget)
         return;
     HICON icon = (HICON)LoadImageW(GetModuleHandleW(nullptr), L"IDI_ICON1",
@@ -432,7 +432,7 @@ static void ensureStartIcon(App& app) {
 void renderStartPage(App& app) {
     app.startPageHits.clear();
     if (!app.renderTarget || !app.brush || !app.dwriteFactory) return;
-    ensureStartIcon(app);
+    startPageEnsureIcon(app);
 
     const D2DTheme& th = app.theme;
     D2D1_COLOR_F white = D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f);

@@ -29,6 +29,7 @@
 #include "overlays.h"
 #include "annotations.h"
 #include "drafts.h"
+#include "editrail.h"
 #include "startpage.h"
 
 #include <appmodel.h>
@@ -116,7 +117,7 @@ void render(App& app) {
     }
 
     if (app.layoutDirty) {
-        if (app.editMode && !app.editorShowPreview) {
+        if (app.editMode && !editorPreviewVisible(app)) {
             // Preview hidden: defer document layout until it's shown again
             // (the viewport is zero-width, so laying out now would be wasted
             // work against a nonsense max width)
@@ -152,8 +153,8 @@ void render(App& app) {
     }
 
     // Sync preview scroll to editor scroll position using source-offset anchors
-    if (app.editMode && app.editorShowPreview &&
-        !app.scrollAnchors.empty() && !app.editorLineByteOffsets.empty()) {
+    if (editorPreviewVisible(app) && !app.scrollAnchors.empty() &&
+        !app.editorLineByteOffsets.empty()) {
         // Find the editor's top visible line (row-aware in wrap mode)
         int topLine = (int)editorTopVisibleLine(app);
         topLine = std::max(0, std::min(topLine, (int)app.editorLineByteOffsets.size() - 1));
@@ -217,7 +218,7 @@ void render(App& app) {
         renderEditor(app, editorWidth);
 
         // Render separator
-        if (app.editorShowPreview) renderSeparator(app);
+        if (editorPreviewVisible(app)) renderSeparator(app);
 
         // Render preview (right pane) using clip + transform
         app.renderTarget->PushAxisAlignedClip(
@@ -1258,6 +1259,13 @@ render_document:
 
     // Title-bar tab strip: the caption itself, above every panel
     renderTabStrip(app);
+
+    // Edit-mode tool rail (design t8): covers the strip's left corner
+    // and the old gutter column, so it draws above both
+    if (app.editMode) {
+        renderEditRail(app);
+        renderEditCtxMenu(app);
+    }
     renderTabSwitcher(app);
     renderTabMenu(app);
 
@@ -1823,6 +1831,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.zoomFactor = app->zoomFactor;
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
+                settings.editorWysiwyg = app->editorWysiwyg;
+                settings.editorAssists = app->editorAssists;
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
@@ -1944,6 +1954,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.folderSearchEnabled = savedSettings.folderSearchEnabled;
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
+    app.editorWysiwyg = savedSettings.editorWysiwyg;
+    app.editorAssists = savedSettings.editorAssists;
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;

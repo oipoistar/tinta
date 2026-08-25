@@ -389,6 +389,13 @@ void updateOverlayFormats(App& app) {
             measureLayout->Release();
         }
     }
+
+    // WYSIWYG canvas base (design t8): the theme's proportional face at a
+    // reading size that still fits the editor's uniform row grid
+    app.dwriteFactory->CreateTextFormat(app.theme.fontFamily, nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 15.0f * editorScale, L"en-us",
+        &app.wysiwygTextFormat);
 }
 
 void ensureThemePreviewFormats(App& app) {
@@ -463,6 +470,16 @@ bool createRenderTarget(App& app) {
         app.startPageIconBitmap->Release();
         app.startPageIconBitmap = nullptr;
     }
+    if (app.editorDimBrush) {
+        app.editorDimBrush->Release();
+        app.editorDimBrush = nullptr;
+    }
+    if (app.editorCodeBrush) {
+        app.editorCodeBrush->Release();
+        app.editorCodeBrush = nullptr;
+    }
+    // Cached editor layouts may hold those brushes as drawing effects
+    app.clearEditorLineLayoutCache();
 
     RECT rc;
     GetClientRect(app.hwnd, &rc);
