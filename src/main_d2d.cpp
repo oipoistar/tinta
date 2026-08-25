@@ -191,7 +191,12 @@ void render(App& app) {
             }
         }
 
-        float previewMaxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
+        // The page clips at the sheet's bottom edge, so its scroll range
+        // extends past the plain window-height clamp — the last blocks
+        // must clear the sheet bottom with a little breathing room
+        float previewMaxScroll =
+            std::max(0.0f, app.contentHeight + dpi(app, 18.0f) -
+                               editSheetRect(app).bottom);
         // renderedY includes the sheet's top padding; subtract it so an
         // editor at its top means a sheet at its top, and snap the last
         // half-line so the page top is always reachable (t11 feedback)

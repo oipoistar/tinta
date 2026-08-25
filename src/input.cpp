@@ -864,9 +864,13 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         if (!ctrl) {
             float editorMax = std::max(0.0f, app.editorContentHeight - (float)app.height);
             if (delta < 0 && app.editorScrollY >= editorMax - 1.0f) {
-                // Editor is at its end: scroll the preview's remaining tail
-                // directly (#85); the sync allows this overshoot
-                float maxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
+                // Editor is at its end: scroll the page's remaining tail
+                // directly (#85); the sync allows this overshoot. Same
+                // sheet-aware clamp as the sync, or the overshoot dies in
+                // the gap between the two formulas.
+                float maxScroll =
+                    std::max(0.0f, app.contentHeight + dpi(app, 18.0f) -
+                                       editSheetRect(app).bottom);
                 app.scrollY = std::min(app.scrollY - delta * dpi(app, 60.0f), maxScroll);
                 app.targetScrollY = app.scrollY;
                 InvalidateRect(hwnd, nullptr, FALSE);

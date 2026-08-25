@@ -234,9 +234,10 @@ void renderEditRail(App& app) {
     app.renderTarget->SetTransform(prev);
     app.renderTarget->PopAxisAlignedClip();
 
-    // Flyout label beside the hovered tool (design: "Bold  Ctrl+B")
+    // Flyout label beside the hovered tool (design: "Bold  Ctrl+B");
+    // suppressed while an insert flyout panel is open beside the rail
     const RailBtn* hovBtn = railBtnById(app.editRailHover);
-    if (hovBtn && app.folderBrowserFormat) {
+    if (hovBtn && !app.editCtxOpen && app.folderBrowserFormat) {
         D2D1_RECT_F src{};
         for (const auto& hit : app.editRailHits) {
             if (hit.second == hovBtn->id) {
@@ -368,6 +369,7 @@ static const EDiagItem kEDiag[] = {
 void openEditCtxMenu(App& app, HWND hwnd, float x, float y) {
     editorMoveCaretToPoint(app, (int)x, (int)y);
     app.editCtxOpen = true;
+    app.editCtxRailOnly = false;
     app.editCtxX = x;
     app.editCtxY = y;
     app.editCtxHover = 0;
@@ -378,9 +380,37 @@ void openEditCtxMenu(App& app, HWND hwnd, float x, float y) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
+// The rail's table / diagram buttons open the insert menu's submenu
+// standalone, anchored beside the button; the insert lands at the caret
+void openEditRailFlyout(App& app, HWND hwnd, int sub) {
+    if (app.editCtxOpen && app.editCtxRailOnly && app.editCtxSub == sub) {
+        closeEditCtxMenu(app);  // same button again toggles it away
+        return;
+    }
+    float anchorY = chromeTopHeight(app) + dpi(app, 60.0f);
+    int wantId = sub == 1 ? 20 : 21;
+    for (const auto& hit : app.editRailHits) {
+        if (hit.second == wantId) {
+            anchorY = hit.first.top;
+            break;
+        }
+    }
+    app.editCtxOpen = true;
+    app.editCtxRailOnly = true;
+    app.editCtxX = editRailWidth(app) + dpi(app, 10.0f);
+    app.editCtxY = anchorY;
+    app.editCtxHover = 0;
+    app.editCtxSub = sub;
+    app.editCtxSubHover = 0;
+    app.editCtxGridC = 3;
+    app.editCtxGridR = 4;
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 void closeEditCtxMenu(App& app) {
     if (!app.editCtxOpen) return;
     app.editCtxOpen = false;
+    app.editCtxRailOnly = false;
     app.editCtxSub = 0;
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
@@ -409,11 +439,21 @@ void renderEditCtxMenu(App& app) {
         totalH += it.id == 0 ? hdH : rowH;
         if (it.sepAfter) totalH += sepH;
     }
-    float mx = std::min(app.editCtxX, (float)app.width - w - dpi(app, 8.0f));
-    float my = std::min(app.editCtxY,
-                        (float)app.height - totalH - dpi(app, 8.0f));
-    my = std::max(my, chromeTopHeight(app) + dpi(app, 4.0f));
+    float mx, my;
+    if (app.editCtxRailOnly) {
+        // Rail flyout: no main panel — position so the submenu (which
+        // hangs off the main panel's right edge) lands beside the rail
+        mx = app.editCtxX - w - dpi(app, 4.0f);
+        my = app.editCtxY;
+    } else {
+        mx = std::min(app.editCtxX, (float)app.width - w - dpi(app, 8.0f));
+        my = std::min(app.editCtxY,
+                      (float)app.height - totalH - dpi(app, 8.0f));
+        my = std::max(my, chromeTopHeight(app) + dpi(app, 4.0f));
+    }
+    float subAnchorY = my;
 
+    if (!app.editCtxRailOnly) {
     D2D1_RECT_F panel = D2D1::RectF(mx, my, mx + w, my + totalH);
     // Soft shadow, then the acrylic-ish panel
     app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.30f));
@@ -433,7 +473,6 @@ void renderEditCtxMenu(App& app) {
         1.0f);
 
     float cy = my + padV;
-    float subAnchorY = my;
     for (const ECtxItem& it : kECtx) {
         if (it.id == 0) {
             IDWriteTextLayout* hl = railLayout(app, tr(app, it.label), 10.0f,
@@ -509,6 +548,7 @@ void renderEditCtxMenu(App& app) {
             cy += sepH;
         }
     }
+    }  // !editCtxRailOnly
 
     // Submenus, anchored beside their parent row
     if (app.editCtxSub == 2) {

@@ -2158,22 +2158,8 @@ void editRailInvoke(App& app, HWND hwnd, int id) {
         case 10: editorToggleLinePrefix(app, hwnd, L"- "); break;
         case 11: editorToggleLinePrefix(app, hwnd, L"- [ ] "); break;
         case 12: editorToggleLinePrefix(app, hwnd, L"> "); break;
-        case 20:
-            editorInsertSnippet(
-                app, hwnd,
-                L"| Column | Column | Column |\n"
-                L"|---|---|---|\n"
-                L"|  |  |  |\n",
-                2);
-            break;
-        case 21:
-            editorInsertSnippet(app, hwnd,
-                                L"```mermaid\n"
-                                L"flowchart LR\n"
-                                L"    A[Start] --> B[Next]\n"
-                                L"```\n",
-                                11);
-            break;
+        case 20: openEditRailFlyout(app, hwnd, 1); break;  // size grid
+        case 21: openEditRailFlyout(app, hwnd, 2); break;  // templates
         case 22:
             editorInsertSnippet(app, hwnd, L"![](image.png)\n", 4);
             break;
@@ -2872,7 +2858,11 @@ static void renderEditorWrapped(App& app, float editorWidth) {
 
     }
 
-    app.editorContentHeight = padding * 2 + app.editorTotalRows * lineHeight;
+    // Rows draw offset by the chrome strip, so the scrollable height
+    // includes it — otherwise the last strip-height of source can never
+    // scroll into view
+    app.editorContentHeight =
+        chromeTopHeight(app) + padding * 2 + app.editorTotalRows * lineHeight;
 
     // Editor scrollbar (same as unwrapped)
     if (app.editorContentHeight > app.height) {
@@ -3060,7 +3050,10 @@ void renderEditor(App& app, float editorWidth) {
     }
 
     // Update content height for scrolling
-    app.editorContentHeight = padding * 2 + app.editorLineStarts.size() * lineHeight;
+    // Includes the chrome strip offset the rows draw below (see the
+    // wrapped variant)
+    app.editorContentHeight = chromeTopHeight(app) + padding * 2 +
+                              app.editorLineStarts.size() * lineHeight;
 
     // Editor scrollbar
     if (app.editorContentHeight > app.height) {

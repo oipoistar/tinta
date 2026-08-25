@@ -1023,8 +1023,10 @@ struct App {
     std::vector<std::pair<D2D1_RECT_F, int>> editRailHits;  // rebuilt each paint
 
     // Raw editor insert menu (design t9): right-click drops markdown at
-    // the caret; Table and Diagram open flyout submenus
+    // the caret; Table and Diagram open flyout submenus. The rail's
+    // table/diagram buttons open the same submenus standalone.
     bool editCtxOpen = false;
+    bool editCtxRailOnly = false;  // submenu only, anchored at the rail
     float editCtxX = 0.0f;
     float editCtxY = 0.0f;
     int editCtxHover = 0;
