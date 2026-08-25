@@ -21,10 +21,10 @@ bool editRailMouseMove(App& app, HWND hwnd, int x, int y);
 // Rail button actions (defined in editor.cpp beside the edit helpers)
 void editRailInvoke(App& app, HWND hwnd, int id);
 
-// Thread seam between source and render (design t11), drawn after both
-// panes; the preview-side caret block wash draws inside the preview
-// transform before the document content
-void renderEditSeam(App& app);
+// Floating render sheet (design 10a): desk + shadow + sheet surface,
+// drawn before the document clips into the sheet; the caret block wash
+// draws inside the preview transform before the document content
+void renderEditSheetChrome(App& app);
 void renderPreviewCaretBlock(App& app, float previewWidth);
 
 // Raw editor insert menu (design t9)

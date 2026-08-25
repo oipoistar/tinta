@@ -193,10 +193,10 @@ void render(App& app) {
 
         float previewMaxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
         // renderedY includes the chrome strip and the document's top
-        // margin; without subtracting where the editor's top line sits the
-        // first block lands under the strip and the render can never
-        // scroll to its own top (t11 feedback)
-        float alignY = targetY - chromeTopHeight(app) - dpi(app, 8.0f);
+        // margin; subtract both so an editor at its top means a sheet at
+        // its top — without this the first block hides under the chrome
+        // and the render can never scroll up to it (t11 feedback)
+        float alignY = targetY - chromeTopHeight(app) - dpi(app, 20.0f);
         float synced = std::max(0.0f, std::min(alignY, previewMaxScroll));
         float editorMax = std::max(0.0f, app.editorContentHeight - (float)app.height);
         if (app.editorScrollY >= editorMax - 1.0f) {
@@ -210,10 +210,11 @@ void render(App& app) {
         app.targetScrollY = app.scrollY;
     }
 
-    // Edit mode: split view rendering
+    // Edit mode: split view rendering — everything sits on the desk
+    // surface, the render sheet floats above it (design 10a)
     if (app.editMode) {
         app.startPageShowing = false;  // recents reload on the way back
-        app.renderTarget->Clear(app.theme.background);
+        app.renderTarget->Clear(editDeskColor(app));
 
         float editorWidth = editorPaneWidth(app);
         float previewX = documentViewportX(app);
@@ -222,21 +223,21 @@ void render(App& app) {
         // Render editor (left pane; full width when the preview is hidden)
         renderEditor(app, editorWidth);
 
-        // Render preview (right pane) using clip + transform
-        app.renderTarget->PushAxisAlignedClip(
-            D2D1::RectF(previewX, 0, (float)app.width, (float)app.height),
-            D2D1_ANTIALIAS_MODE_ALIASED);
+        // The floating sheet (design 10a): desk, shadow, and sheet
+        // surface first, then the document clips into the sheet
+        renderEditSheetChrome(app);
+        {
+            D2D1_RECT_F sheet = editSheetRect(app);
+            app.renderTarget->PushAxisAlignedClip(
+                sheet, D2D1_ANTIALIAS_MODE_ALIASED);
+        }
 
         D2D1_MATRIX_3X2_F originalTransform;
         app.renderTarget->GetTransform(&originalTransform);
         app.renderTarget->SetTransform(
             D2D1::Matrix3x2F::Translation(previewX, 0) * originalTransform);
 
-        // Clear preview background, then the caret block's accent wash so
-        // the document content draws over it (design t11)
-        app.brush->SetColor(app.theme.background);
-        app.renderTarget->FillRectangle(
-            D2D1::RectF(0, 0, previewWidth, (float)app.height), app.brush);
+        // The caret block's accent wash under the document content
         renderPreviewCaretBlock(app, previewWidth);
 
         goto render_document;
@@ -1250,9 +1251,6 @@ render_document:
         D2D1_MATRIX_3X2_F identity = D2D1::Matrix3x2F::Identity();
         app.renderTarget->SetTransform(identity);
         app.renderTarget->PopAxisAlignedClip();
-
-        // Thread seam between the panes (design t11)
-        renderEditSeam(app);
 
         // Quick-note empty state: Open button in the blank preview pane
         renderQuickNoteEmptyState(app);

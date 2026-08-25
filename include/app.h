@@ -1218,11 +1218,11 @@ inline float dpi(const App& app, float value) {
 }
 
 // Width of the editor pane in edit mode (full window when preview is hidden)
-// Thread seam (design t11): the gutter column between source and render
-// where the mapping threads live. Replaces the old 6px separator; its
-// center sits at width * editorSplitRatio.
+// Desk gap (design 10a): the sliver of desk between the source column
+// and the floating render sheet; it doubles as the split drag handle.
+// Its center sits at width * editorSplitRatio.
 inline float editSeamWidth(const App& app) {
-    return dpi(app, 48.0f);
+    return dpi(app, 16.0f);
 }
 
 inline float editorPaneWidth(const App& app) {
@@ -1301,10 +1301,44 @@ inline bool editorPreviewVisible(const App& app) {
     return app.editMode && app.editorShowPreview;
 }
 
+// Floating render sheet (design 10a): the page lies on the editor's
+// desk, inset from the chrome and the window edges; its shadow is the
+// only separator
+inline D2D1_RECT_F editSheetRect(const App& app) {
+    return D2D1::RectF(documentViewportX(app),
+                       chromeTopHeight(app) + dpi(app, 14.0f),
+                       (float)app.width - dpi(app, 16.0f),
+                       (float)app.height - dpi(app, 14.0f));
+}
+
+inline D2D1_COLOR_F editSurfaceMix(D2D1_COLOR_F c, float to, float t) {
+    c.r += (to - c.r) * t;
+    c.g += (to - c.g) * t;
+    c.b += (to - c.b) * t;
+    c.a = 1.0f;
+    return c;
+}
+
+// The desk both panes sit on: lifted a shade off the window in the dark,
+// dimmed a touch in the light so the sheet reads as paper on top
+inline D2D1_COLOR_F editDeskColor(const App& app) {
+    return app.theme.isDark
+               ? editSurfaceMix(app.theme.background, 1.0f, 0.03f)
+               : editSurfaceMix(app.theme.background, 0.0f, 0.045f);
+}
+
+inline D2D1_COLOR_F editSheetColor(const App& app) {
+    return app.theme.isDark
+               ? editSurfaceMix(app.theme.background, 1.0f, 0.065f)
+               : editSurfaceMix(app.theme.background, 1.0f, 0.35f);
+}
+
 inline float documentViewportWidth(const App& app) {
     float width;
     if (app.editMode) {
         width = static_cast<float>(app.width) - documentViewportX(app);
+        // The floating sheet is inset from the window's right edge
+        if (editorPreviewVisible(app)) width -= dpi(app, 16.0f);
     } else {
         width = static_cast<float>(app.width);
         // Snap to the panel's final width (not the animated position) so

@@ -721,25 +721,12 @@ bool editCtxMouseMove(App& app, int x, int y) {
     return true;
 }
 
-// --- Thread seam (design t11) --------------------------------------------
+// --- Floating sheet (design 10a) -----------------------------------------
 //
-// The gutter between source and render. Hairline beziers tie each source
-// block to its rendered output so a change on the left is traceable to
-// its effect on the right; the caret's thread lights up in accent with
-// dots at both ends. The whole column doubles as the split handle.
-
-// Editor line holding a source byte offset (lines and byte offsets are
-// parallel arrays rebuilt together on reparse)
-static size_t seamLineFromOffset(const App& app, size_t byteOffset) {
-    const auto& offs = app.editorLineByteOffsets;
-    size_t lo = 0, hi = offs.size();
-    while (lo + 1 < hi) {
-        size_t mid = (lo + hi) / 2;
-        if (offs[mid] <= byteOffset) lo = mid;
-        else hi = mid;
-    }
-    return lo;
-}
+// The render is a sheet of paper lying on the editor's desk: both panes
+// share the desk surface, the sheet floats inset from the chrome with a
+// soft shadow thrown below it, and the caret's block keeps its wash on
+// the page. The desk gap left of the sheet is the split drag handle.
 
 // Index of the scroll anchor (top-level block) containing the caret,
 // or -1 when the tables aren't ready
@@ -773,119 +760,44 @@ static int seamCaretAnchor(const App& app) {
     return (int)alo;
 }
 
-// Screen y of the source line holding byteOffset, at the line's middle
-static float seamSourceY(const App& app, size_t byteOffset,
-                         float lineHeight) {
-    size_t line = seamLineFromOffset(app, byteOffset);
-    float rowStart = editorWrapOn(app) && line < app.editorRowStarts.size()
-                         ? (float)app.editorRowStarts[line]
-                         : (float)line;
-    return chromeTopHeight(app) + dpi(app, 8.0f) + rowStart * lineHeight -
-           app.editorScrollY + lineHeight * 0.5f;
-}
-
-void renderEditSeam(App& app) {
+// Desk fill, sheet shadow, sheet surface and edge — drawn before the
+// document content clips into the sheet
+void renderEditSheetChrome(App& app) {
     if (!editorPreviewVisible(app) || !app.renderTarget || !app.brush) {
         return;
     }
-    const D2DTheme& th = app.theme;
-    float seamL = editorPaneWidth(app);
-    float seamW = editSeamWidth(app);
-    float seamR = seamL + seamW;
-    float top = chromeTopHeight(app);
+    float W = (float)app.width;
     float H = (float)app.height;
+    D2D1_RECT_F sheet = editSheetRect(app);
+    float radius = dpi(app, 10.0f);
 
-    // Seam bed: a shade below both panes so the render reads as its own
-    // surface; hairline edges close each pane
-    D2D1_COLOR_F bed =
-        th.isDark ? railMix(th.background, D2D1::ColorF(0, 0, 0, 1), 0.3f)
-                  : railMix(th.background, D2D1::ColorF(0, 0, 0, 1), 0.045f);
-    app.brush->SetColor(bed);
-    app.renderTarget->FillRectangle(D2D1::RectF(seamL, 0, seamR, H),
-                                    app.brush);
-    app.brush->SetColor(railA(th.text, 0.07f));
-    app.renderTarget->FillRectangle(D2D1::RectF(seamL, 0, seamL + 1.0f, H),
-                                    app.brush);
-    app.renderTarget->FillRectangle(D2D1::RectF(seamR - 1.0f, 0, seamR, H),
-                                    app.brush);
+    // Desk right of the source column (the editor fills its own side)
+    app.brush->SetColor(editDeskColor(app));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(editorPaneWidth(app), 0, W, H), app.brush);
 
-    if (app.scrollAnchors.empty() || app.editorLineByteOffsets.empty() ||
-        !app.d2dFactory || !app.editorTextFormat) {
-        return;
-    }
-    float lineHeight = app.editorTextFormat->GetFontSize() * 1.5f;
-    float midX = seamL + seamW * 0.5f;
-    float slack = dpi(app, 40.0f);
-    int caretK = seamCaretAnchor(app);
-    float caretSrcY = 0.0f, caretDstY = 0.0f;
-    bool caretSeen = false;
-
-    app.renderTarget->PushAxisAlignedClip(
-        D2D1::RectF(seamL, top, seamR, H),
-        D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-
-    auto drawThread = [&](float ySrc, float yDst, bool caret, float alpha) {
-        ID2D1PathGeometry* geo = nullptr;
-        app.d2dFactory->CreatePathGeometry(&geo);
-        if (!geo) return;
-        ID2D1GeometrySink* sink = nullptr;
-        if (SUCCEEDED(geo->Open(&sink)) && sink) {
-            sink->BeginFigure(D2D1::Point2F(seamL, ySrc),
-                              D2D1_FIGURE_BEGIN_HOLLOW);
-            sink->AddBezier(D2D1::BezierSegment(D2D1::Point2F(midX, ySrc),
-                                                D2D1::Point2F(midX, yDst),
-                                                D2D1::Point2F(seamR, yDst)));
-            sink->EndFigure(D2D1_FIGURE_END_OPEN);
-            sink->Close();
-            sink->Release();
-            app.brush->SetColor(caret ? th.accent
-                                      : railA(th.text, alpha));
-            app.renderTarget->DrawGeometry(geo, app.brush,
-                                           caret ? 1.5f : 1.0f);
-        }
-        geo->Release();
-    };
-
-    float span = std::max(1.0f, H - top);
-    for (size_t k = 0; k < app.scrollAnchors.size(); k++) {
-        float ySrc =
-            seamSourceY(app, app.scrollAnchors[k].sourceOffset, lineHeight);
-        float yDst = app.scrollAnchors[k].renderedY - app.scrollY +
-                     dpi(app, 10.0f);
-        if (ySrc > H + slack) break;  // source rows only grow from here
-        if ((int)k == caretK) {
-            // Deferred so the lit thread draws above its neighbors
-            caretSrcY = ySrc;
-            caretDstY = yDst;
-            caretSeen = true;
-            continue;
-        }
-        // A thread draws while either end is on screen; render content is
-        // taller than its source, so the two sides drift apart with depth
-        // and the thread fades with that distance — near-aligned pairs
-        // read clearly, far dives become whispers instead of a noise band
-        bool srcVis = ySrc >= top - slack && ySrc <= H + slack;
-        bool dstVis = yDst >= top - slack && yDst <= H + slack;
-        if (!srcVis && !dstVis) continue;
-        float fade =
-            1.0f - std::min(1.0f, fabsf(yDst - ySrc) / (1.5f * span));
-        if (fade <= 0.03f) continue;
-        drawThread(ySrc, yDst, false, 0.05f + 0.11f * fade);
-    }
-    if (caretSeen) {
-        drawThread(caretSrcY, caretDstY, true, 1.0f);
-        float r = dpi(app, 2.5f);
-        app.brush->SetColor(th.accent);
-        app.renderTarget->FillEllipse(
-            D2D1::Ellipse(D2D1::Point2F(seamL + dpi(app, 2.0f), caretSrcY),
-                          r, r),
-            app.brush);
-        app.renderTarget->FillEllipse(
-            D2D1::Ellipse(D2D1::Point2F(seamR - dpi(app, 2.0f), caretDstY),
-                          r, r),
+    // Shadow: stacked translucent fills growing outward and sliding down,
+    // so the sheet throws its shade below itself
+    float grow = dpi(app, 2.2f);
+    float drop = dpi(app, 1.1f);
+    float ringAlpha = app.theme.isDark ? 0.07f : 0.035f;
+    for (int i = 8; i >= 1; i--) {
+        D2D1_RECT_F halo = D2D1::RectF(
+            sheet.left - grow * i, sheet.top - grow * i * 0.3f + drop * i,
+            sheet.right + grow * i, sheet.bottom + grow * i + drop * i);
+        app.brush->SetColor(D2D1::ColorF(0, 0, 0, ringAlpha));
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(halo, radius + grow * i, radius + grow * i),
             app.brush);
     }
-    app.renderTarget->PopAxisAlignedClip();
+
+    // The sheet itself, closed by a hairline edge
+    app.brush->SetColor(editSheetColor(app));
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(sheet, radius, radius), app.brush);
+    app.brush->SetColor(railA(app.theme.text, 0.08f));
+    app.renderTarget->DrawRoundedRectangle(
+        D2D1::RoundedRect(sheet, radius, radius), app.brush, 1.0f);
 }
 
 // Soft accent wash behind the caret block's rendered output; drawn inside

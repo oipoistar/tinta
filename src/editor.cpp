@@ -1043,8 +1043,8 @@ void renderQuickNoteEmptyState(App& app) {
     if (!format || !app.renderTarget || !app.brush || !app.dwriteFactory)
         return;
 
-    float paneX = (float)app.width * app.editorSplitRatio;
-    float paneW = (float)app.width - paneX;
+    float paneX = documentViewportX(app);
+    float paneW = documentViewportWidth(app);
     if (paneW < dpi(app, 180.0f)) return;  // pane too narrow to bother
 
     const wchar_t* label = tr(app, "empty.open_button");
@@ -2769,7 +2769,8 @@ static void renderEditorWrapped(App& app, float editorWidth) {
     float padding = dpi(app, 8.0f);
     float textX = editorTextX(app);
 
-    app.brush->SetColor(app.theme.background);
+    // The source sits directly on the desk (design 10a) — no pane box
+    app.brush->SetColor(editDeskColor(app));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, editorWidth, (float)app.height), app.brush);
 
@@ -2903,8 +2904,8 @@ void renderEditor(App& app, float editorWidth) {
     float padding = dpi(app, 8.0f);
     float charWidth = app.editorCharWidth > 0 ? app.editorCharWidth : app.editorTextFormat->GetFontSize() * 0.6f;
 
-    // Editor background
-    app.brush->SetColor(app.theme.background);
+    // Editor background: the desk surface (design 10a)
+    app.brush->SetColor(editDeskColor(app));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, editorWidth, (float)app.height), app.brush);
 
@@ -3039,7 +3040,7 @@ void renderEditor(App& app, float editorWidth) {
 
     // The rail + gutter column last: horizontally scrolled text slides
     // under it, then the line numbers draw on top (design t11)
-    app.brush->SetColor(app.theme.background);
+    app.brush->SetColor(editDeskColor(app));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, gutterRight, (float)app.height), app.brush);
     for (int i = firstVisible; i <= lastVisible && i < (int)app.editorLineStarts.size(); i++) {
