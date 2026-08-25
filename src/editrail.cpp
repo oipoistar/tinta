@@ -868,10 +868,14 @@ void renderPreviewCaretBlock(App& app, float previewWidth) {
     D2D1_COLOR_F c = app.theme.accent;
     c.a = 0.08f;
     app.brush->SetColor(c);
+    // Hug the content column with a small overhang (design t11's wash)
+    // rather than spanning the sheet — a full-width band makes indented
+    // blocks beside plain ones read as misaligned
+    float inset = std::max(dpi(app, 10.0f),
+                           app.layoutIndent - dpi(app, 12.0f));
     app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(D2D1::RectF(dpi(app, 10.0f), blockTop,
-                                      previewWidth - dpi(app, 10.0f),
-                                      blockBottom),
+        D2D1::RoundedRect(D2D1::RectF(inset, blockTop,
+                                      previewWidth - inset, blockBottom),
                           dpi(app, 5.0f), dpi(app, 5.0f)),
         app.brush);
 }
