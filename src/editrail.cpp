@@ -7,6 +7,7 @@
 #include "editor.h"
 #include "i18n.h"
 #include "startpage.h"
+#include "tabs.h"
 
 #include <algorithm>
 #include <string>
@@ -815,6 +816,14 @@ void renderEditSheetChrome(App& app) {
     app.brush->SetColor(editDeskColor(app));
     app.renderTarget->FillRectangle(
         D2D1::RectF(editorPaneWidth(app), 0, W, H), app.brush);
+    // The tab strip's band continues across the top behind the sheet so
+    // the chrome reads as one surface — without this the strip stops
+    // dead at the source column's edge, which on dark themes (strip far
+    // darker than desk) looks cut off
+    app.brush->SetColor(tabStripBackground(app));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(editorPaneWidth(app), 0, W, chromeTopHeight(app)),
+        app.brush);
 
     // Shadow: stacked translucent fills growing outward and sliding down,
     // so the sheet throws its shade below itself
