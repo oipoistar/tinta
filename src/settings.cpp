@@ -47,7 +47,6 @@ void saveSettings(const Settings& settings) {
     file << "hasAskedFileAssociation=" << (settings.hasAskedFileAssociation ? 1 : 0) << "\n";
     file << "editorShowPreview=" << (settings.editorShowPreview ? 1 : 0) << "\n";
     file << "editorWordWrap=" << (settings.editorWordWrap ? 1 : 0) << "\n";
-    file << "editorWysiwyg=" << (settings.editorWysiwyg ? 1 : 0) << "\n";
     file << "editorAssists=" << (settings.editorAssists ? 1 : 0) << "\n";
     file << "followSystemTheme=" << (settings.followSystemTheme ? 1 : 0) << "\n";
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
@@ -186,11 +185,10 @@ void persistReadingPosition(const std::string& path, float scrollY,
     saveSettings(settings);
 }
 
-// The editor mode pill (Ctrl+E) persists immediately so the next ':'
-// opens the preferred mode, in this window or a fresh one
+// The editor assists toggle persists immediately so fresh windows pick
+// it up without waiting for this one's exit save
 void persistEditorMode(const App& app) {
     Settings settings = loadSettings();
-    settings.editorWysiwyg = app.editorWysiwyg;
     settings.editorAssists = app.editorAssists;
     saveSettings(settings);
 }
@@ -332,8 +330,6 @@ Settings loadSettings() {
             settings.editorShowPreview = (value == "1");
         } else if (key == "editorWordWrap") {
             settings.editorWordWrap = (value == "1");
-        } else if (key == "editorWysiwyg") {
-            settings.editorWysiwyg = (value == "1");
         } else if (key == "editorAssists") {
             settings.editorAssists = (value == "1");
         } else if (key == "sessionActive") {

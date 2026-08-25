@@ -226,7 +226,7 @@ static void setSearchCursor(const App& app, float x, float y) {
     float barHeight = dpi(app, 44.0f);
     float centerWidth = (float)app.width;
     if (app.editMode) {
-        float paneWidth = app.width * app.editorSplitRatio - 3.0f;
+        float paneWidth = editorPaneWidth(app);
         barWidth = std::min(barWidth, paneWidth - dpi(app, 40.0f));
         centerWidth = paneWidth;
     }
@@ -1182,10 +1182,8 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             }
         }
         // If mouse is in the preview pane and not dragging separator, fall through for link hover etc.
-        float sepX = app.editorShowPreview
-            ? app.width * app.editorSplitRatio
-            : static_cast<float>(app.width);
-        if (app.mouseX < sepX || app.draggingSeparator || app.editorSelecting) return;
+        if ((float)app.mouseX < documentViewportX(app) ||
+            app.draggingSeparator || app.editorSelecting) return;
         // Quick-note empty state: hover feedback for the Open button
         if (quickNoteEmptyStateActive(app) && app.editorShowPreview) {
             const D2D1_RECT_F& r = app.quickNoteButtonRect;
@@ -1647,7 +1645,7 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
 
     // Raw editor insert menu (design t9): the right-click moves the
     // caret and the INSERT entries drop their markdown there
-    if (app.editMode && !app.editorWysiwyg && !app.confirmExitPending &&
+    if (app.editMode && !app.confirmExitPending &&
         !fromKeyboard && (float)pt.x >= editRailWidth(app) &&
         (float)pt.x < editorPaneWidth(app)) {
         openEditCtxMenu(app, hwnd, (float)pt.x, (float)pt.y);
@@ -1826,10 +1824,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 }
             }
         }
-        float sepX = app.editorShowPreview
-            ? app.width * app.editorSplitRatio
-            : static_cast<float>(app.width);
-        if (x < sepX + 6) {
+        // Everything left of the preview edge — pane and seam — belongs
+        // to the editor handler (the seam is the split handle)
+        if ((float)x < documentViewportX(app)) {
             handleEditorMouseDown(app, hwnd, x, y);
             return;
         }

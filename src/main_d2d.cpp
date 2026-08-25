@@ -217,9 +217,6 @@ void render(App& app) {
         // Render editor (left pane; full width when the preview is hidden)
         renderEditor(app, editorWidth);
 
-        // Render separator
-        if (editorPreviewVisible(app)) renderSeparator(app);
-
         // Render preview (right pane) using clip + transform
         app.renderTarget->PushAxisAlignedClip(
             D2D1::RectF(previewX, 0, (float)app.width, (float)app.height),
@@ -230,10 +227,12 @@ void render(App& app) {
         app.renderTarget->SetTransform(
             D2D1::Matrix3x2F::Translation(previewX, 0) * originalTransform);
 
-        // Clear preview background
+        // Clear preview background, then the caret block's accent wash so
+        // the document content draws over it (design t11)
         app.brush->SetColor(app.theme.background);
         app.renderTarget->FillRectangle(
             D2D1::RectF(0, 0, previewWidth, (float)app.height), app.brush);
+        renderPreviewCaretBlock(app, previewWidth);
 
         goto render_document;
     }
@@ -1247,6 +1246,9 @@ render_document:
         app.renderTarget->SetTransform(identity);
         app.renderTarget->PopAxisAlignedClip();
 
+        // Thread seam between the panes (design t11)
+        renderEditSeam(app);
+
         // Quick-note empty state: Open button in the blank preview pane
         renderQuickNoteEmptyState(app);
 
@@ -1831,7 +1833,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.zoomFactor = app->zoomFactor;
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
-                settings.editorWysiwyg = app->editorWysiwyg;
                 settings.editorAssists = app->editorAssists;
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
@@ -1954,7 +1955,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.folderSearchEnabled = savedSettings.folderSearchEnabled;
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
-    app.editorWysiwyg = savedSettings.editorWysiwyg;
     app.editorAssists = savedSettings.editorAssists;
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;

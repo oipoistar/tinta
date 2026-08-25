@@ -1,8 +1,7 @@
-// Left tool rail (design t8): a 48dp column that slides in with edit
-// mode, replacing the old editor gutter. In WYSIWYG it carries the
-// formatting tools grouped text / blocks / insert; in raw mode it is the
-// document map and the only line numbering. The Aa / M-down mode pill at
-// its foot switches modes (Ctrl+E) and the choice persists.
+// Left tool rail (design t8/t11): a 48dp column that slides in with edit
+// mode carrying the formatting controls grouped text / blocks / insert.
+// Line numbers live in the editor's own slim gutter beside it, and the
+// thread seam (also here) ties source blocks to their render.
 
 #include "editrail.h"
 #include "editor.h"
@@ -199,174 +198,45 @@ void renderEditRail(App& app) {
     sep(y);
     y += dpi(app, 9.0f);
 
-    // Foot: mode pill + CTRL+E label (drawn from the bottom up so the
-    // middle section knows its available height)
-    float labelH = dpi(app, 12.0f);
-    float pillH = dpi(app, 56.0f);
-    float pillW = dpi(app, 32.0f);
-    float pillTop = H - dpi(app, 12.0f) - labelH - dpi(app, 6.0f) - pillH;
-    float middleBottom = pillTop - dpi(app, 8.0f);
-
-    {
-        D2D1_RECT_F pill = D2D1::RectF((railW - pillW) * 0.5f, pillTop,
-                                       (railW + pillW) * 0.5f,
-                                       pillTop + pillH);
-        app.brush->SetColor(railMix(railBg, text, 0.06f));
-        app.renderTarget->FillRoundedRectangle(
-            D2D1::RoundedRect(pill, pillW * 0.5f, pillW * 0.5f), app.brush);
-        app.brush->SetColor(railA(text, 0.12f));
-        app.renderTarget->DrawRoundedRectangle(
-            D2D1::RoundedRect(pill, pillW * 0.5f, pillW * 0.5f), app.brush,
-            1.0f);
-        float cSize = dpi(app, 24.0f);
-        float inset = dpi(app, 4.0f);
-        D2D1_RECT_F top = D2D1::RectF(pill.left + inset, pill.top + inset,
-                                      pill.left + inset + cSize,
-                                      pill.top + inset + cSize);
-        D2D1_RECT_F bottom =
-            D2D1::RectF(pill.left + inset, pill.bottom - inset - cSize,
-                        pill.left + inset + cSize, pill.bottom - inset);
-        if (app.editorWysiwyg) {
-            app.brush->SetColor(accent);
-            app.renderTarget->FillEllipse(
-                D2D1::Ellipse(D2D1::Point2F((top.left + top.right) * 0.5f,
-                                            (top.top + top.bottom) * 0.5f),
-                              cSize * 0.5f, cSize * 0.5f),
-                app.brush);
-        } else {
-            app.brush->SetColor(accent);
-            app.renderTarget->FillEllipse(
-                D2D1::Ellipse(
-                    D2D1::Point2F((bottom.left + bottom.right) * 0.5f,
-                                  (bottom.top + bottom.bottom) * 0.5f),
-                    cSize * 0.5f, cSize * 0.5f),
-                app.brush);
-        }
-        railGlyph(app, L"Aa", 10.0f, DWRITE_FONT_WEIGHT_BOLD,
-                  DWRITE_FONT_STYLE_NORMAL, L"Segoe UI", top,
-                  app.editorWysiwyg ? onAccent : railA(text, 0.55f));
-        railGlyph(app, L"M\u2193", 9.0f,
-                  app.editorWysiwyg ? DWRITE_FONT_WEIGHT_NORMAL
-                                    : DWRITE_FONT_WEIGHT_BOLD,
-                  DWRITE_FONT_STYLE_NORMAL, L"Consolas", bottom,
-                  app.editorWysiwyg ? railA(text, 0.55f) : onAccent);
-        addHit(D2D1::RectF(pill.left, pill.top, pill.right,
-                           pill.top + pillH * 0.5f),
-               30);
-        addHit(D2D1::RectF(pill.left, pill.top + pillH * 0.5f, pill.right,
-                           pill.bottom),
-               31);
-
-        IDWriteTextLayout* lbl = railLayout(app, L"CTRL+E", 7.5f,
-                                            DWRITE_FONT_WEIGHT_NORMAL);
-        if (lbl) {
-            DWRITE_TEXT_METRICS m{};
-            lbl->GetMetrics(&m);
-            railDraw(app, lbl, (railW - m.width) * 0.5f,
-                     pill.bottom + dpi(app, 5.0f), railA(text, 0.4f));
-            lbl->Release();
-        }
-    }
-
-    if (app.editorWysiwyg) {
-        // Tool groups: text style, blocks, insert
-        float btn = dpi(app, 32.0f);
-        float bx = (railW - btn) * 0.5f;
-        auto group = [&](const RailBtn* btns, int count) {
-            for (int i = 0; i < count; i++) {
-                const RailBtn& b = btns[i];
-                D2D1_RECT_F r =
-                    D2D1::RectF(bx, y, bx + btn, y + btn);
-                bool hov = app.editRailHover == b.id;
-                if (hov) {
-                    app.brush->SetColor(railA(text, 0.07f));
-                    app.renderTarget->FillRoundedRectangle(
-                        D2D1::RoundedRect(r, dpi(app, 7.0f),
-                                          dpi(app, 7.0f)),
-                        app.brush);
-                }
-                railGlyph(app, b.glyph, b.size, b.weight, b.style,
-                          b.family, r,
-                          hov ? railA(text, 0.95f) : railA(text, 0.8f),
-                          b.strike);
-                addHit(r, b.id);
-                y += btn + dpi(app, 2.0f);
+    // Tool groups: text style, blocks, insert
+    float btn = dpi(app, 32.0f);
+    float bx = (railW - btn) * 0.5f;
+    auto group = [&](const RailBtn* btns, int count) {
+        for (int i = 0; i < count; i++) {
+            const RailBtn& b = btns[i];
+            D2D1_RECT_F r = D2D1::RectF(bx, y, bx + btn, y + btn);
+            bool hov = app.editRailHover == b.id;
+            if (hov) {
+                app.brush->SetColor(railA(text, 0.07f));
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(r, dpi(app, 7.0f), dpi(app, 7.0f)),
+                    app.brush);
             }
-        };
-        group(kTextBtns, 5);
-        y += dpi(app, 7.0f);
-        sep(y);
-        y += dpi(app, 8.0f);
-        group(kBlockBtns, 3);
-        y += dpi(app, 7.0f);
-        sep(y);
-        y += dpi(app, 8.0f);
-        group(kInsertBtns, 3);
-    } else {
-        // Document map as the gutter reborn: each number is the real
-        // line beside it, drawn at the editor's exact screen height, so
-        // the column scrolls with the text and never resamples. The
-        // caret line's number lights up; dragging the strip scrolls.
-        float mapTop = y + dpi(app, 3.0f);
-        float mapBottom = middleBottom - dpi(app, 4.0f);
-        float lineHeight = app.editorTextFormat
-                               ? app.editorTextFormat->GetFontSize() * 1.5f
-                               : dpi(app, 22.0f);
-        float padding = dpi(app, 8.0f);
-        size_t lineCount = app.editorLineStarts.size();
-        if (lineCount > 0 && mapBottom - mapTop > lineHeight) {
-            bool wrap = editorWrapOn(app);
-            size_t caretLine = 0;
-            {
-                // Line containing the caret (same binary search the
-                // editor uses)
-                size_t lo = 0, hi = lineCount;
-                while (lo + 1 < hi) {
-                    size_t mid = (lo + hi) / 2;
-                    if (app.editorLineStarts[mid] <= app.editorCursorPos) {
-                        lo = mid;
-                    } else {
-                        hi = mid;
-                    }
-                }
-                caretLine = lo;
-            }
-            for (size_t i = 0; i < lineCount; i++) {
-                float rowStart =
-                    wrap && i < app.editorRowStarts.size()
-                        ? (float)app.editorRowStarts[i]
-                        : (float)i;
-                float lineY = chromeTopHeight(app) + padding +
-                              rowStart * lineHeight - app.editorScrollY;
-                if (lineY + lineHeight <= mapTop) continue;
-                if (lineY + lineHeight > mapBottom) break;
-                wchar_t num[16];
-                swprintf_s(num, _countof(num), L"%d", (int)i + 1);
-                IDWriteTextLayout* l = railLayout(
-                    app, num, 8.5f,
-                    i == caretLine ? DWRITE_FONT_WEIGHT_SEMI_BOLD
-                                   : DWRITE_FONT_WEIGHT_NORMAL,
-                    L"Consolas");
-                if (l) {
-                    DWRITE_TEXT_METRICS m{};
-                    l->GetMetrics(&m);
-                    railDraw(app, l, (railW - m.width) * 0.5f,
-                             lineY + (lineHeight - m.height) * 0.5f,
-                             i == caretLine ? railA(accent, 0.9f)
-                                            : railA(text, 0.38f));
-                    l->Release();
-                }
-            }
-            addHit(D2D1::RectF(0, mapTop, railW, mapBottom), 40);
+            railGlyph(app, b.glyph, b.size, b.weight, b.style, b.family, r,
+                      hov ? railA(text, 0.95f) : railA(text, 0.8f),
+                      b.strike);
+            addHit(r, b.id);
+            y += btn + dpi(app, 2.0f);
         }
-    }
+    };
+    group(kTextBtns, 5);
+    y += dpi(app, 7.0f);
+    sep(y);
+    y += dpi(app, 8.0f);
+    group(kBlockBtns, 3);
+    y += dpi(app, 7.0f);
+    sep(y);
+    y += dpi(app, 8.0f);
+    group(kInsertBtns, 3);
+    (void)onAccent;
+    (void)accent;
 
     app.renderTarget->SetTransform(prev);
     app.renderTarget->PopAxisAlignedClip();
 
     // Flyout label beside the hovered tool (design: "Bold  Ctrl+B")
     const RailBtn* hovBtn = railBtnById(app.editRailHover);
-    if (hovBtn && app.editorWysiwyg && app.folderBrowserFormat) {
+    if (hovBtn && app.folderBrowserFormat) {
         D2D1_RECT_F src{};
         for (const auto& hit : app.editRailHits) {
             if (hit.second == hovBtn->id) {
@@ -430,33 +300,9 @@ int editRailHitAt(const App& app, float x, float y) {
     return 0;
 }
 
-// Clamp helper shared by the map drag and the click-to-caret jump
-static float editRailMaxScroll(const App& app) {
-    float lineHeight = app.editorTextFormat
-                           ? app.editorTextFormat->GetFontSize() * 1.5f
-                           : dpi(app, 22.0f);
-    float totalRows =
-        editorWrapOn(app) && app.editorTotalRows > 0
-            ? (float)app.editorTotalRows
-            : (float)app.editorLineStarts.size();
-    return std::max(0.0f,
-                    totalRows * lineHeight + dpi(app, 16.0f) -
-                        (float)app.height);
-}
-
 bool editRailMouseDown(App& app, HWND hwnd, int x, int y) {
     if (!app.editMode || (float)x >= editRailWidth(app)) return false;
     int hit = editRailHitAt(app, (float)x, (float)y);
-    if (hit == 40) {
-        // Arm the grab: movement scrolls 1:1, a still click places the
-        // caret on the clicked line (resolved on release)
-        app.editRailMapDragging = true;
-        app.editRailMapMoved = false;
-        app.editRailMapDragStartY = (float)y;
-        app.editRailMapDragStartScroll = app.editorScrollY;
-        SetCapture(hwnd);
-        return true;
-    }
     if (hit != 0) {
         editRailInvoke(app, hwnd, hit);
     }
@@ -465,17 +311,6 @@ bool editRailMouseDown(App& app, HWND hwnd, int x, int y) {
 
 bool editRailMouseMove(App& app, HWND hwnd, int x, int y) {
     if (!app.editMode) return false;
-    if (app.editRailMapDragging) {
-        float delta = app.editRailMapDragStartY - (float)y;
-        if (fabsf(delta) > 3.0f) app.editRailMapMoved = true;
-        if (app.editRailMapMoved) {
-            app.editorScrollY = std::max(
-                0.0f, std::min(app.editRailMapDragStartScroll + delta,
-                               editRailMaxScroll(app)));
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
-        return true;
-    }
     int hit = (float)x < editRailWidth(app)
                   ? editRailHitAt(app, (float)x, (float)y)
                   : 0;
@@ -484,43 +319,6 @@ bool editRailMouseMove(App& app, HWND hwnd, int x, int y) {
         InvalidateRect(hwnd, nullptr, FALSE);
     }
     return (float)x < editRailWidth(app);
-}
-
-void editRailMouseUp(App& app, int y) {
-    if (!app.editRailMapDragging) return;
-    app.editRailMapDragging = false;
-    if (GetCapture() == app.hwnd) ReleaseCapture();
-    if (app.editRailMapMoved) return;
-
-    // A still click: put the caret on the line level with the click
-    float lineHeight = app.editorTextFormat
-                           ? app.editorTextFormat->GetFontSize() * 1.5f
-                           : dpi(app, 22.0f);
-    float padding = dpi(app, 8.0f);
-    float row = ((float)y - chromeTopHeight(app) - padding +
-                 app.editorScrollY) /
-                lineHeight;
-    if (row < 0.0f) row = 0.0f;
-    size_t line;
-    if (editorWrapOn(app) && app.editorRowStarts.size() >= 2) {
-        size_t r = (size_t)row;
-        size_t lo = 0, hi = app.editorRowStarts.size() - 1;
-        while (lo + 1 < hi) {
-            size_t mid = (lo + hi) / 2;
-            if (app.editorRowStarts[mid] <= r) lo = mid;
-            else hi = mid;
-        }
-        line = lo;
-    } else {
-        line = (size_t)row;
-    }
-    if (line >= app.editorLineStarts.size()) {
-        line = app.editorLineStarts.size() - 1;
-    }
-    app.editorCursorPos = app.editorLineStarts[line];
-    app.editorHasSelection = false;
-    app.editorDesiredCol = -1;
-    InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 // --- Raw editor insert menu (design t9) ----------------------------------
@@ -549,8 +347,7 @@ static const ECtxItem kECtx[] = {
     {112, L"\U0001F5BC", "ectx.image", L"![](\u2026)", false, false, false},
     {113, L"</>", "ectx.codeblock", L"```", false, false, false},
     {114, L"\U0001F517", "ectx.link", L"[](\u2026)", false, false, false},
-    {115, L"\u2015", "ectx.hr", L"---", false, false, true},
-    {120, L"Aa", "ectx.wysiwyg", L"Ctrl+E", false, false, false},
+    {115, L"\u2015", "ectx.hr", L"---", false, false, false},
 };
 
 struct EDiagItem {
@@ -873,7 +670,6 @@ bool editCtxMouseDown(App& app, HWND hwnd, int x, int y) {
             case 115:
                 editorInsertSnippetPublic(app, hwnd, L"---\n", 4);
                 break;
-            case 120: editorSetWysiwyg(app, hwnd, true); break;
         }
         closeEditCtxMenu(app);
         return true;
@@ -923,4 +719,192 @@ bool editCtxMouseMove(App& app, int x, int y) {
         InvalidateRect(app.hwnd, nullptr, FALSE);  // live grid highlight
     }
     return true;
+}
+
+// --- Thread seam (design t11) --------------------------------------------
+//
+// The gutter between source and render. Hairline beziers tie each source
+// block to its rendered output so a change on the left is traceable to
+// its effect on the right; the caret's thread lights up in accent with
+// dots at both ends. The whole column doubles as the split handle.
+
+// Editor line holding a source byte offset (lines and byte offsets are
+// parallel arrays rebuilt together on reparse)
+static size_t seamLineFromOffset(const App& app, size_t byteOffset) {
+    const auto& offs = app.editorLineByteOffsets;
+    size_t lo = 0, hi = offs.size();
+    while (lo + 1 < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (offs[mid] <= byteOffset) lo = mid;
+        else hi = mid;
+    }
+    return lo;
+}
+
+// Index of the scroll anchor (top-level block) containing the caret,
+// or -1 when the tables aren't ready
+static int seamCaretAnchor(const App& app) {
+    if (app.scrollAnchors.empty() || app.editorLineByteOffsets.empty() ||
+        app.editorLineStarts.empty()) {
+        return -1;
+    }
+    // Caret position -> line (wchar indices), then the byte offset of the
+    // line's END: anchors point at a block's first text node, which sits
+    // past the "## " marker, so keying on the line start would resolve a
+    // heading's caret to the previous block
+    size_t lo = 0, hi = app.editorLineStarts.size();
+    while (lo + 1 < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (app.editorLineStarts[mid] <= app.editorCursorPos) lo = mid;
+        else hi = mid;
+    }
+    size_t caretLine = std::min(lo, app.editorLineByteOffsets.size() - 1);
+    size_t caretByte =
+        caretLine + 1 < app.editorLineByteOffsets.size()
+            ? app.editorLineByteOffsets[caretLine + 1] - 1
+            : SIZE_MAX;
+    // Greatest anchor at or before the caret's line start
+    size_t alo = 0, ahi = app.scrollAnchors.size();
+    while (alo + 1 < ahi) {
+        size_t mid = (alo + ahi) / 2;
+        if (app.scrollAnchors[mid].sourceOffset <= caretByte) alo = mid;
+        else ahi = mid;
+    }
+    return (int)alo;
+}
+
+// Screen y of the source line holding byteOffset, at the line's middle
+static float seamSourceY(const App& app, size_t byteOffset,
+                         float lineHeight) {
+    size_t line = seamLineFromOffset(app, byteOffset);
+    float rowStart = editorWrapOn(app) && line < app.editorRowStarts.size()
+                         ? (float)app.editorRowStarts[line]
+                         : (float)line;
+    return chromeTopHeight(app) + dpi(app, 8.0f) + rowStart * lineHeight -
+           app.editorScrollY + lineHeight * 0.5f;
+}
+
+void renderEditSeam(App& app) {
+    if (!editorPreviewVisible(app) || !app.renderTarget || !app.brush) {
+        return;
+    }
+    const D2DTheme& th = app.theme;
+    float seamL = editorPaneWidth(app);
+    float seamW = editSeamWidth(app);
+    float seamR = seamL + seamW;
+    float top = chromeTopHeight(app);
+    float H = (float)app.height;
+
+    // Seam bed: a shade below both panes so the render reads as its own
+    // surface; hairline edges close each pane
+    D2D1_COLOR_F bed =
+        th.isDark ? railMix(th.background, D2D1::ColorF(0, 0, 0, 1), 0.3f)
+                  : railMix(th.background, D2D1::ColorF(0, 0, 0, 1), 0.045f);
+    app.brush->SetColor(bed);
+    app.renderTarget->FillRectangle(D2D1::RectF(seamL, 0, seamR, H),
+                                    app.brush);
+    app.brush->SetColor(railA(th.text, 0.07f));
+    app.renderTarget->FillRectangle(D2D1::RectF(seamL, 0, seamL + 1.0f, H),
+                                    app.brush);
+    app.renderTarget->FillRectangle(D2D1::RectF(seamR - 1.0f, 0, seamR, H),
+                                    app.brush);
+
+    if (app.scrollAnchors.empty() || app.editorLineByteOffsets.empty() ||
+        !app.d2dFactory || !app.editorTextFormat) {
+        return;
+    }
+    float lineHeight = app.editorTextFormat->GetFontSize() * 1.5f;
+    float midX = seamL + seamW * 0.5f;
+    float slack = dpi(app, 40.0f);
+    int caretK = seamCaretAnchor(app);
+    float caretSrcY = 0.0f, caretDstY = 0.0f;
+    bool caretSeen = false;
+
+    app.renderTarget->PushAxisAlignedClip(
+        D2D1::RectF(seamL, top, seamR, H),
+        D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
+    auto drawThread = [&](float ySrc, float yDst, bool caret) {
+        ID2D1PathGeometry* geo = nullptr;
+        app.d2dFactory->CreatePathGeometry(&geo);
+        if (!geo) return;
+        ID2D1GeometrySink* sink = nullptr;
+        if (SUCCEEDED(geo->Open(&sink)) && sink) {
+            sink->BeginFigure(D2D1::Point2F(seamL, ySrc),
+                              D2D1_FIGURE_BEGIN_HOLLOW);
+            sink->AddBezier(D2D1::BezierSegment(D2D1::Point2F(midX, ySrc),
+                                                D2D1::Point2F(midX, yDst),
+                                                D2D1::Point2F(seamR, yDst)));
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            sink->Close();
+            sink->Release();
+            app.brush->SetColor(caret ? th.accent
+                                      : railA(th.text, 0.16f));
+            app.renderTarget->DrawGeometry(geo, app.brush,
+                                           caret ? 1.5f : 1.0f);
+        }
+        geo->Release();
+    };
+
+    for (size_t k = 0; k < app.scrollAnchors.size(); k++) {
+        float ySrc =
+            seamSourceY(app, app.scrollAnchors[k].sourceOffset, lineHeight);
+        float yDst = app.scrollAnchors[k].renderedY - app.scrollY +
+                     dpi(app, 10.0f);
+        if (ySrc > H + slack) break;  // source rows only grow from here
+        if ((int)k == caretK) {
+            // Deferred so the lit thread draws above its neighbors
+            caretSrcY = ySrc;
+            caretDstY = yDst;
+            caretSeen = true;
+            continue;
+        }
+        // Quiet threads only tie blocks visible on BOTH sides — a target
+        // far off-screen would dive near-vertically and read as noise
+        if (ySrc < top - slack || yDst < top - slack || yDst > H + slack) {
+            continue;
+        }
+        drawThread(ySrc, yDst, false);
+    }
+    if (caretSeen) {
+        drawThread(caretSrcY, caretDstY, true);
+        float r = dpi(app, 2.5f);
+        app.brush->SetColor(th.accent);
+        app.renderTarget->FillEllipse(
+            D2D1::Ellipse(D2D1::Point2F(seamL + dpi(app, 2.0f), caretSrcY),
+                          r, r),
+            app.brush);
+        app.renderTarget->FillEllipse(
+            D2D1::Ellipse(D2D1::Point2F(seamR - dpi(app, 2.0f), caretDstY),
+                          r, r),
+            app.brush);
+    }
+    app.renderTarget->PopAxisAlignedClip();
+}
+
+// Soft accent wash behind the caret block's rendered output; drawn inside
+// the preview's transform, before the document content
+void renderPreviewCaretBlock(App& app, float previewWidth) {
+    if (!editorPreviewVisible(app) || !app.renderTarget || !app.brush) {
+        return;
+    }
+    int k = seamCaretAnchor(app);
+    if (k < 0) return;
+    float blockTop = app.scrollAnchors[k].renderedY - app.scrollY -
+                     dpi(app, 4.0f);
+    float nextY = k + 1 < (int)app.scrollAnchors.size()
+                      ? app.scrollAnchors[k + 1].renderedY
+                      : app.contentHeight;
+    float blockBottom = nextY - app.scrollY - dpi(app, 8.0f);
+    if (blockBottom <= blockTop + dpi(app, 4.0f)) return;
+    if (blockBottom < chromeTopHeight(app) || blockTop > app.height) return;
+    D2D1_COLOR_F c = app.theme.accent;
+    c.a = 0.08f;
+    app.brush->SetColor(c);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(D2D1::RectF(dpi(app, 10.0f), blockTop,
+                                      previewWidth - dpi(app, 10.0f),
+                                      blockBottom),
+                          dpi(app, 5.0f), dpi(app, 5.0f)),
+        app.brush);
 }

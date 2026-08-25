@@ -2,14 +2,13 @@
 
 #include "app.h"
 
-// Left tool rail (design t8): slides in with edit mode over the old
-// gutter column. WYSIWYG shows the formatting tools (text style, blocks,
-// insert); raw mode shows the document map — the only line numbering.
-// At the foot sits the Aa/M-down mode pill (Ctrl+E).
+// Left tool rail (design t8/t11): slides in with edit mode over the old
+// gutter column, carrying the formatting controls. Line numbers live in
+// the editor's own slim gutter; the thread seam between the panes ties
+// source blocks to their render.
 //
 // Hit ids: 1 bold, 2 italic, 3 strike, 4 inline code, 5 link;
-// 10 bullet list, 11 task list, 12 quote; 20 table, 21 diagram,
-// 22 image; 30 pill WYSIWYG half, 31 pill raw half; 40 document map.
+// 10 bullet list, 11 task list, 12 quote; 20 table, 21 diagram, 22 image.
 
 void renderEditRail(App& app);
 int editRailHitAt(const App& app, float x, float y);
@@ -18,12 +17,15 @@ int editRailHitAt(const App& app, float x, float y);
 // event belonged to the rail
 bool editRailMouseDown(App& app, HWND hwnd, int x, int y);
 bool editRailMouseMove(App& app, HWND hwnd, int x, int y);
-void editRailMouseUp(App& app, int y);
 
 // Rail button actions (defined in editor.cpp beside the edit helpers)
 void editRailInvoke(App& app, HWND hwnd, int id);
-// The Ctrl+E mode switch, shared by the pill and the keyboard
-void editorSetWysiwyg(App& app, HWND hwnd, bool wysiwyg);
+
+// Thread seam between source and render (design t11), drawn after both
+// panes; the preview-side caret block wash draws inside the preview
+// transform before the document content
+void renderEditSeam(App& app);
+void renderPreviewCaretBlock(App& app, float previewWidth);
 
 // Raw editor insert menu (design t9)
 void openEditCtxMenu(App& app, HWND hwnd, float x, float y);

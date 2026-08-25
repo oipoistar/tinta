@@ -24,7 +24,6 @@ void handleEditorMouseWheel(App& app, HWND hwnd, float delta);
 
 // Editor rendering
 void renderEditor(App& app, float editorWidth);
-void renderSeparator(App& app);
 void renderEditModeNotification(App& app);
 
 // Re-enter edit mode from a parked tab buffer (tabs.cpp), restoring the

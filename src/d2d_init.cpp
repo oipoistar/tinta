@@ -390,12 +390,19 @@ void updateOverlayFormats(App& app) {
         }
     }
 
-    // WYSIWYG canvas base (design t8): the theme's proportional face at a
-    // reading size that still fits the editor's uniform row grid
-    app.dwriteFactory->CreateTextFormat(app.theme.fontFamily, nullptr,
+    // Slim line-number gutter (design t11): small mono digits,
+    // right-aligned against the gutter's inner edge
+    app.dwriteFactory->CreateTextFormat(L"Consolas", nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, 15.0f * editorScale, L"en-us",
-        &app.wysiwygTextFormat);
+        DWRITE_FONT_STRETCH_NORMAL, 9.5f * editorScale, L"en-us",
+        &app.editorGutterFormat);
+    if (app.editorGutterFormat) {
+        app.editorGutterFormat->SetTextAlignment(
+            DWRITE_TEXT_ALIGNMENT_TRAILING);
+        app.editorGutterFormat->SetParagraphAlignment(
+            DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        app.editorGutterFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    }
 }
 
 void ensureThemePreviewFormats(App& app) {
@@ -470,16 +477,6 @@ bool createRenderTarget(App& app) {
         app.startPageIconBitmap->Release();
         app.startPageIconBitmap = nullptr;
     }
-    if (app.editorDimBrush) {
-        app.editorDimBrush->Release();
-        app.editorDimBrush = nullptr;
-    }
-    if (app.editorCodeBrush) {
-        app.editorCodeBrush->Release();
-        app.editorCodeBrush = nullptr;
-    }
-    // Cached editor layouts may hold those brushes as drawing effects
-    app.clearEditorLineLayoutCache();
 
     RECT rc;
     GetClientRect(app.hwnd, &rc);

@@ -1384,8 +1384,7 @@ void renderHelpOverlay(App& app) {
     const HelpEntry editEntries[] = {
         {kEdit.c_str(),   tr(app, "help.edit.enter_edit")},
         {L"Ctrl+S",       tr(app, "help.edit.save")},
-        {L"Ctrl+E",       tr(app, "help.edit.mode")},
-        {L"Ctrl+Shift+E", tr(app, "help.edit.preview")},
+        {L"Ctrl+E",       tr(app, "help.edit.preview")},
         {L"Ctrl+W",       tr(app, "help.edit.word_wrap")},
         {L"ESC ESC",      tr(app, "help.edit.exit_edit")},
     };

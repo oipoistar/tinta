@@ -55,188 +55,27 @@ static std::wstring fromUtf8(const std::string& str) {
 // math must go through DirectWrite hit testing instead of multiplying a
 // column index by a fixed character width.
 
-// Width available for line text in the editor pane (after gutter + padding)
+// Width available for line text in the editor pane (after the rail, the
+// slim line-number gutter, and padding)
 static float editorTextMaxWidth(const App& app) {
-    float gutterWidth = dpi(app, 48.0f);
+    float chrome = dpi(app, 48.0f) + editorGutterWidth(app);
     float padding = dpi(app, 8.0f);
-    if (app.editorWysiwyg) {
-        // The canvas reads like a page: a capped centered column
-        return std::min(
-            dpi(app, 680.0f),
-            std::max(10.0f, editorPaneWidth(app) - gutterWidth -
-                                dpi(app, 40.0f) * 2.0f));
-    }
-    return std::max(10.0f, editorPaneWidth(app) - gutterWidth - padding * 2.0f);
+    return std::max(10.0f, editorPaneWidth(app) - chrome - padding * 2.0f);
 }
 
-// Left edge of the line text: raw sits right of the rail column,
-// the WYSIWYG column centers in the remaining pane
+// Left edge of the line text: right of the rail column and the in-editor
+// line-number gutter (design t11)
 static float editorTextX(const App& app) {
-    float base = dpi(app, 48.0f) + dpi(app, 8.0f);
-    if (!app.editorWysiwyg) return base;
-    float railW = dpi(app, 48.0f);
-    return std::max(base,
-                    railW + (editorPaneWidth(app) - railW -
-                             editorTextMaxWidth(app)) * 0.5f);
-}
-
-// --- WYSIWYG line styling (design t8) -----------------------------------
-
-// Leading-# heading level (1..6) when the line is a heading
-static int wysiwygHeadingLevel(const wchar_t* t, size_t len) {
-    size_t h = 0;
-    while (h < len && t[h] == L'#') h++;
-    if (h == 0 || h > 6 || h >= len || t[h] != L' ') return 0;
-    return (int)h;
-}
-
-// Grid rows a line's base style occupies (H1/H2 span two rows)
-static int wysiwygRowMul(const App& app, size_t lineStart, size_t lineLen) {
-    int lvl = wysiwygHeadingLevel(app.editorText.data() + lineStart, lineLen);
-    return (lvl == 1 || lvl == 2) ? 2 : 1;
-}
-
-static void wysiwygEnsureBrushes(App& app) {
-    if (!app.renderTarget) return;
-    if (!app.editorDimBrush) {
-        D2D1_COLOR_F c = app.theme.text;
-        c.a = 0.4f;
-        app.renderTarget->CreateSolidColorBrush(c, &app.editorDimBrush);
-    }
-    if (!app.editorCodeBrush) {
-        app.renderTarget->CreateSolidColorBrush(app.theme.code,
-                                                &app.editorCodeBrush);
-    }
-}
-
-// Styled source: markdown stays visible but dimmed, content renders with
-// its real weight and size — headings big, **bold** bold, `code` mono
-static void wysiwygStyleLayout(App& app, IDWriteTextLayout* layout,
-                               size_t lineStart, size_t lineLen) {
-    const wchar_t* t = app.editorText.data() + lineStart;
-    float base = app.wysiwygTextFormat->GetFontSize();
-    float lineHeight = app.editorTextFormat->GetFontSize() * 1.5f;
-    wysiwygEnsureBrushes(app);
-
-    int lvl = wysiwygHeadingLevel(t, lineLen);
-    int rowMul = (lvl == 1 || lvl == 2) ? 2 : 1;
-    layout->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
-                           rowMul * lineHeight, rowMul * lineHeight * 0.76f);
-
-    auto dim = [&](size_t s, size_t n) {
-        if (app.editorDimBrush && n > 0) {
-            DWRITE_TEXT_RANGE r{(UINT32)s, (UINT32)n};
-            layout->SetDrawingEffect(app.editorDimBrush, r);
-        }
-    };
-
-    DWRITE_TEXT_RANGE all{0, (UINT32)lineLen};
-    if (lvl) {
-        float size = lvl == 1   ? base * 1.6f
-                     : lvl == 2 ? base * 1.32f
-                                : base * 1.12f;
-        layout->SetFontSize(size, all);
-        layout->SetFontWeight(lvl == 1 ? DWRITE_FONT_WEIGHT_EXTRA_BOLD
-                                       : DWRITE_FONT_WEIGHT_BOLD,
-                              all);
-        DWRITE_TEXT_RANGE marker{0, (UINT32)std::min<size_t>(lvl + 1, lineLen)};
-        layout->SetFontSize(base * 0.85f, marker);
-        layout->SetFontWeight(DWRITE_FONT_WEIGHT_NORMAL, marker);
-        dim(0, marker.length);
-    } else if (lineLen >= 2 && t[0] == L'>' && t[1] == L' ') {
-        layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, all);
-        dim(0, 2);
-    }
-
-    // Inline code first: its content is opaque to the other markers
-    std::vector<std::pair<size_t, size_t>> codeSpans;
-    for (size_t i = 0; i + 1 < lineLen; i++) {
-        if (t[i] != L'`') continue;
-        size_t close = i + 1;
-        while (close < lineLen && t[close] != L'`') close++;
-        if (close >= lineLen) break;
-        if (close > i + 1) {
-            DWRITE_TEXT_RANGE inner{(UINT32)(i + 1),
-                                    (UINT32)(close - i - 1)};
-            layout->SetFontFamilyName(app.theme.codeFontFamily, inner);
-            layout->SetFontSize(base * 0.9f, inner);
-            if (app.editorCodeBrush) {
-                layout->SetDrawingEffect(app.editorCodeBrush, inner);
-            }
-        }
-        dim(i, 1);
-        dim(close, 1);
-        codeSpans.push_back({i, close});
-        i = close;
-    }
-    auto inCode = [&](size_t p) {
-        for (const auto& cs : codeSpans) {
-            if (p >= cs.first && p <= cs.second) return true;
-        }
-        return false;
-    };
-
-    auto styleSpans = [&](const wchar_t* mark, size_t ml, int kind) {
-        size_t i = 0;
-        while (i + 2 * ml <= lineLen) {
-            bool open = !inCode(i) && wcsncmp(t + i, mark, ml) == 0 &&
-                        i + ml < lineLen && t[i + ml] != L' ';
-            if (ml == 1 && mark[0] == L'*' && open) {
-                // A lone * that is really part of ** stays untouched
-                if ((i + 1 < lineLen && t[i + 1] == L'*') ||
-                    (i > 0 && t[i - 1] == L'*')) {
-                    open = false;
-                }
-            }
-            if (!open) {
-                i++;
-                continue;
-            }
-            size_t close = SIZE_MAX;
-            for (size_t j = i + ml; j + ml <= lineLen; j++) {
-                if (inCode(j) || wcsncmp(t + j, mark, ml) != 0) continue;
-                if (t[j - 1] == L' ') continue;
-                if (ml == 1 && mark[0] == L'*' &&
-                    ((j + 1 < lineLen && t[j + 1] == L'*') ||
-                     t[j - 1] == L'*')) {
-                    continue;
-                }
-                close = j;
-                break;
-            }
-            if (close == SIZE_MAX) {
-                i += ml;
-                continue;
-            }
-            DWRITE_TEXT_RANGE inner{(UINT32)(i + ml),
-                                    (UINT32)(close - i - ml)};
-            if (kind == 1) {
-                layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, inner);
-            } else if (kind == 2) {
-                layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, inner);
-            } else {
-                layout->SetStrikethrough(TRUE, inner);
-            }
-            dim(i, ml);
-            dim(close, ml);
-            i = close + ml;
-        }
-    };
-    styleSpans(L"**", 2, 1);
-    styleSpans(L"~~", 2, 3);
-    styleSpans(L"*", 1, 2);
+    return dpi(app, 48.0f) + editorGutterWidth(app);
 }
 
 static IDWriteTextLayout* createEditorLineLayout(App& app, size_t lineStart, size_t lineLen) {
     if (!app.dwriteFactory || !app.editorTextFormat || lineLen == 0) return nullptr;
-    bool wysiwyg = app.editorWysiwyg && app.wysiwygTextFormat;
-    IDWriteTextFormat* baseFormat =
-        wysiwyg ? app.wysiwygTextFormat : app.editorTextFormat;
     float maxWidth = editorWrapOn(app) ? editorTextMaxWidth(app) : 1e7f;
     IDWriteTextLayout* layout = nullptr;
     app.dwriteFactory->CreateTextLayout(
         app.editorText.data() + lineStart, (UINT32)lineLen,
-        baseFormat, maxWidth, 1e7f, &layout);
+        app.editorTextFormat, maxWidth, 1e7f, &layout);
     // The shared editor format is NO_WRAP; the wrap toggle overrides per layout
     if (layout && editorWrapOn(app)) {
         layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
@@ -251,9 +90,6 @@ static IDWriteTextLayout* createEditorLineLayout(App& app, size_t lineStart, siz
             layout2->SetFontFallback(app.fontFallback);
             layout2->Release();
         }
-    }
-    if (layout && wysiwyg) {
-        wysiwygStyleLayout(app, layout, lineStart, lineLen);
     }
     return layout;
 }
@@ -404,9 +240,6 @@ static void rebuildEditorRowMetrics(App& app) {
     float charWidth = app.editorCharWidth > 0 ? app.editorCharWidth
         : (app.editorTextFormat ? app.editorTextFormat->GetFontSize() * 0.6f : 10.0f);
 
-    float lineHeight = app.editorTextFormat
-                           ? app.editorTextFormat->GetFontSize() * 1.5f
-                           : 20.0f;
     size_t lineCount = app.editorLineStarts.size();
     app.editorRowStarts.reserve(lineCount + 1);
     app.editorRowStarts.push_back(0);
@@ -414,24 +247,15 @@ static void rebuildEditorRowMetrics(App& app) {
         size_t lineLen = getLineLength(app, i);
         // A line can't wrap unless it could exceed the pane width even at
         // full-width glyph advances (2x the ASCII cell) — skip the layout
-        // for the common short line. In WYSIWYG the base row count comes
-        // from the line's style (H1/H2 span two grid rows) and long lines
-        // measure their real height against the uniform grid.
-        size_t rows = app.editorWysiwyg
-                          ? (size_t)wysiwygRowMul(app, app.editorLineStarts[i],
-                                                  lineLen)
-                          : 1;
+        // for the common short line.
+        size_t rows = 1;
         if (lineLen > 0 && (float)lineLen * charWidth * 2.0f > maxTextWidth) {
             IDWriteTextLayout* layout =
                 createEditorLineLayout(app, app.editorLineStarts[i], lineLen);
             if (layout) {
                 DWRITE_TEXT_METRICS tm{};
                 if (SUCCEEDED(layout->GetMetrics(&tm)) && tm.lineCount > 0) {
-                    rows = app.editorWysiwyg
-                               ? (size_t)std::max(
-                                     1.0f,
-                                     floorf(tm.height / lineHeight + 0.5f))
-                               : tm.lineCount;
+                    rows = tm.lineCount;
                 }
                 layout->Release();
             }
@@ -1809,13 +1633,8 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 openPrintPreview(app, hwnd);
                 return;
             case 'E': {
-                // Ctrl+E flips WYSIWYG <-> raw (design t8); the split
-                // preview toggle lives on Ctrl+Shift+E in raw mode
-                if (!shift) {
-                    editorSetWysiwyg(app, hwnd, !app.editorWysiwyg);
-                    return;
-                }
-                if (app.editorWysiwyg) return;  // no preview to toggle
+                // Ctrl+E shows / hides the live render beside the source
+                // (design t11; Ctrl+Shift+E kept as the old alias)
                 app.editorShowPreview = !app.editorShowPreview;
                 app.clearEditorLineLayoutCache();
                 if (app.editorShowPreview) {
@@ -1836,12 +1655,12 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 return;
             }
             case 'B':
-                if (app.editorAssists || app.editorWysiwyg) {
+                if (app.editorAssists) {
                     editorToggleInlineMark(app, hwnd, L"**");
                 }
                 return;
             case 'I':
-                if (app.editorAssists || app.editorWysiwyg) {
+                if (app.editorAssists) {
                     editorToggleInlineMark(app, hwnd, L"*");
                 }
                 return;
@@ -2242,22 +2061,6 @@ static void editorInsertLink(App& app, HWND hwnd) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-void editorSetWysiwyg(App& app, HWND hwnd, bool wysiwyg) {
-    if (app.editorWysiwyg == wysiwyg) return;
-    app.editorWysiwyg = wysiwyg;
-    app.clearEditorLineLayoutCache();
-    app.editorRowMetricsWidth = -1.0f;
-    app.editorDesiredCol = -1;
-    app.editorScrollX = 0.0f;
-    rebuildEditorRowMetrics(app);
-    // The pill choice is the remembered preference (next ':' opens here)
-    persistEditorMode(app);
-    if (!wysiwyg && app.editorShowPreview) editorReparse(app);
-    app.layoutDirty = true;
-    editorEnsureCursorVisible(app);
-    InvalidateRect(hwnd, nullptr, FALSE);
-}
-
 // --- Insert-menu helpers (design t9) ------------------------------------
 
 void editorMoveCaretToPoint(App& app, int x, int y) {
@@ -2374,8 +2177,6 @@ void editRailInvoke(App& app, HWND hwnd, int id) {
         case 22:
             editorInsertSnippet(app, hwnd, L"![](image.png)\n", 4);
             break;
-        case 30: editorSetWysiwyg(app, hwnd, true); break;
-        case 31: editorSetWysiwyg(app, hwnd, false); break;
     }
 }
 
@@ -2456,10 +2257,8 @@ void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
     }
 
     // Enter on a list item continues the list; Enter on an empty item
-    // removes its marker and ends it. The raw editor's assists are a
-    // setting; the WYSIWYG canvas always assists.
-    if (ch == L'\n' && !app.editorHasSelection &&
-        (app.editorAssists || app.editorWysiwyg)) {
+    // removes its marker and ends it. The assists are a setting.
+    if (ch == L'\n' && !app.editorHasSelection && app.editorAssists) {
         size_t ls = editorLineStartBefore(app, app.editorCursorPos);
         ListMarkerInfo lm = parseListMarker(app.editorText, ls);
         if (lm.isList && app.editorCursorPos >= ls + lm.contentStart) {
@@ -2501,7 +2300,7 @@ void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
     if (ch == 9) { // Tab
         // Ctrl+I arrives as the Tab control character: keydown handled it
         if (GetKeyState(VK_CONTROL) & 0x8000) return;
-        bool assists = app.editorAssists || app.editorWysiwyg;
+        bool assists = app.editorAssists;
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         if (shift && !assists) return;
         if (shift) {
@@ -2603,7 +2402,6 @@ void editorPositionImeWindow(App& app, HWND hwnd) {
 
     float lineHeight = app.editorTextFormat ? app.editorTextFormat->GetFontSize() * 1.5f : 20.0f;
     float padding = dpi(app, 8.0f);
-    float gutterWidth = dpi(app, 48.0f);
 
     float lineTop;
     if (editorWrapOn(app)) {
@@ -2710,10 +2508,10 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
         return;
     }
 
-    // Check for separator (only exists while the preview is visible)
+    // The thread seam doubles as the split handle (design t11)
     if (app.editorShowPreview) {
-        float sepX = app.width * app.editorSplitRatio;
-        if (std::abs((float)x - sepX) < dpi(app, 6.0f)) {
+        float paneW = editorPaneWidth(app);
+        if ((float)x >= paneW && (float)x < paneW + editSeamWidth(app)) {
             app.draggingSeparator = true;
             app.separatorDragStartX = (float)x;
             app.separatorDragStartRatio = app.editorSplitRatio;
@@ -2797,7 +2595,6 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
 }
 
 void handleEditorMouseUp(App& app, HWND hwnd, int x, int y) {
-    editRailMouseUp(app, y);
     if (app.editorScrollbarDragging) {
         app.editorScrollbarDragging = false;
         ReleaseCapture();
@@ -2826,12 +2623,10 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
         return;
     }
 
-    // Rail hover / document-map drag (design t8)
+    // Rail hover (design t8/t11)
     if (editRailMouseMove(app, hwnd, x, y)) {
-        if (!app.editRailMapDragging) {
-            SetCursor(LoadCursor(nullptr,
-                                 app.editRailHover ? IDC_HAND : IDC_ARROW));
-        }
+        SetCursor(LoadCursor(nullptr,
+                             app.editRailHover ? IDC_HAND : IDC_ARROW));
         return;
     }
 
@@ -2873,13 +2668,13 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
         return;
     }
 
-    // Cursor shape
-    float sepX = app.width * app.editorSplitRatio;
+    // Cursor shape: the seam column is the split handle
     static HCURSOR cursorSizeWE = LoadCursor(nullptr, IDC_SIZEWE);
     static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
     static HCURSOR cursorArrow = LoadCursor(nullptr, IDC_ARROW);
 
-    if (app.editorShowPreview && std::abs((float)x - sepX) < dpi(app, 6.0f)) {
+    if (app.editorShowPreview && (float)x >= editorWidth &&
+        (float)x < editorWidth + editSeamWidth(app)) {
         SetCursor(cursorSizeWE);
         return;
     } else if (x < editorWidth) {
@@ -2907,6 +2702,38 @@ void handleEditorMouseWheel(App& app, HWND hwnd, float delta) {
 
 // Fill highlight rectangles for a text range within a wrapped line layout.
 // HitTestTextRange returns one rect per visual row the range touches.
+// One right-aligned number in the slim gutter, level with its line
+// (design t11); the caret line's number brightens toward the accent
+static void editorDrawLineNumber(App& app, size_t lineIdx, float lineY,
+                                 float lineHeight, bool isCaretLine) {
+    if (!app.editorGutterFormat) return;
+    wchar_t num[16];
+    int len = swprintf_s(num, _countof(num), L"%u",
+                         (unsigned)(lineIdx + 1));
+    if (len <= 0) return;
+    float railW = dpi(app, 48.0f);
+    D2D1_COLOR_F c = isCaretLine ? app.theme.accent : app.theme.text;
+    c.a = isCaretLine ? 0.8f : 0.3f;
+    app.brush->SetColor(c);
+    app.renderTarget->DrawTextW(
+        num, (UINT32)len, app.editorGutterFormat,
+        D2D1::RectF(railW, lineY,
+                    railW + editorGutterWidth(app) - dpi(app, 8.0f),
+                    lineY + lineHeight),
+        app.brush);
+}
+
+// The caret line's soft accent wash, spanning gutter and text (design t11)
+static void editorFillCaretLine(App& app, float lineY, float rowsHeight,
+                                float editorWidth) {
+    D2D1_COLOR_F c = app.theme.accent;
+    c.a = 0.08f;
+    app.brush->SetColor(c);
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(dpi(app, 48.0f), lineY, editorWidth, lineY + rowsHeight),
+        app.brush);
+}
+
 static void editorFillRangeRects(App& app, IDWriteTextLayout* layout,
                                  float originX, float originY,
                                  size_t rangeStart, size_t rangeLen,
@@ -2974,8 +2801,13 @@ static void renderEditorWrapped(App& app, float editorWidth) {
         size_t lineLen = getLineLength(app, i);
         IDWriteTextLayout* lineLayout = cachedEditorLineLayout(app, lineStart, lineLen);
 
-        // Line numbers moved to the rail's document map (design t8); the
-        // gutter column is where the rail now lives
+        // Caret-line wash + gutter number (design t11)
+        if (i == curLine && i + 1 < app.editorRowStarts.size()) {
+            float rowsH = (app.editorRowStarts[i + 1] - app.editorRowStarts[i]) *
+                          lineHeight;
+            editorFillCaretLine(app, lineY, rowsH, editorWidth);
+        }
+        editorDrawLineNumber(app, i, lineY, lineHeight, i == curLine);
 
         // Selection highlight
         if (app.editorHasSelection && selMax > lineStart && selMin < lineStart + lineLen + 1) {
@@ -3093,11 +2925,13 @@ void renderEditor(App& app, float editorWidth) {
         selMax = editorSelMax(app);
     }
 
-    // Text origin shifts left as the pane scrolls horizontally; the old
+    size_t curLine = getLineFromPos(app, app.editorCursorPos);
+
+    // Text origin shifts left as the pane scrolls horizontally; the rail +
     // gutter column is repainted after the text so lines slide underneath
-    // the rail (#77)
-    float gutterWidth = dpi(app, 48.0f);
-    float textBase = editorTextX(app) - app.editorScrollX;
+    // it (#77)
+    float gutterRight = editorTextX(app);
+    float textBase = gutterRight - app.editorScrollX;
 
     // Search match scanning index (both sorted by position, so we advance together)
     size_t searchScanIdx = 0;
@@ -3121,6 +2955,12 @@ void renderEditor(App& app, float editorWidth) {
         // metrics and drawing so overlays always match the actual glyphs
         // (CJK and other full-width characters are wider than charWidth)
         IDWriteTextLayout* lineLayout = cachedEditorLineLayout(app, lineStart, lineLen);
+
+        // Caret-line wash (design t11); the gutter number comes after the
+        // gutter repaint below so it sits above slid text
+        if ((size_t)i == curLine) {
+            editorFillCaretLine(app, lineY, lineHeight, editorWidth);
+        }
 
         // Selection highlight on this line
         if (app.editorHasSelection && selMax > lineStart && selMin < lineStart + lineLen + 1) {
@@ -3185,7 +3025,6 @@ void renderEditor(App& app, float editorWidth) {
 
     // Cursor (blink state driven by TIMER_CURSOR_BLINK)
     if (app.cursorBlinkOn) {
-        size_t curLine = getLineFromPos(app, app.editorCursorPos);
         size_t curCol = getColFromPos(app, app.editorCursorPos);
         size_t curLineStart = app.editorLineStarts[curLine];
         size_t curLineLen = getLineLength(app, curLine);
@@ -3198,12 +3037,26 @@ void renderEditor(App& app, float editorWidth) {
             D2D1::RectF(curX, curY, curX + dpi(app, 2.0f), curY + lineHeight), app.brush);
     }
 
-    // The old gutter column last, blanked: horizontally scrolled text
-    // slides under it, and the rail (with the document map as the only
-    // line numbering) draws on top of it (design t8)
+    // The rail + gutter column last: horizontally scrolled text slides
+    // under it, then the line numbers draw on top (design t11)
     app.brush->SetColor(app.theme.background);
     app.renderTarget->FillRectangle(
-        D2D1::RectF(0, 0, gutterWidth, (float)app.height), app.brush);
+        D2D1::RectF(0, 0, gutterRight, (float)app.height), app.brush);
+    for (int i = firstVisible; i <= lastVisible && i < (int)app.editorLineStarts.size(); i++) {
+        float lineY = chromeTopHeight(app) + padding + i * lineHeight - app.editorScrollY;
+        if ((size_t)i == curLine) {
+            // Re-lay the caret wash over the blanked gutter strip
+            D2D1_COLOR_F c = app.theme.accent;
+            c.a = 0.08f;
+            app.brush->SetColor(c);
+            app.renderTarget->FillRectangle(
+                D2D1::RectF(dpi(app, 48.0f), lineY, gutterRight,
+                            lineY + lineHeight),
+                app.brush);
+        }
+        editorDrawLineNumber(app, (size_t)i, lineY, lineHeight,
+                             (size_t)i == curLine);
+    }
 
     // Update content height for scrolling
     app.editorContentHeight = padding * 2 + app.editorLineStarts.size() * lineHeight;
@@ -3224,30 +3077,6 @@ void renderEditor(App& app, float editorWidth) {
     }
 
     app.renderTarget->PopAxisAlignedClip();
-}
-
-void renderSeparator(App& app) {
-    float sepX = app.width * app.editorSplitRatio;
-    float sepWidth = dpi(app, 6.0f);
-
-    // Separator background
-    D2D1_COLOR_F sepColor = app.theme.isDark ? hexColor(0x3A3A40) : hexColor(0xD0D0D0);
-    app.brush->SetColor(sepColor);
-    app.renderTarget->FillRectangle(
-        D2D1::RectF(sepX - sepWidth / 2, 0, sepX + sepWidth / 2, (float)app.height), app.brush);
-
-    // Grip dots (3 dots in center)
-    float dotRadius = dpi(app, 2.0f);
-    float dotSpacing = dpi(app, 10.0f);
-    float centerY = app.height / 2.0f;
-    D2D1_COLOR_F dotColor = app.theme.isDark ? hexColor(0x808080) : hexColor(0x808080);
-    app.brush->SetColor(dotColor);
-
-    for (int i = -1; i <= 1; i++) {
-        app.renderTarget->FillEllipse(
-            D2D1::Ellipse(D2D1::Point2F(sepX, centerY + i * dotSpacing), dotRadius, dotRadius),
-            app.brush);
-    }
 }
 
 void renderEditModeNotification(App& app) {
