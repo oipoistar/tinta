@@ -1,5 +1,36 @@
 # Changelog
 
+## [v3.3.0] - 2026-08-25
+
+The redesign release: a new start page, one unified editor with the rendered page floating beside the source, Pandoc export, and retuned themes.
+
+### Added
+- Start page: bare launches land on a launcher with recent files, quick actions showing your actual key bindings, and two built-in guides. It is the universal empty state - closing the last tab returns there, Ctrl+T opens it as a new tab (#142)
+- Unified editor: one raw Markdown buffer with the rendered page floating beside it as a sheet on the editor's desk, rising past the tab strip with the window controls riding it as an island. A slim in-editor line-number gutter, an accent wash on the caret's line and its rendered block, and a tool rail with formatting controls plus table-size and diagram-template pickers (#142)
+- Pandoc bridge: when a pandoc executable is found (or set in settings), the rail offers EPUB, OpenDocument, PowerPoint, RTF and LaTeX export; rich formats convert from Tinta's own HTML export so diagrams and math survive as vector graphics (#143)
+- Local SVG images render natively, and the help overlay shows the app version (#137)
+- Portable builds check GitHub once a day for a new release and offer it as a quiet dismissible chip; Store installs keep updating through the Store (#138)
+- Emoji shortcodes like `:rocket:`, a Fit button on wide tables and diagrams, and per-document zoom memory (#139)
+- Draft recovery for unsaved quick notes, and create-on-click for missing file references (#140)
+- Editor Markdown assists (list continuation, Tab indent, Ctrl+B/I) and plain-text file references: .txt, .json, .yaml and friends link like Markdown files and open as highlighted documents (#141)
+
+### Changed
+- All ten theme palettes tuned as a set - accents on shared luminance rows, per-theme syntax colors, temperature-tinted comments, contrast fixes; Dracula stays canonical. The theme chooser is rebuilt with live palette-proof cards, hover preview that repaints the app behind the dialog, and sun/moon pins on the follow-system defaults (#144)
+- The separate WYSIWYG editing mode is gone in favor of the single unified editor (#142)
+
+### Fixed
+- Caption buttons could stop responding after clicks in the document area (stuck mouse capture) (#142)
+- Theme changes persist immediately, so windows spawned afterwards match (#142)
+- The last strip-height of a document could never scroll into view in the editor (#142)
+
+## [v3.2.0] - 2026-08-24
+
+The review release: annotations stored in the file itself with an agent-ready copy button, plain-path file references with live/missing states and link peek, and a dozen quality-of-life touches - pin on top, image lightbox, TOC scroll-spy and filtering, search ticks on the scrollbar, table TSV and diagram PNG copy buttons, and screenshot paste in the editor (#126, #127, #131-#134)
+
+## [v3.1.0] - 2026-08-22
+
+The export release: export as HTML, DOCX, or PDF from the context menu, and nine more natively rendered Mermaid families for 22 in total (#124, #125)
+
 ## [v3.0.0] - 2026-08-20
 
 The tabs release: Tinta becomes a tabbed markdown workspace while staying a single small native executable.

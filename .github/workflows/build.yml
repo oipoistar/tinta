@@ -45,44 +45,46 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.** The review release: annotations, file references, and a dozen quality-of-life touches for reading (and reviewing) agent-written Markdown.
+            **Markdown, distilled.** The redesign release: a new start page, one unified editor with the rendered page floating beside your source, Pandoc export, and ten retuned themes with a chooser that shows every palette live.
 
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Review annotations (#126)
-            - Select text and press `A` (or right-click, Annotate) to attach a note; annotated text gets a soft tint and a square on a rail beside the scrollbar, with a line pointing at the passage
-            - Notes are stored as invisible HTML comments in the file itself, so nothing else renders them and the file stays the only source of truth
-            - Hover a square for a preview beside the section; click it (or the tinted text) to edit or delete; off-screen annotations park at the rail's edges and clicking a parked square jumps to its text
-            - The copy-for-agent button puts the file path, a task instruction, and every remark with line numbers on the clipboard: paste it into any coding agent, and as the agent fixes items and deletes the comments, the squares vanish live
+            ### The start page (#142)
+            - Launching without a file lands on a launcher: recent files, quick actions labeled with your actual key bindings, and two built-in guides
+            - It is the universal empty state - closing the last tab returns there instead of closing the window, and Ctrl+T opens it as a new tab
 
-            ### File references (#127)
-            - Plain-text paths like `docs/plan.md` in agent-written notes become real links: existing targets show the link color with a dashed underline and open as a tab on click; missing targets render as faded, inert ghosts
-            - `[text](target.md)` links to local files get the same live/missing treatment and open as tabs instead of shelling out
-            - Mouse back/forward (or Alt+Left / Alt+Right) walks your link jumps with exact scroll restore, and reopens the document if its tab was closed
+            ### The unified editor (#142)
+            - One raw Markdown buffer with the rendered page floating beside it, a sheet of paper on the editor's desk - rounded, shadowed, rising to the window's top edge with the window controls riding it as an island
+            - A slim line-number gutter lives in the editor; the caret's line and its rendered block both carry a soft accent wash, so you always see where your edit lands on the page
+            - The left tool rail holds formatting controls plus real pickers for tables (an 8x6 size grid) and diagrams (seven Mermaid templates); the same pickers live in the right-click insert menu
+            - Ctrl+E shows or hides the page, the gap between the panes drags the split, and Markdown assists (lists continue on Enter, Tab indents, Ctrl+B/I wrap) are a setting
 
-            ### Link peek
-            - Rest the pointer on a local `.md` or wiki link for half a second and the target opens fully rendered in a panel beside the link - headings, tables, diagrams, your theme - without opening a tab
+            ### Pandoc export (#143)
+            - If pandoc is installed (or you point Tinta at it in settings), an export button appears in the editor rail offering EPUB, OpenDocument, PowerPoint, RTF and LaTeX
+            - Rich formats convert from Tinta's own HTML export, so diagrams and math arrive as vector graphics instead of decaying into code blocks
 
-            ### Quality of life
-            - Pin on top: a pushpin in the title bar keeps the window above every other app
-            - Image lightbox: click any inline image to view it full size - wheel zooms, drag pans, Esc closes
-            - Table of contents follows your reading position, and typing while it is open filters the headings (Enter jumps to the first match)
-            - Find-in-page paints every match as a tick on the scrollbar, the current match brighter
-            - Tables grow a Copy TSV button on hover: paste straight into Excel or Sheets as a grid
-            - Diagrams grow an Image button: a crisp 2x PNG lands on the clipboard for slides and chats
-            - Paste a screenshot in edit mode and it saves as a PNG beside the document with the Markdown link inserted
-            - The Annotate key is rebindable like every other shortcut, in both keymap profiles
+            ### Themes, tuned (#144)
+            - All ten palettes retuned as a set: accents on shared luminance rows, per-theme syntax colors, temperature-tinted comments, and contrast fixes - Dracula stays canonical
+            - The theme chooser is rebuilt: every card is a live palette proof ending in the seven syntax colors as a dot row, hovering a card repaints the whole app behind the dialog, and with follow-system on the day and night defaults wear sun and moon pins
+
+            ### Also new
+            - Local SVG images render natively, and the help overlay shows the app version (#137)
+            - Portable builds check GitHub once a day and offer a new release as a quiet, dismissible chip (#138)
+            - Emoji shortcodes like `:rocket:`, a Fit button that shrinks wide tables and diagrams to the column, and per-document zoom memory (#139)
+            - Unsaved quick notes survive crashes: drafts are stashed continuously and offered back on the next launch (#140)
+            - Clicking a missing file reference offers to create the file and opens it ready to type (#140)
+            - Plain-text references (.txt, .json, .yaml and friends) link like Markdown files and open as highlighted documents (#141)
 
             ### What's included
-            - Export as HTML, DOCX, or PDF from the context menu
+            - Export as HTML, DOCX, or PDF - plus the Pandoc formats above
             - 22 natively rendered Mermaid diagram families
             - Tabbed interface with drag, session restore, and a tab context menu
-            - 10 beautiful themes (5 light, 5 dark) plus custom themes
+            - 10 tuned themes (5 light, 5 dark) plus custom themes
             - Hardware-accelerated rendering via Direct2D
-            - Single portable executable about 1.9 MB, no dependencies
+            - Single portable executable about 2.1 MB, no dependencies
           files: build/Release/tinta.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
