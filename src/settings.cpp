@@ -48,6 +48,9 @@ void saveSettings(const Settings& settings) {
     file << "editorShowPreview=" << (settings.editorShowPreview ? 1 : 0) << "\n";
     file << "editorWordWrap=" << (settings.editorWordWrap ? 1 : 0) << "\n";
     file << "editorAssists=" << (settings.editorAssists ? 1 : 0) << "\n";
+    if (!settings.pandocPath.empty()) {
+        file << "pandocPath=" << settings.pandocPath << "\n";
+    }
     file << "followSystemTheme=" << (settings.followSystemTheme ? 1 : 0) << "\n";
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
@@ -332,6 +335,8 @@ Settings loadSettings() {
             settings.editorWordWrap = (value == "1");
         } else if (key == "editorAssists") {
             settings.editorAssists = (value == "1");
+        } else if (key == "pandocPath") {
+            settings.pandocPath = value;
         } else if (key == "sessionActive") {
             int idx = std::stoi(value);
             if (idx >= 0) settings.sessionActive = idx;

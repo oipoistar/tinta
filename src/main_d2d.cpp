@@ -1803,6 +1803,20 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
 
+        case WM_APP_PANDOC_DONE:
+            if (app) {
+                app->pandocRunning = false;
+                app->copiedNotificationKey =
+                    wParam ? "toast.pandoc_ok" : "toast.pandoc_fail";
+                app->showCopiedNotification = true;
+                app->copiedNotificationAlpha = 1.0f;
+                app->copiedNotificationStart =
+                    std::chrono::steady_clock::now();
+                startNotificationTimer(*app);
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
+
         case WM_APP_GPU_READY:
             // Driver is warm: swap the startup software render target for a
             // hardware one. The recreated target's own device keeps the
@@ -1970,6 +1984,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
     app.editorAssists = savedSettings.editorAssists;
+    app.pandocUserPath = toWide(savedSettings.pandocPath);
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;

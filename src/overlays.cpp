@@ -1,6 +1,7 @@
 #include "overlays.h"
 #include "utils.h"
 #include "d2d_init.h"
+#include "pandoc.h"
 #include "print.h"
 #include "settings.h"
 #include "i18n.h"
@@ -2492,6 +2493,22 @@ void renderSettingsOverlay(App& app) {
         settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
                        cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.editorAssists, SET_TOGGLE_ASSISTS, anim);
+        cy += rowCardH + cardGap;
+        // Pandoc bridge: hint shows the resolved executable when found
+        card(rowCardH);
+        pandocResolve(app);
+        cardLabel(tr(app, "settings.pandoc"),
+                  app.pandocExe.empty()
+                      ? tr(app, "settings.pandoc.hint")
+                      : app.pandocExe.c_str(),
+                  dpi(app, 110.0f));
+        {
+            float chipW = chipsWidth({tr(app, "settings.browse")});
+            float bx = cx + cw - cardPad - chipW;
+            float chipY = cy + (rowCardH - dpi(app, 24.0f)) * 0.5f;
+            settingsChip(app, bx, chipY, tr(app, "settings.browse"), false,
+                         SET_LOCATE_PANDOC, anim, fmt);
+        }
     }
 
     // Shortcut profile popup, drawn last so it sits above the rows

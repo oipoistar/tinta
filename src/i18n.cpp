@@ -5,7 +5,7 @@
 #include <string.h>
 #include <cstring>
 
-// Language metadata. nativeFont is a hint — the chooser uses it so each
+// Language metadata. nativeFont is a hint - the chooser uses it so each
 // language's name shows in its native typeface. Empty string falls back to
 // the theme font (the font fallback chain already handles CJK glyphs).
 const Language LANGUAGES[LANG_COUNT] = {
@@ -17,7 +17,7 @@ const Language LANGUAGES[LANG_COUNT] = {
 
 // Translation table.
 //
-// Every key MUST have an English entry — English is the fallback when a
+// Every key MUST have an English entry - English is the fallback when a
 // language lacks a translation. The zh/ja/ko columns may be nullptr to mean
 // "fall back to English". Once a translation is added it should never be
 // removed (only amended); keys are stable identifiers referenced across the
@@ -234,6 +234,11 @@ const Entry kEntries[] = {
     { "help.edit.mode", L"WYSIWYG / raw markdown", L"\u6240\u89C1\u5373\u6240\u5F97 / \u539F\u59CB Markdown", L"WYSIWYG / Raw Markdown", L"WYSIWYG / \uC6D0\uC2DC \uB9C8\uD06C\uB2E4\uC6B4" },
     { "settings.editor_assists", L"Markdown assists in the raw editor", L"\u539F\u59CB\u7F16\u8F91\u5668\u7684 Markdown \u8F85\u52A9", L"Raw \u30A8\u30C7\u30A3\u30BF\u306E Markdown \u30A2\u30B7\u30B9\u30C8", L"\uC6D0\uC2DC \uD3B8\uC9D1\uAE30\uC758 \uB9C8\uD06C\uB2E4\uC6B4 \uB3C4\uC6B0\uBBF8" },
     { "settings.editor_assists.hint", L"Lists continue on Enter, Tab indents, Ctrl+B/I wrap", L"\u56DE\u8F66\u7EED\u5199\u5217\u8868\uFF0CTab \u7F29\u8FDB\uFF0CCtrl+B/I \u5305\u88F9", L"Enter \u3067\u30EA\u30B9\u30C8\u7D99\u7D9A\u3001Tab \u3067\u30A4\u30F3\u30C7\u30F3\u30C8\u3001Ctrl+B/I \u3067\u88C5\u98FE", L"Enter\uB85C \uBAA9\uB85D \uACC4\uC18D, Tab \uB4E4\uC5EC\uC4F0\uAE30, Ctrl+B/I \uAC10\uC2F8\uAE30" },
+    { "rail.export", L"Export via Pandoc", L"\u901A\u8FC7 Pandoc \u5BFC\u51FA", L"Pandoc \u3067\u30A8\u30AF\u30B9\u30DD\u30FC\u30C8", L"Pandoc\uB85C \uB0B4\uBCF4\uB0B4\uAE30" },
+    { "toast.pandoc_ok", L"Exported", L"\u5DF2\u5BFC\u51FA", L"\u30A8\u30AF\u30B9\u30DD\u30FC\u30C8\u5B8C\u4E86", L"\uB0B4\uBCF4\uB0B4\uAE30 \uC644\uB8CC" },
+    { "toast.pandoc_fail", L"Pandoc export failed", L"Pandoc \u5BFC\u51FA\u5931\u8D25", L"Pandoc \u30A8\u30AF\u30B9\u30DD\u30FC\u30C8\u306B\u5931\u6557", L"Pandoc \uB0B4\uBCF4\uB0B4\uAE30 \uC2E4\uD328" },
+    { "settings.pandoc", L"Pandoc converter", L"Pandoc \u8F6C\u6362\u5668", L"Pandoc \u30B3\u30F3\u30D0\u30FC\u30BF\u30FC", L"Pandoc \uBCC0\uD658\uAE30" },
+    { "settings.pandoc.hint", L"Adds EPUB, ODT, PPTX, RTF and LaTeX export to the editor", L"\u4E3A\u7F16\u8F91\u5668\u589E\u52A0 EPUB\u3001ODT\u3001PPTX\u3001RTF \u548C LaTeX \u5BFC\u51FA", L"\u30A8\u30C7\u30A3\u30BF\u306B EPUB\u3001ODT\u3001PPTX\u3001RTF\u3001LaTeX \u306E\u30A8\u30AF\u30B9\u30DD\u30FC\u30C8\u3092\u8FFD\u52A0", L"\uD3B8\uC9D1\uAE30\uC5D0 EPUB, ODT, PPTX, RTF, LaTeX \uB0B4\uBCF4\uB0B4\uAE30 \uCD94\uAC00" },
     { "ectx.cut", L"Cut", L"\u526A\u5207", L"\u5207\u308A\u53D6\u308A", L"\uC798\uB77C\uB0B4\uAE30" },
     { "ectx.copy", L"Copy", L"\u590D\u5236", L"\u30B3\u30D4\u30FC", L"\uBCF5\uC0AC" },
     { "ectx.paste", L"Paste", L"\u7C98\u8D34", L"\u8CBC\u308A\u4ED8\u3051", L"\uBD99\uC5EC\uB123\uAE30" },
@@ -385,7 +390,7 @@ bool compiledColumnHasTranslations(int column) {
 }
 
 const Entry* findEntry(const char* key) {
-    // Linear scan — ~80 entries, called a few hundred times per frame at most.
+    // Linear scan - ~80 entries, called a few hundred times per frame at most.
     for (size_t i = 0; i < kEntryCount; i++) {
         if (std::strcmp(kEntries[i].key, key) == 0) {
             return &kEntries[i];

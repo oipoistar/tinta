@@ -2160,6 +2160,7 @@ void editRailInvoke(App& app, HWND hwnd, int id) {
         case 12: editorToggleLinePrefix(app, hwnd, L"> "); break;
         case 20: openEditRailFlyout(app, hwnd, 1); break;  // size grid
         case 21: openEditRailFlyout(app, hwnd, 2); break;  // templates
+        case 23: openEditRailFlyout(app, hwnd, 3); break;  // pandoc
         case 22:
             editorInsertSnippet(app, hwnd, L"![](image.png)\n", 4);
             break;

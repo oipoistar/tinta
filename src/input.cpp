@@ -13,6 +13,7 @@
 #include "settings.h"
 #include "render.h"
 #include "overlays.h"
+#include "pandoc.h"
 #include "print.h"
 #include "export.h"
 #include "i18n.h"
@@ -705,6 +706,21 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.editorAssists = !app.editorAssists;
             persistEditorMode(app);
             break;
+        case SET_LOCATE_PANDOC: {
+            wchar_t path[MAX_PATH]{};
+            OPENFILENAMEW ofn{};
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner = hwnd;
+            ofn.lpstrFilter =
+                L"pandoc.exe\0pandoc.exe\0Programs (*.exe)\0*.exe\0\0";
+            ofn.lpstrFile = path;
+            ofn.nMaxFile = MAX_PATH;
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+            if (GetOpenFileNameW(&ofn)) {
+                pandocSetUserPath(app, path);
+            }
+            break;
+        }
         case SET_TOGGLE_FOLLOW:
             app.followSystemTheme = !app.followSystemTheme;
             if (app.followSystemTheme) {
