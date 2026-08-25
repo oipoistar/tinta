@@ -395,10 +395,16 @@ struct App {
     int currentThemeIndex = 5;  // Default to "Midnight" (first dark theme)
     D2DTheme theme = THEMES[5];
 
-    // Theme chooser overlay
+    // Theme chooser overlay (design t12): hit rects rebuilt each paint;
+    // ids >= 0 pick a theme, -1 follow toggle, -2 close, -3 edit theme.
+    // Hovering a card live-previews it; themeChooserPreviewBase remembers
+    // the committed theme to restore on leave/close (-1 = not previewing).
     bool showThemeChooser = false;
     int hoveredThemeIndex = -1;
     float themeChooserAnimation = 0.0f;  // 0 to 1 for fade in
+    std::vector<std::pair<D2D1_RECT_F, int>> themeChooserHits;
+    D2D1_RECT_F themeChooserPanel{};
+    int themeChooserPreviewBase = -1;
 
     // --- Tabbed interface (Win11 Notepad-style tabs in the title bar) ---
     // A tab keeps only what the document itself cannot restore: its path
