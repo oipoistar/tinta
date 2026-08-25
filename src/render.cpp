@@ -3147,8 +3147,12 @@ bool layoutBegin(App& app) {
         }
     }
     // Content starts below the title-bar tab strip; the strip paints over
-    // anything that scrolls up under it
-    app.layoutCursorY = chromeTopHeight(app) + 20.0f * scale;
+    // anything that scrolls up under it. On the edit-mode floating sheet
+    // (design 10a) content instead starts just inside the sheet's top
+    // edge — the sheet rises past the strip, so the page top is its own.
+    app.layoutCursorY = editorPreviewVisible(app)
+                            ? editSheetRect(app).top + dpi(app, 18.0f)
+                            : chromeTopHeight(app) + 20.0f * scale;
     app.layoutNextBlock = 0;
     app.layoutComplete = false;
     app.contentWidth = layoutWidth;

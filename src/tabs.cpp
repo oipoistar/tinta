@@ -364,15 +364,21 @@ struct StripMetrics {
 StripMetrics stripMetrics(const App& app) {
     StripMetrics m;
     m.height = chromeTopHeight(app);
-    m.tabsLeft = dpi(app, 40.0f);
+    // Tabs clear the edit-mode tool rail instead of hiding under it
+    m.tabsLeft = std::max(dpi(app, 40.0f),
+                          editRailWidth(app) + dpi(app, 8.0f));
     float buttons = captionButtonWidth(app) * 3.0f + pinButtonWidth(app);
     float plusW = dpi(app, 30.0f);
     float chevronW = dpi(app, 32.0f);
     float gap = dpi(app, 2.0f);
     size_t count = std::max<size_t>(app.tabs.size(), 1);
 
-    float available = (float)app.width - m.tabsLeft - buttons - plusW -
-                      dpi(app, 16.0f);
+    // With the floating sheet the tab row lives above the source column
+    // only; the caption buttons float on the sheet as their own island
+    float rowRight = editorPreviewVisible(app)
+                         ? editorPaneWidth(app)
+                         : (float)app.width - buttons;
+    float available = rowRight - m.tabsLeft - plusW - dpi(app, 16.0f);
     float natural = dpi(app, 190.0f);
     float minimum = dpi(app, 60.0f);
     float per = (available - gap * (count - 1)) / (float)count;
@@ -395,6 +401,13 @@ D2D1_RECT_F captionButtonRect(const App& app, int button) {
     float w = captionButtonWidth(app);
     float right = (float)app.width - w * (2 - button);
     return D2D1::RectF(right - w, 0.0f, right, chromeTopHeight(app));
+}
+
+// Left edge of the caption island (pin + window buttons); in sheet mode
+// clicks left of this and right of the source column belong to the page
+float captionIslandLeft(const App& app) {
+    return (float)app.width - captionButtonWidth(app) * 3.0f -
+           pinButtonWidth(app) - dpi(app, 8.0f);
 }
 
 int captionHitTest(const App& app, float x, float y) {
@@ -494,10 +507,13 @@ void renderTabStrip(App& app) {
     D2D1_COLOR_F faint = text;
     faint.a = 0.06f;
 
-    // Strip background
+    // Strip background: with the floating sheet the strip only spans the
+    // source side — the desk and the sheet own the top band to its right
+    bool sheetMode = editorPreviewVisible(app);
+    float stripRight = sheetMode ? editorPaneWidth(app) : (float)app.width;
     app.brush->SetColor(stripBackground(app));
     app.renderTarget->FillRectangle(
-        D2D1::RectF(0, 0, (float)app.width, stripH), app.brush);
+        D2D1::RectF(0, 0, stripRight, stripH), app.brush);
 
     // App icon (16px, centered in a 40px cell)
     float iconCell = dpi(app, 40.0f);
@@ -546,10 +562,14 @@ void renderTabStrip(App& app) {
             title = app.tabs[0].title;
             if (app.editMode && app.editorDirty) title = L"* " + title;
         }
-        float textLeft = iconCell + dpi(app, 4.0f);
+        float textLeft = std::max(iconCell + dpi(app, 4.0f),
+                                  editRailWidth(app) + dpi(app, 8.0f));
         float textRight = textLeft;
-        float maxRight = (float)app.width - captionButtonWidth(app) * 3 -
-                         pinButtonWidth(app);
+        float maxRight = sheetMode
+                             ? editorPaneWidth(app) - dpi(app, 8.0f)
+                             : (float)app.width -
+                                   captionButtonWidth(app) * 3 -
+                                   pinButtonWidth(app);
         if (app.folderBrowserFormat) {
             app.brush->SetColor(muted);
             app.renderTarget->DrawText(
@@ -609,7 +629,7 @@ void renderTabStrip(App& app) {
         float gap = dpi(app, 2.0f);
 
         app.renderTarget->PushAxisAlignedClip(
-            D2D1::RectF(0, 0, (float)app.width, stripH),
+            D2D1::RectF(0, 0, stripRight, stripH),
             D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
         for (size_t i = 0; i < app.tabs.size(); i++) {
@@ -759,9 +779,33 @@ void renderTabStrip(App& app) {
         }
     }
 
-    // Caption buttons: minimize, maximize/restore, close
+    // Caption buttons: minimize, maximize/restore, close. On the
+    // floating sheet they ride a rounded island so the page can rise to
+    // the window's top edge behind them (design 10a)
+    float islandTop = sheetMode ? dpi(app, 6.0f) : 0.0f;
+    float islandBottom = sheetMode ? stripH - dpi(app, 6.0f) : stripH;
+    if (sheetMode) {
+        D2D1_RECT_F island = D2D1::RectF(
+            pinButtonRect(app).left - dpi(app, 8.0f), islandTop,
+            (float)app.width - dpi(app, 6.0f), islandBottom);
+        D2D1_COLOR_F ibg = stripBackground(app);
+        ibg.a = 0.94f;
+        app.brush->SetColor(ibg);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(island, dpi(app, 8.0f), dpi(app, 8.0f)),
+            app.brush);
+        D2D1_COLOR_F ibd = text;
+        ibd.a = 0.1f;
+        app.brush->SetColor(ibd);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(island, dpi(app, 8.0f), dpi(app, 8.0f)),
+            app.brush, 1.0f);
+    }
     for (int b = 0; b < 3; b++) {
         D2D1_RECT_F r = captionButtonRect(app, b);
+        r.top = islandTop;
+        r.bottom = islandBottom;
+        if (sheetMode) r.right = std::min(r.right, (float)app.width - dpi(app, 8.0f));
         bool hover = app.captionButtonHover == b + 1;
         bool pressed = app.captionButtonPressed == b + 1;
         if (hover || pressed) {
@@ -773,7 +817,18 @@ void renderTabStrip(App& app) {
                 bg.a = pressed ? 0.12f : 0.07f;
             }
             app.brush->SetColor(bg);
-            app.renderTarget->FillRectangle(r, app.brush);
+            if (sheetMode) {
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(
+                        D2D1::RectF(r.left + dpi(app, 2.0f),
+                                    r.top + dpi(app, 2.0f),
+                                    r.right - dpi(app, 2.0f),
+                                    r.bottom - dpi(app, 2.0f)),
+                        dpi(app, 6.0f), dpi(app, 6.0f)),
+                    app.brush);
+            } else {
+                app.renderTarget->FillRectangle(r, app.brush);
+            }
         }
         D2D1_COLOR_F glyph = (b == 2 && (hover || pressed))
                                  ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
@@ -812,13 +867,26 @@ void renderTabStrip(App& app) {
     // Always-on-top pin: an upright pushpin, accent-filled while pinned
     {
         D2D1_RECT_F r = pinButtonRect(app);
+        r.top = islandTop;
+        r.bottom = islandBottom;
         bool hover = (float)app.mouseX >= r.left && (float)app.mouseX < r.right &&
                      (float)app.mouseY >= r.top && (float)app.mouseY < r.bottom;
         if (hover) {
             D2D1_COLOR_F bg = text;
             bg.a = 0.07f;
             app.brush->SetColor(bg);
-            app.renderTarget->FillRectangle(r, app.brush);
+            if (sheetMode) {
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(
+                        D2D1::RectF(r.left + dpi(app, 2.0f),
+                                    r.top + dpi(app, 2.0f),
+                                    r.right - dpi(app, 2.0f),
+                                    r.bottom - dpi(app, 2.0f)),
+                        dpi(app, 6.0f), dpi(app, 6.0f)),
+                    app.brush);
+            } else {
+                app.renderTarget->FillRectangle(r, app.brush);
+            }
         }
         float cx = (r.left + r.right) * 0.5f;
         float cy = (r.top + r.bottom) * 0.5f - dpi(app, 1.0f);

@@ -815,7 +815,7 @@ void renderPreviewCaretBlock(App& app, float previewWidth) {
                       : app.contentHeight;
     float blockBottom = nextY - app.scrollY - dpi(app, 8.0f);
     if (blockBottom <= blockTop + dpi(app, 4.0f)) return;
-    if (blockBottom < chromeTopHeight(app) || blockTop > app.height) return;
+    if (blockBottom < editSheetRect(app).top || blockTop > app.height) return;
     D2D1_COLOR_F c = app.theme.accent;
     c.a = 0.08f;
     app.brush->SetColor(c);

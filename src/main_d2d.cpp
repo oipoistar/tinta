@@ -192,12 +192,12 @@ void render(App& app) {
         }
 
         float previewMaxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
-        // renderedY includes the chrome strip and the document's top
-        // margin; subtract both so an editor at its top means a sheet at
-        // its top — without this the first block hides under the chrome
-        // and the render can never scroll up to it (t11 feedback)
-        float alignY = targetY - chromeTopHeight(app) - dpi(app, 20.0f);
+        // renderedY includes the sheet's top padding; subtract it so an
+        // editor at its top means a sheet at its top, and snap the last
+        // half-line so the page top is always reachable (t11 feedback)
+        float alignY = targetY - editSheetRect(app).top - dpi(app, 18.0f);
         float synced = std::max(0.0f, std::min(alignY, previewMaxScroll));
+        if (app.editorScrollY <= 0.5f) synced = 0.0f;
         float editorMax = std::max(0.0f, app.editorContentHeight - (float)app.height);
         if (app.editorScrollY >= editorMax - 1.0f) {
             // The editor has bottomed out, but rendered content is taller
@@ -1411,6 +1411,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (button == 1) return HTMINBUTTON;
             if (button == 2) return HTMAXBUTTON;  // Win11 snap flyout
             if (button == 3) return HTCLOSE;
+            // The floating sheet rises past the strip (design 10a):
+            // right of the source column the top band is desk gap and
+            // page, both of which take normal clicks
+            if (editorPreviewVisible(*app) && x >= editorPaneWidth(*app)) {
+                return HTCLIENT;
+            }
             for (const App::TabHit& hit : app->tabHits) {
                 if (x >= hit.rect.left && x <= hit.rect.right &&
                     y >= hit.rect.top && y <= hit.rect.bottom) {

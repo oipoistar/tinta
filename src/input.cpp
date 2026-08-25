@@ -1677,7 +1677,14 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             app.swallowNextMouseUp = true;
             return;
         }
-        if ((float)my < chromeTopHeight(app) && !app.confirmExitPending) {
+        // With the floating sheet the top band right of the source column
+        // belongs to the desk gap and the page, not the strip — except
+        // the caption island (pin + window buttons) floating on it
+        bool overSheetBand = editorPreviewVisible(app) &&
+                             (float)mx >= editorPaneWidth(app) &&
+                             (float)mx < captionIslandLeft(app);
+        if ((float)my < chromeTopHeight(app) && !overSheetBand &&
+            !app.confirmExitPending) {
             tabStripMouseDown(app, hwnd, mx, my, false);
             app.swallowNextMouseUp = true;
             return;

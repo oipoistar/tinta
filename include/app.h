@@ -1302,11 +1302,11 @@ inline bool editorPreviewVisible(const App& app) {
 }
 
 // Floating render sheet (design 10a): the page lies on the editor's
-// desk, inset from the chrome and the window edges; its shadow is the
-// only separator
+// desk and rises past the tab strip to the window's top edge — the
+// caption buttons float over it as an island. Shadow is the only
+// separator.
 inline D2D1_RECT_F editSheetRect(const App& app) {
-    return D2D1::RectF(documentViewportX(app),
-                       chromeTopHeight(app) + dpi(app, 14.0f),
+    return D2D1::RectF(documentViewportX(app), dpi(app, 10.0f),
                        (float)app.width - dpi(app, 16.0f),
                        (float)app.height - dpi(app, 14.0f));
 }
