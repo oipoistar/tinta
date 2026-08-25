@@ -568,8 +568,40 @@ void renderTabStrip(App& app) {
                 layout->Release();
             }
         }
-        float plusX = std::min(textRight + dpi(app, 10.0f),
-                               maxRight - dpi(app, 38.0f));
+        // A document's lone tab still closes: a small x after the title
+        // lands on the start page. The launcher itself shows none - the
+        // window's own close button is the way out there.
+        float nextX = textRight + dpi(app, 10.0f);
+        if (!startPageActive(app)) {
+            float cbSize = dpi(app, 20.0f);
+            float cbX = std::min(nextX, maxRight - dpi(app, 38.0f) -
+                                            cbSize - dpi(app, 6.0f));
+            float cbY = (stripH - cbSize) * 0.5f;
+            D2D1_RECT_F cb =
+                D2D1::RectF(cbX, cbY, cbX + cbSize, cbY + cbSize);
+            bool closeHover =
+                app.mouseX >= cb.left && app.mouseX <= cb.right &&
+                app.mouseY >= cb.top && app.mouseY <= cb.bottom;
+            if (closeHover) {
+                D2D1_COLOR_F cbBg = text;
+                cbBg.a = 0.12f;
+                app.brush->SetColor(cbBg);
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(cb, dpi(app, 4.0f), dpi(app, 4.0f)),
+                    app.brush);
+            }
+            drawCloseGlyph(app, (cb.left + cb.right) * 0.5f,
+                           (cb.top + cb.bottom) * 0.5f, dpi(app, 3.6f),
+                           muted);
+            App::TabHit hit;
+            hit.rect = cb;
+            hit.index = 0;
+            hit.closeRect = cb;
+            hit.hasClose = true;
+            app.tabHits.push_back(hit);
+            nextX = cb.right + dpi(app, 6.0f);
+        }
+        float plusX = std::min(nextX, maxRight - dpi(app, 38.0f));
         drawPlusButton(app, plusX, stripH, faint, muted);
     } else {
         StripMetrics m = stripMetrics(app);
