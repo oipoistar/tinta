@@ -8,6 +8,7 @@
 #include "document.h"
 #include "drafts.h"
 #include "editor.h"
+#include "startpage.h"
 #include "file_utils.h"
 #include "i18n.h"
 #include "input.h"
@@ -38,7 +39,11 @@ void syncActiveTab(App& app) {
     }
     App::DocTab& tab = app.tabs[app.activeTab];
     tab.path = app.currentFile;
-    tab.title = titleForPath(app, app.currentFile);
+    // A pathless viewer tab with a custom title (an embedded Learn
+    // document from the start page) keeps it; quick notes re-derive
+    if (!app.currentFile.empty() || tab.title.empty() || app.editMode) {
+        tab.title = titleForPath(app, app.currentFile);
+    }
     tab.editMode = app.editMode;
     tab.editorDirty = app.editMode && app.editorDirty;
 }
@@ -87,6 +92,8 @@ void tabsInit(App& app) {
     tab.id = ++app.tabIdCounter;
     tab.path = app.currentFile;
     tab.title = titleForPath(app, app.currentFile);
+    // A pathless viewer tab is the start page, not an untitled note
+    if (app.currentFile.empty() && !app.editMode) tab.title = L"Tinta";
     app.tabs.push_back(std::move(tab));
     app.activeTab = 0;
 }
@@ -123,6 +130,10 @@ void tabActivate(App& app, HWND hwnd, int index) {
     if (index < 0 || index >= (int)app.tabs.size()) return;
     if (index == app.activeTab) return;
 
+    // Leaving an embedded Learn document: an empty tab activated later
+    // shows the launcher again
+    app.startPageEmbeddedOpen = false;
+
     syncActiveTab(app);
     parkActiveEditBuffer(app);
     app.activeTab = index;
@@ -144,6 +155,11 @@ void tabActivate(App& app, HWND hwnd, int index) {
         app.scrollY = app.targetScrollY = 0;
         app.scrollX = app.targetScrollX = 0;
         app.layoutDirty = true;
+        // An empty viewer tab in a launcher window shows the start page
+        // again; its label follows suit
+        if (!tab.editMode && startPageActive(app)) {
+            tab.title = L"Tinta";
+        }
     }
     if (tab.editMode) {
         app.editorWordWrap = tab.wordWrap;
@@ -200,13 +216,19 @@ void tabCloseIndex(App& app, HWND hwnd, int index) {
         return;
     }
 
-    if ((int)app.tabs.size() <= 1) {
-        PostMessageW(hwnd, WM_CLOSE, 0, 0);
-        return;
-    }
-
     // The closed tab's crash-recovery draft goes with it
     draftsDeleteForTab(app, app.tabs[index].id);
+
+    if ((int)app.tabs.size() <= 1) {
+        // The last tab closes into the start page instead of taking the
+        // window with it; closing the start page itself closes the window
+        if (startPageActive(app)) {
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        } else {
+            tabBecomeStartPage(app, hwnd);
+        }
+        return;
+    }
 
     if (index == app.activeTab) {
         // Leave a clean edit session silently before the neighbor loads
@@ -235,6 +257,60 @@ void tabCycle(App& app, HWND hwnd, int direction) {
     int count = (int)app.tabs.size();
     int next = (app.activeTab + direction + count) % count;
     tabActivate(app, hwnd, next);
+}
+
+// The lone surviving tab turns into the start page in place: closing
+// the last document lands on the launcher instead of the window
+// vanishing. Idempotent — a tab that is already the launcher stays one.
+void tabBecomeStartPage(App& app, HWND hwnd) {
+    tabsInit(app);
+    parkActiveEditBuffer(app);  // clean editor teardown if one was open
+    App::DocTab& tab = app.tabs[app.activeTab];
+    draftsDeleteForTab(app, tab.id);
+    tab.path.clear();
+    tab.title = L"Tinta";
+    tab.editMode = false;
+    tab.editorDirty = false;
+    tab.editorText.clear();
+    app.currentFile.clear();
+    auto result = parseDocument(app.parser, std::string(), app.currentFile);
+    if (result.success) {
+        app.root = result.root;
+        app.parseTimeUs = result.parseTimeUs;
+    }
+    app.scrollY = app.targetScrollY = 0;
+    app.scrollX = app.targetScrollX = 0;
+    app.layoutDirty = true;
+    app.startPageEmbeddedOpen = false;
+    app.hoveredTab = -1;
+    updateWindowTitle(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// Ctrl+T: a fresh empty viewer tab, which is the start page (the
+// browser-style new-tab page with recents and open actions)
+void tabOpenStartPage(App& app, HWND hwnd) {
+    tabsInit(app);
+    syncActiveTab(app);
+    parkActiveEditBuffer(app);
+    App::DocTab tab;
+    tab.id = ++app.tabIdCounter;
+    tab.title = L"Tinta";
+    app.tabs.push_back(std::move(tab));
+    app.activeTab = (int)app.tabs.size() - 1;
+    app.currentFile.clear();
+    auto result = parseDocument(app.parser, std::string(), app.currentFile);
+    if (result.success) {
+        app.root = result.root;
+        app.parseTimeUs = result.parseTimeUs;
+    }
+    app.scrollY = app.targetScrollY = 0;
+    app.scrollX = app.targetScrollX = 0;
+    app.layoutDirty = true;
+    app.startPageEmbeddedOpen = false;
+    app.showTabSwitcher = false;
+    updateWindowTitle(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 void tabOpenQuickNote(App& app, HWND hwnd) {
@@ -288,15 +364,21 @@ struct StripMetrics {
 StripMetrics stripMetrics(const App& app) {
     StripMetrics m;
     m.height = chromeTopHeight(app);
-    m.tabsLeft = dpi(app, 40.0f);
+    // Tabs clear the edit-mode tool rail instead of hiding under it
+    m.tabsLeft = std::max(dpi(app, 40.0f),
+                          editRailWidth(app) + dpi(app, 8.0f));
     float buttons = captionButtonWidth(app) * 3.0f + pinButtonWidth(app);
     float plusW = dpi(app, 30.0f);
     float chevronW = dpi(app, 32.0f);
     float gap = dpi(app, 2.0f);
     size_t count = std::max<size_t>(app.tabs.size(), 1);
 
-    float available = (float)app.width - m.tabsLeft - buttons - plusW -
-                      dpi(app, 16.0f);
+    // With the floating sheet the tab row lives above the source column
+    // only; the caption buttons float on the sheet as their own island
+    float rowRight = editorPreviewVisible(app)
+                         ? editorPaneWidth(app)
+                         : (float)app.width - buttons;
+    float available = rowRight - m.tabsLeft - plusW - dpi(app, 16.0f);
     float natural = dpi(app, 190.0f);
     float minimum = dpi(app, 60.0f);
     float per = (available - gap * (count - 1)) / (float)count;
@@ -319,6 +401,13 @@ D2D1_RECT_F captionButtonRect(const App& app, int button) {
     float w = captionButtonWidth(app);
     float right = (float)app.width - w * (2 - button);
     return D2D1::RectF(right - w, 0.0f, right, chromeTopHeight(app));
+}
+
+// Left edge of the caption island (pin + window buttons); in sheet mode
+// clicks left of this and right of the source column belong to the page
+float captionIslandLeft(const App& app) {
+    return (float)app.width - captionButtonWidth(app) * 3.0f -
+           pinButtonWidth(app) - dpi(app, 8.0f);
 }
 
 int captionHitTest(const App& app, float x, float y) {
@@ -418,10 +507,13 @@ void renderTabStrip(App& app) {
     D2D1_COLOR_F faint = text;
     faint.a = 0.06f;
 
-    // Strip background
+    // Strip background: with the floating sheet the strip only spans the
+    // source side — the desk and the sheet own the top band to its right
+    bool sheetMode = editorPreviewVisible(app);
+    float stripRight = sheetMode ? editorPaneWidth(app) : (float)app.width;
     app.brush->SetColor(stripBackground(app));
     app.renderTarget->FillRectangle(
-        D2D1::RectF(0, 0, (float)app.width, stripH), app.brush);
+        D2D1::RectF(0, 0, stripRight, stripH), app.brush);
 
     // App icon (16px, centered in a 40px cell)
     float iconCell = dpi(app, 40.0f);
@@ -465,14 +557,19 @@ void renderTabStrip(App& app) {
         // Single document: the caption shows the plain window title, with
         // the + button right after it so the tab row is discoverable
         std::wstring title = L"Tinta";
-        if (!app.tabs.empty() && !app.tabs[0].title.empty()) {
+        if (!app.tabs.empty() && !app.tabs[0].title.empty() &&
+            !startPageActive(app)) {
             title = app.tabs[0].title;
             if (app.editMode && app.editorDirty) title = L"* " + title;
         }
-        float textLeft = iconCell + dpi(app, 4.0f);
+        float textLeft = std::max(iconCell + dpi(app, 4.0f),
+                                  editRailWidth(app) + dpi(app, 8.0f));
         float textRight = textLeft;
-        float maxRight = (float)app.width - captionButtonWidth(app) * 3 -
-                         pinButtonWidth(app);
+        float maxRight = sheetMode
+                             ? editorPaneWidth(app) - dpi(app, 8.0f)
+                             : (float)app.width -
+                                   captionButtonWidth(app) * 3 -
+                                   pinButtonWidth(app);
         if (app.folderBrowserFormat) {
             app.brush->SetColor(muted);
             app.renderTarget->DrawText(
@@ -491,8 +588,40 @@ void renderTabStrip(App& app) {
                 layout->Release();
             }
         }
-        float plusX = std::min(textRight + dpi(app, 10.0f),
-                               maxRight - dpi(app, 38.0f));
+        // A document's lone tab still closes: a small x after the title
+        // lands on the start page. The launcher itself shows none - the
+        // window's own close button is the way out there.
+        float nextX = textRight + dpi(app, 10.0f);
+        if (!startPageActive(app)) {
+            float cbSize = dpi(app, 20.0f);
+            float cbX = std::min(nextX, maxRight - dpi(app, 38.0f) -
+                                            cbSize - dpi(app, 6.0f));
+            float cbY = (stripH - cbSize) * 0.5f;
+            D2D1_RECT_F cb =
+                D2D1::RectF(cbX, cbY, cbX + cbSize, cbY + cbSize);
+            bool closeHover =
+                app.mouseX >= cb.left && app.mouseX <= cb.right &&
+                app.mouseY >= cb.top && app.mouseY <= cb.bottom;
+            if (closeHover) {
+                D2D1_COLOR_F cbBg = text;
+                cbBg.a = 0.12f;
+                app.brush->SetColor(cbBg);
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(cb, dpi(app, 4.0f), dpi(app, 4.0f)),
+                    app.brush);
+            }
+            drawCloseGlyph(app, (cb.left + cb.right) * 0.5f,
+                           (cb.top + cb.bottom) * 0.5f, dpi(app, 3.6f),
+                           muted);
+            App::TabHit hit;
+            hit.rect = cb;
+            hit.index = 0;
+            hit.closeRect = cb;
+            hit.hasClose = true;
+            app.tabHits.push_back(hit);
+            nextX = cb.right + dpi(app, 6.0f);
+        }
+        float plusX = std::min(nextX, maxRight - dpi(app, 38.0f));
         drawPlusButton(app, plusX, stripH, faint, muted);
     } else {
         StripMetrics m = stripMetrics(app);
@@ -500,7 +629,7 @@ void renderTabStrip(App& app) {
         float gap = dpi(app, 2.0f);
 
         app.renderTarget->PushAxisAlignedClip(
-            D2D1::RectF(0, 0, (float)app.width, stripH),
+            D2D1::RectF(0, 0, stripRight, stripH),
             D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
         for (size_t i = 0; i < app.tabs.size(); i++) {
@@ -650,9 +779,33 @@ void renderTabStrip(App& app) {
         }
     }
 
-    // Caption buttons: minimize, maximize/restore, close
+    // Caption buttons: minimize, maximize/restore, close. On the
+    // floating sheet they ride a rounded island so the page can rise to
+    // the window's top edge behind them (design 10a)
+    float islandTop = sheetMode ? dpi(app, 6.0f) : 0.0f;
+    float islandBottom = sheetMode ? stripH - dpi(app, 6.0f) : stripH;
+    if (sheetMode) {
+        D2D1_RECT_F island = D2D1::RectF(
+            pinButtonRect(app).left - dpi(app, 8.0f), islandTop,
+            (float)app.width - dpi(app, 6.0f), islandBottom);
+        D2D1_COLOR_F ibg = stripBackground(app);
+        ibg.a = 0.94f;
+        app.brush->SetColor(ibg);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(island, dpi(app, 8.0f), dpi(app, 8.0f)),
+            app.brush);
+        D2D1_COLOR_F ibd = text;
+        ibd.a = 0.1f;
+        app.brush->SetColor(ibd);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(island, dpi(app, 8.0f), dpi(app, 8.0f)),
+            app.brush, 1.0f);
+    }
     for (int b = 0; b < 3; b++) {
         D2D1_RECT_F r = captionButtonRect(app, b);
+        r.top = islandTop;
+        r.bottom = islandBottom;
+        if (sheetMode) r.right = std::min(r.right, (float)app.width - dpi(app, 8.0f));
         bool hover = app.captionButtonHover == b + 1;
         bool pressed = app.captionButtonPressed == b + 1;
         if (hover || pressed) {
@@ -664,7 +817,18 @@ void renderTabStrip(App& app) {
                 bg.a = pressed ? 0.12f : 0.07f;
             }
             app.brush->SetColor(bg);
-            app.renderTarget->FillRectangle(r, app.brush);
+            if (sheetMode) {
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(
+                        D2D1::RectF(r.left + dpi(app, 2.0f),
+                                    r.top + dpi(app, 2.0f),
+                                    r.right - dpi(app, 2.0f),
+                                    r.bottom - dpi(app, 2.0f)),
+                        dpi(app, 6.0f), dpi(app, 6.0f)),
+                    app.brush);
+            } else {
+                app.renderTarget->FillRectangle(r, app.brush);
+            }
         }
         D2D1_COLOR_F glyph = (b == 2 && (hover || pressed))
                                  ? D2D1::ColorF(1.0f, 1.0f, 1.0f)
@@ -703,13 +867,26 @@ void renderTabStrip(App& app) {
     // Always-on-top pin: an upright pushpin, accent-filled while pinned
     {
         D2D1_RECT_F r = pinButtonRect(app);
+        r.top = islandTop;
+        r.bottom = islandBottom;
         bool hover = (float)app.mouseX >= r.left && (float)app.mouseX < r.right &&
                      (float)app.mouseY >= r.top && (float)app.mouseY < r.bottom;
         if (hover) {
             D2D1_COLOR_F bg = text;
             bg.a = 0.07f;
             app.brush->SetColor(bg);
-            app.renderTarget->FillRectangle(r, app.brush);
+            if (sheetMode) {
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(
+                        D2D1::RectF(r.left + dpi(app, 2.0f),
+                                    r.top + dpi(app, 2.0f),
+                                    r.right - dpi(app, 2.0f),
+                                    r.bottom - dpi(app, 2.0f)),
+                        dpi(app, 6.0f), dpi(app, 6.0f)),
+                    app.brush);
+            } else {
+                app.renderTarget->FillRectangle(r, app.brush);
+            }
         }
         float cx = (r.left + r.right) * 0.5f;
         float cy = (r.top + r.bottom) * 0.5f - dpi(app, 1.0f);

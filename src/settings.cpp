@@ -47,6 +47,7 @@ void saveSettings(const Settings& settings) {
     file << "hasAskedFileAssociation=" << (settings.hasAskedFileAssociation ? 1 : 0) << "\n";
     file << "editorShowPreview=" << (settings.editorShowPreview ? 1 : 0) << "\n";
     file << "editorWordWrap=" << (settings.editorWordWrap ? 1 : 0) << "\n";
+    file << "editorAssists=" << (settings.editorAssists ? 1 : 0) << "\n";
     file << "followSystemTheme=" << (settings.followSystemTheme ? 1 : 0) << "\n";
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
@@ -84,6 +85,14 @@ void saveSettings(const Settings& settings) {
         file << "sessionActive=" << settings.sessionActive << "\n";
         for (const auto& path : settings.sessionTabs) {
             file << "tab=" << path << "\n";
+        }
+    }
+
+    if (!settings.recentFiles.empty()) {
+        // Recently opened files for the start page, most recent first
+        file << "[Recent]\n";
+        for (const auto& recent : settings.recentFiles) {
+            file << "recent=" << recent.when << "|" << recent.path << "\n";
         }
     }
 
@@ -173,6 +182,54 @@ void persistReadingPosition(const std::string& path, float scrollY,
     if (path.empty()) return;
     Settings settings = loadSettings();
     rememberReadingPosition(settings, path, scrollY, zoom);
+    saveSettings(settings);
+}
+
+// The editor assists toggle persists immediately so fresh windows pick
+// it up without waiting for this one's exit save
+void persistEditorMode(const App& app) {
+    Settings settings = loadSettings();
+    settings.editorAssists = app.editorAssists;
+    saveSettings(settings);
+}
+
+// A theme change persists immediately: windows spawned afterwards
+// (quick notes, drag-outs) read settings.ini at startup and would
+// otherwise come up in the look from the previous session
+void persistThemeChoice(const App& app) {
+    Settings settings = loadSettings();
+    settings.themeIndex = app.currentThemeIndex;
+    settings.followSystemTheme = app.followSystemTheme;
+    settings.lightThemeIndex = app.lightThemeIndex;
+    settings.darkThemeIndex = app.darkThemeIndex;
+    saveSettings(settings);
+}
+
+// Start page recents: every successful document open moves (or inserts)
+// its path at the head of the [Recent] list
+void persistRecentFile(const std::string& path) {
+    if (path.empty()) return;
+    Settings settings = loadSettings();
+    auto& list = settings.recentFiles;
+    for (size_t i = 0; i < list.size(); i++) {
+        if (_stricmp(list[i].path.c_str(), path.c_str()) == 0) {
+            list.erase(list.begin() + i);
+            break;
+        }
+    }
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    ULARGE_INTEGER now;
+    now.LowPart = ft.dwLowDateTime;
+    now.HighPart = ft.dwHighDateTime;
+    list.insert(list.begin(), {now.QuadPart, path});
+    if (list.size() > 10) list.resize(10);
+    saveSettings(settings);
+}
+
+void clearRecentFiles() {
+    Settings settings = loadSettings();
+    settings.recentFiles.clear();
     saveSettings(settings);
 }
 
@@ -273,12 +330,28 @@ Settings loadSettings() {
             settings.editorShowPreview = (value == "1");
         } else if (key == "editorWordWrap") {
             settings.editorWordWrap = (value == "1");
+        } else if (key == "editorAssists") {
+            settings.editorAssists = (value == "1");
         } else if (key == "sessionActive") {
             int idx = std::stoi(value);
             if (idx >= 0) settings.sessionActive = idx;
         } else if (key == "tab") {
             if (!value.empty() && settings.sessionTabs.size() < 64) {
                 settings.sessionTabs.push_back(value);
+            }
+        } else if (key == "recent") {
+            // when(FILETIME)|path, most recent first
+            size_t sep = value.find('|');
+            if (sep != std::string::npos && sep + 1 < value.size() &&
+                settings.recentFiles.size() < 10) {
+                try {
+                    unsigned long long when =
+                        std::stoull(value.substr(0, sep));
+                    std::string recentPath = value.substr(sep + 1);
+                    if (!recentPath.empty()) {
+                        settings.recentFiles.push_back({when, recentPath});
+                    }
+                } catch (...) {}
             }
         } else if (key == "pos") {
             // New format: scrollY|zoom|path; legacy: scrollY|path

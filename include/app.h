@@ -188,6 +188,13 @@ struct Settings {
     bool checkUpdates = true;
     std::string lastUpdateCheck;   // YYYY-MM-DD of the last completed check
     std::string dismissedUpdate;   // "X.Y.Z" the user dismissed
+    // Recently opened files for the start page: most-recent-first,
+    // capped at 10. when = FILETIME ticks of the last open.
+    struct RecentFile { unsigned long long when = 0; std::string path; };
+    std::vector<RecentFile> recentFiles;
+    // Editor markdown assists (list continuation, Tab indent, Ctrl+B/I)
+    // master switch
+    bool editorAssists = true;
 };
 
 // Application state
@@ -492,6 +499,21 @@ struct App {
     // 16px window icon drawn in the strip (device bitmap: recreated with
     // the render target)
     ID2D1Bitmap* titleIconBitmap = nullptr;
+
+    // Start page (design t7): the launcher that replaced the sample
+    // document. It is the universal empty state: any tab with no
+    // document and no edit buffer shows it, and Ctrl+T opens one fresh.
+    // An embedded Learn document showing in place of the launcher;
+    // cleared when anything else takes the view over
+    bool startPageEmbeddedOpen = false;
+    // Tracks appearance transitions so recents reload from settings.ini
+    // each time the launcher comes back into view
+    bool startPageShowing = false;
+    struct RecentDoc { std::string path; unsigned long long when = 0; };
+    std::vector<RecentDoc> startPageRecents;
+    int startPageHover = 0;  // hit id under the mouse, 0 = none
+    std::vector<std::pair<D2D1_RECT_F, int>> startPageHits;  // rebuilt each paint
+    ID2D1Bitmap* startPageIconBitmap = nullptr;  // hero icon (device bitmap)
 
     // Folder browser overlay
     bool showFolderBrowser = false;
@@ -993,6 +1015,28 @@ struct App {
     std::chrono::steady_clock::time_point editModeNotificationStart;
     std::wstring editorNotificationMsg;
 
+    // Unified editor (design t11): one raw buffer, live render beside it;
+    // the left tool rail slides in with edit mode carrying the controls
+    bool editorAssists = true;
+    float editRailAnim = 0.0f;       // rail slide-in 0..1
+    int editRailHover = 0;           // hit id under the mouse, 0 = none
+    std::vector<std::pair<D2D1_RECT_F, int>> editRailHits;  // rebuilt each paint
+
+    // Raw editor insert menu (design t9): right-click drops markdown at
+    // the caret; Table and Diagram open flyout submenus. The rail's
+    // table/diagram buttons open the same submenus standalone.
+    bool editCtxOpen = false;
+    bool editCtxRailOnly = false;  // submenu only, anchored at the rail
+    float editCtxX = 0.0f;
+    float editCtxY = 0.0f;
+    int editCtxHover = 0;
+    int editCtxSub = 0;       // 0 none, 1 table grid, 2 diagram templates
+    int editCtxSubHover = 0;
+    int editCtxGridC = 0;     // hovered table size
+    int editCtxGridR = 0;
+    std::vector<std::pair<D2D1_RECT_F, int>> editCtxHits;     // rebuilt each paint
+    std::vector<std::pair<D2D1_RECT_F, int>> editCtxSubHits;
+
     // Editor document
     std::wstring editorText;
     bool editorDirty = false;
@@ -1054,6 +1098,8 @@ struct App {
     IDWriteTextFormat* supSubFormat = nullptr;   // small size for ^sup^/~sub~
     IDWriteTextFormat* editorTextFormat = nullptr;
     float editorCharWidth = 0.0f; // Measured monospace char width
+    // Slim in-editor line-number gutter (design t11)
+    IDWriteTextFormat* editorGutterFormat = nullptr;
 
     // Metrics
     StartupMetrics metrics;
@@ -1105,6 +1151,7 @@ struct App {
         if (statsFormat) { statsFormat->Release(); statsFormat = nullptr; }
         if (supSubFormat) { supSubFormat->Release(); supSubFormat = nullptr; }
         if (editorTextFormat) { editorTextFormat->Release(); editorTextFormat = nullptr; }
+        if (editorGutterFormat) { editorGutterFormat->Release(); editorGutterFormat = nullptr; }
         for (auto& fmt : themePreviewFormats) {
             if (fmt.name) { fmt.name->Release(); fmt.name = nullptr; }
             if (fmt.preview) { fmt.preview->Release(); fmt.preview = nullptr; }
@@ -1123,6 +1170,10 @@ struct App {
         if (titleIconBitmap) {
             titleIconBitmap->Release();
             titleIconBitmap = nullptr;
+        }
+        if (startPageIconBitmap) {
+            startPageIconBitmap->Release();
+            startPageIconBitmap = nullptr;
         }
     }
 
@@ -1169,10 +1220,33 @@ inline float dpi(const App& app, float value) {
 }
 
 // Width of the editor pane in edit mode (full window when preview is hidden)
+// Desk gap (design 10a): the sliver of desk between the source column
+// and the floating render sheet; it doubles as the split drag handle.
+// Its center sits at width * editorSplitRatio.
+inline float editSeamWidth(const App& app) {
+    return dpi(app, 16.0f);
+}
+
 inline float editorPaneWidth(const App& app) {
     return app.editorShowPreview
-        ? app.width * app.editorSplitRatio - 3.0f
+        ? app.width * app.editorSplitRatio - editSeamWidth(app) * 0.5f
         : static_cast<float>(app.width);
+}
+
+// Left tool rail (design t8/t11): slides in with edit mode, carries the
+// formatting controls
+inline float editRailWidth(const App& app) {
+    if (!app.editMode) return 0.0f;
+    return dpi(app, 48.0f) * app.editRailAnim;
+}
+
+// Slim in-editor line-number column right of the rail (design t11)
+inline float editorGutterWidth(const App& app) {
+    return dpi(app, 34.0f);
+}
+
+inline bool editorWrapOn(const App& app) {
+    return app.editorWordWrap;
 }
 
 // Folder browser panel width — shared by input hit-testing, the panel
@@ -1219,14 +1293,54 @@ inline float documentViewportX(const App& app) {
     }
     // Preview hidden: zero-width viewport at the right edge — document
     // rendering flows through unchanged and clips to nothing
-    if (!app.editorShowPreview) return static_cast<float>(app.width);
-    return app.width * app.editorSplitRatio + 3.0f;
+    if (!app.editorShowPreview) {
+        return static_cast<float>(app.width);
+    }
+    return app.width * app.editorSplitRatio + editSeamWidth(app) * 0.5f;
+}
+
+inline bool editorPreviewVisible(const App& app) {
+    return app.editMode && app.editorShowPreview;
+}
+
+// Floating render sheet (design 10a): the page lies on the editor's
+// desk and rises past the tab strip to the window's top edge — the
+// caption buttons float over it as an island. Shadow is the only
+// separator.
+inline D2D1_RECT_F editSheetRect(const App& app) {
+    return D2D1::RectF(documentViewportX(app), dpi(app, 10.0f),
+                       (float)app.width - dpi(app, 16.0f),
+                       (float)app.height - dpi(app, 14.0f));
+}
+
+inline D2D1_COLOR_F editSurfaceMix(D2D1_COLOR_F c, float to, float t) {
+    c.r += (to - c.r) * t;
+    c.g += (to - c.g) * t;
+    c.b += (to - c.b) * t;
+    c.a = 1.0f;
+    return c;
+}
+
+// The desk both panes sit on: lifted a shade off the window in the dark,
+// dimmed a touch in the light so the sheet reads as paper on top
+inline D2D1_COLOR_F editDeskColor(const App& app) {
+    return app.theme.isDark
+               ? editSurfaceMix(app.theme.background, 1.0f, 0.03f)
+               : editSurfaceMix(app.theme.background, 0.0f, 0.045f);
+}
+
+inline D2D1_COLOR_F editSheetColor(const App& app) {
+    return app.theme.isDark
+               ? editSurfaceMix(app.theme.background, 1.0f, 0.065f)
+               : editSurfaceMix(app.theme.background, 1.0f, 0.35f);
 }
 
 inline float documentViewportWidth(const App& app) {
     float width;
     if (app.editMode) {
         width = static_cast<float>(app.width) - documentViewportX(app);
+        // The floating sheet is inset from the window's right edge
+        if (editorPreviewVisible(app)) width -= dpi(app, 16.0f);
     } else {
         width = static_cast<float>(app.width);
         // Snap to the panel's final width (not the animated position) so

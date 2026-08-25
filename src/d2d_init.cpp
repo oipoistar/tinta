@@ -389,6 +389,20 @@ void updateOverlayFormats(App& app) {
             measureLayout->Release();
         }
     }
+
+    // Slim line-number gutter (design t11): small mono digits,
+    // right-aligned against the gutter's inner edge
+    app.dwriteFactory->CreateTextFormat(L"Consolas", nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 9.5f * editorScale, L"en-us",
+        &app.editorGutterFormat);
+    if (app.editorGutterFormat) {
+        app.editorGutterFormat->SetTextAlignment(
+            DWRITE_TEXT_ALIGNMENT_TRAILING);
+        app.editorGutterFormat->SetParagraphAlignment(
+            DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        app.editorGutterFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    }
 }
 
 void ensureThemePreviewFormats(App& app) {
@@ -458,6 +472,10 @@ bool createRenderTarget(App& app) {
     if (app.titleIconBitmap) {
         app.titleIconBitmap->Release();
         app.titleIconBitmap = nullptr;
+    }
+    if (app.startPageIconBitmap) {
+        app.startPageIconBitmap->Release();
+        app.startPageIconBitmap = nullptr;
     }
 
     RECT rc;

@@ -1393,6 +1393,7 @@ void renderHelpOverlay(App& app) {
         {L"Ctrl+A",       tr(app, "help.general.select_all")},
         {L"Ctrl+C",       tr(app, "help.general.copy")},
         {L"Ctrl+N",       tr(app, "help.general.new_note")},
+        {L"Ctrl+Shift+N", tr(app, "help.general.new_window")},
         {L"Ctrl+P",       tr(app, "ctx.print")},
         {L"ESC",          tr(app, "help.general.close")},
         {kQuit.c_str(),   tr(app, "help.general.quit")},
@@ -2484,6 +2485,13 @@ void renderSettingsOverlay(App& app) {
         settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
                        cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.editorShowPreview, SET_TOGGLE_PREVIEW, anim);
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        cardLabel(tr(app, "settings.editor_assists"),
+                  tr(app, "settings.editor_assists.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
+                       app.editorAssists, SET_TOGGLE_ASSISTS, anim);
     }
 
     // Shortcut profile popup, drawn last so it sits above the rows

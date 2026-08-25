@@ -1,6 +1,8 @@
 #include "input.h"
 #include "annotations.h"
 #include "drafts.h"
+#include "editrail.h"
+#include "startpage.h"
 #include "tabs.h"
 #include "document.h"
 #include "editor.h"
@@ -18,6 +20,7 @@
 
 #include <windowsx.h>
 #include <shellapi.h>
+#include <commdlg.h>
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
@@ -32,6 +35,7 @@ static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
 static HCURSOR cursorSizeWE = LoadCursor(nullptr, IDC_SIZEWE);
 
 static const App::TaskRect* taskRectAt(const App& app);
+static void startPageInvoke(App& app, HWND hwnd, int id);
 static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY);
 static bool diagramPngButtonAt(const App& app, int mouseX, int mouseY);
 static bool tableFitButtonAt(const App& app, int mouseX, int mouseY);
@@ -222,7 +226,7 @@ static void setSearchCursor(const App& app, float x, float y) {
     float barHeight = dpi(app, 44.0f);
     float centerWidth = (float)app.width;
     if (app.editMode) {
-        float paneWidth = app.width * app.editorSplitRatio - 3.0f;
+        float paneWidth = editorPaneWidth(app);
         barWidth = std::min(barWidth, paneWidth - dpi(app, 40.0f));
         centerWidth = paneWidth;
     }
@@ -291,6 +295,7 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     if (app.showLightbox) closeLightbox(app);
     clearLinkPeek(app);
     app.fitBlocks.clear();
+    app.startPageEmbeddedOpen = false;  // a real document takes the view
 
     // Reading position memory (#77): keep the old document's position,
     // resume the new one's
@@ -303,6 +308,9 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     int utf8Len = WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, nullptr, 0, nullptr, nullptr);
     app.currentFile.resize(utf8Len - 1);
     WideCharToMultiByte(CP_UTF8, 0, fullPath.c_str(), -1, &app.currentFile[0], utf8Len, nullptr, nullptr);
+    // Start page recents: every open (including tab switches) refreshes
+    // the document's spot at the head of the list
+    persistRecentFile(app.currentFile);
     app.scrollY = 0;
     app.scrollX = 0;
     app.targetScrollY = 0;
@@ -693,6 +701,10 @@ static void settingsAction(App& app, HWND hwnd, int action) {
         case SET_TOGGLE_OPENTABS:
             app.openInTabs = !app.openInTabs;
             break;
+        case SET_TOGGLE_ASSISTS:
+            app.editorAssists = !app.editorAssists;
+            persistEditorMode(app);
+            break;
         case SET_TOGGLE_FOLLOW:
             app.followSystemTheme = !app.followSystemTheme;
             if (app.followSystemTheme) {
@@ -852,9 +864,13 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         if (!ctrl) {
             float editorMax = std::max(0.0f, app.editorContentHeight - (float)app.height);
             if (delta < 0 && app.editorScrollY >= editorMax - 1.0f) {
-                // Editor is at its end: scroll the preview's remaining tail
-                // directly (#85); the sync allows this overshoot
-                float maxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
+                // Editor is at its end: scroll the page's remaining tail
+                // directly (#85); the sync allows this overshoot. Same
+                // sheet-aware clamp as the sync, or the overshoot dies in
+                // the gap between the two formulas.
+                float maxScroll =
+                    std::max(0.0f, app.contentHeight + dpi(app, 18.0f) -
+                                       editSheetRect(app).bottom);
                 app.scrollY = std::min(app.scrollY - delta * dpi(app, 60.0f), maxScroll);
                 app.targetScrollY = app.scrollY;
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -1170,10 +1186,8 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             }
         }
         // If mouse is in the preview pane and not dragging separator, fall through for link hover etc.
-        float sepX = app.editorShowPreview
-            ? app.width * app.editorSplitRatio
-            : static_cast<float>(app.width);
-        if (app.mouseX < sepX || app.draggingSeparator || app.editorSelecting) return;
+        if ((float)app.mouseX < documentViewportX(app) ||
+            app.draggingSeparator || app.editorSelecting) return;
         // Quick-note empty state: hover feedback for the Open button
         if (quickNoteEmptyStateActive(app) && app.editorShowPreview) {
             const D2D1_RECT_F& r = app.quickNoteButtonRect;
@@ -1316,6 +1330,17 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         }
     }
 
+    // Start page hover drives its row and button highlights
+    if (startPageActive(app)) {
+        int hit = startPageHitAt(app, (float)app.mouseX, (float)app.mouseY);
+        if (hit != app.startPageHover) {
+            app.startPageHover = hit;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+    } else if (app.startPageHover != 0) {
+        app.startPageHover = 0;
+    }
+
     // Link peek: dwelling on a local .md link arms the preview timer
     if (app.hoveredLink != prevHoveredLink) {
         clearLinkPeek(app);
@@ -1405,6 +1430,8 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     } else if (!app.recoveredDrafts.empty() &&
                cursorPointInRect((float)app.mouseX, (float)app.mouseY,
                                  app.draftChipRect)) {
+        SetCursor(cursorHand);
+    } else if (startPageActive(app) && app.startPageHover != 0) {
         SetCursor(cursorHand);
     } else if (!app.annotationMarks.empty() &&
                (annotationRailHit(app, (float)app.mouseX,
@@ -1620,6 +1647,16 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
         return;  // strip right-clicks never reach the document menu
     }
 
+    // Raw editor insert menu (design t9): the right-click moves the
+    // caret and the INSERT entries drop their markdown there
+    if (app.editMode && !app.confirmExitPending &&
+        !fromKeyboard && (float)pt.x >= editRailWidth(app) &&
+        (float)pt.x < editorPaneWidth(app)) {
+        openEditCtxMenu(app, hwnd, (float)pt.x, (float)pt.y);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Document menu: viewer mode only, and never on top of a modal
     // overlay. The search bar is fine — it shares the viewport rather
     // than covering it.
@@ -1644,7 +1681,14 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             app.swallowNextMouseUp = true;
             return;
         }
-        if ((float)my < chromeTopHeight(app) && !app.confirmExitPending) {
+        // With the floating sheet the top band right of the source column
+        // belongs to the desk gap and the page, not the strip — except
+        // the caption island (pin + window buttons) floating on it
+        bool overSheetBand = editorPreviewVisible(app) &&
+                             (float)mx >= editorPaneWidth(app) &&
+                             (float)mx < captionIslandLeft(app);
+        if ((float)my < chromeTopHeight(app) && !overSheetBand &&
+            !app.confirmExitPending) {
             tabStripMouseDown(app, hwnd, mx, my, false);
             app.swallowNextMouseUp = true;
             return;
@@ -1791,10 +1835,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 }
             }
         }
-        float sepX = app.editorShowPreview
-            ? app.width * app.editorSplitRatio
-            : static_cast<float>(app.width);
-        if (x < sepX + 6) {
+        // Everything left of the preview edge — pane and seam — belongs
+        // to the editor handler (the seam is the split handle)
+        if ((float)x < documentViewportX(app)) {
             handleEditorMouseDown(app, hwnd, x, y);
             return;
         }
@@ -2001,6 +2044,18 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         }
         InvalidateRect(hwnd, nullptr, FALSE);
     } else {
+        // Start page: clicks act on its controls, there is nothing to
+        // select underneath. The capture from this press is let go up
+        // front: the Open action runs a modal picker whose release never
+        // reaches this window.
+        if (startPageActive(app)) {
+            if (GetCapture() == hwnd) ReleaseCapture();
+            int hit = startPageHitAt(app, (float)GET_X_LPARAM(lParam),
+                                     (float)GET_Y_LPARAM(lParam));
+            app.swallowNextMouseUp = true;
+            if (hit) startPageInvoke(app, hwnd, hit);
+            return;
+        }
         // Capture the mouse for the duration of a selection drag: without
         // it, mouse events stop at the window edge and the drag can neither
         // auto-scroll past the viewport nor finalize outside the window
@@ -2123,6 +2178,102 @@ static void openFileRefTarget(App& app, HWND hwnd, const std::string& path) {
         navRecordJump(app, app.currentFile, app.scrollY);
     }
     tabOpenPath(app, hwnd, path, true);
+}
+
+// Start page actions (design t7). Ids match startPageHitAt: 1 open,
+// 2 new document, 3 browse, 4 clear, 5 shortcuts, 10+i recent, 20+i learn.
+static void startPageInvoke(App& app, HWND hwnd, int id) {
+    if (id == 1) {
+        // Open a file: picker, then the picked document takes over the
+        // launcher shell (same handover as the quick-note empty state)
+        wchar_t path[MAX_PATH] = L"";
+        OPENFILENAMEW ofn = {};
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = hwnd;
+        ofn.lpstrFilter =
+            L"Documents (*.md;*.mmd;*.txt;*.json;*.yaml;...)\0"
+            L"*.md;*.markdown;*.mmd;*.txt;*.json;*.yaml;*.yml;*.toml;"
+            L"*.ini;*.csv;*.log\0"
+            L"Markdown / Mermaid (*.md;*.markdown;*.mmd)\0"
+            L"*.md;*.markdown;*.mmd\0"
+            L"All files (*.*)\0*.*\0";
+        ofn.lpstrFile = path;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
+                    OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+        if (GetOpenFileNameW(&ofn)) {
+            tabsInit(app);
+            int shellId = app.tabs[app.activeTab].id;
+            tabOpenPath(app, hwnd, toUtf8(path));
+            for (int i = 0; i < (int)app.tabs.size(); i++) {
+                if (app.tabs[i].id == shellId) {
+                    tabCloseIndex(app, hwnd, i);
+                    break;
+                }
+            }
+        }
+    } else if (id == 2) {
+        // New document: the note takes over this window (#121 semantics);
+        // the keystroke's WM_CHAR must not type into the fresh editor
+        app.swallowCharsUntil = std::chrono::steady_clock::now() +
+                                std::chrono::milliseconds(150);
+        tabsInit(app);
+        enterQuickNoteMode(app);
+        app.tabs[app.activeTab].title = tr(app, "title.untitled");
+        updateWindowTitle(app);
+    } else if (id == 3) {
+        if (!app.showFolderBrowser) {
+            closeSearchIfOpen(app);
+            app.showFolderBrowser = true;
+            app.folderBrowserAnimation = 0;
+            wchar_t cwd[MAX_PATH];
+            if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
+                app.folderBrowserPath = cwd;
+            }
+            populateFolderItems(app);
+        }
+    } else if (id == 4) {
+        clearRecentFiles();
+        app.startPageRecents.clear();
+        app.startPageHover = 0;
+    } else if (id == 5) {
+        app.showHelp = true;
+    } else if (id >= 10 && id < 20) {
+        int index = id - 10;
+        if (index < (int)app.startPageRecents.size()) {
+            std::string path = app.startPageRecents[index].path;
+            if (GetFileAttributesW(toWide(path).c_str()) ==
+                INVALID_FILE_ATTRIBUTES) {
+                // Vanished since it was recorded: drop the stale entry
+                Settings stored = loadSettings();
+                for (size_t i = 0; i < stored.recentFiles.size(); i++) {
+                    if (_stricmp(stored.recentFiles[i].path.c_str(),
+                                 path.c_str()) == 0) {
+                        stored.recentFiles.erase(
+                            stored.recentFiles.begin() + i);
+                        break;
+                    }
+                }
+                saveSettings(stored);
+                app.startPageRecents.erase(
+                    app.startPageRecents.begin() + index);
+                app.startPageHover = 0;
+            } else {
+                tabsInit(app);
+                int shellId = app.tabs[app.activeTab].id;
+                tabOpenPath(app, hwnd, path);
+                for (int i = 0; i < (int)app.tabs.size(); i++) {
+                    if (app.tabs[i].id == shellId) {
+                        tabCloseIndex(app, hwnd, i);
+                        break;
+                    }
+                }
+            }
+        }
+    } else if (id >= 20 && id < 23) {
+        startPageOpenEmbedded(app, hwnd, id - 20);
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 // Create-missing-reference dialog outcome: 1 = create the file and start
@@ -2382,6 +2533,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     if (app.tabDragIndex >= 0) {
         tabDragEnd(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
     }
+    // The press captured the mouse (selection drags need it); the release
+    // must let go no matter which branch handles it. A branch that
+    // returned early used to leak the capture, which silently killed the
+    // caption buttons' non-client hit-testing until the next full click.
+    if (GetCapture() == hwnd) ReleaseCapture();
     // Release belonging to a context-menu item click: already handled
     if (app.swallowNextMouseUp) {
         app.swallowNextMouseUp = false;
@@ -2502,6 +2658,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                     }
                     app.themePreviewFormats.clear();
                     applyTheme(app, idx);
+                    persistThemeChoice(app);
                 }
                 closeThemeEditor(app, false);
                 return;
@@ -2798,6 +2955,8 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 if (themeAt(clickedTheme).isDark) app.darkThemeIndex = clickedTheme;
                 else app.lightThemeIndex = clickedTheme;
             }
+            // New windows spawned from here on come up in this theme
+            persistThemeChoice(app);
             app.showThemeChooser = false;
             app.themeChooserAnimation = 0;
         }
@@ -3058,22 +3217,10 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             return;
         }
         if (wParam == 'T') {
-            app.tabNewTabIntent = true;
-            if (!app.showFolderBrowser) {
-                closeSearchIfOpen(app);
-                app.showFolderBrowser = true;
-                app.folderBrowserAnimation = 0;
-                if (!app.currentFile.empty()) {
-                    app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
-                } else {
-                    wchar_t cwd[MAX_PATH];
-                    if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                        app.folderBrowserPath = cwd;
-                    }
-                }
-                populateFolderItems(app);
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
+            // New tab = the start page (browser-style new-tab page); its
+            // Open/Browse/recents land in this tab. The old open-into-a-
+            // new-tab browser flow lives on as Ctrl+click in the browser.
+            tabOpenStartPage(app, hwnd);
             return;
         }
         if (wParam >= '1' && wParam <= '9' && app.tabs.size() > 1) {
@@ -3245,18 +3392,28 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 break;
             case 'N':
-                // Quick note. On the bare-launch welcome document the note
-                // takes over this window instead of leaving the welcome
-                // behind (#121); any real document keeps its window and a
-                // fresh one spawns
-                if (app.currentFile.empty()) {
+                // Quick note, Notepad model: Ctrl+N stays in this window
+                // (the launcher or an empty tab is taken over in place, a
+                // document gets a fresh note tab); Ctrl+Shift+N spawns a
+                // separate window
+                if (GetKeyState(VK_SHIFT) & 0x8000) {
+                    launchQuickNoteWindow();
+                } else if (app.currentFile.empty()) {
+                    // The keystroke's WM_CHAR must not type into the
+                    // editor the takeover just opened
+                    app.swallowCharsUntil =
+                        std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(150);
                     tabsInit(app);
                     enterQuickNoteMode(app);
                     app.tabs[app.activeTab].title = tr(app, "title.untitled");
                     updateWindowTitle(app);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 } else {
-                    launchQuickNoteWindow();
+                    app.swallowCharsUntil =
+                        std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(150);
+                    tabOpenQuickNote(app, hwnd);
                 }
                 break;
             case 'A': {
@@ -3392,6 +3549,26 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             if ((wParam >= 'A' && wParam <= 'Z') ||
                 (wParam >= '0' && wParam <= '9') || wParam == VK_SPACE) {
                 return;  // swallowed here; WM_CHAR feeds the filter
+            }
+        }
+
+        // Start page: Ctrl+O opens the picker, 1..5 the recent files, and
+        // the newfile key does what its button chip promises: a new
+        // document in place (elsewhere it opens the naming-row flow).
+        // B and ? keep their keymapped meanings, which the page reuses.
+        if (startPageActive(app)) {
+            if (ctrl && wParam == 'O') {
+                startPageInvoke(app, hwnd, 1);
+                return;
+            }
+            if (!ctrl && wParam == app.keymap[KA_NEWFILE]) {
+                startPageInvoke(app, hwnd, 2);
+                return;
+            }
+            if (!ctrl && wParam >= '1' && wParam <= '5' &&
+                (int)(wParam - '1') < (int)app.startPageRecents.size()) {
+                startPageInvoke(app, hwnd, 10 + (int)(wParam - '1'));
+                return;
             }
         }
 

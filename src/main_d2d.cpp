@@ -29,6 +29,8 @@
 #include "overlays.h"
 #include "annotations.h"
 #include "drafts.h"
+#include "editrail.h"
+#include "startpage.h"
 
 #include <appmodel.h>
 #include <winhttp.h>
@@ -115,7 +117,7 @@ void render(App& app) {
     }
 
     if (app.layoutDirty) {
-        if (app.editMode && !app.editorShowPreview) {
+        if (app.editMode && !editorPreviewVisible(app)) {
             // Preview hidden: defer document layout until it's shown again
             // (the viewport is zero-width, so laying out now would be wasted
             // work against a nonsense max width)
@@ -151,8 +153,8 @@ void render(App& app) {
     }
 
     // Sync preview scroll to editor scroll position using source-offset anchors
-    if (app.editMode && app.editorShowPreview &&
-        !app.scrollAnchors.empty() && !app.editorLineByteOffsets.empty()) {
+    if (editorPreviewVisible(app) && !app.scrollAnchors.empty() &&
+        !app.editorLineByteOffsets.empty()) {
         // Find the editor's top visible line (row-aware in wrap mode)
         int topLine = (int)editorTopVisibleLine(app);
         topLine = std::max(0, std::min(topLine, (int)app.editorLineByteOffsets.size() - 1));
@@ -189,8 +191,18 @@ void render(App& app) {
             }
         }
 
-        float previewMaxScroll = std::max(0.0f, app.contentHeight - (float)app.height);
-        float synced = std::max(0.0f, std::min(targetY, previewMaxScroll));
+        // The page clips at the sheet's bottom edge, so its scroll range
+        // extends past the plain window-height clamp — the last blocks
+        // must clear the sheet bottom with a little breathing room
+        float previewMaxScroll =
+            std::max(0.0f, app.contentHeight + dpi(app, 18.0f) -
+                               editSheetRect(app).bottom);
+        // renderedY includes the sheet's top padding; subtract it so an
+        // editor at its top means a sheet at its top, and snap the last
+        // half-line so the page top is always reachable (t11 feedback)
+        float alignY = targetY - editSheetRect(app).top - dpi(app, 18.0f);
+        float synced = std::max(0.0f, std::min(alignY, previewMaxScroll));
+        if (app.editorScrollY <= 0.5f) synced = 0.0f;
         float editorMax = std::max(0.0f, app.editorContentHeight - (float)app.height);
         if (app.editorScrollY >= editorMax - 1.0f) {
             // The editor has bottomed out, but rendered content is taller
@@ -203,9 +215,11 @@ void render(App& app) {
         app.targetScrollY = app.scrollY;
     }
 
-    // Edit mode: split view rendering
+    // Edit mode: split view rendering — everything sits on the desk
+    // surface, the render sheet floats above it (design 10a)
     if (app.editMode) {
-        app.renderTarget->Clear(app.theme.background);
+        app.startPageShowing = false;  // recents reload on the way back
+        app.renderTarget->Clear(editDeskColor(app));
 
         float editorWidth = editorPaneWidth(app);
         float previewX = documentViewportX(app);
@@ -214,23 +228,22 @@ void render(App& app) {
         // Render editor (left pane; full width when the preview is hidden)
         renderEditor(app, editorWidth);
 
-        // Render separator
-        if (app.editorShowPreview) renderSeparator(app);
-
-        // Render preview (right pane) using clip + transform
-        app.renderTarget->PushAxisAlignedClip(
-            D2D1::RectF(previewX, 0, (float)app.width, (float)app.height),
-            D2D1_ANTIALIAS_MODE_ALIASED);
+        // The floating sheet (design 10a): desk, shadow, and sheet
+        // surface first, then the document clips into the sheet
+        renderEditSheetChrome(app);
+        {
+            D2D1_RECT_F sheet = editSheetRect(app);
+            app.renderTarget->PushAxisAlignedClip(
+                sheet, D2D1_ANTIALIAS_MODE_ALIASED);
+        }
 
         D2D1_MATRIX_3X2_F originalTransform;
         app.renderTarget->GetTransform(&originalTransform);
         app.renderTarget->SetTransform(
             D2D1::Matrix3x2F::Translation(previewX, 0) * originalTransform);
 
-        // Clear preview background
-        app.brush->SetColor(app.theme.background);
-        app.renderTarget->FillRectangle(
-            D2D1::RectF(0, 0, previewWidth, (float)app.height), app.brush);
+        // The caret block's accent wash under the document content
+        renderPreviewCaretBlock(app, previewWidth);
 
         goto render_document;
     }
@@ -244,6 +257,19 @@ void render(App& app) {
     if (documentViewportX(app) > 0.0f) {
         app.renderTarget->SetTransform(
             D2D1::Matrix3x2F::Translation(documentViewportX(app), 0));
+    }
+
+    // Start page: the launcher draws over the (empty) document; panels,
+    // chips and overlays keep layering above it. Its recents reload on
+    // every appearance so the list is always current.
+    if (startPageActive(app)) {
+        if (!app.startPageShowing) {
+            app.startPageShowing = true;
+            startPageRefreshRecents(app);
+        }
+        renderStartPage(app);
+    } else {
+        app.startPageShowing = false;
     }
 
 render_document:
@@ -1243,6 +1269,13 @@ render_document:
 
     // Title-bar tab strip: the caption itself, above every panel
     renderTabStrip(app);
+
+    // Edit-mode tool rail (design t8): covers the strip's left corner
+    // and the old gutter column, so it draws above both
+    if (app.editMode) {
+        renderEditRail(app);
+        renderEditCtxMenu(app);
+    }
     renderTabSwitcher(app);
     renderTabMenu(app);
 
@@ -1383,6 +1416,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (button == 1) return HTMINBUTTON;
             if (button == 2) return HTMAXBUTTON;  // Win11 snap flyout
             if (button == 3) return HTCLOSE;
+            // The floating sheet rises past the strip (design 10a):
+            // right of the source column the top band is desk gap and
+            // page, both of which take normal clicks
+            if (editorPreviewVisible(*app) && x >= editorPaneWidth(*app)) {
+                return HTCLIENT;
+            }
             for (const App::TabHit& hit : app->tabHits) {
                 if (x >= hit.rect.left && x <= hit.rect.right &&
                     y >= hit.rect.top && y <= hit.rect.bottom) {
@@ -1548,6 +1587,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 int want = autoThemeIndex(*app);
                 if (want != app->currentThemeIndex) {
                     applyTheme(*app, want);
+                    persistThemeChoice(*app);
                 }
             }
             return 0;
@@ -1807,6 +1847,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.zoomFactor = app->zoomFactor;
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
+                settings.editorAssists = app->editorAssists;
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
@@ -1873,70 +1914,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-static const char* sampleMarkdown = R"(# Welcome to Tinta
-
-**Tinta** is a fast, lightweight Markdown and Mermaid viewer for Windows.
-
-## Getting Started
-
-- **Drag & drop** a `.md` or `.mmd` file onto this window
-- Press **B** to browse and open files from a folder
-- Or run `tinta.exe readme.md` from the command line
-- Press **?** for all available keyboard shortcuts
-
-## Features
-
-- 10 beautiful themes — press **T** to choose
-- Native Mermaid flowchart rendering for `.mmd` files
-- Edit mode with live preview — press **:**
-- Search — press **F**
-- Table of contents — press **Tab**
-- Text selection and copy
-- Syntax highlighting in code blocks for C/C++, C#, Python, JavaScript, Rust, Go, and Bash
-
-## Code Example
-
-```cpp
-int main() {
-    printf("Hello, World!\n");
-    return 0;
-}
-```
-
-## Keyboard Shortcuts
-
-Press **?** at any time to see all shortcuts.
-
-### Navigation
-
-- **J / K** - Scroll down / up
-- **Space / PgDn** - Page down
-- **PgUp** - Page up
-- **Home / End** - Jump to start / end
-- **Ctrl+Scroll** - Zoom in / out
-
-### View
-
-- **F** or **Ctrl+F** - Search
-- **Enter** - Next search match
-- **B** - Toggle folder browser
-- **Tab** - Toggle table of contents
-- **T** - Theme chooser
-- **S** - Toggle stats
-
-### Editing
-
-- **:** - Enter edit mode
-- **Ctrl+S** - Save (in edit mode)
-- **ESC ESC** - Exit edit mode
-
-### General
-
-- **Ctrl+A** - Select all
-- **Ctrl+C** - Copy selection
-- **ESC** - Close overlay / Quit
-- **Q** - Quit
-)";
+// The bare-launch tutorial moved to startpage.cpp: failed loads fall
+// back to the start page, which keeps the sample behind a Learn card
 
 // Last-chance handler: writes %LOCALAPPDATA%\Tinta\crash.dmp so crash
 // reports from the field carry a usable stack
@@ -1990,6 +1969,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.folderSearchEnabled = savedSettings.folderSearchEnabled;
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
+    app.editorAssists = savedSettings.editorAssists;
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;
@@ -2272,6 +2252,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         if (sessionPaths.empty()) restoreSession = false;
     }
 
+    // Windows that come up with nothing to show land on the start page
+    // (design t7) instead of the old tutorial document: an empty
+    // document is all it takes, the launcher is the empty state
+    auto showStartPage = [&]() { loadDocumentContent(std::string(), {}); };
+
     if (quickNote) {
         // Untitled quick note: an empty document, no backing file
         loadDocumentContent(std::string(), {});
@@ -2279,8 +2264,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         if (loadFile(inputFile)) {
             app.currentFile = inputFile;
             app.focusMermaidOnNextLayout = isMermaidDocumentPath(inputFile);
+            persistRecentFile(app.currentFile);
         } else {
-            loadDocumentContent(sampleMarkdown, {});
+            showStartPage();
         }
     } else if (restoreSession) {
         // No file argument: reopen where the last session left off
@@ -2289,14 +2275,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             app.focusMermaidOnNextLayout =
                 isMermaidDocumentPath(sessionPaths[sessionActive]);
         } else {
-            loadDocumentContent(sampleMarkdown, {});
+            showStartPage();
         }
     } else {
         // Try syntax.md
         if (loadFile("syntax.md")) {
             app.currentFile = "syntax.md";
         } else {
-            loadDocumentContent(sampleMarkdown, {});
+            showStartPage();
         }
     }
 
