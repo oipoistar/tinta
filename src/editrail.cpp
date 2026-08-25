@@ -303,67 +303,61 @@ void renderEditRail(App& app) {
         y += dpi(app, 8.0f);
         group(kInsertBtns, 3);
     } else {
-        // Document map: one row per line on the editor's grid, sampled
-        // when the document outgrows the rail; the lens is the viewport
+        // Document map as the gutter reborn: each number is the real
+        // line beside it, drawn at the editor's exact screen height, so
+        // the column scrolls with the text and never resamples. The
+        // caret line's number lights up; dragging the strip scrolls.
         float mapTop = y + dpi(app, 3.0f);
         float mapBottom = middleBottom - dpi(app, 4.0f);
-        float mapH = mapBottom - mapTop;
-        float pitch = app.editorTextFormat
-                          ? app.editorTextFormat->GetFontSize() * 1.5f
-                          : dpi(app, 22.0f);
-        int mapRows = std::max(1, (int)(mapH / pitch));
-        int lineCount = (int)app.editorLineStarts.size();
-        if (lineCount > 0 && mapH > pitch) {
-            int shown = std::min(mapRows, lineCount);
-            for (int i = 0; i < shown; i++) {
-                int line = (shown >= lineCount || shown <= 1)
-                               ? i
-                               : (int)((long long)i * (lineCount - 1) /
-                                       (shown - 1));
+        float lineHeight = app.editorTextFormat
+                               ? app.editorTextFormat->GetFontSize() * 1.5f
+                               : dpi(app, 22.0f);
+        float padding = dpi(app, 8.0f);
+        size_t lineCount = app.editorLineStarts.size();
+        if (lineCount > 0 && mapBottom - mapTop > lineHeight) {
+            bool wrap = editorWrapOn(app);
+            size_t caretLine = 0;
+            {
+                // Line containing the caret (same binary search the
+                // editor uses)
+                size_t lo = 0, hi = lineCount;
+                while (lo + 1 < hi) {
+                    size_t mid = (lo + hi) / 2;
+                    if (app.editorLineStarts[mid] <= app.editorCursorPos) {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                caretLine = lo;
+            }
+            for (size_t i = 0; i < lineCount; i++) {
+                float rowStart =
+                    wrap && i < app.editorRowStarts.size()
+                        ? (float)app.editorRowStarts[i]
+                        : (float)i;
+                float lineY = chromeTopHeight(app) + padding +
+                              rowStart * lineHeight - app.editorScrollY;
+                if (lineY + lineHeight <= mapTop) continue;
+                if (lineY + lineHeight > mapBottom) break;
                 wchar_t num[16];
-                swprintf_s(num, _countof(num), L"%d", line + 1);
+                swprintf_s(num, _countof(num), L"%d", (int)i + 1);
                 IDWriteTextLayout* l = railLayout(
-                    app, num, 8.5f, DWRITE_FONT_WEIGHT_NORMAL, L"Consolas");
+                    app, num, 8.5f,
+                    i == caretLine ? DWRITE_FONT_WEIGHT_SEMI_BOLD
+                                   : DWRITE_FONT_WEIGHT_NORMAL,
+                    L"Consolas");
                 if (l) {
                     DWRITE_TEXT_METRICS m{};
                     l->GetMetrics(&m);
                     railDraw(app, l, (railW - m.width) * 0.5f,
-                             mapTop + i * pitch +
-                                 (pitch - m.height) * 0.5f,
-                             railA(text, 0.38f));
+                             lineY + (lineHeight - m.height) * 0.5f,
+                             i == caretLine ? railA(accent, 0.9f)
+                                            : railA(text, 0.38f));
                     l->Release();
                 }
             }
-
-            // Lens over the visible slice
-            float lineHeight = pitch;
-            float visRows = (float)app.height / lineHeight;
-            float totalRows =
-                app.editorWordWrap && app.editorTotalRows > 0
-                    ? (float)app.editorTotalRows
-                    : (float)lineCount;
-            float firstRow = app.editorScrollY / lineHeight;
-            float mapSpan = (float)shown * pitch;
-            float lensTop =
-                mapTop + (firstRow / std::max(1.0f, totalRows)) * mapSpan;
-            float lensH = std::max(
-                dpi(app, 16.0f),
-                (visRows / std::max(1.0f, totalRows)) * mapSpan);
-            lensH = std::min(lensH, mapSpan);
-            lensTop = std::min(lensTop, mapTop + mapSpan - lensH);
-            lensTop = std::max(lensTop, mapTop);
-            D2D1_RECT_F lens =
-                D2D1::RectF(dpi(app, 2.0f), lensTop, railW - dpi(app, 2.0f),
-                            lensTop + lensH);
-            app.brush->SetColor(railA(accent, 0.14f));
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(lens, dpi(app, 6.0f), dpi(app, 6.0f)),
-                app.brush);
-            app.brush->SetColor(railA(accent, 0.4f));
-            app.renderTarget->DrawRoundedRectangle(
-                D2D1::RoundedRect(lens, dpi(app, 6.0f), dpi(app, 6.0f)),
-                app.brush, 1.0f);
-            addHit(D2D1::RectF(0, mapTop, railW, mapTop + mapSpan), 40);
+            addHit(D2D1::RectF(0, mapTop, railW, mapBottom), 40);
         }
     }
 
@@ -436,43 +430,30 @@ int editRailHitAt(const App& app, float x, float y) {
     return 0;
 }
 
-// Maps a rail-map y position to an editor scroll offset
-static void editRailMapScrollTo(App& app, float y, bool centerLens) {
-    float railW = dpi(app, 48.0f);
-    (void)railW;
-    // Recover the map geometry from the stored hit rect (id 40)
-    for (const auto& hit : app.editRailHits) {
-        if (hit.second != 40) continue;
-        float mapTop = hit.first.top;
-        float mapSpan = hit.first.bottom - hit.first.top;
-        float lineHeight = app.editorTextFormat
-                               ? app.editorTextFormat->GetFontSize() * 1.5f
-                               : dpi(app, 22.0f);
-        float totalRows =
-            app.editorWordWrap && app.editorTotalRows > 0
-                ? (float)app.editorTotalRows
-                : (float)app.editorLineStarts.size();
-        float docH = totalRows * lineHeight;
-        float visH = (float)app.height;
-        float frac = (y - mapTop) / std::max(1.0f, mapSpan);
-        frac = std::max(0.0f, std::min(1.0f, frac));
-        float target = frac * docH;
-        if (centerLens) target -= visH * 0.5f;
-        app.editorScrollY =
-            std::max(0.0f, std::min(target, std::max(0.0f, docH - visH)));
-        InvalidateRect(app.hwnd, nullptr, FALSE);
-        return;
-    }
+// Clamp helper shared by the map drag and the click-to-caret jump
+static float editRailMaxScroll(const App& app) {
+    float lineHeight = app.editorTextFormat
+                           ? app.editorTextFormat->GetFontSize() * 1.5f
+                           : dpi(app, 22.0f);
+    float totalRows =
+        editorWrapOn(app) && app.editorTotalRows > 0
+            ? (float)app.editorTotalRows
+            : (float)app.editorLineStarts.size();
+    return std::max(0.0f,
+                    totalRows * lineHeight + dpi(app, 16.0f) -
+                        (float)app.height);
 }
 
 bool editRailMouseDown(App& app, HWND hwnd, int x, int y) {
     if (!app.editMode || (float)x >= editRailWidth(app)) return false;
     int hit = editRailHitAt(app, (float)x, (float)y);
     if (hit == 40) {
+        // Arm the grab: movement scrolls 1:1, a still click places the
+        // caret on the clicked line (resolved on release)
         app.editRailMapDragging = true;
+        app.editRailMapMoved = false;
         app.editRailMapDragStartY = (float)y;
         app.editRailMapDragStartScroll = app.editorScrollY;
-        editRailMapScrollTo(app, (float)y, true);
         SetCapture(hwnd);
         return true;
     }
@@ -485,7 +466,14 @@ bool editRailMouseDown(App& app, HWND hwnd, int x, int y) {
 bool editRailMouseMove(App& app, HWND hwnd, int x, int y) {
     if (!app.editMode) return false;
     if (app.editRailMapDragging) {
-        editRailMapScrollTo(app, (float)y, true);
+        float delta = app.editRailMapDragStartY - (float)y;
+        if (fabsf(delta) > 3.0f) app.editRailMapMoved = true;
+        if (app.editRailMapMoved) {
+            app.editorScrollY = std::max(
+                0.0f, std::min(app.editRailMapDragStartScroll + delta,
+                               editRailMaxScroll(app)));
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
         return true;
     }
     int hit = (float)x < editRailWidth(app)
@@ -498,11 +486,41 @@ bool editRailMouseMove(App& app, HWND hwnd, int x, int y) {
     return (float)x < editRailWidth(app);
 }
 
-void editRailMouseUp(App& app) {
-    if (app.editRailMapDragging) {
-        app.editRailMapDragging = false;
-        if (GetCapture() == app.hwnd) ReleaseCapture();
+void editRailMouseUp(App& app, int y) {
+    if (!app.editRailMapDragging) return;
+    app.editRailMapDragging = false;
+    if (GetCapture() == app.hwnd) ReleaseCapture();
+    if (app.editRailMapMoved) return;
+
+    // A still click: put the caret on the line level with the click
+    float lineHeight = app.editorTextFormat
+                           ? app.editorTextFormat->GetFontSize() * 1.5f
+                           : dpi(app, 22.0f);
+    float padding = dpi(app, 8.0f);
+    float row = ((float)y - chromeTopHeight(app) - padding +
+                 app.editorScrollY) /
+                lineHeight;
+    if (row < 0.0f) row = 0.0f;
+    size_t line;
+    if (editorWrapOn(app) && app.editorRowStarts.size() >= 2) {
+        size_t r = (size_t)row;
+        size_t lo = 0, hi = app.editorRowStarts.size() - 1;
+        while (lo + 1 < hi) {
+            size_t mid = (lo + hi) / 2;
+            if (app.editorRowStarts[mid] <= r) lo = mid;
+            else hi = mid;
+        }
+        line = lo;
+    } else {
+        line = (size_t)row;
     }
+    if (line >= app.editorLineStarts.size()) {
+        line = app.editorLineStarts.size() - 1;
+    }
+    app.editorCursorPos = app.editorLineStarts[line];
+    app.editorHasSelection = false;
+    app.editorDesiredCol = -1;
+    InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 // --- Raw editor insert menu (design t9) ----------------------------------

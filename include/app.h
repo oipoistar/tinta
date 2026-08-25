@@ -1025,6 +1025,7 @@ struct App {
     int editRailHover = 0;           // hit id under the mouse, 0 = none
     std::vector<std::pair<D2D1_RECT_F, int>> editRailHits;  // rebuilt each paint
     bool editRailMapDragging = false;
+    bool editRailMapMoved = false;
     float editRailMapDragStartY = 0.0f;
     float editRailMapDragStartScroll = 0.0f;
 

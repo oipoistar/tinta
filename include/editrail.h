@@ -18,7 +18,7 @@ int editRailHitAt(const App& app, float x, float y);
 // event belonged to the rail
 bool editRailMouseDown(App& app, HWND hwnd, int x, int y);
 bool editRailMouseMove(App& app, HWND hwnd, int x, int y);
-void editRailMouseUp(App& app);
+void editRailMouseUp(App& app, int y);
 
 // Rail button actions (defined in editor.cpp beside the edit helpers)
 void editRailInvoke(App& app, HWND hwnd, int id);
