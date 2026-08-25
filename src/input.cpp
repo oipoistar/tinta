@@ -110,40 +110,21 @@ static void setPrintPreviewCursor(const App& app, float x, float y) {
     SetCursor(cursorArrow);
 }
 
-static void setThemeChooserCursor(const App& app, float x, float y) {
-    float panelWidth = std::min(dpi(app, 900.0f), (float)app.width - dpi(app, 80.0f));
-    float panelHeight = std::min(dpi(app, 620.0f), (float)app.height - dpi(app, 80.0f));
-    float panelX = (app.width - panelWidth) / 2;
-    float panelY = (app.height - panelHeight) / 2;
-
-    float toggleW = dpi(app, 34.0f);
-    float toggleH = dpi(app, 18.0f);
-    float toggleX = panelX + panelWidth - dpi(app, 30.0f) - toggleW;
-    float toggleY = panelY + dpi(app, 24.0f);
-    if (x >= toggleX - dpi(app, 130.0f) && x <= toggleX + toggleW &&
-        y >= toggleY - dpi(app, 4.0f) && y <= toggleY + toggleH + dpi(app, 4.0f)) {
-        SetCursor(cursorHand);
-        return;
-    }
-
-    float gridStartY = panelY + dpi(app, 75.0f);
-    float cardWidth = (panelWidth - dpi(app, 60.0f)) / 2;
-    float cardHeight = (panelHeight - dpi(app, 130.0f)) / themeChooserRows();
-    float cardPadding = dpi(app, 8.0f);
-    for (int i = 0; i < themeCount(); i++) {
-        int col, row;
-        themeChooserCell(i, col, row);
-        float cardX = panelX + dpi(app, 20.0f) + col * (cardWidth + dpi(app, 20.0f));
-        float cardY = gridStartY + row * cardHeight;
-        D2D1_RECT_F card = D2D1::RectF(
-            cardX + cardPadding, cardY + cardPadding,
-            cardX + cardWidth - cardPadding, cardY + cardHeight - cardPadding);
-        if (cursorPointInRect(x, y, card)) {
-            SetCursor(cursorHand);
-            return;
+// Resolve the chooser hit under a point (rects from the last paint);
+// INT_MIN = nothing
+static int themeChooserHitAt(const App& app, float x, float y) {
+    for (const auto& hit : app.themeChooserHits) {
+        if (x >= hit.first.left && x <= hit.first.right &&
+            y >= hit.first.top && y <= hit.first.bottom) {
+            return hit.second;
         }
     }
-    SetCursor(cursorArrow);
+    return INT_MIN;
+}
+
+static void setThemeChooserCursor(const App& app, float x, float y) {
+    SetCursor(themeChooserHitAt(app, x, y) != INT_MIN ? cursorHand
+                                                      : cursorArrow);
 }
 
 static void setTocCursor(const App& app, float x, float y) {
@@ -1166,6 +1147,24 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     }
     if (app.showThemeChooser) {
         setThemeChooserCursor(app, (float)app.mouseX, (float)app.mouseY);
+        // Hover live-preview (design 12b): resting on a card repaints the
+        // app behind the scrim in that theme; leaving restores the
+        // committed one. The chooser chrome itself stays on the committed
+        // theme via themeChooserPreviewBase.
+        int hit = themeChooserHitAt(app, (float)app.mouseX,
+                                    (float)app.mouseY);
+        int hoverTheme = hit >= 0 ? hit : -1;
+        if (hoverTheme >= 0 && hoverTheme != app.currentThemeIndex) {
+            if (app.themeChooserPreviewBase < 0) {
+                app.themeChooserPreviewBase = app.currentThemeIndex;
+            }
+            applyTheme(app, hoverTheme);
+            InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (hoverTheme < 0 && app.themeChooserPreviewBase >= 0) {
+            applyTheme(app, app.themeChooserPreviewBase);
+            app.themeChooserPreviewBase = -1;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
         return;
     }
 
@@ -2909,75 +2908,59 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
     // Theme chooser click handling
     if (app.showThemeChooser) {
-        int clickX = GET_X_LPARAM(lParam);
-        int clickY = GET_Y_LPARAM(lParam);
+        float clickX = (float)GET_X_LPARAM(lParam);
+        float clickY = (float)GET_Y_LPARAM(lParam);
+        int hit = themeChooserHitAt(app, clickX, clickY);
 
-        // Calculate which theme was clicked (replicate layout logic)
-        float panelWidth = std::min(dpi(app, 900.0f), (float)app.width - dpi(app, 80.0f));
-        float panelHeight = std::min(dpi(app, 620.0f), (float)app.height - dpi(app, 80.0f));
-        float panelX = (app.width - panelWidth) / 2;
-        float panelY = (app.height - panelHeight) / 2;
-        float gridStartY = panelY + dpi(app, 75.0f);
-        float cardWidth = (panelWidth - dpi(app, 60.0f)) / 2;
-        float cardHeight = (panelHeight - dpi(app, 130.0f)) / themeChooserRows();
-        float cardPadding = dpi(app, 8.0f);
-
-        // "Follow Windows" toggle (label + switch, must match render geometry)
-        {
-            float togW = dpi(app, 34.0f);
-            float togH = dpi(app, 18.0f);
-            float togX = panelX + panelWidth - dpi(app, 30.0f) - togW;
-            float togY = panelY + dpi(app, 24.0f);
-            if (clickX >= togX - dpi(app, 130.0f) && clickX <= togX + togW &&
-                clickY >= togY - dpi(app, 4.0f) && clickY <= togY + togH + dpi(app, 4.0f)) {
-                app.followSystemTheme = !app.followSystemTheme;
-                if (app.followSystemTheme) {
-                    // Adopt the current theme as this mode's preference, then
-                    // snap to whatever the system mode wants
-                    if (app.theme.isDark) app.darkThemeIndex = app.currentThemeIndex;
-                    else app.lightThemeIndex = app.currentThemeIndex;
-                    PostMessageW(hwnd, WM_SETTINGCHANGE, 0,
-                                 (LPARAM)L"ImmersiveColorSet");
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
+        auto restorePreview = [&]() {
+            if (app.themeChooserPreviewBase >= 0) {
+                applyTheme(app, app.themeChooserPreviewBase);
+                app.themeChooserPreviewBase = -1;
             }
-        }
+        };
 
-        int clickedTheme = -1;
-        for (int i = 0; i < themeCount(); i++) {
-            int col, row;
-            themeChooserCell(i, col, row);
-
-            float cardX = panelX + dpi(app, 20.0f) + col * (cardWidth + dpi(app, 20.0f));
-            float cardY = gridStartY + row * cardHeight;
-            float innerX = cardX + cardPadding;
-            float innerY = cardY + cardPadding;
-            float innerW = cardWidth - cardPadding * 2;
-            float innerH = cardHeight - cardPadding * 2;
-
-            if (clickX >= innerX && clickX <= innerX + innerW &&
-                clickY >= innerY && clickY <= innerY + innerH) {
-                clickedTheme = i;
-                break;
+        if (hit == -1) {
+            // "Follow Windows" toggle
+            restorePreview();
+            app.followSystemTheme = !app.followSystemTheme;
+            if (app.followSystemTheme) {
+                // Adopt the current theme as this mode's preference, then
+                // snap to whatever the system mode wants
+                if (app.theme.isDark) app.darkThemeIndex = app.currentThemeIndex;
+                else app.lightThemeIndex = app.currentThemeIndex;
+                PostMessageW(hwnd, WM_SETTINGCHANGE, 0,
+                             (LPARAM)L"ImmersiveColorSet");
             }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
         }
-
-        if (clickedTheme >= 0) {
-            applyTheme(app, clickedTheme);
+        if (hit == -3) {
+            // Footer: open the theme editor on the committed theme
+            restorePreview();
+            app.showThemeChooser = false;
+            app.themeChooserAnimation = 0;
+            openThemeEditor(app, true);
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        if (hit >= 0) {
+            // Commit the pick (the hover preview already applied it)
+            applyTheme(app, hit);
+            app.themeChooserPreviewBase = -1;
             // While auto mode is on, picking a card records it as the
             // preference for that card's light/dark class
             if (app.followSystemTheme) {
-                if (themeAt(clickedTheme).isDark) app.darkThemeIndex = clickedTheme;
-                else app.lightThemeIndex = clickedTheme;
+                if (themeAt(hit).isDark) app.darkThemeIndex = hit;
+                else app.lightThemeIndex = hit;
             }
             // New windows spawned from here on come up in this theme
             persistThemeChoice(app);
             app.showThemeChooser = false;
             app.themeChooserAnimation = 0;
-        }
-        // If clicked outside themes, just close the chooser
-        else {
+        } else {
+            // Close (x) or a click on empty panel / outside: put the
+            // committed theme back and dismiss
+            restorePreview();
             app.showThemeChooser = false;
             app.themeChooserAnimation = 0;
         }
@@ -3617,6 +3600,10 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                         app.tocAnimation = 0;
                     }
                 } else if (app.showThemeChooser) {
+                    if (app.themeChooserPreviewBase >= 0) {
+                        applyTheme(app, app.themeChooserPreviewBase);
+                        app.themeChooserPreviewBase = -1;
+                    }
                     app.showThemeChooser = false;
                     app.themeChooserAnimation = 0;
                 } else if (app.zenMode) {
@@ -3686,6 +3673,12 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 break;
             case 'T':
                 if (!app.showSearch) {
+                    if (app.showThemeChooser &&
+                        app.themeChooserPreviewBase >= 0) {
+                        // Closing mid-preview: the committed theme returns
+                        applyTheme(app, app.themeChooserPreviewBase);
+                        app.themeChooserPreviewBase = -1;
+                    }
                     app.showThemeChooser = !app.showThemeChooser;
                     if (app.showThemeChooser) {
                         app.themeChooserAnimation = 0;
