@@ -73,6 +73,7 @@ set(SOURCES
     src/drafts.cpp
     src/startpage.cpp
     src/editrail.cpp
+    src/pandoc.cpp
 )
 
 set(HEADERS

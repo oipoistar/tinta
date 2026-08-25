@@ -59,6 +59,9 @@ inline int64_t usElapsed(Clock::time_point start) {
 // empty string = the check failed and is retried another day)
 #define WM_APP_UPDATE_CHECK (WM_APP + 5)
 
+// Pandoc worker finished; wParam = success (pandoc.cpp)
+#define WM_APP_PANDOC_DONE (WM_APP + 6)
+
 // Startup metrics
 struct StartupMetrics {
     int64_t windowInitUs = 0;
@@ -195,6 +198,8 @@ struct Settings {
     // Editor markdown assists (list continuation, Tab indent, Ctrl+B/I)
     // master switch
     bool editorAssists = true;
+    // User-chosen pandoc executable ("" = auto-detect)
+    std::string pandocPath;
 };
 
 // Application state
@@ -1014,6 +1019,13 @@ struct App {
     float editModeNotificationAlpha = 0;
     std::chrono::steady_clock::time_point editModeNotificationStart;
     std::wstring editorNotificationMsg;
+
+    // Pandoc bridge (pandoc.cpp): resolved executable, the user's
+    // settings override, and the single in-flight conversion guard
+    std::wstring pandocExe;
+    std::wstring pandocUserPath;
+    bool pandocChecked = false;
+    bool pandocRunning = false;
 
     // Unified editor (design t11): one raw buffer, live render beside it;
     // the left tool rail slides in with edit mode carrying the controls

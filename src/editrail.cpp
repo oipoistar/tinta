@@ -6,6 +6,7 @@
 #include "editrail.h"
 #include "editor.h"
 #include "i18n.h"
+#include "pandoc.h"
 #include "startpage.h"
 #include "tabs.h"
 
@@ -114,6 +115,11 @@ static const RailBtn kInsertBtns[] = {
     {22, L"\U0001F5BC", 12.0f, DWRITE_FONT_WEIGHT_NORMAL,
      DWRITE_FONT_STYLE_NORMAL, L"Segoe UI", false, "rail.image", L""},
 };
+// Foot: pandoc export, shown only when an executable was found
+static const RailBtn kFootBtns[] = {
+    {23, L"\u2912", 13.0f, DWRITE_FONT_WEIGHT_NORMAL,
+     DWRITE_FONT_STYLE_NORMAL, L"Segoe UI", false, "rail.export", L""},
+};
 
 static const RailBtn* railBtnById(int id) {
     for (const RailBtn& b : kTextBtns) {
@@ -123,6 +129,9 @@ static const RailBtn* railBtnById(int id) {
         if (b.id == id) return &b;
     }
     for (const RailBtn& b : kInsertBtns) {
+        if (b.id == id) return &b;
+    }
+    for (const RailBtn& b : kFootBtns) {
         if (b.id == id) return &b;
     }
     return nullptr;
@@ -229,6 +238,25 @@ void renderEditRail(App& app) {
     sep(y);
     y += dpi(app, 8.0f);
     group(kInsertBtns, 3);
+
+    // Foot: the pandoc export button, pinned to the rail's bottom and
+    // present only when an executable is available
+    if (pandocAvailable(app)) {
+        float fy = H - dpi(app, 12.0f) - btn;
+        sep(fy - dpi(app, 8.0f));
+        const RailBtn& b = kFootBtns[0];
+        D2D1_RECT_F r = D2D1::RectF(bx, fy, bx + btn, fy + btn);
+        bool hov = app.editRailHover == b.id;
+        if (hov) {
+            app.brush->SetColor(railA(text, 0.07f));
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(r, dpi(app, 7.0f), dpi(app, 7.0f)),
+                app.brush);
+        }
+        railGlyph(app, b.glyph, b.size, b.weight, b.style, b.family, r,
+                  hov ? railA(text, 0.95f) : railA(text, 0.8f), b.strike);
+        addHit(r, b.id);
+    }
     (void)onAccent;
     (void)accent;
 
@@ -389,7 +417,7 @@ void openEditRailFlyout(App& app, HWND hwnd, int sub) {
         return;
     }
     float anchorY = chromeTopHeight(app) + dpi(app, 60.0f);
-    int wantId = sub == 1 ? 20 : 21;
+    int wantId = sub == 1 ? 20 : sub == 2 ? 21 : 23;
     for (const auto& hit : app.editRailHits) {
         if (hit.second == wantId) {
             anchorY = hit.first.top;
@@ -442,7 +470,7 @@ void renderEditCtxMenu(App& app) {
     }
     float mx, my;
     if (app.editCtxRailOnly) {
-        // Rail flyout: no main panel — position so the submenu (which
+        // Rail flyout: no main panel - position so the submenu (which
         // hangs off the main panel's right edge) lands beside the rail
         mx = app.editCtxX - w - dpi(app, 4.0f);
         my = app.editCtxY;
@@ -620,6 +648,71 @@ void renderEditCtxMenu(App& app) {
             app.editCtxSubHits.push_back({r, 130 + i});
             ry += srowH + dpi(app, 2.0f);
         }
+    } else if (app.editCtxSub == 3) {
+        // Pandoc export formats (rail flyout only)
+        float sw = dpi(app, 220.0f);
+        float srowH = dpi(app, 34.0f);
+        float sh = dpi(app, 30.0f) +
+                   PANDOC_FORMAT_COUNT * (srowH + dpi(app, 2.0f)) +
+                   dpi(app, 8.0f);
+        float sx = std::min(mx + w + dpi(app, 4.0f),
+                            (float)app.width - sw - dpi(app, 8.0f));
+        float sy = std::min(subAnchorY,
+                            (float)app.height - sh - dpi(app, 8.0f));
+        D2D1_RECT_F sp = D2D1::RectF(sx, sy, sx + sw, sy + sh);
+        app.brush->SetColor(menuBg);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(sp, dpi(app, 8.0f), dpi(app, 8.0f)),
+            app.brush);
+        app.brush->SetColor(railA(text, 0.12f));
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(sp, dpi(app, 8.0f), dpi(app, 8.0f)),
+            app.brush, 1.0f);
+        IDWriteTextLayout* hl = railLayout(app, tr(app, "rail.export"),
+                                           10.5f,
+                                           DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        if (hl) {
+            railDraw(app, hl, sx + dpi(app, 14.0f), sy + dpi(app, 8.0f),
+                     railA(text, 0.5f));
+            hl->Release();
+        }
+        float ry = sy + dpi(app, 30.0f);
+        for (int i = 0; i < PANDOC_FORMAT_COUNT; i++) {
+            D2D1_RECT_F r = D2D1::RectF(sx + dpi(app, 4.0f), ry,
+                                        sx + sw - dpi(app, 4.0f),
+                                        ry + srowH);
+            bool hov = app.editCtxSubHover == 150 + i;
+            if (hov) {
+                app.brush->SetColor(railA(text, 0.08f));
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(r, dpi(app, 5.0f), dpi(app, 5.0f)),
+                    app.brush);
+            }
+            IDWriteTextLayout* ll = railLayout(app, pandocFormatLabel(i),
+                                               13.0f,
+                                               DWRITE_FONT_WEIGHT_NORMAL);
+            if (ll) {
+                DWRITE_TEXT_METRICS m{};
+                ll->GetMetrics(&m);
+                railDraw(app, ll, r.left + dpi(app, 12.0f),
+                         ry + (srowH - m.height) * 0.5f,
+                         railA(text, 0.92f));
+                ll->Release();
+            }
+            IDWriteTextLayout* hint = railLayout(app, pandocFormatExt(i),
+                                                 10.5f,
+                                                 DWRITE_FONT_WEIGHT_NORMAL,
+                                                 L"Consolas");
+            if (hint) {
+                DWRITE_TEXT_METRICS m{};
+                hint->GetMetrics(&m);
+                railDraw(app, hint, r.right - dpi(app, 10.0f) - m.width,
+                         ry + (srowH - m.height) * 0.5f, railA(text, 0.4f));
+                hint->Release();
+            }
+            app.editCtxSubHits.push_back({r, 150 + i});
+            ry += srowH + dpi(app, 2.0f);
+        }
     } else if (app.editCtxSub == 1) {
         float cell = dpi(app, 20.0f);
         float gap = dpi(app, 3.0f);
@@ -686,6 +779,12 @@ bool editCtxMouseDown(App& app, HWND hwnd, int x, int y) {
         if (hit.second == 140) {
             editorInsertTableGrid(app, hwnd, app.editCtxGridC,
                                   app.editCtxGridR);
+        } else if (hit.second >= 150) {
+            // Close first: the export flow opens a modal save dialog
+            int fmt = hit.second - 150;
+            closeEditCtxMenu(app);
+            pandocExportFlow(app, hwnd, fmt);
+            return true;
         } else if (hit.second >= 130) {
             editorInsertDiagramTemplate(app, hwnd, hit.second - 130);
         }
@@ -801,7 +900,7 @@ static int seamCaretAnchor(const App& app) {
     return (int)alo;
 }
 
-// Desk fill, sheet shadow, sheet surface and edge — drawn before the
+// Desk fill, sheet shadow, sheet surface and edge - drawn before the
 // document content clips into the sheet
 void renderEditSheetChrome(App& app) {
     if (!editorPreviewVisible(app) || !app.renderTarget || !app.brush) {
@@ -817,7 +916,7 @@ void renderEditSheetChrome(App& app) {
     app.renderTarget->FillRectangle(
         D2D1::RectF(editorPaneWidth(app), 0, W, H), app.brush);
     // The tab strip's band continues across the top behind the sheet so
-    // the chrome reads as one surface — without this the strip stops
+    // the chrome reads as one surface - without this the strip stops
     // dead at the source column's edge, which on dark themes (strip far
     // darker than desk) looks cut off
     app.brush->SetColor(tabStripBackground(app));
@@ -869,7 +968,7 @@ void renderPreviewCaretBlock(App& app, float previewWidth) {
     c.a = 0.08f;
     app.brush->SetColor(c);
     // Hug the content column with a small overhang (design t11's wash)
-    // rather than spanning the sheet — a full-width band makes indented
+    // rather than spanning the sheet - a full-width band makes indented
     // blocks beside plain ones read as misaligned
     float inset = std::max(dpi(app, 10.0f),
                            app.layoutIndent - dpi(app, 12.0f));
