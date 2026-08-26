@@ -1,5 +1,6 @@
 #include "i18n.h"
 #include "app.h"
+#include "settings.h"
 
 #include <windows.h>
 #include <string.h>
@@ -1277,14 +1278,10 @@ std::wstring langUtf8ToWide(const std::string& s) {
 }
 
 std::wstring languagesIniPath() {
-    wchar_t appData[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
-        return L"";
-    }
-    std::wstring path = appData;
-    path += L"\\Tinta";
-    CreateDirectoryW(path.c_str(), nullptr);
-    return path + L"\\languages.ini";
+    // Follows the config home: portable beside the exe, else %APPDATA%
+    std::wstring dir = tintaConfigDir();
+    if (dir.empty()) return L"";
+    return dir + L"\\languages.ini";
 }
 
 // Section-name aliases onto the compiled languages
