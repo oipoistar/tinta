@@ -2740,12 +2740,38 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
             // one line past its measured row height (#148)
             bool isHeader = (r == 0);
             IDWriteTextFormat* fmt = isHeader ? app.boldFormat : app.textFormat;
+            bool plainCell = cell->children.size() == 1 &&
+                             cell->children[0]->type == ElementType::Text;
             float textWidth = 0;
-            if (!text.empty() && fmt) {
+            if (plainCell && !text.empty() && fmt) {
                 LayoutInfo mi = createLayout(app, text, fmt, lineHeight,
                                              app.bodyTypography);
                 textWidth = mi.width;
                 if (mi.layout) mi.layout->Release();
+            } else if (!cell->children.empty() && fmt) {
+                // Styled cell: plain-text extraction lies about width —
+                // inline code renders in the mono face plus a padded chip
+                // and never wraps internally, so an under-measured column
+                // pushed chips past the table border. Lay the cell out at
+                // unlimited width with the real renderer and take its
+                // right edge (chip rects included), then roll back.
+                LayoutSnapshot snap = takeSnapshot(app);
+                float cy = 0.0f;
+                layoutInlineContent(app, cell->children, 0.0f, cy,
+                                    kHugeWidth, fmt, app.theme.text, {},
+                                    lineHeight);
+                float maxRight = 0.0f;
+                for (size_t i = snap.textRuns; i < app.layoutTextRuns.size();
+                     i++) {
+                    maxRight = std::max(maxRight,
+                                        app.layoutTextRuns[i].bounds.right);
+                }
+                for (size_t i = snap.rects; i < app.layoutRects.size(); i++) {
+                    maxRight = std::max(maxRight,
+                                        app.layoutRects[i].rect.right);
+                }
+                rollbackTo(app, snap);
+                textWidth = maxRight;
             }
             float needed = textWidth + cellPadding * 2 + 6.0f * scale;
             if (needed > colWidths[c]) colWidths[c] = needed;
