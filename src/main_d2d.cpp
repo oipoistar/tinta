@@ -2246,9 +2246,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     };
 
     // Last session's tabs come back on plain launches (files that vanished
-    // from disk in the meantime are dropped)
+    // from disk in the meantime are dropped). With "Open files in tabs"
+    // off the session stays parked: one window, one document — a file
+    // launch must not drag the previous session in as extra tabs (#147)
     bool restoreSession = !quickNote && !cascadeWindow && !startInEditMode &&
-                          printPagesDir.empty() &&
+                          printPagesDir.empty() && savedSettings.openInTabs &&
                           !savedSettings.sessionTabs.empty();
     std::vector<std::string> sessionPaths;
     int sessionActive = 0;
