@@ -237,6 +237,8 @@ const int THEME_COUNT = sizeof(THEMES) / sizeof(THEMES[0]);
 //   text=D8DEE9
 //   ...
 
+#include "settings.h"
+
 #include <shlobj.h>
 #include <fstream>
 #include <memory>
@@ -248,14 +250,10 @@ namespace {
 std::vector<std::unique_ptr<CustomTheme>> g_customThemes;
 
 std::wstring themesIniPath() {
-    wchar_t appData[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
-        return L"";
-    }
-    std::wstring path = appData;
-    path += L"\\Tinta";
-    CreateDirectoryW(path.c_str(), nullptr);
-    return path + L"\\themes.ini";
+    // Follows the config home: portable beside the exe, else %APPDATA%
+    std::wstring dir = tintaConfigDir();
+    if (dir.empty()) return L"";
+    return dir + L"\\themes.ini";
 }
 
 bool parseHexColor(const std::string& value, D2D1_COLOR_F& out) {

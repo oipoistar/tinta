@@ -94,6 +94,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Update check** - Portable builds check GitHub once a day and offer a new release as a quiet, dismissible chip
 - **Search** - Find text with F or Ctrl+F, cycle through matches with Enter; every match shows as a tick on the scrollbar
 - **Persistent settings** - Remembers your theme, zoom level, and window position
+- **Portable mode** - Create a `settings.ini` next to `tinta.exe` (an empty file works) and the whole configuration — settings, custom themes, languages, drafts — lives beside the executable and travels with it; without one, everything stays in `%APPDATA%\Tinta`
 - **Localized interface** - English, Simplified Chinese, Japanese, Korean, German, French, and Italian UI; follows Windows or a chosen language
 - **Text selection & copy** - Select text and copy to clipboard
 - **Zoom support** - Ctrl+scroll to zoom in/out

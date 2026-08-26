@@ -27,6 +27,10 @@ void persistThemeChoice(const App& app);
 void persistEditorMode(const App& app);
 void persistOpenInTabs(const App& app);
 
+// The configuration home: the exe's folder in portable mode (a
+// settings.ini beside tinta.exe opts in, #147), else %APPDATA%\Tinta
+std::wstring tintaConfigDir();
+
 // User-remappable single-key actions (#77), written to settings.ini as a
 // [Keys] section. Char actions trigger via WM_CHAR (edit ':', help '?');
 // the rest are WM_KEYDOWN virtual-key codes. Ctrl combos stay fixed.

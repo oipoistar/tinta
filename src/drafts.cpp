@@ -1,4 +1,5 @@
 #include "drafts.h"
+#include "settings.h"
 #include "tabs.h"
 #include "editor.h"
 #include "utils.h"
@@ -7,16 +8,11 @@
 #include <fstream>
 #include <sstream>
 
-// %APPDATA%\Tinta\drafts, created on first use
+// The config home's drafts folder (portable beside the exe, else
+// %APPDATA%\Tinta), created on first use
 static std::wstring draftsDirPath() {
-    wchar_t appDataPath[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0,
-                                appDataPath))) {
-        return L"";
-    }
-    std::wstring path = appDataPath;
-    path += L"\\Tinta";
-    CreateDirectoryW(path.c_str(), nullptr);
+    std::wstring path = tintaConfigDir();
+    if (path.empty()) return L"";
     path += L"\\drafts";
     CreateDirectoryW(path.c_str(), nullptr);
     return path;
