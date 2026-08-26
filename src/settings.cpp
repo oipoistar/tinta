@@ -196,6 +196,17 @@ void persistEditorMode(const App& app) {
     saveSettings(settings);
 }
 
+// "Open files in tabs" persists the moment it is toggled: the join-or-
+// spawn decision is made by the NEXT launched process reading
+// settings.ini, so an exit-time save would leave every Explorer open on
+// the old mode until all windows closed (#147 follow-up). The ini is the
+// single source of truth for this flag - the exit save leaves it alone.
+void persistOpenInTabs(const App& app) {
+    Settings settings = loadSettings();
+    settings.openInTabs = app.openInTabs;
+    saveSettings(settings);
+}
+
 // A theme change persists immediately: windows spawned afterwards
 // (quick notes, drag-outs) read settings.ini at startup and would
 // otherwise come up in the look from the previous session

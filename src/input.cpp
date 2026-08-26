@@ -682,6 +682,10 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             break;
         case SET_TOGGLE_OPENTABS:
             app.openInTabs = !app.openInTabs;
+            // Takes effect for the very next Explorer open, no window
+            // closing required; also keeps older windows' exit saves
+            // from clobbering it (they no longer write this flag)
+            persistOpenInTabs(app);
             break;
         case SET_TOGGLE_ASSISTS:
             app.editorAssists = !app.editorAssists;

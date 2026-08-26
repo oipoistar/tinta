@@ -1870,7 +1870,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.dismissedUpdate = app->updateDismissedVersion;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
                 settings.browserFocusPath = app->browserFocusPath;
-                settings.openInTabs = app->openInTabs;
+                // openInTabs persists at toggle time (persistOpenInTabs)
+                // and is preserved from disk here: a window opened before
+                // the toggle must not write its stale value back at exit
                 // Remember the open tab set for the next launch (untitled
                 // quick-note buffers have no path to restore). Satellite
                 // windows never own the session: they re-read the owner's
