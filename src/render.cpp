@@ -2733,20 +2733,19 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
             }
             tsv += tsvCell;
 
-            // Measure natural width
+            // Measure natural width THE WAY THE RENDERER SHAPES IT — same
+            // typography and the language-aware font fallback. A raw
+            // layout here picked a different CJK font than the renderer,
+            // whose slightly wider advances then wrapped a "fitting" cell
+            // one line past its measured row height (#148)
             bool isHeader = (r == 0);
             IDWriteTextFormat* fmt = isHeader ? app.boldFormat : app.textFormat;
             float textWidth = 0;
             if (!text.empty() && fmt) {
-                IDWriteTextLayout* layout = nullptr;
-                app.dwriteFactory->CreateTextLayout(text.data(), (UINT32)text.length(),
-                    fmt, kHugeWidth, lineHeight, &layout);
-                if (layout) {
-                    DWRITE_TEXT_METRICS metrics{};
-                    layout->GetMetrics(&metrics);
-                    textWidth = metrics.widthIncludingTrailingWhitespace;
-                    layout->Release();
-                }
+                LayoutInfo mi = createLayout(app, text, fmt, lineHeight,
+                                             app.bodyTypography);
+                textWidth = mi.width;
+                if (mi.layout) mi.layout->Release();
             }
             float needed = textWidth + cellPadding * 2 + 6.0f * scale;
             if (needed > colWidths[c]) colWidths[c] = needed;
