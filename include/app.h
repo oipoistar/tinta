@@ -1017,6 +1017,8 @@ struct App {
     // The unsaved-exit / create-file prompt chip occupies the corner slot;
     // the chip stack starts above it (set by the prompt renderers)
     D2D1_RECT_F promptChipRect{};
+    // Close cross on the floating Contents card (t13)
+    D2D1_RECT_F tocCloseRect{};
     std::vector<std::pair<D2D1_RECT_F, int>> signalTrayHits;  // action row: chip id
 
     // Cursor blink state, toggled by TIMER_CURSOR_BLINK (editor + search cursor)

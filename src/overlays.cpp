@@ -664,6 +664,47 @@ void renderFolderBrowser(App& app) {
     }
 }
 
+// Prompt-chip helpers defined with the dialogs below; the floating panels
+// share their surface, shadow, and keycap language (t13)
+static void promptChipShadow(App& app, const D2D1_RECT_F& r, float radius);
+static D2D1_COLOR_F promptChipSurface(const App& app);
+static float promptKeycap(App& app, const wchar_t* label, float rightX,
+                          float cy);
+
+// Click hit-test sharing the renderer's card geometry (#114 pattern:
+// render-time hover must never drive click actions). Keep in step with
+// renderToc below.
+int tocItemIndexAt(App& app, float x, float y) {
+    float panelWidth = tocPanelWidth(app);
+    float panelX = tocPanelX(app, panelWidth);
+    float m = dpi(app, 10.0f);
+    float cardLeft = panelX + m;
+    float cardRight = panelX + panelWidth - m;
+    float cardTop = chromeTopHeight(app) + dpi(app, 10.0f);
+    float cardBottom = (float)app.height - dpi(app, 12.0f);
+    float headerY = cardTop + dpi(app, 9.0f);
+    float dividerY = headerY + dpi(app, 34.0f) - dpi(app, 8.0f);
+    float listStartY = dividerY + dpi(app, 8.0f);
+    float listBottom = cardBottom - dpi(app, 26.0f);
+    float rowLeft = cardLeft + dpi(app, 14.0f);
+    float rowRight = cardRight - dpi(app, 8.0f);
+    float itemHeight = dpi(app, 26.0f);
+    if (x < rowLeft || x > rowRight || y < listStartY || y > listBottom)
+        return -1;
+    int row = (int)((y - listStartY + app.tocScroll) / itemHeight);
+    if (row < 0) return -1;
+    std::wstring needle = toLower(app.tocFilter);
+    int visIdx = -1;
+    for (size_t i = 0; i < app.headings.size(); i++) {
+        if (!needle.empty() &&
+            toLower(app.headings[i].text).find(needle) == std::wstring::npos) {
+            continue;
+        }
+        if (++visIdx == row) return (int)i;
+    }
+    return -1;
+}
+
 void renderToc(App& app) {
     // Animate in (slide from right) - only invalidate while progressing
     if (app.tocAnimation < 1.0f) {
@@ -674,46 +715,96 @@ void renderToc(App& app) {
     }
     float anim = app.tocAnimation;
 
-    // Panel dimensions (below the title-bar tab strip)
+    // Floating outline card (t13 design 13a): the panel leaves its
+    // full-height slab and floats inside the slab's slide envelope
     float panelWidth = tocPanelWidth(app);
     float panelX = tocPanelX(app, panelWidth);  // slides from the chosen side
-    float panelY = chromeTopHeight(app);
-    // Doubles as the absolute bottom edge in the list math below (same
-    // convention as the folder browser)
-    float panelHeight = (float)app.height;
+    float m = dpi(app, 10.0f);
+    float cardLeft = panelX + m;
+    float cardRight = panelX + panelWidth - m;
+    float cardTop = chromeTopHeight(app) + dpi(app, 10.0f);
+    float cardBottom = (float)app.height - dpi(app, 12.0f);
+    D2D1_RECT_F card = D2D1::RectF(cardLeft, cardTop, cardRight, cardBottom);
+    float radius = dpi(app, 12.0f);
 
-    // Background
-    D2D1_COLOR_F panelBg = app.theme.isDark ? hexColor(0x1E1E1E, 0.95f) : hexColor(0xF5F5F5, 0.95f);
-    app.brush->SetColor(panelBg);
-    app.renderTarget->FillRectangle(
-        D2D1::RectF(panelX, panelY, panelX + panelWidth, panelY + panelHeight), app.brush);
-
-    // Left border
-    D2D1_COLOR_F borderColor = app.theme.isDark ? hexColor(0x3A3A40, 0.8f) : hexColor(0xD0D0D0, 0.8f);
-    app.brush->SetColor(borderColor);
+    promptChipShadow(app, card, radius);
+    D2D1_COLOR_F surf = promptChipSurface(app);
+    surf.a = 0.96f;
+    app.brush->SetColor(surf);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(card, radius, radius), app.brush);
+    // Inset top highlight, then the hairline border
+    D2D1_COLOR_F hi = D2D1::ColorF(1, 1, 1, app.theme.isDark ? 0.06f : 0.5f);
+    app.brush->SetColor(hi);
     app.renderTarget->DrawLine(
-        D2D1::Point2F(panelX, panelY),
-        D2D1::Point2F(panelX, panelY + panelHeight),
-        app.brush, 1.0f);
+        D2D1::Point2F(cardLeft + radius, cardTop + 1.0f),
+        D2D1::Point2F(cardRight - radius, cardTop + 1.0f), app.brush, 1.0f);
+    D2D1_COLOR_F borderColor = app.theme.text;
+    borderColor.a = 0.13f;
+    app.brush->SetColor(borderColor);
+    app.renderTarget->DrawRoundedRectangle(
+        D2D1::RoundedRect(card, radius, radius), app.brush, 1.0f);
 
+    app.tocCloseRect = D2D1_RECT_F{};
     IDWriteTextFormat* tocBold = app.tocFormatBold;
     IDWriteTextFormat* tocNormal = app.tocFormat;
     if (tocBold && tocNormal) {
         float padding = dpi(app, 12.0f);
-        float itemHeight = dpi(app, 28.0f);
-        float headerHeight = dpi(app, 40.0f);
+        float itemHeight = dpi(app, 26.0f);
+        float headerHeight = dpi(app, 34.0f);
+        float footerHeight = dpi(app, 26.0f);
 
-        // Header: "Contents"
-        float headerY = panelY + padding;
+        // Header: title, count badge, live filter, close cross
+        float headerY = cardTop + dpi(app, 9.0f);
         D2D1_COLOR_F headerColor = app.theme.heading;
         headerColor.a = anim;
         app.brush->SetColor(headerColor);
         const wchar_t* tocTitle = tr(app, "toc.title");
         app.renderTarget->DrawText(tocTitle, (UINT32)wcslen(tocTitle), tocBold,
-            D2D1::RectF(panelX + padding, headerY, panelX + panelWidth - padding, headerY + headerHeight),
+            D2D1::RectF(cardLeft + padding, headerY, cardRight - padding,
+                        headerY + headerHeight),
             app.brush);
+        float titleW = measureText(app, tocTitle, tocBold);
 
-        // Active filter, right-aligned in the header
+        if (!app.headings.empty() && app.signalSmallFormat) {
+            wchar_t count[8];
+            swprintf_s(count, L"%d", (int)app.headings.size());
+            float cw = measureText(app, count, app.signalSmallFormat);
+            D2D1_RECT_F badge = D2D1::RectF(
+                cardLeft + padding + titleW + dpi(app, 8.0f),
+                headerY + dpi(app, 2.0f),
+                cardLeft + padding + titleW + dpi(app, 8.0f) + cw + dpi(app, 11.0f),
+                headerY + dpi(app, 17.0f));
+            D2D1_COLOR_F bb = app.theme.text; bb.a = 0.07f * anim;
+            app.brush->SetColor(bb);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(badge, dpi(app, 7.0f), dpi(app, 7.0f)),
+                app.brush);
+            D2D1_COLOR_F bi = app.theme.text; bi.a = 0.6f * anim;
+            app.brush->SetColor(bi);
+            app.renderTarget->DrawText(count, (UINT32)wcslen(count),
+                app.signalSmallFormat,
+                D2D1::RectF(badge.left + dpi(app, 5.5f), badge.top + dpi(app, 1.5f),
+                            badge.right, badge.bottom),
+                app.brush);
+        }
+
+        // Close cross at the right edge of the header
+        {
+            float ccx = cardRight - padding - dpi(app, 4.0f);
+            float ccy = headerY + dpi(app, 9.0f);
+            D2D1_COLOR_F c = app.theme.text; c.a = 0.45f * anim;
+            app.brush->SetColor(c);
+            float s = dpi(app, 3.6f);
+            app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy - s),
+                                       D2D1::Point2F(ccx + s, ccy + s), app.brush, 1.3f);
+            app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy + s),
+                                       D2D1::Point2F(ccx + s, ccy - s), app.brush, 1.3f);
+            app.tocCloseRect = D2D1::RectF(ccx - dpi(app, 10.0f), cardTop,
+                                           cardRight, headerY + dpi(app, 20.0f));
+        }
+
+        // Active filter, right-aligned before the cross
         if (!app.tocFilter.empty() && app.dwriteFactory) {
             IDWriteTextLayout* filterLayout = nullptr;
             app.dwriteFactory->CreateTextLayout(
@@ -726,24 +817,53 @@ void renderToc(App& app) {
                 filterColor.a = anim;
                 app.brush->SetColor(filterColor);
                 app.renderTarget->DrawTextLayout(
-                    D2D1::Point2F(panelX + panelWidth - padding - fm.width,
-                                  headerY + dpi(app, 2.0f)),
+                    D2D1::Point2F(cardRight - padding - dpi(app, 18.0f) - fm.width,
+                                  headerY + dpi(app, 1.0f)),
                     filterLayout, app.brush);
                 filterLayout->Release();
             }
         }
 
         // Divider
-        float dividerY = headerY + headerHeight;
-        app.brush->SetColor(borderColor);
-        app.renderTarget->DrawLine(
-            D2D1::Point2F(panelX + padding, dividerY),
-            D2D1::Point2F(panelX + panelWidth - padding, dividerY),
-            app.brush, 1.0f);
+        float dividerY = headerY + headerHeight - dpi(app, 8.0f);
+        D2D1_COLOR_F div = app.theme.text; div.a = 0.1f;
+        app.brush->SetColor(div);
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(cardLeft + padding, dividerY, cardRight - padding,
+                        dividerY + 1.0f),
+            app.brush);
 
-        // Items list
+        // Items list between header and footer
         float listStartY = dividerY + dpi(app, 8.0f);
-        float listHeight = panelHeight - listStartY - padding;
+        float listBottom = cardBottom - footerHeight;
+        float listHeight = listBottom - listStartY;
+
+        // Scroll-thread on the card edge: the document's viewport mapped
+        // onto the panel span (design 13a)
+        if (app.contentHeight > (float)app.height) {
+            float tx = cardLeft + dpi(app, 6.0f);
+            D2D1_RECT_F track = D2D1::RectF(tx, listStartY + dpi(app, 4.0f),
+                                            tx + dpi(app, 3.0f),
+                                            listBottom - dpi(app, 4.0f));
+            D2D1_COLOR_F tc = app.theme.text; tc.a = 0.08f * anim;
+            app.brush->SetColor(tc);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(track, dpi(app, 1.5f), dpi(app, 1.5f)),
+                app.brush);
+            float span = track.bottom - track.top;
+            float docSpan = std::max(1.0f, app.contentHeight);
+            float segTop = track.top + span * (app.scrollY / docSpan);
+            float segH = std::max(dpi(app, 18.0f),
+                                  span * ((float)app.height / docSpan));
+            segTop = std::min(segTop, track.bottom - segH);
+            D2D1_COLOR_F ac = app.theme.accent; ac.a = anim;
+            app.brush->SetColor(ac);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(track.left, segTop,
+                                              track.right, segTop + segH),
+                                  dpi(app, 1.5f), dpi(app, 1.5f)),
+                app.brush);
+        }
 
         if (app.headings.empty()) {
             // "No headings" message
@@ -752,7 +872,9 @@ void renderToc(App& app) {
             app.brush->SetColor(dimColor);
             const wchar_t* tocEmpty = tr(app, "toc.empty");
             app.renderTarget->DrawText(tocEmpty, (UINT32)wcslen(tocEmpty), tocNormal,
-                D2D1::RectF(panelX + padding, listStartY + dpi(app, 8.0f), panelX + panelWidth - padding, listStartY + dpi(app, 40.0f)),
+                D2D1::RectF(cardLeft + padding + dpi(app, 6.0f),
+                            listStartY + dpi(app, 8.0f), cardRight - padding,
+                            listStartY + dpi(app, 40.0f)),
                 app.brush);
         } else {
             // Typing filters the list; the section under the reading line
@@ -804,49 +926,51 @@ void renderToc(App& app) {
                 const wchar_t* tocEmpty = tr(app, "toc.empty");
                 app.renderTarget->DrawText(tocEmpty, (UINT32)wcslen(tocEmpty),
                     tocNormal,
-                    D2D1::RectF(panelX + padding, listStartY + dpi(app, 8.0f),
-                                panelX + panelWidth - padding,
+                    D2D1::RectF(cardLeft + padding + dpi(app, 6.0f),
+                                listStartY + dpi(app, 8.0f),
+                                cardRight - padding,
                                 listStartY + dpi(app, 40.0f)),
                     app.brush);
             }
 
+            float rowLeft = cardLeft + dpi(app, 14.0f);
+            float rowRight = cardRight - dpi(app, 8.0f);
+            app.renderTarget->PushAxisAlignedClip(
+                D2D1::RectF(cardLeft, listStartY, cardRight, listBottom),
+                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             for (size_t row = 0; row < visible.size(); row++) {
                 float itemY = listStartY + row * itemHeight - app.tocScroll;
 
                 // Skip items outside visible area
-                if (itemY + itemHeight < listStartY || itemY > panelHeight - padding) continue;
+                if (itemY + itemHeight < listStartY || itemY > listBottom) continue;
 
                 const auto& heading = app.headings[visible[row]];
-                float indent = (heading.level - 1) * dpi(app, 16.0f);
-                float itemX = panelX + padding + indent;
+                float indent = (heading.level - 1) * dpi(app, 13.0f);
+                float itemX = rowLeft + dpi(app, 10.0f) + indent;
                 bool isCurrent = visible[row] == currentIdx;
 
                 // Check hover (use full item width for hit area)
-                float hitX = panelX + padding;
-                float hitW = panelWidth - padding * 2;
-                bool isHovered = (app.mouseX >= hitX && app.mouseX <= hitX + hitW &&
+                bool isHovered = (app.mouseX >= rowLeft && app.mouseX <= rowRight &&
                                   app.mouseY >= itemY && app.mouseY <= itemY + itemHeight &&
-                                  app.mouseY >= listStartY && app.mouseY <= panelHeight - padding);
+                                  app.mouseY >= listStartY && app.mouseY <= listBottom);
 
+                D2D1_RECT_F rowRect = D2D1::RectF(rowLeft, itemY + 1.0f,
+                                                  rowRight, itemY + itemHeight - 1.0f);
                 if (isHovered) {
                     app.hoveredTocIndex = visible[row];
-
-                    // Hover highlight
-                    D2D1_COLOR_F hoverColor = app.theme.accent;
-                    hoverColor.a = 0.15f * anim;
+                    D2D1_COLOR_F hoverColor = app.theme.text;
+                    hoverColor.a = 0.06f * anim;
                     app.brush->SetColor(hoverColor);
                     app.renderTarget->FillRoundedRectangle(
-                        D2D1::RoundedRect(D2D1::RectF(panelX + padding - dpi(app, 4.0f), itemY,
-                            panelX + panelWidth - padding + dpi(app, 4.0f), itemY + itemHeight), 4, 4),
+                        D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
                         app.brush);
                 } else if (isCurrent) {
-                    // Scroll-spy highlight: softer than hover
+                    // Scroll-spy pill: the accent-washed active row
                     D2D1_COLOR_F spyColor = app.theme.accent;
-                    spyColor.a = 0.08f * anim;
+                    spyColor.a = 0.13f * anim;
                     app.brush->SetColor(spyColor);
                     app.renderTarget->FillRoundedRectangle(
-                        D2D1::RoundedRect(D2D1::RectF(panelX + padding - dpi(app, 4.0f), itemY,
-                            panelX + panelWidth - padding + dpi(app, 4.0f), itemY + itemHeight), 4, 4),
+                        D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
                         app.brush);
                 }
                 if (isCurrent) {
@@ -855,32 +979,46 @@ void renderToc(App& app) {
                     app.brush->SetColor(barColor);
                     app.renderTarget->FillRoundedRectangle(
                         D2D1::RoundedRect(
-                            D2D1::RectF(panelX + padding - dpi(app, 8.0f),
-                                        itemY + dpi(app, 5.0f),
-                                        panelX + padding - dpi(app, 5.0f),
-                                        itemY + itemHeight - dpi(app, 5.0f)),
+                            D2D1::RectF(rowLeft + dpi(app, 3.0f),
+                                        itemY + dpi(app, 6.0f),
+                                        rowLeft + dpi(app, 5.5f),
+                                        itemY + itemHeight - dpi(app, 6.0f)),
                             1.5f, 1.5f),
                         app.brush);
                 }
 
-                // Text color and format based on heading level
-                IDWriteTextFormat* fmt = (heading.level == 1) ? tocBold : tocNormal;
+                // Type scale by level: H1 bold heading ink, H2 body, H3 quiet
+                IDWriteTextFormat* fmt =
+                    (heading.level == 1 || isCurrent) ? tocBold : tocNormal;
                 D2D1_COLOR_F textColor;
-                if (heading.level == 1) {
+                if (heading.level == 1 || isCurrent) {
                     textColor = app.theme.heading;
-                } else if (heading.level == 3) {
+                    textColor.a = anim;
+                } else if (heading.level >= 3) {
                     textColor = app.theme.text;
-                    textColor.a = (isCurrent ? 1.0f : 0.7f) * anim;
+                    textColor.a = 0.55f * anim;
                 } else {
                     textColor = app.theme.text;
-                    textColor.a = anim;
+                    textColor.a = 0.82f * anim;
                 }
                 app.brush->SetColor(textColor);
-
-                app.renderTarget->DrawText(heading.text.c_str(), (UINT32)heading.text.length(), fmt,
-                    D2D1::RectF(itemX, itemY + dpi(app, 4.0f), panelX + panelWidth - padding, itemY + itemHeight),
+                app.renderTarget->DrawText(heading.text.c_str(),
+                    (UINT32)heading.text.length(), fmt,
+                    D2D1::RectF(itemX, itemY + dpi(app, 4.0f),
+                                rowRight - dpi(app, 16.0f), itemY + itemHeight),
                     app.brush);
+
+                if (isHovered) {
+                    D2D1_COLOR_F arr = app.theme.text; arr.a = 0.45f * anim;
+                    app.brush->SetColor(arr);
+                    app.renderTarget->DrawText(L"\u2192", 1, tocNormal,
+                        D2D1::RectF(rowRight - dpi(app, 15.0f),
+                                    itemY + dpi(app, 4.0f), rowRight,
+                                    itemY + itemHeight),
+                        app.brush);
+                }
             }
+            app.renderTarget->PopAxisAlignedClip();
 
             // Scrollbar if needed
             if (totalItemsHeight > listHeight) {
@@ -889,13 +1027,33 @@ void renderToc(App& app) {
                 float sbY = listStartY + (maxScroll > 0 ? (app.tocScroll / maxScroll * (listHeight - sbHeight)) : 0);
 
                 D2D1_COLOR_F sbColor = app.theme.text;
-                sbColor.a = 0.3f * anim;
+                sbColor.a = 0.25f * anim;
                 app.brush->SetColor(sbColor);
                 app.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(D2D1::RectF(panelX + dpi(app, 4.0f), sbY,
-                                                  panelX + dpi(app, 8.0f), sbY + sbHeight), 2, 2),
+                    D2D1::RoundedRect(D2D1::RectF(cardRight - dpi(app, 6.0f), sbY,
+                                                  cardRight - dpi(app, 3.0f), sbY + sbHeight), 1.5f, 1.5f),
                     app.brush);
             }
+        }
+
+        // Footer: the hint plus the T keycap
+        float footTop = listBottom;
+        app.brush->SetColor(div);
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(cardLeft + padding, footTop, cardRight - padding,
+                        footTop + 1.0f),
+            app.brush);
+        if (app.signalSmallFormat) {
+            const wchar_t* hint = tr(app, "toc.hint");
+            D2D1_COLOR_F hc = app.theme.text; hc.a = 0.48f * anim;
+            app.brush->SetColor(hc);
+            app.renderTarget->DrawText(hint, (UINT32)wcslen(hint),
+                app.signalSmallFormat,
+                D2D1::RectF(cardLeft + padding, footTop + dpi(app, 7.0f),
+                            cardRight - padding - dpi(app, 26.0f), cardBottom),
+                app.brush);
+            promptKeycap(app, L"T", cardRight - padding,
+                         footTop + footerHeight * 0.5f);
         }
     }
 }
