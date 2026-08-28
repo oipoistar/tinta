@@ -31,6 +31,10 @@ void persistOpenInTabs(const App& app);
 // settings.ini beside tinta.exe opts in, #147), else %APPDATA%\Tinta
 std::wstring tintaConfigDir();
 
+// Resolve the actual file before handing it to an external editor, which
+// does not share a Store/MSIX process's virtualized AppData view.
+std::wstring configFilePathForShell(const std::wstring& path);
+
 // User-remappable single-key actions (#77), written to settings.ini as a
 // [Keys] section. Char actions trigger via WM_CHAR (edit ':', help '?');
 // the rest are WM_KEYDOWN virtual-key codes. Ctrl combos stay fixed.

@@ -1462,5 +1462,6 @@ void openLanguagesIniFile() {
             }
         }
     }
-    ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    ShellExecuteW(nullptr, L"open", configFilePathForShell(path).c_str(),
+                  nullptr, nullptr, SW_SHOWNORMAL);
 }

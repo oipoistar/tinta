@@ -196,6 +196,17 @@ if(BUILD_TESTING)
     target_link_libraries(i18n_tests PRIVATE shell32)
     target_compile_definitions(i18n_tests PRIVATE UNICODE _UNICODE)
     add_test(NAME i18n COMMAND i18n_tests)
+
+    add_executable(config_path_tests
+        tests/config_path_tests.cpp
+        src/config_dir.cpp
+    )
+    target_include_directories(config_path_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_link_libraries(config_path_tests PRIVATE shell32)
+    target_compile_definitions(config_path_tests PRIVATE UNICODE _UNICODE)
+    add_test(NAME config_paths COMMAND config_path_tests)
 endif()
 
 # Install

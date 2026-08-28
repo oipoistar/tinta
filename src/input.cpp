@@ -577,7 +577,8 @@ static void openThemesIniFile() {
         std::ofstream f(p);
         f << "; Custom themes: [theme] sections, RRGGBB colors.\n";
     }
-    ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    ShellExecuteW(nullptr, L"open", configFilePathForShell(p).c_str(),
+                  nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 // editCurrent seeds the editor with the active theme's name so saving
@@ -754,7 +755,7 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             break;
         case SET_TOC_RIGHT: app.tocOnLeft = false; break;
         case SET_OPEN_INI:
-            ShellExecuteW(nullptr, L"open", getSettingsPath().c_str(),
+            ShellExecuteW(nullptr, L"open", configFilePathForShell(getSettingsPath()).c_str(),
                           nullptr, nullptr, SW_SHOWNORMAL);
             break;
         case SET_OPEN_THEMES_INI:
