@@ -24,7 +24,6 @@ void handleEditorMouseWheel(App& app, HWND hwnd, float delta);
 
 // Editor rendering
 void renderEditor(App& app, float editorWidth);
-void renderEditModeNotification(App& app);
 
 // Re-enter edit mode from a parked tab buffer (tabs.cpp), restoring the
 // dirty flag, scroll, and caret the switch-away captured

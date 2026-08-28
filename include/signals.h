@@ -15,6 +15,7 @@ enum SignalIcon {
     SIGI_WARNING,    // triangle + !
     SIGI_FILE,       // page with fold
     SIGI_UPDATE,     // arrow into tray
+    SIGI_EYE,        // preview visibility
 };
 enum SignalAction {
     SIGA_NONE = 0,
