@@ -1431,8 +1431,15 @@ void renderLightbox(App& app) {
 }
 
 float tocPanelX(const App& app, float panelWidth) {
-    return app.tocOnLeft ? -panelWidth * (1.0f - app.tocAnimation)
-                         : app.width - panelWidth * app.tocAnimation;
+    if (app.tocOnLeft) {
+        // A left-docked TOC sits beside an open browser, not on top of it
+        float base = app.showFolderBrowser
+                         ? folderBrowserPanelWidth(app) *
+                               app.folderBrowserAnimation
+                         : 0.0f;
+        return base - panelWidth * (1.0f - app.tocAnimation);
+    }
+    return app.width - panelWidth * app.tocAnimation;
 }
 
 int themeChooserRows() {

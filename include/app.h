@@ -1370,14 +1370,16 @@ inline float documentViewportX(const App& app) {
     if (!app.editMode) {
         // Side panels push the content aside instead of covering it; the
         // shift follows the panel's slide-in animation. A right-docked TOC
-        // leaves x at 0 and only narrows the viewport.
+        // leaves x at 0 and only narrows the viewport. Both panels can be
+        // up at once (#156): left-side occupants add up.
+        float x = 0.0f;
         if (app.showFolderBrowser) {
-            return folderBrowserPanelWidth(app) * app.folderBrowserAnimation;
+            x += folderBrowserPanelWidth(app) * app.folderBrowserAnimation;
         }
         if (app.showToc && app.tocOnLeft) {
-            return tocPanelWidth(app) * app.tocAnimation;
+            x += tocPanelWidth(app) * app.tocAnimation;
         }
-        return 0.0f;
+        return x;
     }
     // Preview hidden: zero-width viewport at the right edge — document
     // rendering flows through unchanged and clips to nothing
@@ -1432,9 +1434,10 @@ inline float documentViewportWidth(const App& app) {
     } else {
         width = static_cast<float>(app.width);
         // Snap to the panel's final width (not the animated position) so
-        // the reading column relayouts once per toggle, not per frame
+        // the reading column relayouts once per toggle, not per frame.
+        // Both panels can be up together (#156).
         if (app.showFolderBrowser) width -= folderBrowserPanelWidth(app);
-        else if (app.showToc) width -= tocPanelWidth(app);
+        if (app.showToc) width -= tocPanelWidth(app);
     }
     return width > 0.0f ? width : 0.0f;
 }

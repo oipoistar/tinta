@@ -3709,19 +3709,26 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 toggleZenMode(app, hwnd);
                 break;
             case 'Q':
-                if (!app.showThemeChooser && !app.showSearch && !app.showFolderBrowser && !app.showToc) {
+                // Pinned panels are part of the layout: Q still quits
+                // through them (an unpinned panel's filter already
+                // swallowed the key before this switch)
+                if (!app.showThemeChooser && !app.showSearch &&
+                    (!app.showFolderBrowser || app.browserPinned) &&
+                    (!app.showToc || app.tocPinned)) {
                     PostQuitMessage(0);
                 }
                 break;
             case 'N':
                 // New file: folder browser with the naming row active (#74)
-                if (!app.showSearch && !app.showThemeChooser && !app.showToc) {
+                if (!app.showSearch && !app.showThemeChooser) {
                     startNewFileFlow(app, hwnd);
                 }
                 break;
             case 'B':
-                // B to toggle folder browser
-                if (!app.showSearch && !app.showThemeChooser && !app.showToc) {
+                // B to toggle folder browser - an open TOC no longer
+                // blocks it; an unpinned TOC swallows B as filter input
+                // before this switch anyway
+                if (!app.showSearch && !app.showThemeChooser) {
                     app.showFolderBrowser = !app.showFolderBrowser;
                     closeFolderBrowserInput(app);
                     if (app.showFolderBrowser) {
@@ -3752,7 +3759,9 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 break;
             case VK_TAB:
-                if (!app.showSearch && !app.showThemeChooser && !app.showFolderBrowser) {
+                // The browser no longer blocks the TOC: both panels can
+                // be up (and pinned) together (#156)
+                if (!app.showSearch && !app.showThemeChooser) {
                     app.showToc = !app.showToc;
                     app.tocFilter.clear();
                     if (app.showToc) {
