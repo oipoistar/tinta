@@ -2209,6 +2209,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
         return ok ? 0 : 1;
     }
 
+    // Pinned side panels are part of the layout, so they come back on
+    // launch when a document is up (#156). The start page, quick notes,
+    // and --edit launches keep their clean slate; T/B still toggle.
+    if (!app.currentFile.empty() && !app.editMode) {
+        if (app.tocPinned) {
+            app.showToc = true;
+            app.tocAnimation = 1.0f;  // docked: no slide on restore
+            app.tocScroll = 0;
+            app.tocFilter.clear();
+            app.hoveredTocIndex = -1;
+        }
+        if (app.browserPinned) {
+            app.showFolderBrowser = true;
+            app.folderBrowserAnimation = 1.0f;
+            app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
+            populateFolderItems(app);
+        }
+        if (app.tocPinned || app.browserPinned) {
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+        }
+    }
+
     // First frame is on screen — now pay for the GPU in the background
     startGpuWarmup();
 
