@@ -12,6 +12,32 @@
 
 namespace qmd {
 
+// Extensions that get the live/broken file-reference treatment. The
+// plain-path scanner, explicit [text](target) links, and the click
+// handler (#162) all share this gate.
+const char* const kFileRefExtensions[] = {
+    ".markdown", ".json", ".yaml", ".toml", ".mmd", ".yml",
+    ".ini",      ".csv",  ".log",  ".txt",  ".md",  ".xml",
+};
+
+static bool endsWithNoCase(const std::string& s, const char* suffix) {
+    size_t len = strlen(suffix);
+    return s.size() > len &&
+           _strnicmp(s.c_str() + s.size() - len, suffix, len) == 0;
+}
+
+bool fileRefKnownExtension(const std::string& path) {
+    for (const char* ext : kFileRefExtensions) {
+        if (endsWithNoCase(path, ext)) return true;
+    }
+    return false;
+}
+
+bool fileRefIsMarkdown(const std::string& path) {
+    return endsWithNoCase(path, ".md") || endsWithNoCase(path, ".mmd") ||
+           endsWithNoCase(path, ".markdown");
+}
+
 // Parser context for MD4C callbacks
 struct ParserContext {
     ElementPtr root;
@@ -826,11 +852,6 @@ static void splitFileRefs(const ElementPtr& parent) {
         return;
     }
 
-    static const char* kExtensions[] = {
-        ".markdown", ".json", ".yaml", ".toml", ".mmd", ".yml",
-        ".ini",      ".csv",  ".log",  ".txt",  ".md",
-    };
-
     std::vector<ElementPtr> rebuilt;
     bool changed = false;
     for (auto& child : parent->children) {
@@ -848,7 +869,7 @@ static void splitFileRefs(const ElementPtr& parent) {
             size_t dot = text.find('.', scan);
             if (dot == std::string::npos) break;
             size_t extLength = 0;
-            for (const char* extension : kExtensions) {
+            for (const char* extension : kFileRefExtensions) {
                 size_t length = strlen(extension);
                 if (dot + length <= text.size() &&
                     _strnicmp(text.c_str() + dot, extension, length) == 0 &&

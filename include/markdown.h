@@ -112,6 +112,14 @@ private:
     bool m_taskLists = true;
 };
 
+// File-reference extension gate (#127/#141/#162): true when the path
+// ends in one of the extensions the plain-path scanner recognizes
+bool fileRefKnownExtension(const std::string& path);
+// True for Tinta's own document types (.md/.mmd/.markdown): these open
+// in a tab, while other known text files open with their registered
+// application (#162)
+bool fileRefIsMarkdown(const std::string& path);
+
 // Utility functions
 std::string elementTypeToString(ElementType type);
 void debugPrintElement(const ElementPtr& elem, int indent = 0);

@@ -665,6 +665,9 @@ struct App {
     std::string linkPeekUrl;    // hoveredLink value the dwell timer armed for
     std::wstring linkPeekTitle;
     bool linkPeekActive = false;
+    // Peeking a plain-text file: the whole-file code block drops its card
+    // chrome, since the peek panel already frames the content
+    bool peekFrameless = false;
     ID2D1Bitmap* linkPeekBitmap = nullptr;  // owned while active
     D2D1_RECT_F linkPeekAnchorDoc{};        // hovered link rect (doc coords)
     D2D1_RECT_F linkPeekPanel{};            // placed panel (screen coords)

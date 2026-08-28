@@ -45,9 +45,10 @@ std::string percentDecode(const std::string& value) {
     return out;
 }
 
-// A real [text](target) whose target is a local markdown path gets the
-// same live/broken treatment as a plain-text reference
-bool isLocalMarkdownUrl(const std::string& url) {
+// A real [text](target) whose target is a local text-file path gets the
+// same live/broken treatment as a plain-text reference - any extension
+// the plain-path scanner recognizes, not just markdown (#162)
+bool isLocalFileRefUrl(const std::string& url) {
     if (url.empty() || url[0] == '#') return false;
     if (url.find("://") != std::string::npos) return false;
     if (url.rfind("//", 0) == 0 || url.rfind("\\\\", 0) == 0) return false;
@@ -57,13 +58,7 @@ bool isLocalMarkdownUrl(const std::string& url) {
             return false;  // wiki:, mailto:, and other schemes
         }
     }
-    std::string lower = url;
-    for (char& c : lower) c = (char)std::tolower((unsigned char)c);
-    return lower.size() > 3 &&
-           (lower.rfind(".md") == lower.size() - 3 ||
-            (lower.size() > 4 && lower.rfind(".mmd") == lower.size() - 4) ||
-            (lower.size() > 9 &&
-             lower.rfind(".markdown") == lower.size() - 9));
+    return qmd::fileRefKnownExtension(url);
 }
 
 // Resolves against the current file's folder and checks the disk, cached
@@ -159,7 +154,7 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                 std::string target;
                 if (elem->url.rfind("fileref:", 0) == 0) {
                     target = elem->url.substr(8);
-                } else if (isLocalMarkdownUrl(elem->url)) {
+                } else if (isLocalFileRefUrl(elem->url)) {
                     target = elem->url;
                 }
                 if (!target.empty()) {
