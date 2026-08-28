@@ -47,6 +47,24 @@ float tocPanelX(const App& app, float panelWidth);
 // Heading index under a point in the floating Contents card, or -1 -
 // clicks hit-test their own coordinates (#114 pattern)
 int tocItemIndexAt(App& app, float x, float y);
+
+// Shared geometry for the floating file-browser card (t13 design 13b):
+// one source of truth for render, cursor, and click hit-tests
+struct FolderBrowserMetrics {
+    float panelX = 0, panelWidth = 0;              // slide envelope
+    float cardLeft = 0, cardRight = 0, cardTop = 0, cardBottom = 0;
+    float headerY = 0, headerH = 0;                // breadcrumb row
+    float folderBtnX = 0, fileBtnX = 0, btnY = 0, btnSize = 0;
+    float listStartY = 0, listBottom = 0;          // scrolled group area
+    float itemHeight = 0, labelH = 0;              // row + section label
+    float namingOffset = 0;                        // pinned naming row
+    int dirCount = 0;                              // leading directory items
+    bool hasDirs = false, hasFiles = false;
+};
+FolderBrowserMetrics folderBrowserMetrics(const App& app);
+// Top edge of item i inside the scrolled content (labels included),
+// relative to the content origin (add listStartY + namingOffset - scroll)
+float folderItemContentY(const FolderBrowserMetrics& g, int index);
 void renderSettingsOverlay(App& app);
 
 // Theme editor ("+ New" in settings). Font-list entries encode their

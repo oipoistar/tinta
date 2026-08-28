@@ -153,53 +153,38 @@ static void setTocCursor(const App& app, float x, float y) {
 }
 
 static void setFolderBrowserCursor(const App& app, float x, float y) {
-    float panelWidth = folderBrowserPanelWidth(app);
-    float panelX = -panelWidth * (1.0f - app.folderBrowserAnimation);
-    if (x < panelX || x > panelX + panelWidth) {
+    FolderBrowserMetrics g = folderBrowserMetrics(app);
+    if (x < g.panelX || x > g.panelX + g.panelWidth) {
         SetCursor(cursorArrow);
         return;
     }
 
-    float padding = dpi(app, 12.0f);
-    float headerY = chromeTopHeight(app) + padding;
-    float headerHeight = dpi(app, 40.0f);
-    float btnSize = dpi(app, 24.0f);
-    float btnGap = dpi(app, 6.0f);
-    float fileBtnX = panelX + panelWidth - padding - btnSize;
-    float folderBtnX = fileBtnX - btnGap - btnSize;
-    float btnY = headerY + (headerHeight - btnSize) / 2 - dpi(app, 6.0f);
-    bool inHeader = y >= headerY && y <= headerY + headerHeight;
+    bool inHeader = y >= g.headerY && y <= g.headerY + g.headerH;
 
     if (app.folderBrowserEditingPath) {
         SetCursor(inHeader ? cursorIBeam : cursorArrow);
         return;
     }
-    if (inHeader && y >= btnY && y <= btnY + btnSize &&
-        ((x >= folderBtnX && x <= folderBtnX + btnSize) ||
-         (x >= fileBtnX && x <= fileBtnX + btnSize))) {
+    if (inHeader && y >= g.btnY && y <= g.btnY + g.btnSize &&
+        ((x >= g.folderBtnX && x <= g.folderBtnX + g.btnSize) ||
+         (x >= g.fileBtnX && x <= g.fileBtnX + g.btnSize))) {
         SetCursor(cursorHand);
         return;
     }
-    if (inHeader && x >= panelX + padding && x < folderBtnX - dpi(app, 2.0f)) {
+    if (inHeader && x >= g.cardLeft + dpi(app, 6.0f) &&
+        x < g.folderBtnX - dpi(app, 2.0f)) {
         SetCursor(cursorHand);
         return;
     }
 
-    float listStartY = headerY + headerHeight + dpi(app, 8.0f);
-    float itemHeight = dpi(app, 28.0f);
-    float listBottom = app.height - padding;
-    float namingOffset = app.folderBrowserNaming != 0 ? itemHeight : 0.0f;
     if (app.folderBrowserNaming != 0 &&
-        y >= listStartY && y <= listStartY + itemHeight) {
+        y >= g.listStartY && y <= g.listStartY + g.itemHeight) {
         SetCursor(cursorIBeam);
         return;
     }
-    if (y >= listStartY + namingOffset && y <= listBottom) {
-        int index = (int)((y - listStartY - namingOffset + app.folderBrowserScroll) / itemHeight);
-        if (index >= 0 && index < (int)app.folderItems.size()) {
-            SetCursor(cursorHand);
-            return;
-        }
+    if (folderItemIndexAt(app, x, y) >= 0) {
+        SetCursor(cursorHand);
+        return;
     }
     SetCursor(cursorArrow);
 }
@@ -2795,23 +2780,16 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
         // Check if click is inside panel
         if (clickX >= panelX && clickX <= panelX + panelWidth) {
-            // Header geometry (must match renderFolderBrowser)
-            float padding = dpi(app, 12.0f);
-            float headerY = chromeTopHeight(app) + padding;
-            float headerHeight = dpi(app, 40.0f);
-            float btnSize = dpi(app, 24.0f);
-            float btnGap = dpi(app, 6.0f);
-            float fileBtnX = panelX + panelWidth - padding - btnSize;
-            float folderBtnX = fileBtnX - btnGap - btnSize;
-            float btnY = headerY + (headerHeight - btnSize) / 2 - dpi(app, 6.0f);
-            bool inHeader = clickY >= headerY && clickY <= headerY + headerHeight;
+            // Card geometry shared with the renderer (t13)
+            FolderBrowserMetrics g = folderBrowserMetrics(app);
+            bool inHeader = clickY >= g.headerY && clickY <= g.headerY + g.headerH;
 
             // An active input keeps focus when clicked, anything else cancels it
             if (app.folderBrowserEditingPath || app.folderBrowserNaming != 0) {
                 bool onInput = app.folderBrowserEditingPath
                     ? inHeader
-                    : (clickY >= headerY + headerHeight + dpi(app, 8.0f) &&
-                       clickY <= headerY + headerHeight + dpi(app, 8.0f) + dpi(app, 28.0f));
+                    : (clickY >= g.listStartY &&
+                       clickY <= g.listStartY + g.itemHeight);
                 if (onInput) {
                     app.folderBrowserInputSelectAll = false;
                 } else {
@@ -2821,10 +2799,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 return;
             }
 
-            if (inHeader && clickY >= btnY && clickY <= btnY + btnSize &&
-                clickX >= folderBtnX && clickX <= fileBtnX + btnSize) {
+            if (inHeader && clickY >= g.btnY && clickY <= g.btnY + g.btnSize &&
+                clickX >= g.folderBtnX && clickX <= g.fileBtnX + g.btnSize) {
                 // + folder / + file buttons: start naming a new item
-                app.folderBrowserNaming = (clickX < folderBtnX + btnSize + btnGap / 2) ? 2 : 1;
+                app.folderBrowserNaming =
+                    (clickX < g.folderBtnX + g.btnSize + dpi(app, 2.0f)) ? 2 : 1;
                 app.folderBrowserInput.clear();
                 app.folderBrowserInputSelectAll = false;
                 app.folderBrowserInputError = false;
@@ -2835,8 +2814,41 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 return;
             }
             if (inHeader) {
-                // Path header becomes an edit box with everything selected,
-                // so click + paste + Enter jumps straight to a new path (#52)
+                // Breadcrumb segments navigate to their ancestor folder
+                for (const auto& crumb : app.folderCrumbHits) {
+                    if (!cursorPointInRect((float)clickX, (float)clickY,
+                                           crumb.first)) {
+                        continue;
+                    }
+                    std::wstring rebuilt;
+                    int kept = 0;
+                    size_t pos = 0;
+                    const std::wstring& full = app.folderBrowserPath;
+                    while (pos <= full.size() && kept < crumb.second) {
+                        size_t sep = full.find_first_of(L"\\/", pos);
+                        std::wstring part = sep == std::wstring::npos
+                                                ? full.substr(pos)
+                                                : full.substr(pos, sep - pos);
+                        if (!part.empty()) {
+                            if (!rebuilt.empty()) rebuilt += L'\\';
+                            rebuilt += part;
+                            kept++;
+                        }
+                        if (sep == std::wstring::npos) break;
+                        pos = sep + 1;
+                    }
+                    if (!rebuilt.empty()) {
+                        if (rebuilt.back() == L':') rebuilt += L'\\';
+                        app.folderBrowserPath = rebuilt;
+                        populateFolderItems(app);
+                        app.folderBrowserScroll = 0.0f;
+                    }
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return;
+                }
+                // Anywhere else on the row (the pencil included) becomes an
+                // edit box with everything selected, so click + paste +
+                // Enter jumps straight to a new path (#52)
                 app.folderBrowserEditingPath = true;
                 app.folderBrowserInput = app.folderBrowserPath;
                 app.folderBrowserInputSelectAll = true;
