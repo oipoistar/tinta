@@ -1,5 +1,20 @@
 # Changelog
 
+## [v3.4.0] - 2026-08-28
+
+The feedback release: every change came from a user report - one document per window fixed, portable mode, two table measurement fixes, locale-correct kanji, and a heading separator toggle.
+
+### Added
+- Portable mode: a settings.ini beside tinta.exe (even an empty one) makes that folder the config home - settings, custom themes, UI languages, and drafts all travel with the exe; without it configuration stays in %APPDATA%\Tinta (#147, #151)
+- Settings > Appearance toggle for the separator lines under level 1 and 2 headings; applies live and is remembered (#154, #157)
+
+### Fixed
+- With "Open files in tabs" off, every file opens in its own window again: new windows no longer inherit the previous session's tabs (#147, #149)
+- The tabs toggle takes effect immediately for the next opened file, no need to close every window first (#147, #150)
+- Table columns are measured with the renderer's own font shaping, so CJK tables no longer wrap their last line over the bottom border (#148, #152)
+- Inline code in table cells is measured as the padded mono chip it renders as, so long code spans stay inside the table (#148, #153)
+- Kanji follow the Windows UI language: Japanese systems prefer Yu Gothic and Meiryo instead of Simplified-Chinese glyph variants, Korean systems prefer Malgun Gothic (#155, #158)
+
 ## [v3.3.0] - 2026-08-25
 
 The redesign release: a new start page, one unified editor with the rendered page floating beside the source, Pandoc export, and retuned themes.
