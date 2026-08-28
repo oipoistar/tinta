@@ -1,11 +1,20 @@
 #include "overlays.h"
 #include "utils.h"
 #include "d2d_init.h"
+#include "editor.h"
+#include "markdown.h"
 #include "pandoc.h"
 #include "print.h"
 #include "settings.h"
 #include "signals.h"
 #include "i18n.h"
+
+// Prompt-chip helpers defined with the dialogs below; the floating panels
+// share their surface, shadow, and keycap language (t13)
+static void promptChipShadow(App& app, const D2D1_RECT_F& r, float radius);
+static D2D1_COLOR_F promptChipSurface(const App& app);
+static float promptKeycap(App& app, const wchar_t* label, float rightX,
+                          float cy);
 
 #include <chrono>
 #include <algorithm>
@@ -264,32 +273,111 @@ void renderSearchOverlay(App& app) {
     }
 }
 
+// One source of truth for the floating browser card's geometry (t13):
+// render, cursor, and click hit-tests all read from here.
+FolderBrowserMetrics folderBrowserMetrics(const App& app) {
+    FolderBrowserMetrics g;
+    g.panelWidth = folderBrowserPanelWidth(app);
+    g.panelX = -g.panelWidth * (1.0f - app.folderBrowserAnimation);
+    float m = dpi(app, 10.0f);
+    g.cardLeft = g.panelX + m;
+    g.cardRight = g.panelX + g.panelWidth - m;
+    g.cardTop = chromeTopHeight(app) + dpi(app, 10.0f);
+    g.cardBottom = (float)app.height - dpi(app, 12.0f);
+    g.headerY = g.cardTop + dpi(app, 8.0f);
+    g.headerH = dpi(app, 28.0f);
+    g.btnSize = dpi(app, 22.0f);
+    g.fileBtnX = g.cardRight - dpi(app, 10.0f) - g.btnSize;
+    g.folderBtnX = g.fileBtnX - dpi(app, 4.0f) - g.btnSize;
+    g.btnY = g.headerY + (g.headerH - g.btnSize) * 0.5f;
+    float dividerY = g.headerY + g.headerH + dpi(app, 4.0f);
+    g.listStartY = dividerY + dpi(app, 3.0f);
+    g.listBottom = g.cardBottom - dpi(app, 26.0f);  // footer band
+    g.itemHeight = dpi(app, 26.0f);
+    g.labelH = dpi(app, 19.0f);
+    g.namingOffset = app.folderBrowserNaming != 0 ? g.itemHeight : 0.0f;
+    g.dirCount = 0;
+    for (const auto& it : app.folderItems) {
+        if (it.isDirectory) g.dirCount++;
+    }
+    g.hasDirs = g.dirCount > 0;
+    g.hasFiles = g.dirCount < (int)app.folderItems.size();
+    return g;
+}
+
+// Top edge of item i inside the scrolled content: the FOLDERS and FILES
+// section labels sit inside the scroll like rows do
+float folderItemContentY(const FolderBrowserMetrics& g, int index) {
+    float y = 0.0f;
+    if (g.hasDirs) y += g.labelH;
+    if (index < g.dirCount) return y + index * g.itemHeight;
+    y += g.dirCount * g.itemHeight;
+    if (g.hasFiles) y += g.labelH;
+    return y + (index - g.dirCount) * g.itemHeight;
+}
+
 // Item index at a client point, sharing renderFolderBrowser's geometry.
 // Clicks must hit-test their own coordinates: the render-time hover index
 // lags one paint behind the mouse, so a fast move-and-click would act on
 // the previously highlighted row.
 int folderItemIndexAt(const App& app, float x, float y) {
-    float panelWidth = folderBrowserPanelWidth(app);
-    float panelX = -panelWidth * (1.0f - app.folderBrowserAnimation);
-    float padding = dpi(app, 12.0f);
-    float itemHeight = dpi(app, 28.0f);
-    float headerHeight = dpi(app, 40.0f);
-    float listStartY =
-        chromeTopHeight(app) + padding + headerHeight + dpi(app, 8.0f);
-    float panelHeight = (float)app.height;
-    float namingOffset =
-        app.folderBrowserNaming != 0 ? itemHeight : 0.0f;
+    FolderBrowserMetrics g = folderBrowserMetrics(app);
+    float rowLeft = g.cardLeft + dpi(app, 6.0f);
+    float rowRight = g.cardRight - dpi(app, 6.0f);
+    if (x < rowLeft || x > rowRight) return -1;
+    if (y < g.listStartY + g.namingOffset || y > g.listBottom) return -1;
+    float contentY =
+        y - (g.listStartY + g.namingOffset - app.folderBrowserScroll);
+    for (int i = 0; i < (int)app.folderItems.size(); i++) {
+        float top = folderItemContentY(g, i);
+        if (contentY >= top && contentY < top + g.itemHeight) return i;
+    }
+    return -1;
+}
 
-    float itemX = panelX + padding;
-    float itemW = panelWidth - padding * 2.0f;
-    if (x < itemX || x > itemX + itemW) return -1;
-    if (y < listStartY || y > panelHeight - padding) return -1;
-    float offset =
-        y - (listStartY + namingOffset - app.folderBrowserScroll);
-    if (offset < 0.0f) return -1;
-    int index = (int)(offset / itemHeight);
-    if (index < 0 || index >= (int)app.folderItems.size()) return -1;
-    return index;
+// Monoline glyphs shared by the browser card's rows and header buttons
+static void drawFolderGlyph(App& app, float cx, float cy, float s,
+                            D2D1_COLOR_F color, bool plus) {
+    app.brush->SetColor(color);
+    float w = 1.2f;
+    float left = cx - s * 0.46f, right = cx + s * 0.46f;
+    float top = cy - s * 0.3f, bot = cy + s * 0.34f;
+    float tabW = s * 0.34f, tabH = s * 0.14f;
+    app.renderTarget->DrawLine(D2D1::Point2F(left, bot), D2D1::Point2F(left, top), app.brush, w);
+    app.renderTarget->DrawLine(D2D1::Point2F(left, top), D2D1::Point2F(left + tabW, top), app.brush, w);
+    app.renderTarget->DrawLine(D2D1::Point2F(left + tabW, top),
+                               D2D1::Point2F(left + tabW + tabH, top + tabH), app.brush, w);
+    app.renderTarget->DrawLine(D2D1::Point2F(left + tabW + tabH, top + tabH),
+                               D2D1::Point2F(right, top + tabH), app.brush, w);
+    app.renderTarget->DrawLine(D2D1::Point2F(right, top + tabH), D2D1::Point2F(right, bot), app.brush, w);
+    app.renderTarget->DrawLine(D2D1::Point2F(right, bot), D2D1::Point2F(left, bot), app.brush, w);
+    if (plus) {
+        app.renderTarget->DrawLine(D2D1::Point2F(cx, cy - s * 0.1f),
+                                   D2D1::Point2F(cx, cy + s * 0.22f), app.brush, w);
+        app.renderTarget->DrawLine(D2D1::Point2F(cx - s * 0.16f, cy + s * 0.06f),
+                                   D2D1::Point2F(cx + s * 0.16f, cy + s * 0.06f), app.brush, w);
+    }
+}
+
+static void drawPageGlyph(App& app, float cx, float cy, float s,
+                          D2D1_COLOR_F color, bool plus) {
+    app.brush->SetColor(color);
+    float w = 1.2f;
+    float left = cx - s * 0.3f, right = cx + s * 0.3f;
+    float top = cy - s * 0.44f, bot = cy + s * 0.44f;
+    float fold = s * 0.22f;
+    app.renderTarget->DrawLine(D2D1::Point2F(left, top), D2D1::Point2F(right - fold, top), app.brush, w);
+    app.renderTarget->DrawLine(D2D1::Point2F(right - fold, top),
+                               D2D1::Point2F(right, top + fold), app.brush, w);
+    app.renderTarget->DrawLine(D2D1::Point2F(right, top + fold), D2D1::Point2F(right, bot), app.brush, w);
+    app.renderTarget->DrawLine(D2D1::Point2F(right, bot), D2D1::Point2F(left, bot), app.brush, w);
+    app.renderTarget->DrawLine(D2D1::Point2F(left, bot), D2D1::Point2F(left, top), app.brush, w);
+    if (plus) {
+        app.renderTarget->DrawLine(D2D1::Point2F(cx, cy - s * 0.12f),
+                                   D2D1::Point2F(cx, cy + s * 0.2f), app.brush, w);
+        app.renderTarget->DrawLine(D2D1::Point2F(cx - s * 0.16f, cy + s * 0.04f),
+                                   D2D1::Point2F(cx + s * 0.16f, cy + s * 0.04f), app.brush, w);
+    }
 }
 
 void renderFolderBrowser(App& app) {
@@ -302,41 +390,45 @@ void renderFolderBrowser(App& app) {
     }
     float anim = app.folderBrowserAnimation;
 
-    // Panel dimensions (below the title-bar tab strip)
-    float panelWidth = folderBrowserPanelWidth(app);
-    float panelX = -panelWidth * (1.0f - anim);  // Slide in from left
-    float panelY = chromeTopHeight(app);
-    float panelHeight = (float)app.height;
-
-    // Semi-transparent backdrop (only on the panel area)
-    D2D1_COLOR_F panelBg = app.theme.isDark ? hexColor(0x1E1E1E, 0.95f) : hexColor(0xF5F5F5, 0.95f);
+    // Floating card inside the slide envelope (t13 design 13b)
+    FolderBrowserMetrics g = folderBrowserMetrics(app);
+    float panelWidth = g.panelWidth;
+    float panelX = g.panelX;
+    D2D1_RECT_F card = D2D1::RectF(g.cardLeft, g.cardTop, g.cardRight, g.cardBottom);
+    float radius = dpi(app, 12.0f);
+    promptChipShadow(app, card, radius);
+    D2D1_COLOR_F panelBg = promptChipSurface(app);
+    panelBg.a = 0.96f;
     app.brush->SetColor(panelBg);
-    app.renderTarget->FillRectangle(
-        D2D1::RectF(panelX, panelY, panelX + panelWidth, panelY + panelHeight), app.brush);
-
-    // Border on the right edge
-    D2D1_COLOR_F borderColor = app.theme.isDark ? hexColor(0x3A3A40, 0.8f) : hexColor(0xD0D0D0, 0.8f);
-    app.brush->SetColor(borderColor);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(card, radius, radius), app.brush);
+    D2D1_COLOR_F hi = D2D1::ColorF(1, 1, 1, app.theme.isDark ? 0.06f : 0.5f);
+    app.brush->SetColor(hi);
     app.renderTarget->DrawLine(
-        D2D1::Point2F(panelX + panelWidth, panelY),
-        D2D1::Point2F(panelX + panelWidth, panelY + panelHeight),
-        app.brush, 1.0f);
+        D2D1::Point2F(g.cardLeft + radius, g.cardTop + 1.0f),
+        D2D1::Point2F(g.cardRight - radius, g.cardTop + 1.0f), app.brush, 1.0f);
+    D2D1_COLOR_F borderColor = app.theme.text;
+    borderColor.a = 0.13f;
+    app.brush->SetColor(borderColor);
+    app.renderTarget->DrawRoundedRectangle(
+        D2D1::RoundedRect(card, radius, radius), app.brush, 1.0f);
 
+    app.folderCrumbHits.clear();
     IDWriteTextFormat* browserFormat = app.folderBrowserFormat;
     if (browserFormat) {
         float padding = dpi(app, 12.0f);
-        float itemHeight = dpi(app, 28.0f);
-        float headerHeight = dpi(app, 40.0f);
+        float itemHeight = g.itemHeight;
 
-        // Current path header - click converts it to an edit box (#52)
-        float headerY = panelY + padding;
+        // Breadcrumb header - segments navigate, the pencil (or any other
+        // spot on the row) opens the edit box (#52)
+        float headerY = g.headerY;
 
         auto textWidth = [&](const std::wstring& s) {
             float w = 0.0f;
             IDWriteTextLayout* layout = nullptr;
             if (app.dwriteFactory && SUCCEEDED(app.dwriteFactory->CreateTextLayout(
                     s.c_str(), (UINT32)s.length(), browserFormat,
-                    1000000.0f, headerHeight, &layout)) && layout) {
+                    1000000.0f, g.headerH, &layout)) && layout) {
                 DWRITE_TEXT_METRICS metrics;
                 if (SUCCEEDED(layout->GetMetrics(&metrics))) {
                     w = metrics.widthIncludingTrailingWhitespace;
@@ -399,119 +491,178 @@ void renderFolderBrowser(App& app) {
             }
         };
 
-        float btnSize = dpi(app, 24.0f);
-        float btnGap = dpi(app, 6.0f);
-        float fileBtnX = panelX + panelWidth - padding - btnSize;
-        float folderBtnX = fileBtnX - btnGap - btnSize;
-        float btnY = headerY + (headerHeight - btnSize) / 2 - dpi(app, 6.0f);
-
-        // Path text, edit box, and buttons all center on the button midline
+        float btnSize = g.btnSize;
+        float fileBtnX = g.fileBtnX;
+        float folderBtnX = g.folderBtnX;
+        float btnY = g.btnY;
         float headerCenterY = btnY + btnSize / 2;
 
         if (app.folderBrowserEditingPath) {
-            drawInputBox(panelX + padding, panelX + panelWidth - padding,
+            drawInputBox(g.cardLeft + padding, g.cardRight - padding,
                          headerCenterY - boxHeight / 2);
         } else {
-            D2D1_COLOR_F headerColor = app.theme.heading;
-            headerColor.a = anim;
-
-            // Truncate path if too long, keeping the tail (leaf folder) visible:
-            // measure with the actual font instead of estimating character widths,
-            // which breaks down for CJK and other wide scripts
-            std::wstring displayPath = app.folderBrowserPath;
-            float maxPathWidth = panelWidth - padding * 2 - (btnSize * 2 + btnGap * 2);
-
-            if (!displayPath.empty() && textWidth(displayPath) > maxPathWidth) {
-                std::wstring tail = displayPath;
-                while (textWidth(L"..." + tail) > maxPathWidth) {
-                    size_t sep = tail.find(L'\\', 1);
-                    if (sep == std::wstring::npos) break;  // one long component: ellipsis trimming cuts it
-                    tail = tail.substr(sep);
+            // Breadcrumb: drive > ellipsis > parent > leaf; each visible
+            // segment records how many components a click keeps
+            std::vector<std::wstring> parts;
+            {
+                std::wstring rest = app.folderBrowserPath;
+                size_t pos = 0;
+                while (pos <= rest.size()) {
+                    size_t sep = rest.find_first_of(L"\\/", pos);
+                    if (sep == std::wstring::npos) {
+                        if (pos < rest.size()) parts.push_back(rest.substr(pos));
+                        break;
+                    }
+                    if (sep > pos) parts.push_back(rest.substr(pos, sep - pos));
+                    pos = sep + 1;
                 }
-                displayPath = L"..." + tail;
+            }
+            struct Crumb { std::wstring text; int keep; bool leaf; };
+            std::vector<Crumb> crumbs;
+            int n = (int)parts.size();
+            if (n <= 3) {
+                for (int i = 0; i < n; i++) {
+                    crumbs.push_back({parts[i], i + 1, i == n - 1});
+                }
+            } else {
+                crumbs.push_back({parts[0], 1, false});
+                crumbs.push_back({L"\u2026", 0, false});
+                crumbs.push_back({parts[n - 2], n - 1, false});
+                crumbs.push_back({parts[n - 1], n, true});
             }
 
-            // Subtle hover backdrop signals the path is clickable
-            bool pathHovered = app.mouseX >= panelX + padding - dpi(app, 4.0f) &&
-                               app.mouseX < folderBtnX - dpi(app, 2.0f) &&
-                               app.mouseY >= btnY && app.mouseY <= btnY + btnSize;
-            if (pathHovered) {
-                D2D1_COLOR_F hoverColor = app.theme.accent;
-                hoverColor.a = 0.12f * anim;
-                app.brush->SetColor(hoverColor);
-                app.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(D2D1::RectF(panelX + padding - dpi(app, 4.0f), btnY,
-                                                  folderBtnX - dpi(app, 2.0f), btnY + btnSize), 4, 4),
+            float cx = g.cardLeft + padding;
+            float crumbMax = folderBtnX - dpi(app, 26.0f);
+
+            // The leaf always survives: drop the parent crumb first when
+            // the row runs out of room, then trim the leaf as a last resort
+            {
+                float sepW = dpi(app, 10.0f);
+                auto totalW = [&]() {
+                    float w = 0.0f;
+                    for (size_t ci = 0; ci < crumbs.size(); ci++) {
+                        w += textWidth(crumbs[ci].text) + dpi(app, 4.0f);
+                        if (ci + 1 < crumbs.size()) w += sepW;
+                    }
+                    return w;
+                };
+                if (crumbs.size() >= 4 && cx + totalW() > crumbMax) {
+                    crumbs.erase(crumbs.end() - 2);  // the parent yields
+                }
+                if (crumbs.size() >= 3 && cx + totalW() > crumbMax) {
+                    crumbs.erase(crumbs.begin());  // then the drive
+                }
+            }
+            D2D1_COLOR_F sepColor = app.theme.text; sepColor.a = 0.35f * anim;
+            for (size_t ci = 0; ci < crumbs.size(); ci++) {
+                std::wstring seg = crumbs[ci].text;
+                float segW = textWidth(seg);
+                // The leaf keeps at least a readable stub; middle crumbs
+                // give way when the row runs out
+                if (cx + segW > crumbMax) {
+                    // Trim with an ellipsis; the leaf keeps a readable stub
+                    while (seg.size() > 4 &&
+                           cx + textWidth(seg + L"\u2026") > crumbMax) {
+                        seg.pop_back();
+                    }
+                    if (!crumbs[ci].leaf &&
+                        cx + textWidth(seg + L"\u2026") > crumbMax) {
+                        break;
+                    }
+                    seg += L"\u2026";
+                    segW = textWidth(seg);
+                }
+                bool leaf = crumbs[ci].leaf;
+                D2D1_COLOR_F segColor = leaf ? app.theme.heading : app.theme.text;
+                segColor.a = (leaf ? 1.0f : 0.6f) * anim;
+                app.brush->SetColor(segColor);
+                app.renderTarget->DrawText(seg.c_str(), (UINT32)seg.size(),
+                    leaf && app.tocFormatBold ? app.tocFormatBold : browserFormat,
+                    D2D1::RectF(cx, headerCenterY - dpi(app, 9.0f),
+                                cx + segW + dpi(app, 4.0f), headerY + g.headerH),
+                    app.brush);
+                if (!leaf && crumbs[ci].keep > 0) {
+                    app.folderCrumbHits.push_back(
+                        {D2D1::RectF(cx - dpi(app, 2.0f), btnY,
+                                     cx + segW + dpi(app, 2.0f), btnY + btnSize),
+                         crumbs[ci].keep});
+                }
+                cx += segW + dpi(app, 4.0f);
+                if (ci + 1 < crumbs.size()) {
+                    app.brush->SetColor(sepColor);
+                    app.renderTarget->DrawText(L"\u203A", 1, browserFormat,
+                        D2D1::RectF(cx, headerCenterY - dpi(app, 9.0f),
+                                    cx + dpi(app, 8.0f), headerY + g.headerH),
+                        app.brush);
+                    cx += dpi(app, 10.0f);
+                }
+            }
+            // The pencil: edit the path as text
+            {
+                D2D1_COLOR_F pc = app.theme.text; pc.a = 0.45f * anim;
+                app.brush->SetColor(pc);
+                app.renderTarget->DrawText(L"\u270E", 1, browserFormat,
+                    D2D1::RectF(cx + dpi(app, 2.0f), headerCenterY - dpi(app, 9.0f),
+                                cx + dpi(app, 18.0f), headerY + g.headerH),
                     app.brush);
             }
 
-            app.brush->SetColor(headerColor);
-            app.renderTarget->DrawText(displayPath.c_str(), (UINT32)displayPath.length(), browserFormat,
-                D2D1::RectF(panelX + padding, headerCenterY - dpi(app, 9.0f),
-                            folderBtnX - dpi(app, 4.0f), headerY + headerHeight),
-                app.brush);
-
-            // + folder / + file buttons
+            // New folder / new file: monoline glyph buttons; the active
+            // naming target wears an accent tint and ring
             auto drawAddButton = [&](float bx, bool isFolder) {
+                bool naming = app.folderBrowserNaming == (isFolder ? 2 : 1);
                 bool hovered = app.mouseX >= bx && app.mouseX <= bx + btnSize &&
                                app.mouseY >= btnY && app.mouseY <= btnY + btnSize;
-                if (hovered) {
-                    D2D1_COLOR_F hoverColor = app.theme.accent;
-                    hoverColor.a = 0.2f * anim;
-                    app.brush->SetColor(hoverColor);
+                if (naming || hovered) {
+                    D2D1_COLOR_F bg = app.theme.accent;
+                    bg.a = (naming ? 0.16f : 0.1f) * anim;
+                    app.brush->SetColor(bg);
                     app.renderTarget->FillRoundedRectangle(
-                        D2D1::RoundedRect(D2D1::RectF(bx, btnY, bx + btnSize, btnY + btnSize), 4, 4),
+                        D2D1::RoundedRect(D2D1::RectF(bx, btnY, bx + btnSize, btnY + btnSize),
+                                          dpi(app, 5.0f), dpi(app, 5.0f)),
                         app.brush);
+                    if (naming) {
+                        D2D1_COLOR_F ring = app.theme.accent; ring.a = 0.4f * anim;
+                        app.brush->SetColor(ring);
+                        app.renderTarget->DrawRoundedRectangle(
+                            D2D1::RoundedRect(D2D1::RectF(bx, btnY, bx + btnSize, btnY + btnSize),
+                                              dpi(app, 5.0f), dpi(app, 5.0f)),
+                            app.brush, 1.0f);
+                    }
                 }
-                float gx = bx + dpi(app, 3.0f);
-                float gy = btnY + dpi(app, 6.0f);
-                if (isFolder) {
-                    D2D1_COLOR_F folderColor = app.theme.isDark ? hexColor(0xE8A848) : hexColor(0xD4941A);
-                    folderColor.a = anim;
-                    app.brush->SetColor(folderColor);
-                    app.renderTarget->FillRoundedRectangle(
-                        D2D1::RoundedRect(D2D1::RectF(gx, gy + dpi(app, 4.0f), gx + dpi(app, 13.0f), gy + dpi(app, 13.0f)), 2, 2),
-                        app.brush);
-                    app.renderTarget->FillRectangle(
-                        D2D1::RectF(gx, gy + dpi(app, 2.0f), gx + dpi(app, 6.0f), gy + dpi(app, 5.0f)),
-                        app.brush);
+                D2D1_COLOR_F glyphColor;
+                if (naming) {
+                    glyphColor = app.theme.accent; glyphColor.a = anim;
                 } else {
-                    D2D1_COLOR_F fileColor = app.theme.text;
-                    fileColor.a = 0.6f * anim;
-                    app.brush->SetColor(fileColor);
-                    app.renderTarget->DrawRoundedRectangle(
-                        D2D1::RoundedRect(D2D1::RectF(gx + dpi(app, 1.0f), gy, gx + dpi(app, 11.0f), gy + dpi(app, 13.0f)), 1, 1),
-                        app.brush, 1.0f);
+                    glyphColor = app.theme.text; glyphColor.a = 0.6f * anim;
                 }
-                // Accent "+" badge in the top-right corner of the button
-                float px = bx + btnSize - dpi(app, 7.0f);
-                float py = btnY + dpi(app, 2.0f);
-                app.brush->SetColor(accentColor);
-                app.renderTarget->DrawLine(
-                    D2D1::Point2F(px, py + dpi(app, 3.0f)), D2D1::Point2F(px + dpi(app, 6.0f), py + dpi(app, 3.0f)),
-                    app.brush, 2.0f);
-                app.renderTarget->DrawLine(
-                    D2D1::Point2F(px + dpi(app, 3.0f), py), D2D1::Point2F(px + dpi(app, 3.0f), py + dpi(app, 6.0f)),
-                    app.brush, 2.0f);
+                float gcx = bx + btnSize * 0.5f, gcy = btnY + btnSize * 0.5f;
+                if (isFolder) drawFolderGlyph(app, gcx, gcy, dpi(app, 13.0f), glyphColor, true);
+                else drawPageGlyph(app, gcx, gcy, dpi(app, 13.0f), glyphColor, true);
             };
             drawAddButton(folderBtnX, true);
             drawAddButton(fileBtnX, false);
         }
 
         // Divider line
-        float dividerY = headerY + headerHeight;
-        app.brush->SetColor(borderColor);
-        app.renderTarget->DrawLine(
-            D2D1::Point2F(panelX + padding, dividerY),
-            D2D1::Point2F(panelX + panelWidth - padding, dividerY),
-            app.brush, 1.0f);
+        float dividerY = headerY + g.headerH + dpi(app, 4.0f);
+        D2D1_COLOR_F div = app.theme.text; div.a = 0.1f;
+        app.brush->SetColor(div);
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(g.cardLeft + padding, dividerY, g.cardRight - padding,
+                        dividerY + 1.0f),
+            app.brush);
 
         // Items list (with scrolling); an active naming row occupies the
         // first slot and the real items shift down beneath it
-        float listStartY = dividerY + dpi(app, 8.0f);
-        float listHeight = panelHeight - listStartY - padding;
-        float namingOffset = app.folderBrowserNaming != 0 ? itemHeight : 0.0f;
-        float totalItemsHeight = app.folderItems.size() * itemHeight + namingOffset;
+        float listStartY = g.listStartY;
+        float listHeight = g.listBottom - listStartY;
+        float namingOffset = g.namingOffset;
+        float totalItemsHeight = namingOffset +
+            (app.folderItems.empty()
+                 ? 0.0f
+                 : folderItemContentY(g, (int)app.folderItems.size() - 1) +
+                       g.itemHeight);
 
         // Clamp scroll
         float maxScroll = std::max(0.0f, totalItemsHeight - listHeight);
@@ -535,116 +686,142 @@ void renderFolderBrowser(App& app) {
             }
         }
 
+        float rowLeft = g.cardLeft + dpi(app, 6.0f);
+        float rowRight = g.cardRight - dpi(app, 6.0f);
+        app.renderTarget->PushAxisAlignedClip(
+            D2D1::RectF(g.cardLeft, listStartY + namingOffset, g.cardRight,
+                        g.listBottom),
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
+        // Section labels ride inside the scroll like rows do
+        auto drawLabel = [&](const char* key, float y) {
+            if (!app.signalSmallFormat) return;
+            D2D1_COLOR_F lc = app.theme.text; lc.a = 0.45f * anim;
+            app.brush->SetColor(lc);
+            const wchar_t* text = tr(app, key);
+            app.renderTarget->DrawText(text, (UINT32)wcslen(text),
+                app.signalSmallFormat,
+                D2D1::RectF(rowLeft + dpi(app, 8.0f), y + dpi(app, 4.0f),
+                            rowRight, y + g.labelH),
+                app.brush);
+        };
+        float contentBase = listStartY + namingOffset - app.folderBrowserScroll;
+        if (g.hasDirs) drawLabel("browser.folders", contentBase);
+        if (g.hasFiles) {
+            float filesLabelY = contentBase + (g.hasDirs ? g.labelH : 0.0f) +
+                                g.dirCount * itemHeight;
+            drawLabel("browser.files", filesLabelY);
+        }
+
         for (size_t i = 0; i < app.folderItems.size(); i++) {
-            float itemY = listStartY + namingOffset + i * itemHeight - app.folderBrowserScroll;
+            float itemY = contentBase + folderItemContentY(g, (int)i);
 
             // Skip items outside visible area
-            if (itemY + itemHeight < listStartY || itemY > panelHeight - padding) continue;
+            if (itemY + itemHeight < listStartY || itemY > g.listBottom) continue;
 
             const auto& item = app.folderItems[i];
-            float itemX = panelX + padding;
-            float itemW = panelWidth - padding * 2;
 
             // Check hover
-            bool isHovered = (app.mouseX >= itemX && app.mouseX <= itemX + itemW &&
+            bool isHovered = (app.mouseX >= rowLeft && app.mouseX <= rowRight &&
                               app.mouseY >= itemY && app.mouseY <= itemY + itemHeight &&
-                              app.mouseY >= listStartY && app.mouseY <= panelHeight - padding);
+                              app.mouseY >= listStartY + namingOffset &&
+                              app.mouseY <= g.listBottom);
 
             bool isCurrent = !item.isDirectory && !currentName.empty() &&
                              _wcsicmp(item.name.c_str(), currentName.c_str()) == 0;
+            bool isMd = !item.isDirectory &&
+                        qmd::fileRefIsMarkdown(toUtf8(item.name));
+
+            D2D1_RECT_F rowRect = D2D1::RectF(rowLeft, itemY + 1.0f, rowRight,
+                                              itemY + itemHeight - 1.0f);
             if (isCurrent) {
+                // Preview mode: the open file wears the accent wash + ring
                 D2D1_COLOR_F curColor = app.theme.accent;
-                curColor.a = 0.22f * anim;
+                curColor.a = 0.14f * anim;
                 app.brush->SetColor(curColor);
                 app.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(D2D1::RectF(itemX - dpi(app, 4.0f), itemY, itemX + itemW + dpi(app, 4.0f), itemY + itemHeight), 4, 4),
+                    D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
                     app.brush);
-            }
-
-            if (isHovered) {
-                app.hoveredFolderIndex = (int)i;
-
-                // Hover highlight
-                D2D1_COLOR_F hoverColor = app.theme.accent;
-                hoverColor.a = 0.15f * anim;
-                app.brush->SetColor(hoverColor);
-                app.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(D2D1::RectF(itemX - dpi(app, 4.0f), itemY, itemX + itemW + dpi(app, 4.0f), itemY + itemHeight), 4, 4),
-                    app.brush);
-            }
-
-            // Icon and text
-            float iconX = itemX + dpi(app, 4.0f);
-            float textX = itemX + dpi(app, 26.0f);
-
-            // Simple folder/file indicator
-            if (item.isDirectory) {
-                // Folder icon (simple filled rectangle with tab)
-                D2D1_COLOR_F folderColor = app.theme.isDark ? hexColor(0xE8A848) : hexColor(0xD4941A);
-                folderColor.a = anim;
-                app.brush->SetColor(folderColor);
-                // Main body
-                app.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(D2D1::RectF(iconX, itemY + dpi(app, 10.0f), iconX + dpi(app, 16.0f), itemY + dpi(app, 22.0f)), 2, 2),
-                    app.brush);
-                // Tab
-                app.renderTarget->FillRectangle(
-                    D2D1::RectF(iconX, itemY + dpi(app, 8.0f), iconX + dpi(app, 8.0f), itemY + dpi(app, 11.0f)),
-                    app.brush);
-            } else {
-                // File icon (simple document shape)
-                D2D1_COLOR_F fileColor = app.theme.text;
-                fileColor.a = 0.6f * anim;
-                app.brush->SetColor(fileColor);
+                D2D1_COLOR_F ring = app.theme.accent;
+                ring.a = 0.4f * anim;
+                app.brush->SetColor(ring);
                 app.renderTarget->DrawRoundedRectangle(
-                    D2D1::RoundedRect(D2D1::RectF(iconX + dpi(app, 2.0f), itemY + dpi(app, 6.0f), iconX + dpi(app, 14.0f), itemY + dpi(app, 22.0f)), 1, 1),
+                    D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
                     app.brush, 1.0f);
             }
+            if (isHovered) {
+                app.hoveredFolderIndex = (int)i;
+                D2D1_COLOR_F hoverColor = app.theme.text;
+                hoverColor.a = 0.06f * anim;
+                app.brush->SetColor(hoverColor);
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
+                    app.brush);
+            }
 
-            // Item name
-            D2D1_COLOR_F textColor = item.isDirectory ? app.theme.heading : app.theme.text;
-            textColor.a = anim;
+            // Monoline glyphs: folders and markdown carry the accent,
+            // everything else stays quiet ink (design 13b)
+            float gcx = rowLeft + dpi(app, 15.0f);
+            float gcy = itemY + itemHeight * 0.5f;
+            float textX = rowLeft + dpi(app, 28.0f);
+            D2D1_COLOR_F glyphColor;
+            if (item.isDirectory || isMd) {
+                glyphColor = app.theme.accent;
+                glyphColor.a = (item.isDirectory ? 0.85f : 0.9f) * anim;
+            } else {
+                glyphColor = app.theme.text;
+                glyphColor.a = 0.45f * anim;
+            }
+            if (item.isDirectory) {
+                drawFolderGlyph(app, gcx, gcy, dpi(app, 13.0f), glyphColor, false);
+            } else {
+                drawPageGlyph(app, gcx, gcy, dpi(app, 13.0f), glyphColor, false);
+            }
+
+            // Item name: markdown first-class, other files dimmed
+            D2D1_COLOR_F textColor;
+            if (isCurrent) {
+                textColor = app.theme.heading;
+                textColor.a = anim;
+            } else if (!item.isDirectory && !isMd) {
+                textColor = app.theme.text;
+                textColor.a = 0.5f * anim;
+            } else {
+                textColor = app.theme.text;
+                textColor.a = 0.85f * anim;
+            }
             app.brush->SetColor(textColor);
-
-            app.renderTarget->DrawText(item.name.c_str(), (UINT32)item.name.length(), browserFormat,
-                D2D1::RectF(textX, itemY + dpi(app, 4.0f), panelX + panelWidth - padding, itemY + itemHeight),
+            app.renderTarget->DrawText(item.name.c_str(), (UINT32)item.name.length(),
+                isCurrent && app.tocFormatBold ? app.tocFormatBold : browserFormat,
+                D2D1::RectF(textX, itemY + dpi(app, 4.0f), rowRight - dpi(app, 6.0f),
+                            itemY + itemHeight),
                 app.brush);
         }
+        app.renderTarget->PopAxisAlignedClip();
 
         // Naming row for a new file/folder: pinned to the top of the list,
         // drawn after the items so they scroll underneath it
         if (app.folderBrowserNaming != 0) {
             bool isFolder = app.folderBrowserNaming == 2;
             float rowY = listStartY;
-            float iconX = panelX + padding + dpi(app, 4.0f);
-            float textX = panelX + padding + dpi(app, 26.0f);
+            float gcx = rowLeft + dpi(app, 15.0f);
+            float textX = rowLeft + dpi(app, 28.0f);
 
             app.brush->SetColor(panelBg);
             app.renderTarget->FillRectangle(
-                D2D1::RectF(panelX + padding - dpi(app, 4.0f), rowY,
-                            panelX + panelWidth - padding + dpi(app, 4.0f), rowY + itemHeight),
+                D2D1::RectF(rowLeft, rowY, rowRight, rowY + itemHeight),
                 app.brush);
 
+            D2D1_COLOR_F glyphColor = app.theme.accent;
+            glyphColor.a = anim;
             if (isFolder) {
-                D2D1_COLOR_F folderColor = app.theme.isDark ? hexColor(0xE8A848) : hexColor(0xD4941A);
-                folderColor.a = anim;
-                app.brush->SetColor(folderColor);
-                app.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(D2D1::RectF(iconX, rowY + dpi(app, 10.0f), iconX + dpi(app, 16.0f), rowY + dpi(app, 22.0f)), 2, 2),
-                    app.brush);
-                app.renderTarget->FillRectangle(
-                    D2D1::RectF(iconX, rowY + dpi(app, 8.0f), iconX + dpi(app, 8.0f), rowY + dpi(app, 11.0f)),
-                    app.brush);
+                drawFolderGlyph(app, gcx, rowY + itemHeight * 0.5f,
+                                dpi(app, 13.0f), glyphColor, true);
             } else {
-                D2D1_COLOR_F fileColor = app.theme.text;
-                fileColor.a = 0.6f * anim;
-                app.brush->SetColor(fileColor);
-                app.renderTarget->DrawRoundedRectangle(
-                    D2D1::RoundedRect(D2D1::RectF(iconX + dpi(app, 2.0f), rowY + dpi(app, 6.0f), iconX + dpi(app, 14.0f), rowY + dpi(app, 22.0f)), 1, 1),
-                    app.brush, 1.0f);
+                drawPageGlyph(app, gcx, rowY + itemHeight * 0.5f,
+                              dpi(app, 13.0f), glyphColor, true);
             }
-
-            drawInputBox(textX, panelX + panelWidth - padding, rowY + dpi(app, 1.0f));
+            drawInputBox(textX, rowRight, rowY);
         }
 
         // Scrollbar if needed
@@ -654,22 +831,54 @@ void renderFolderBrowser(App& app) {
             float sbY = listStartY + (maxScroll > 0 ? (app.folderBrowserScroll / maxScroll * (listHeight - sbHeight)) : 0);
 
             D2D1_COLOR_F sbColor = app.theme.text;
-            sbColor.a = 0.3f * anim;
+            sbColor.a = 0.25f * anim;
             app.brush->SetColor(sbColor);
             app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(D2D1::RectF(panelX + panelWidth - dpi(app, 8.0f), sbY,
-                                              panelX + panelWidth - dpi(app, 4.0f), sbY + sbHeight), 2, 2),
+                D2D1::RoundedRect(D2D1::RectF(g.cardRight - dpi(app, 6.0f), sbY,
+                                              g.cardRight - dpi(app, 3.0f), sbY + sbHeight), 1.5f, 1.5f),
+                app.brush);
+        }
+
+        // Footer: counts on the left, the key hints on the right
+        float footTop = g.listBottom;
+        app.brush->SetColor(div);
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(g.cardLeft + padding, footTop, g.cardRight - padding,
+                        footTop + 1.0f),
+            app.brush);
+        if (app.signalSmallFormat) {
+            D2D1_COLOR_F hc = app.theme.text; hc.a = 0.48f * anim;
+            app.brush->SetColor(hc);
+            wchar_t counts[96];
+            if (app.folderBrowserNaming != 0) {
+                wcscpy_s(counts, tr(app, app.folderBrowserNaming == 2
+                                             ? "browser.naming_folder"
+                                             : "browser.naming_file"));
+            } else {
+                int dirs = g.dirCount;
+                for (const auto& it : app.folderItems) {
+                    if (it.isDirectory && it.name == L"..") { dirs--; break; }
+                }
+                swprintf_s(counts, tr(app, "browser.counts"), dirs,
+                           (int)app.folderItems.size() - g.dirCount);
+            }
+            app.renderTarget->DrawText(counts, (UINT32)wcslen(counts),
+                app.signalSmallFormat,
+                D2D1::RectF(g.cardLeft + padding, footTop + dpi(app, 7.0f),
+                            g.cardRight - padding, g.cardBottom),
+                app.brush);
+            const wchar_t* hint = tr(app, app.folderBrowserNaming != 0
+                                              ? "browser.naming_hint"
+                                              : "browser.hint");
+            float hw = measureText(app, hint, app.signalSmallFormat);
+            app.renderTarget->DrawText(hint, (UINT32)wcslen(hint),
+                app.signalSmallFormat,
+                D2D1::RectF(g.cardRight - padding - hw, footTop + dpi(app, 7.0f),
+                            g.cardRight - padding + dpi(app, 2.0f), g.cardBottom),
                 app.brush);
         }
     }
 }
-
-// Prompt-chip helpers defined with the dialogs below; the floating panels
-// share their surface, shadow, and keycap language (t13)
-static void promptChipShadow(App& app, const D2D1_RECT_F& r, float radius);
-static D2D1_COLOR_F promptChipSurface(const App& app);
-static float promptKeycap(App& app, const wchar_t* label, float rightX,
-                          float cy);
 
 // Click hit-test sharing the renderer's card geometry (#114 pattern:
 // render-time hover must never drive click actions). Keep in step with

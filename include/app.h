@@ -1019,6 +1019,9 @@ struct App {
     D2D1_RECT_F promptChipRect{};
     // Close cross on the floating Contents card (t13)
     D2D1_RECT_F tocCloseRect{};
+    // Breadcrumb segments on the browser card: rect -> number of path
+    // components the click keeps (refreshed by renderFolderBrowser)
+    std::vector<std::pair<D2D1_RECT_F, int>> folderCrumbHits;
     std::vector<std::pair<D2D1_RECT_F, int>> signalTrayHits;  // action row: chip id
 
     // Cursor blink state, toggled by TIMER_CURSOR_BLINK (editor + search cursor)
