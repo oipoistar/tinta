@@ -45,38 +45,30 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.** The redesign release: a new start page, one unified editor with the rendered page floating beside your source, Pandoc export, and ten retuned themes with a chooser that shows every palette live.
+            **Markdown, distilled.** The feedback release: every change in this one came from a user report - portable mode, one document per window fixed, correct table widths, locale-correct kanji, and a heading separator toggle.
 
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### The start page (#142)
-            - Launching without a file lands on a launcher: recent files, quick actions labeled with your actual key bindings, and two built-in guides
-            - It is the universal empty state - closing the last tab returns there instead of closing the window, and Ctrl+T opens it as a new tab
+            ### Portable mode (#147)
+            - Create a settings.ini next to tinta.exe (even an empty one) and that folder becomes the config home: settings, custom themes, UI languages, and drafts all travel with the exe
+            - Without it, configuration stays in `%APPDATA%\Tinta` as before; Store installs are unaffected
 
-            ### The unified editor (#142)
-            - One raw Markdown buffer with the rendered page floating beside it, a sheet of paper on the editor's desk - rounded, shadowed, rising to the window's top edge with the window controls riding it as an island
-            - A slim line-number gutter lives in the editor; the caret's line and its rendered block both carry a soft accent wash, so you always see where your edit lands on the page
-            - The left tool rail holds formatting controls plus real pickers for tables (an 8x6 size grid) and diagrams (seven Mermaid templates); the same pickers live in the right-click insert menu
-            - Ctrl+E shows or hides the page, the gap between the panes drags the split, and Markdown assists (lists continue on Enter, Tab indents, Ctrl+B/I wrap) are a setting
+            ### One document per window (#147)
+            - With "Open files in tabs" off, every file opens in its own window again: new windows no longer inherit the previous session's tabs
+            - The toggle now takes effect immediately for the next file you open - no need to close every Tinta window first
 
-            ### Pandoc export (#143)
-            - If pandoc is installed (or you point Tinta at it in settings), an export button appears in the editor rail offering EPUB, OpenDocument, PowerPoint, RTF and LaTeX
-            - Rich formats convert from Tinta's own HTML export, so diagrams and math arrive as vector graphics instead of decaying into code blocks
+            ### Tables measure what they render (#148)
+            - Column widths are measured with the renderer's own font shaping, so CJK tables no longer wrap their last line over the bottom border
+            - Inline code in cells is measured as the padded mono chip it actually renders as, so long code spans stay inside the table
 
-            ### Themes, tuned (#144)
-            - All ten palettes retuned as a set: accents on shared luminance rows, per-theme syntax colors, temperature-tinted comments, and contrast fixes - Dracula stays canonical
-            - The theme chooser is rebuilt: every card is a live palette proof ending in the seven syntax colors as a dot row, hovering a card repaints the whole app behind the dialog, and with follow-system on the day and night defaults wear sun and moon pins
+            ### Japanese and Korean text (#155)
+            - Kanji now follow the Windows UI language: Japanese systems prefer Yu Gothic and Meiryo instead of Simplified-Chinese glyph variants, and Korean systems prefer Malgun Gothic
 
-            ### Also new
-            - Local SVG images render natively, and the help overlay shows the app version (#137)
-            - Portable builds check GitHub once a day and offer a new release as a quiet, dismissible chip (#138)
-            - Emoji shortcodes like `:rocket:`, a Fit button that shrinks wide tables and diagrams to the column, and per-document zoom memory (#139)
-            - Unsaved quick notes survive crashes: drafts are stashed continuously and offered back on the next launch (#140)
-            - Clicking a missing file reference offers to create the file and opens it ready to type (#140)
-            - Plain-text references (.txt, .json, .yaml and friends) link like Markdown files and open as highlighted documents (#141)
+            ### Heading separators are optional (#154)
+            - Settings > Appearance gains a toggle for the lines drawn under level 1 and 2 headings; it applies live and is remembered
 
             ### What's included
             - Export as HTML, DOCX, or PDF - plus the Pandoc formats above
