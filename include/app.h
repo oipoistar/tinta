@@ -366,6 +366,9 @@ struct App {
     IDWriteTextFormat* tocFormat = nullptr;
     IDWriteTextFormat* tocFormatBold = nullptr;
 
+    // Signal chips: subtitles, badges, and the tiny PINNED/HELD labels
+    IDWriteTextFormat* signalSmallFormat = nullptr;
+
     // Stats overlay: UI chrome, so it must not follow the document zoom
     IDWriteTextFormat* statsFormat = nullptr;
 
@@ -980,11 +983,38 @@ struct App {
 
     size_t searchMatchCursor = 0;
 
-    // Copied notification (fades out over 2 seconds)
-    bool showCopiedNotification = false;
-    float copiedNotificationAlpha = 0.0f;
-    const char* copiedNotificationKey = "toast.copied";
-    std::chrono::steady_clock::time_point copiedNotificationStart;
+    // Signal chips (design t13): one anatomy for every notification.
+    // Active chips stack bottom-right and drain over a visible rail;
+    // dismissed or drained chips park in the bell tray with their
+    // actions still live.
+    struct SignalChip {
+        int id = 0;
+        int severity = 0;      // SIG_INFO/SUCCESS/WARN/ERROR
+        int icon = 0;          // SignalIcon
+        std::wstring text;     // regular part
+        std::wstring emph;     // bold tail (file name, shortcut)
+        std::wstring traySub;  // context line once parked
+        int action = 0;        // SignalAction run on chip/tray click
+        int closeAction = 0;   // SignalClose run when X resolves state
+        bool drains = true;    // false = stays until answered
+        float remaining = 4.0f;   // drain seconds left
+        bool pinned = false;
+        float tuckT = -1.0f;      // >=0: parking animation progress
+        bool anchored = false;    // mini pill at docAnchor (Copied)
+        D2D1_RECT_F docAnchor{};  // document coords when anchored
+        // refreshed by the renderer each frame
+        D2D1_RECT_F rect{}, pinRect{}, closeRect{};
+    };
+    std::vector<SignalChip> signalChips;   // active, oldest first
+    std::vector<SignalChip> signalTray;    // parked, newest first (cap 20)
+    int signalIdCounter = 1;
+    int signalUnseen = 0;                  // bell badge
+    bool signalTrayOpen = false;
+    int signalHoverChip = 0;               // id under cursor (drain hold)
+    double signalLastTick = 0.0;           // seconds, drain integration
+    D2D1_RECT_F signalBellRect{};
+    D2D1_RECT_F signalTrayRect{}, signalTrayClearRect{};
+    std::vector<std::pair<D2D1_RECT_F, int>> signalTrayHits;  // action row: chip id
 
     // Cursor blink state, toggled by TIMER_CURSOR_BLINK (editor + search cursor)
     bool cursorBlinkOn = true;
@@ -1167,6 +1197,7 @@ struct App {
     }
 
     void releaseOverlayFormats() {
+        if (signalSmallFormat) { signalSmallFormat->Release(); signalSmallFormat = nullptr; }
         if (searchTextFormat) { searchTextFormat->Release(); searchTextFormat = nullptr; }
         if (themeTitleFormat) { themeTitleFormat->Release(); themeTitleFormat = nullptr; }
         if (themeHeaderFormat) { themeHeaderFormat->Release(); themeHeaderFormat = nullptr; }

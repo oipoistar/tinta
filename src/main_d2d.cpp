@@ -29,6 +29,7 @@
 #include "overlays.h"
 #include "annotations.h"
 #include "drafts.h"
+#include "signals.h"
 #include "editrail.h"
 #include "startpage.h"
 
@@ -1002,203 +1003,8 @@ render_document:
     // Link peek popup (dwell over a local .md link)
     renderLinkPeek(app);
 
-    // Localized copy notification with fade out.
-    if (app.showCopiedNotification) {
-        auto now = std::chrono::steady_clock::now();
-        float elapsed = std::chrono::duration<float>(now - app.copiedNotificationStart).count();
-
-        if (elapsed < 2.0f) {
-            float alpha = 1.0f;
-            if (elapsed > 0.5f) {
-                alpha = 1.0f - (elapsed - 0.5f) / 1.5f;
-            }
-            app.copiedNotificationAlpha = alpha;
-
-            const wchar_t* copied = tr(app, app.copiedNotificationKey);
-            float copyWidth = dpi(app, 100.0f);
-            if (app.textFormat) {
-                copyWidth = std::max(copyWidth,
-                                     measureText(app, copied, app.textFormat) + dpi(app, 40.0f));
-            }
-            copyWidth = std::min(copyWidth, (float)app.width - dpi(app, 20.0f));
-            float copyHeight = dpi(app, 26.0f);
-            float pillX = (app.width - copyWidth) / 2;
-            float pillY = chromeTopHeight(app) + dpi(app, 10.0f);
-
-            D2D1_COLOR_F pillColor = app.theme.accent;
-            pillColor.a = 0.92f * alpha;
-            app.brush->SetColor(pillColor);
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(D2D1::RectF(pillX, pillY, pillX + copyWidth, pillY + copyHeight), 13, 13),
-                app.brush);
-
-            if (app.textFormat) {
-                D2D1_COLOR_F textColor = app.theme.background;
-                textColor.a = alpha;
-                app.brush->SetColor(textColor);
-                // A dedicated layout centers both axes; the shared textFormat
-                // is leading/near-aligned and must not be mutated here
-                IDWriteTextLayout* toastLayout = nullptr;
-                app.dwriteFactory->CreateTextLayout(
-                    copied, (UINT32)wcslen(copied), app.textFormat,
-                    copyWidth, copyHeight, &toastLayout);
-                if (toastLayout) {
-                    toastLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-                    toastLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                    app.renderTarget->DrawTextLayout(
-                        D2D1::Point2F(pillX, pillY), toastLayout, app.brush);
-                    toastLayout->Release();
-                }
-            }
-            app.drawCalls++;
-        } else {
-            app.showCopiedNotification = false;
-        }
-    }
-
-    // Draw stats
-    // Update-available chip: small, silent, bottom right; the cross
-    // dismisses this version for good, a click opens the release page
-    app.updateChipRect = D2D1_RECT_F{};
-    app.updateCloseRect = D2D1_RECT_F{};
-    if (app.updateAvailable && !app.updateDismissed && !app.zenMode &&
-        !app.showPrintPreview && !app.showLightbox && app.dwriteFactory &&
-        (app.folderBrowserFormat || app.textFormat)) {
-        wchar_t label[96];
-        std::wstring wideVersion = toWide(app.updateVersion);
-        swprintf_s(label, _countof(label), tr(app, "update.available"),
-                   wideVersion.c_str());
-        IDWriteTextLayout* layout = nullptr;
-        app.dwriteFactory->CreateTextLayout(
-            label, (UINT32)wcslen(label),
-            app.folderBrowserFormat ? app.folderBrowserFormat
-                                    : app.textFormat,
-            600.0f, 40.0f, &layout);
-        if (layout) {
-            layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            DWRITE_TEXT_METRICS m{};
-            layout->GetMetrics(&m);
-            float pad = dpi(app, 12.0f);
-            float closeW = dpi(app, 20.0f);
-            float chipH = dpi(app, 32.0f);
-            float chipW =
-                pad + m.width + dpi(app, 8.0f) + closeW + pad * 0.5f;
-            float cx = (float)app.width - chipW - dpi(app, 18.0f);
-            float cy = (float)app.height - chipH - dpi(app, 18.0f) -
-                       (app.showStats ? dpi(app, 55.0f) : 0.0f);
-            D2D1_RECT_F chip = D2D1::RectF(cx, cy, cx + chipW, cy + chipH);
-
-            D2D1_COLOR_F bg = app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
-                                               : hexColor(0xF8F8F8, 0.97f);
-            app.brush->SetColor(bg);
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(chip, chipH * 0.5f, chipH * 0.5f),
-                app.brush);
-            D2D1_COLOR_F border = app.theme.accent;
-            border.a = 0.6f;
-            app.brush->SetColor(border);
-            app.renderTarget->DrawRoundedRectangle(
-                D2D1::RoundedRect(chip, chipH * 0.5f, chipH * 0.5f),
-                app.brush, 1.0f);
-
-            app.brush->SetColor(app.theme.text);
-            app.renderTarget->DrawTextLayout(
-                D2D1::Point2F(cx + pad, cy + (chipH - m.height) * 0.5f),
-                layout, app.brush);
-            layout->Release();
-
-            float ccx = cx + pad + m.width + dpi(app, 8.0f) + closeW * 0.5f;
-            float ccy = cy + chipH * 0.5f;
-            float s = dpi(app, 4.0f);
-            D2D1_COLOR_F cross = app.theme.text;
-            cross.a = 0.6f;
-            app.brush->SetColor(cross);
-            app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy - s),
-                                       D2D1::Point2F(ccx + s, ccy + s),
-                                       app.brush, 1.4f);
-            app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy + s),
-                                       D2D1::Point2F(ccx + s, ccy - s),
-                                       app.brush, 1.4f);
-
-            app.updateChipRect = chip;
-            app.updateCloseRect = D2D1::RectF(ccx - closeW * 0.5f, cy,
-                                              ccx + closeW * 0.5f,
-                                              cy + chipH);
-        }
-    }
-
-    // Draft-recovery chip: same shape as the update chip, stacked above
-    // it when both are visible; a click restores the drafts as dirty
-    // edit tabs, the cross discards them for good
-    app.draftChipRect = D2D1_RECT_F{};
-    app.draftCloseRect = D2D1_RECT_F{};
-    if (!app.recoveredDrafts.empty() && !app.zenMode &&
-        !app.showPrintPreview && !app.showLightbox && app.dwriteFactory &&
-        (app.folderBrowserFormat || app.textFormat)) {
-        wchar_t label[96];
-        swprintf_s(label, _countof(label), tr(app, "draft.recovered"),
-                   (int)app.recoveredDrafts.size());
-        IDWriteTextLayout* layout = nullptr;
-        app.dwriteFactory->CreateTextLayout(
-            label, (UINT32)wcslen(label),
-            app.folderBrowserFormat ? app.folderBrowserFormat
-                                    : app.textFormat,
-            600.0f, 40.0f, &layout);
-        if (layout) {
-            layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            DWRITE_TEXT_METRICS m{};
-            layout->GetMetrics(&m);
-            float pad = dpi(app, 12.0f);
-            float closeW = dpi(app, 20.0f);
-            float chipH = dpi(app, 32.0f);
-            float chipW =
-                pad + m.width + dpi(app, 8.0f) + closeW + pad * 0.5f;
-            float cx = (float)app.width - chipW - dpi(app, 18.0f);
-            float cy = (float)app.height - chipH - dpi(app, 18.0f) -
-                       (app.showStats ? dpi(app, 55.0f) : 0.0f);
-            if (app.updateChipRect.right > app.updateChipRect.left) {
-                cy = app.updateChipRect.top - chipH - dpi(app, 10.0f);
-            }
-            D2D1_RECT_F chip = D2D1::RectF(cx, cy, cx + chipW, cy + chipH);
-
-            D2D1_COLOR_F bg = app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
-                                               : hexColor(0xF8F8F8, 0.97f);
-            app.brush->SetColor(bg);
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(chip, chipH * 0.5f, chipH * 0.5f),
-                app.brush);
-            D2D1_COLOR_F border = app.theme.accent;
-            border.a = 0.6f;
-            app.brush->SetColor(border);
-            app.renderTarget->DrawRoundedRectangle(
-                D2D1::RoundedRect(chip, chipH * 0.5f, chipH * 0.5f),
-                app.brush, 1.0f);
-
-            app.brush->SetColor(app.theme.text);
-            app.renderTarget->DrawTextLayout(
-                D2D1::Point2F(cx + pad, cy + (chipH - m.height) * 0.5f),
-                layout, app.brush);
-            layout->Release();
-
-            float ccx = cx + pad + m.width + dpi(app, 8.0f) + closeW * 0.5f;
-            float ccy = cy + chipH * 0.5f;
-            float s = dpi(app, 4.0f);
-            D2D1_COLOR_F cross = app.theme.text;
-            cross.a = 0.6f;
-            app.brush->SetColor(cross);
-            app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy - s),
-                                       D2D1::Point2F(ccx + s, ccy + s),
-                                       app.brush, 1.4f);
-            app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy + s),
-                                       D2D1::Point2F(ccx + s, ccy - s),
-                                       app.brush, 1.4f);
-
-            app.draftChipRect = chip;
-            app.draftCloseRect = D2D1::RectF(ccx - closeW * 0.5f, cy,
-                                             ccx + closeW * 0.5f,
-                                             cy + chipH);
-        }
-    }
+    // Signal chips: every notification, one bottom-right system (t13)
+    renderSignalChips(app);
 
     if (app.showStats) {
         wchar_t stats[768];
@@ -1731,7 +1537,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (wParam == TIMER_NOTIFICATION && app) {
                 // Only fading notifications need repaints; the persistent
                 // exit-confirm prompt is static until answered
-                bool fading = app->showCopiedNotification ||
+                bool fading = signalsNeedTicks(*app) ||
                     (app->showEditModeNotification && !app->confirmExitPending);
                 if (fading) {
                     InvalidateRect(hwnd, nullptr, FALSE);
@@ -1796,6 +1602,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     *version != app->updateDismissedVersion) {
                     app->updateVersion = *version;
                     app->updateAvailable = true;
+                    wchar_t label[96];
+                    swprintf_s(label, _countof(label),
+                               tr(*app, "update.available"),
+                               toWide(*version).c_str());
+                    signalPush(*app, SIG_INFO, SIGI_UPDATE, label, L"",
+                               L"v" + toWide(*version), SIGA_OPEN_RELEASE,
+                               SIGC_DISMISS_UPDATE, false);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
             }
@@ -1806,13 +1619,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_APP_PANDOC_DONE:
             if (app) {
                 app->pandocRunning = false;
-                app->copiedNotificationKey =
-                    wParam ? "toast.pandoc_ok" : "toast.pandoc_fail";
-                app->showCopiedNotification = true;
-                app->copiedNotificationAlpha = 1.0f;
-                app->copiedNotificationStart =
-                    std::chrono::steady_clock::now();
-                startNotificationTimer(*app);
+                if (wParam) {
+                    signalPushKey(*app, SIG_SUCCESS, SIGI_CHECK,
+                                  "toast.pandoc_ok");
+                } else {
+                    signalPushKey(*app, SIG_ERROR, SIGI_WARNING,
+                                  "toast.pandoc_fail");
+                }
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;

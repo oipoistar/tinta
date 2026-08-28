@@ -1,6 +1,7 @@
 #include "editor.h"
 #include "document.h"
 #include "drafts.h"
+#include "signals.h"
 #include "editrail.h"
 #include "settings.h"
 #include "tabs.h"
@@ -1266,7 +1267,7 @@ void saveFileAs(App& app, HWND hwnd) {
     bool ok = CopyFileW(src.c_str(), dst.c_str(), FALSE) != 0;
     if (!ok) {
         app.currentFile = previous;
-        app.copiedNotificationKey = "toast.save_failed";
+        signalPushKey(app, SIG_ERROR, SIGI_WARNING, "toast.save_failed");
     } else {
         tabsInit(app);
         App::DocTab& tab = app.tabs[app.activeTab];
@@ -1276,11 +1277,10 @@ void saveFileAs(App& app, HWND hwnd) {
                                ? app.currentFile
                                : app.currentFile.substr(slash + 1));
         updateWindowTitle(app);
-        app.copiedNotificationKey = "toast.saved";
+        signalPush(app, SIG_SUCCESS, SIGI_CHECK,
+                   std::wstring(tr(app, "toast.saved")) + L" \u2014 ",
+                   tab.title, tab.title);
     }
-    app.showCopiedNotification = true;
-    app.copiedNotificationStart = std::chrono::steady_clock::now();
-    startNotificationTimer(app);
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
