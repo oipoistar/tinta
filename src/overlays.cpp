@@ -18,6 +18,7 @@ static float promptKeycap(App& app, const wchar_t* label, float rightX,
 
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 void renderSearchOverlay(App& app) {
@@ -1149,12 +1150,22 @@ void renderToc(App& app) {
                 }
             }
 
+            // A clicked heading stays active until the user scrolls: the
+            // spy line cannot reach bottom sections in short documents
             int currentIdx = -1;
-            float spyLine = app.scrollY + (float)app.height * 0.25f;
-            for (size_t i = 0; i < app.headings.size(); i++) {
-                if (app.headings[i].y <= spyLine) currentIdx = (int)i;
+            if (app.tocSpyOverride >= 0 &&
+                app.tocSpyOverride < (int)app.headings.size() &&
+                std::fabs(app.targetScrollY - app.tocSpyOverrideScroll) <
+                    1.0f) {
+                currentIdx = app.tocSpyOverride;
+            } else {
+                app.tocSpyOverride = -1;
+                float spyLine = app.scrollY + (float)app.height * 0.25f;
+                for (size_t i = 0; i < app.headings.size(); i++) {
+                    if (app.headings[i].y <= spyLine) currentIdx = (int)i;
+                }
+                if (currentIdx < 0 && !app.headings.empty()) currentIdx = 0;
             }
-            if (currentIdx < 0 && !app.headings.empty()) currentIdx = 0;
 
             float totalItemsHeight = visible.size() * itemHeight;
             float maxScroll = std::max(0.0f, totalItemsHeight - listHeight);
