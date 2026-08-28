@@ -691,6 +691,12 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.editorAssists = !app.editorAssists;
             persistEditorMode(app);
             break;
+        case SET_TOGGLE_HEADRULES:
+            app.headingRules = !app.headingRules;
+            // Layout shifts (the rule adds height), so a repaint alone
+            // is not enough
+            app.layoutDirty = true;
+            break;
         case SET_LOCATE_PANDOC: {
             wchar_t path[MAX_PATH]{};
             OPENFILENAMEW ofn{};

@@ -1899,6 +1899,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
+                settings.headingRules = app->headingRules;
                 settings.tocOnLeft = app->tocOnLeft;
                 settings.language = app->languageSetting >= 0
                     ? languageIdAt(app->languageSetting) : "auto";
@@ -1999,6 +2000,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.editorWordWrap = savedSettings.editorWordWrap;
     app.readingWidthPct = savedSettings.readingWidthPct;
     app.zenWidthPct = savedSettings.zenWidthPct;
+    app.headingRules = savedSettings.headingRules;
     app.tocOnLeft = savedSettings.tocOnLeft;
     app.languageSetting = savedSettings.language == "auto"
         ? -1 : languageIndexById(savedSettings.language);

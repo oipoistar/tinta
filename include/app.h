@@ -178,6 +178,9 @@ struct Settings {
     // Windowed and fullscreen (zen) modes keep separate preferences.
     int readingWidthPct = 100;
     int zenWidthPct = 60;
+    // Separator line under level 1 and 2 headings (#154): off renders
+    // the heading text alone
+    bool headingRules = true;
     // Table of contents panel side: false = right (default), true = left
     bool tocOnLeft = false;
     // UI language id ("auto" follows the Windows display language; else a
@@ -577,6 +580,7 @@ struct App {
     std::vector<std::pair<D2D1_RECT_F, int>> settingsHits;
     int readingWidthPct = 100;  // mirrors Settings (#82); 100 = full width
     int zenWidthPct = 60;
+    bool headingRules = true;   // mirrors Settings (#154)
     int settingsDragSlider = 0;         // SET_SLIDER_* while dragging, else 0
     D2D1_RECT_F settingsSliderTrack[2]{};  // 0 window, 1 fullscreen (set in render)
 
