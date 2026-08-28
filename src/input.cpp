@@ -1963,16 +1963,36 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         if (app.showThemeChooser || browserClaims || tocClaims) {
             // The content scrollbar stays usable beside a side panel: a
             // click on it dismisses an unpinned folder browser ("back to
-            // the document") and simply works alongside the TOC
-            bool scrollbarClick =
-                (app.scrollbarHovered && app.verticalScrollbarVisible) ||
-                (app.hScrollbarHovered &&
-                 app.contentWidth > documentViewportWidth(app));
-            if (!app.showThemeChooser && scrollbarClick) {
+            // the document") and simply works alongside the TOC.
+            // Recompute the band at the click: scrollbarHovered freezes
+            // stale while the mouse is over a panel (its mousemove returns
+            // before the hover update), and a stale true here turned panel
+            // clicks into scrollbar drags bound to the mouse.
+            float viewportX = documentViewportX(app);
+            float viewportWidth = documentViewportWidth(app);
+            bool vClick = false, hClick = false;
+            if (app.verticalScrollbarVisible) {
+                float sbWidth = dpi(app, 14.0f);
+                float sbRight = viewportX + viewportWidth;
+                vClick = (float)app.mouseX >= sbRight - sbWidth &&
+                         (float)app.mouseX <= sbRight;
+            }
+            if (!vClick && app.contentWidth > viewportWidth) {
+                float sbHeight = dpi(app, 14.0f);
+                hClick = (float)app.mouseY >= app.height - sbHeight &&
+                         (float)app.mouseX >= viewportX &&
+                         (float)app.mouseX <= viewportX + viewportWidth;
+            }
+            if (!app.showThemeChooser && (vClick || hClick)) {
                 if (app.showFolderBrowser && !app.browserPinned) {
                     app.showFolderBrowser = false;
                     closeFolderBrowserInput(app);
                 }
+                // The drag start below keys off the hover flags, which
+                // freeze while the mouse crosses a panel - refresh them
+                // from this click's own geometry
+                app.scrollbarHovered = vClick;
+                app.hScrollbarHovered = hClick;
                 // fall through to the scrollbar handling below
             } else {
                 return;
@@ -2754,6 +2774,18 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     }
 
     ReleaseCapture();
+
+    // A scrollbar drag ends at this release no matter where it lands -
+    // the panel branches below must not run first and leave the drag
+    // latched, which bound the scroll to plain mouse movement
+    if (app.scrollbarDragging || app.hScrollbarDragging) {
+        app.scrollbarDragging = false;
+        app.hScrollbarDragging = false;
+        app.mouseDown = false;
+        app.selecting = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
 
     // TOC click handling
     if (app.showToc) {
