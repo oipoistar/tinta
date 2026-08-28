@@ -289,6 +289,7 @@ FolderBrowserMetrics folderBrowserMetrics(const App& app) {
     g.btnSize = dpi(app, 22.0f);
     g.fileBtnX = g.cardRight - dpi(app, 10.0f) - g.btnSize;
     g.folderBtnX = g.fileBtnX - dpi(app, 4.0f) - g.btnSize;
+    g.pinBtnX = g.folderBtnX - dpi(app, 4.0f) - g.btnSize;
     g.btnY = g.headerY + (g.headerH - g.btnSize) * 0.5f;
     float dividerY = g.headerY + g.headerH + dpi(app, 4.0f);
     g.listStartY = dividerY + dpi(app, 3.0f);
@@ -333,6 +334,18 @@ int folderItemIndexAt(const App& app, float x, float y) {
         if (contentY >= top && contentY < top + g.itemHeight) return i;
     }
     return -1;
+}
+
+// Map-pin for the panel pin toggles (#156): head circle plus needle
+static void drawPinGlyph(App& app, float cx, float cy, D2D1_COLOR_F color) {
+    app.brush->SetColor(color);
+    app.renderTarget->DrawEllipse(
+        D2D1::Ellipse(D2D1::Point2F(cx, cy - dpi(app, 2.0f)),
+                      dpi(app, 3.0f), dpi(app, 3.0f)),
+        app.brush, 1.3f);
+    app.renderTarget->DrawLine(D2D1::Point2F(cx, cy + dpi(app, 1.0f)),
+                               D2D1::Point2F(cx, cy + dpi(app, 6.0f)),
+                               app.brush, 1.3f);
 }
 
 // Monoline glyphs shared by the browser card's rows and header buttons
@@ -414,6 +427,7 @@ void renderFolderBrowser(App& app) {
         D2D1::RoundedRect(card, radius, radius), app.brush, 1.0f);
 
     app.folderCrumbHits.clear();
+    app.folderPinRect = D2D1_RECT_F{};
     IDWriteTextFormat* browserFormat = app.folderBrowserFormat;
     if (browserFormat) {
         float padding = dpi(app, 12.0f);
@@ -532,7 +546,7 @@ void renderFolderBrowser(App& app) {
             }
 
             float cx = g.cardLeft + padding;
-            float crumbMax = folderBtnX - dpi(app, 26.0f);
+            float crumbMax = g.pinBtnX - dpi(app, 26.0f);
 
             // The leaf always survives: drop the parent crumb first when
             // the row runs out of room, then trim the leaf as a last resort
@@ -642,6 +656,32 @@ void renderFolderBrowser(App& app) {
             };
             drawAddButton(folderBtnX, true);
             drawAddButton(fileBtnX, false);
+
+            // Pin toggle (#156): a pinned browser survives document clicks
+            {
+                bool hoveredP =
+                    app.mouseX >= g.pinBtnX && app.mouseX <= g.pinBtnX + btnSize &&
+                    app.mouseY >= btnY && app.mouseY <= btnY + btnSize;
+                if (app.browserPinned || hoveredP) {
+                    D2D1_COLOR_F bg = app.theme.accent;
+                    bg.a = (app.browserPinned ? 0.16f : 0.1f) * anim;
+                    app.brush->SetColor(bg);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(
+                            D2D1::RectF(g.pinBtnX, btnY, g.pinBtnX + btnSize,
+                                        btnY + btnSize),
+                            dpi(app, 5.0f), dpi(app, 5.0f)),
+                        app.brush);
+                }
+                D2D1_COLOR_F pc = app.browserPinned ? app.theme.accent
+                                                    : app.theme.text;
+                pc.a = (app.browserPinned ? 0.95f : 0.6f) * anim;
+                drawPinGlyph(app, g.pinBtnX + btnSize * 0.5f,
+                             btnY + btnSize * 0.5f, pc);
+                app.folderPinRect = D2D1::RectF(g.pinBtnX, btnY,
+                                                g.pinBtnX + btnSize,
+                                                btnY + btnSize);
+            }
         }
 
         // Divider line
@@ -955,6 +995,7 @@ void renderToc(App& app) {
         D2D1::RoundedRect(card, radius, radius), app.brush, 1.0f);
 
     app.tocCloseRect = D2D1_RECT_F{};
+    app.tocPinRect = D2D1_RECT_F{};
     IDWriteTextFormat* tocBold = app.tocFormatBold;
     IDWriteTextFormat* tocNormal = app.tocFormat;
     if (tocBold && tocNormal) {
@@ -1011,6 +1052,15 @@ void renderToc(App& app) {
                                        D2D1::Point2F(ccx + s, ccy - s), app.brush, 1.3f);
             app.tocCloseRect = D2D1::RectF(ccx - dpi(app, 10.0f), cardTop,
                                            cardRight, headerY + dpi(app, 20.0f));
+
+            // Pin toggle left of the cross (#156)
+            float pcx = ccx - dpi(app, 20.0f);
+            D2D1_COLOR_F pc = app.tocPinned ? app.theme.accent : app.theme.text;
+            pc.a = (app.tocPinned ? 0.95f : 0.45f) * anim;
+            drawPinGlyph(app, pcx, ccy, pc);
+            app.tocPinRect = D2D1::RectF(pcx - dpi(app, 9.0f), cardTop,
+                                         pcx + dpi(app, 9.0f),
+                                         headerY + dpi(app, 20.0f));
         }
 
         // Active filter, right-aligned before the cross
@@ -1026,7 +1076,7 @@ void renderToc(App& app) {
                 filterColor.a = anim;
                 app.brush->SetColor(filterColor);
                 app.renderTarget->DrawTextLayout(
-                    D2D1::Point2F(cardRight - padding - dpi(app, 18.0f) - fm.width,
+                    D2D1::Point2F(cardRight - padding - dpi(app, 38.0f) - fm.width,
                                   headerY + dpi(app, 1.0f)),
                     filterLayout, app.brush);
                 filterLayout->Release();

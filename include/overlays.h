@@ -54,7 +54,7 @@ struct FolderBrowserMetrics {
     float panelX = 0, panelWidth = 0;              // slide envelope
     float cardLeft = 0, cardRight = 0, cardTop = 0, cardBottom = 0;
     float headerY = 0, headerH = 0;                // breadcrumb row
-    float folderBtnX = 0, fileBtnX = 0, btnY = 0, btnSize = 0;
+    float pinBtnX = 0, folderBtnX = 0, fileBtnX = 0, btnY = 0, btnSize = 0;
     float listStartY = 0, listBottom = 0;          // scrolled group area
     float itemHeight = 0, labelH = 0;              // row + section label
     float namingOffset = 0;                        // pinned naming row

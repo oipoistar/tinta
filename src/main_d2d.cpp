@@ -1714,6 +1714,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.zenWidthPct = app->zenWidthPct;
                 settings.headingRules = app->headingRules;
                 settings.tocOnLeft = app->tocOnLeft;
+                settings.tocPinned = app->tocPinned;
+                settings.browserPinned = app->browserPinned;
                 settings.language = app->languageSetting >= 0
                     ? languageIdAt(app->languageSetting) : "auto";
                 settings.keyProfile = app->keyProfile;
@@ -1815,6 +1817,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.zenWidthPct = savedSettings.zenWidthPct;
     app.headingRules = savedSettings.headingRules;
     app.tocOnLeft = savedSettings.tocOnLeft;
+    app.tocPinned = savedSettings.tocPinned;
+    app.browserPinned = savedSettings.browserPinned;
     app.languageSetting = savedSettings.language == "auto"
         ? -1 : languageIndexById(savedSettings.language);
     app.currentLanguageIndex = app.languageSetting >= 0
