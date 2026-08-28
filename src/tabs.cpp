@@ -7,6 +7,7 @@
 
 #include "document.h"
 #include "drafts.h"
+#include "signals.h"
 #include "editor.h"
 #include "startpage.h"
 #include "file_utils.h"
@@ -1369,10 +1370,7 @@ bool tabMenuMouseDown(App& app, HWND hwnd, int x, int y) {
                     wide = fullPath;
                 }
                 copyToClipboard(hwnd, wide);
-                a.copiedNotificationKey = "toast.copied";
-                a.showCopiedNotification = true;
-                a.copiedNotificationStart = std::chrono::steady_clock::now();
-                startNotificationTimer(a);
+                signalPushKey(a, SIG_INFO, SIGI_COPY, "toast.copied");
             }
             break;
         case TM_REVEAL:

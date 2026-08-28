@@ -13,6 +13,7 @@
 #include "settings.h"
 #include "render.h"
 #include "overlays.h"
+#include "signals.h"
 #include "pandoc.h"
 #include "print.h"
 #include "export.h"
@@ -1448,13 +1449,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     } else if (app.scrollbarHovered || app.scrollbarDragging ||
         app.hScrollbarHovered || app.hScrollbarDragging) {
         SetCursor(cursorArrow);
-    } else if (app.updateAvailable && !app.updateDismissed &&
-               cursorPointInRect((float)app.mouseX, (float)app.mouseY,
-                                 app.updateChipRect)) {
-        SetCursor(cursorHand);
-    } else if (!app.recoveredDrafts.empty() &&
-               cursorPointInRect((float)app.mouseX, (float)app.mouseY,
-                                 app.draftChipRect)) {
+    } else if (signalMouseMove(app, (float)app.mouseX, (float)app.mouseY)) {
         SetCursor(cursorHand);
     } else if (startPageActive(app) && app.startPageHover != 0) {
         SetCursor(cursorHand);
@@ -1546,11 +1541,7 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
                 if (selected.empty()) break;
                 copyToClipboard(hwnd, selected);
                 app.hasSelection = false;
-                app.copiedNotificationKey = "toast.copied";
-                app.showCopiedNotification = true;
-                app.copiedNotificationAlpha = 1.0f;
-                app.copiedNotificationStart = std::chrono::steady_clock::now();
-                startNotificationTimer(app);
+                signalPushKey(app, SIG_INFO, SIGI_COPY, "toast.copied");
             }
             break;
         case CTX_SELECT_ALL:
@@ -1719,6 +1710,18 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             return;
         }
     }
+    // Signal chips ride above everything: presses on a chip, the bell,
+    // or the open tray act; any other press parks the draining chips
+    {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        if (signalMouseDown(app, hwnd, mx, my)) {
+            app.swallowNextMouseUp = true;
+            return;
+        }
+        signalTuckPassive(app);
+    }
+
     // Lightbox: press on the image arms a pan, elsewhere closes
     if (app.showLightbox) {
         int mx = GET_X_LPARAM(lParam);
@@ -1780,47 +1783,6 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
-    }
-
-    // Update chip: a click opens the release page, the cross dismisses
-    // this version for good
-    if (app.updateAvailable && !app.updateDismissed &&
-        app.updateChipRect.right > app.updateChipRect.left) {
-        float mx = (float)GET_X_LPARAM(lParam);
-        float my = (float)GET_Y_LPARAM(lParam);
-        if (cursorPointInRect(mx, my, app.updateChipRect)) {
-            app.swallowNextMouseUp = true;
-            if (cursorPointInRect(mx, my, app.updateCloseRect)) {
-                app.updateDismissed = true;
-                app.updateDismissedVersion = app.updateVersion;
-            } else {
-                ShellExecuteW(
-                    nullptr, L"open",
-                    L"https://github.com/oipoistar/tinta/releases/latest",
-                    nullptr, nullptr, SW_SHOWNORMAL);
-                app.updateDismissed = true;
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-    }
-
-    // Draft-recovery chip: a click restores the drafts as edit tabs, the
-    // cross discards them for good
-    if (!app.recoveredDrafts.empty() &&
-        app.draftChipRect.right > app.draftChipRect.left) {
-        float mx = (float)GET_X_LPARAM(lParam);
-        float my = (float)GET_Y_LPARAM(lParam);
-        if (cursorPointInRect(mx, my, app.draftChipRect)) {
-            app.swallowNextMouseUp = true;
-            if (cursorPointInRect(mx, my, app.draftCloseRect)) {
-                draftsDiscardAll(app);
-            } else {
-                draftsRecoverAll(app, hwnd);
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
     }
 
     // Annotation editor is modal: buttons act, outside dismisses (#126)
@@ -3002,10 +2964,13 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         // mouse-up: a drag selection ending on the block would never
         // finalize, stay "selecting", and follow the next mouse move
         copyToClipboard(hwnd, app.codeBlocks[app.hoveredCodeBlock].codeText);
-        app.copiedNotificationKey = "codeblock.copied";
-        app.showCopiedNotification = true;
-        app.copiedNotificationStart = std::chrono::steady_clock::now();
-        startNotificationTimer(app);
+        {
+            // The Copied pill keeps its code-block anchor (t13)
+            D2D1_RECT_F anchor = app.codeBlocks[app.hoveredCodeBlock].bounds;
+            signalPush(app, SIG_SUCCESS, SIGI_CHECK,
+                       tr(app, "codeblock.copied"), L"", L"", SIGA_NONE,
+                       SIGC_NONE, true, &anchor);
+        }
         app.hoveredCodeBlock = -1;
         app.selecting = false;
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -3018,10 +2983,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         if (copyDiagramImage(
                 app, hwnd,
                 toUtf8(app.codeBlocks[app.hoveredCodeBlock].codeText))) {
-            app.copiedNotificationKey = "diagram.copied";
-            app.showCopiedNotification = true;
-            app.copiedNotificationStart = std::chrono::steady_clock::now();
-            startNotificationTimer(app);
+            D2D1_RECT_F anchor = app.codeBlocks[app.hoveredCodeBlock].bounds;
+            signalPush(app, SIG_SUCCESS, SIGI_CHECK,
+                       tr(app, "diagram.copied"), L"", L"", SIGA_NONE,
+                       SIGC_NONE, true, &anchor);
         }
         app.hoveredCodeBlock = -1;
         app.selecting = false;
@@ -3034,10 +2999,12 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         // Table copy button: cells joined by tabs paste into a
         // spreadsheet as a grid
         copyToClipboard(hwnd, app.tableRects[app.hoveredTable].tsv);
-        app.copiedNotificationKey = "table.copied";
-        app.showCopiedNotification = true;
-        app.copiedNotificationStart = std::chrono::steady_clock::now();
-        startNotificationTimer(app);
+        {
+            D2D1_RECT_F anchor = app.tableRects[app.hoveredTable].bounds;
+            signalPush(app, SIG_SUCCESS, SIGI_CHECK,
+                       tr(app, "table.copied"), L"", L"", SIGA_NONE,
+                       SIGC_NONE, true, &anchor);
+        }
         app.hoveredTable = -1;
         app.selecting = false;
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -3278,10 +3245,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 std::max(app.selAnchor, app.selFocus));
             if (selected.empty()) return;
             copyToClipboard(hwnd, selected);
-            app.copiedNotificationKey = "toast.copied";
-            app.showCopiedNotification = true;
-            app.copiedNotificationStart = std::chrono::steady_clock::now();
-            startNotificationTimer(app);
+            signalPushKey(app, SIG_INFO, SIGI_COPY, "toast.copied");
             app.hasSelection = false;
             InvalidateRect(hwnd, nullptr, FALSE);
             return;
@@ -3470,11 +3434,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 // Show "Copied!" notification
                 if (copied) {
-                    app.copiedNotificationKey = "toast.copied";
-                    app.showCopiedNotification = true;
-                    app.copiedNotificationAlpha = 1.0f;
-                    app.copiedNotificationStart = std::chrono::steady_clock::now();
-                    startNotificationTimer(app);
+                    signalPushKey(app, SIG_INFO, SIGI_COPY, "toast.copied");
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
                 break;

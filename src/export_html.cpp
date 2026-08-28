@@ -8,6 +8,7 @@
 
 #include "editor.h"
 #include "i18n.h"
+#include "signals.h"
 #include "math_render.h"
 #include "mermaid.h"
 #include "mermaid_ext.h"
@@ -1474,9 +1475,10 @@ void exportDocumentAs(App& app, HWND hwnd) {
               : format == Format::Pdf ? exportPdfFile(app, chosen)
                                       : exportHtmlFile(app, chosen);
 
-    app.copiedNotificationKey = ok ? "toast.exported" : "toast.save_failed";
-    app.showCopiedNotification = true;
-    app.copiedNotificationStart = std::chrono::steady_clock::now();
-    startNotificationTimer(app);
+    if (ok) {
+        signalPushKey(app, SIG_SUCCESS, SIGI_CHECK, "toast.exported");
+    } else {
+        signalPushKey(app, SIG_ERROR, SIGI_WARNING, "toast.save_failed");
+    }
     InvalidateRect(hwnd, nullptr, FALSE);
 }

@@ -2,6 +2,7 @@
 
 #include "editor.h"
 #include "i18n.h"
+#include "signals.h"
 #include "input.h"
 #include "render.h"
 #include "selection.h"
@@ -378,10 +379,7 @@ std::wstring fullClipboardText(HWND hwnd) {
 }
 
 void showToast(App& app, const char* key) {
-    app.copiedNotificationKey = key;
-    app.showCopiedNotification = true;
-    app.copiedNotificationStart = std::chrono::steady_clock::now();
-    startNotificationTimer(app);
+    signalPushKey(app, SIG_INFO, SIGI_COPY, key);
 }
 
 }  // namespace

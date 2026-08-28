@@ -1,5 +1,7 @@
 #include "drafts.h"
+#include "i18n.h"
 #include "settings.h"
+#include "signals.h"
 #include "tabs.h"
 #include "editor.h"
 #include "utils.h"
@@ -112,6 +114,16 @@ void draftsScanForRecovery(App& app) {
         app.recoveredDrafts.push_back(dir + L"\\" + name);
     } while (FindNextFileW(h, &find));
     FindClose(h);
+
+    if (!app.recoveredDrafts.empty()) {
+        // Offer the leftovers as a signal chip: click or Restore brings
+        // them back as dirty tabs, the cross discards them for good
+        wchar_t label[96];
+        swprintf_s(label, _countof(label), tr(app, "draft.recovered"),
+                   (int)app.recoveredDrafts.size());
+        signalPush(app, SIG_WARN, SIGI_FILE, label, L"", L"",
+                   SIGA_RESTORE_DRAFTS, SIGC_DISCARD_DRAFTS, false);
+    }
 }
 
 void draftsRecoverAll(App& app, HWND hwnd) {
