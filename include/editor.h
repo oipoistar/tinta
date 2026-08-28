@@ -49,6 +49,11 @@ void confirmExitAction(App& app, HWND hwnd, int action);
 
 // Editor reparse (called from timer)
 void editorReparse(App& app);
+// External edits: undo-capable range replace plus dirty + immediate
+// reparse, used by the preview table cell editor (#148)
+void editorReplaceRangeExternal(App& app, size_t start, size_t end,
+                                const std::wstring& repl);
+void editorMarkDirtyAndReparse(App& app);
 
 // Editor search
 void performEditorSearch(App& app);

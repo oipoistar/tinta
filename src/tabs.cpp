@@ -8,6 +8,7 @@
 #include "document.h"
 #include "drafts.h"
 #include "signals.h"
+#include "tableedit.h"
 #include "editor.h"
 #include "startpage.h"
 #include "file_utils.h"
@@ -54,6 +55,8 @@ void syncActiveTab(App& app) {
 // (another document loads immediately after).
 void parkActiveEditBuffer(App& app) {
     if (!app.editMode || app.tabs.empty()) return;
+    // An open table cell belongs to this buffer, not the next tab (#148)
+    tableEditCommit(app);
     App::DocTab& tab = app.tabs[app.activeTab];
     tab.editMode = true;
     tab.editorDirty = app.editorDirty;

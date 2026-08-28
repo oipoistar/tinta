@@ -811,9 +811,29 @@ struct App {
         unsigned fitKey = 0;   // per-layout ordinal for the fit toggle
         bool fitCandidate = false;  // wider than the column at natural size
         bool fitActive = false;
+        size_t sourceOffset = SIZE_MAX;  // Table element source (#148)
     };
     std::vector<TableInfo> tableRects;
     int hoveredTable = -1;
+
+    // In-place table editing in the rendered preview (#148, edit mode).
+    // Cells are identified by the table's source offset plus row/col so
+    // they survive relayouts; rects are document coordinates.
+    struct TableCellRect {
+        size_t tableSrc = 0;  // Table element sourceOffset (first cell text)
+        int row = 0, col = 0; // row 0 = header
+        D2D1_RECT_F rect{};
+    };
+    std::vector<TableCellRect> tableCellRects;  // filled in edit mode only
+    bool tableEditActive = false;
+    size_t tableEditSrc = 0;
+    int tableEditRow = -1, tableEditCol = -1;
+    std::wstring tableEditText;
+    size_t tableEditCaret = 0;
+    // Hover affordances: + row under the table, + column at its right edge
+    size_t tableAddSrc = 0;              // table the buttons belong to
+    D2D1_RECT_F tableAddRowRect{};       // document coordinates
+    D2D1_RECT_F tableAddColRect{};
 
     // Fit-to-width overrides for oversized tables/diagrams, keyed by their
     // per-layout ordinal (cleared when the document changes)
@@ -1211,6 +1231,7 @@ struct App {
         linkRects.clear();
         codeBlocks.clear();
         tableRects.clear();
+        tableCellRects.clear();
         textRects.clear();
         lineBuckets.clear();
         docText.clear();

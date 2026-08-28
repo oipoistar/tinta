@@ -2,6 +2,7 @@
 #include "document.h"
 #include "drafts.h"
 #include "signals.h"
+#include "tableedit.h"
 #include "editrail.h"
 #include "settings.h"
 #include "tabs.h"
@@ -378,6 +379,33 @@ static void pushUndo(App& app, App::EditAction::Type type, size_t pos,
     app.redoStack.clear();
 }
 
+// Undo-capable range replace for out-of-pane editors (the table cell
+// editor, #148): the whole swap lands on the undo stack as one pair
+void editorReplaceRangeExternal(App& app, size_t start, size_t end,
+                                const std::wstring& repl) {
+    if (start > app.editorText.size()) start = app.editorText.size();
+    if (end > app.editorText.size()) end = app.editorText.size();
+    if (end < start) end = start;
+    std::wstring removed = app.editorText.substr(start, end - start);
+    if (removed == repl) return;  // no-op edits stay off the undo stack
+    if (!removed.empty()) {
+        app.editorText.erase(start, end - start);
+        pushUndo(app, App::EditAction::Delete, start, removed,
+                 app.editorCursorPos, start);
+    }
+    if (!repl.empty()) {
+        app.editorText.insert(start, repl);
+        pushUndo(app, App::EditAction::Insert, start, repl, start,
+                 start + repl.size());
+    }
+    app.editorCursorPos = start + repl.size();
+    app.editorHasSelection = false;
+    app.editorDesiredCol = -1;
+    rebuildLineStarts(app);
+    app.clearEditorLineLayoutCache();
+    app.editorRowMetricsWidth = -1.0f;
+}
+
 static void editorUndo(App& app) {
     if (app.undoStack.empty()) return;
     auto action = app.undoStack.back();
@@ -731,6 +759,13 @@ static void scheduleReparse(App& app) {
     SetTimer(app.hwnd, TIMER_EDITOR_REPARSE, 300, nullptr);
 }
 
+// External edits (table cell editor #148) want the dirty bookkeeping AND
+// an immediate reparse so their source offsets stay fresh
+void editorMarkDirtyAndReparse(App& app) {
+    scheduleReparse(app);
+    editorReparse(app);
+}
+
 void editorReparse(App& app) {
     KillTimer(app.hwnd, TIMER_EDITOR_REPARSE);
     if (!app.editMode || !app.editorShowPreview) return;
@@ -766,6 +801,7 @@ static void enterEditModeWithContent(App& app, const std::string& content) {
     app.folderBrowserAnimation = 0.0f;
     app.folderBrowserEditingPath = false;
     app.folderBrowserNaming = 0;
+    tableEditCancel(app);  // no stale cell editor from a previous buffer
 
     app.editorText = fromUtf8(content);
     // Normalize \r\n to \n
@@ -910,6 +946,8 @@ void enterRecoveredDraft(App& app, HWND hwnd, const std::string& content,
 }
 
 void exitEditMode(App& app) {
+    // An open table cell commits before the mode question is asked (#148)
+    tableEditCommit(app);
     if (app.editorDirty) {
         // Unsaved changes: a modal dialog with clickable buttons. The
         // timestamp opens a grace window so smashed Esc presses land on a
@@ -1158,6 +1196,8 @@ void renderQuickNoteEmptyState(App& app) {
 }
 
 void saveEditorFile(App& app, HWND hwnd) {
+    // The open table cell belongs in the save (#148)
+    tableEditCommit(app);
     if (app.currentFile.empty()) {
         // Untitled quick note: name it now; cancel keeps editing untitled
         if (!promptSaveAsPath(app, hwnd)) return;
