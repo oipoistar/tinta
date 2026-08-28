@@ -933,7 +933,7 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
 
     layoutInlineContent(app, elem->children, indent, y, maxWidth, format, app.theme.heading);
 
-    if (elem->level <= 2) {
+    if (elem->level <= 2 && app.headingRules) {
         y += 6 * scale;
         D2D1_COLOR_F lineColor = app.theme.heading;
         lineColor.a = 0.3f;

@@ -92,6 +92,7 @@ void saveSettings(const Settings& settings) {
     file << "openInTabs=" << (settings.openInTabs ? 1 : 0) << "\n";
     file << "readingWidthPct=" << settings.readingWidthPct << "\n";
     file << "zenWidthPct=" << settings.zenWidthPct << "\n";
+    file << "headingRules=" << (settings.headingRules ? 1 : 0) << "\n";
     file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
     file << "language=" << settings.language << "\n";
     file << "keyProfile=" << settings.keyProfile << "\n";
@@ -335,6 +336,8 @@ Settings loadSettings() {
         } else if (key == "zenWidthPct") {
             int w = std::stoi(value);
             if (w >= 30 && w <= 100) settings.zenWidthPct = w;
+        } else if (key == "headingRules") {
+            settings.headingRules = (value == "1");
         } else if (key == "tocOnLeft") {
             settings.tocOnLeft = (value == "1");
         } else if (key == "language") {

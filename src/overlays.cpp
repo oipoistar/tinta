@@ -2648,6 +2648,12 @@ void renderSettingsOverlay(App& app) {
                app.zenWidthPct, SET_SLIDER_ZEN, 1);
         cy += sliderCardH + cardGap;
         card(rowCardH);
+        cardLabel(tr(app, "settings.heading_rules"), tr(app, "settings.heading_rules.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
+                       app.headingRules, SET_TOGGLE_HEADRULES, anim);
+        cy += rowCardH + cardGap;
+        card(rowCardH);
         cardLabel(tr(app, "settings.follow_windows"), tr(app, "settings.follow_windows.hint"), dpi(app, 60.0f));
         settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
                        cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
