@@ -1090,10 +1090,6 @@ struct App {
     std::chrono::steady_clock::time_point swallowCharsUntil{};
 
     // Editor notification
-    bool showEditModeNotification = false;
-    float editModeNotificationAlpha = 0;
-    std::chrono::steady_clock::time_point editModeNotificationStart;
-    std::wstring editorNotificationMsg;
 
     // Pandoc bridge (pandoc.cpp): resolved executable, the user's
     // settings override, and the single in-flight conversion guard

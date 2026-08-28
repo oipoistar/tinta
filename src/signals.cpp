@@ -112,6 +112,16 @@ void drawSignalIcon(App& app, int icon, float cx, float cy, float s,
                                        D2D1::Point2F(left, top), app.brush, w);
             break;
         }
+        case SIGI_EYE: {
+            // Lens as two arcs approximated by a squashed ellipse outline
+            D2D1_ELLIPSE lens = D2D1::Ellipse(D2D1::Point2F(cx, cy),
+                                              s * 0.5f, s * 0.32f);
+            app.renderTarget->DrawEllipse(lens, app.brush, w);
+            app.renderTarget->DrawEllipse(
+                D2D1::Ellipse(D2D1::Point2F(cx, cy), s * 0.14f, s * 0.14f),
+                app.brush, w);
+            break;
+        }
         case SIGI_UPDATE:
             app.renderTarget->DrawLine(D2D1::Point2F(cx, cy - s * 0.42f),
                                        D2D1::Point2F(cx, cy + s * 0.18f), app.brush, w);

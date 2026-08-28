@@ -1003,9 +1003,6 @@ render_document:
     // Link peek popup (dwell over a local .md link)
     renderLinkPeek(app);
 
-    // Signal chips: every notification, one bottom-right system (t13)
-    renderSignalChips(app);
-
     if (app.showStats) {
         wchar_t stats[768];
         wchar_t statsLine1[256];
@@ -1068,10 +1065,12 @@ render_document:
 
         // Render search overlay in screen coordinates (over editor pane)
         if (app.showSearch) renderSearchOverlay(app);
-
-        // Render edit mode notification (on top of everything)
-        renderEditModeNotification(app);
     }
+
+    // Signal chips: every notification, one bottom-right system (t13).
+    // Drawn after the edit-mode clip pops and above the side panels, so
+    // chips reach the corner in both modes and over a pinned Contents
+    renderSignalChips(app);
 
     // Title-bar tab strip: the caption itself, above every panel
     renderTabStrip(app);
@@ -1535,10 +1534,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             if (wParam == TIMER_NOTIFICATION && app) {
-                // Only fading notifications need repaints; the persistent
-                // exit-confirm prompt is static until answered
-                bool fading = signalsNeedTicks(*app) ||
-                    (app->showEditModeNotification && !app->confirmExitPending);
+                // Only draining chips need repaints; prompts are static
+                // until answered
+                bool fading = signalsNeedTicks(*app);
                 if (fading) {
                     InvalidateRect(hwnd, nullptr, FALSE);
                 } else {

@@ -847,11 +847,7 @@ static void enterEditModeWithContent(App& app, const std::string& content) {
     // itself, and the per-tab deleted-file sweep needs the heartbeat
 
     // Show notification
-    app.editorNotificationMsg = tr(app, "toast.exit_edit_hint");
-    app.showEditModeNotification = true;
-    app.editModeNotificationAlpha = 1.0f;
-    app.editModeNotificationStart = std::chrono::steady_clock::now();
-    startNotificationTimer(app);
+    signalPushKey(app, SIG_INFO, SIGI_INFO, "toast.exit_edit_hint");
     updateBlinkTimer(app);
 
     // Force layout at new width
@@ -866,19 +862,13 @@ void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
     app.editorDirty = dirty;
     app.editorCursorPos = std::min(cursor, app.editorText.size());
     app.editorScrollY = std::max(0.0f, scrollY);
-    // No re-entry toast: the user is returning to their own session
-    app.showEditModeNotification = false;
     updateWindowTitle(app);
 }
 
 void enterEditMode(App& app) {
     if (app.currentFile.empty()) {
         // Show brief "No file loaded" notification
-        app.editorNotificationMsg = tr(app, "toast.no_file");
-        app.showEditModeNotification = true;
-        app.editModeNotificationAlpha = 1.0f;
-        app.editModeNotificationStart = std::chrono::steady_clock::now();
-        startNotificationTimer(app);
+        signalPushKey(app, SIG_WARN, SIGI_WARNING, "toast.no_file");
         InvalidateRect(app.hwnd, nullptr, FALSE);
         return;
     }
@@ -1523,11 +1513,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         app.lastEscTime = now;
 
         // Show brief hint
-        app.editorNotificationMsg = tr(app, "toast.exit_confirm");
-        app.showEditModeNotification = true;
-        app.editModeNotificationAlpha = 1.0f;
-        app.editModeNotificationStart = now;
-        startNotificationTimer(app);
+        signalPushKey(app, SIG_INFO, SIGI_INFO, "toast.exit_confirm");
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
@@ -1653,13 +1639,9 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     editorReparse(app);
                 }
                 app.editorRowMetricsWidth = -1.0f;  // pane width changed
-                app.editorNotificationMsg = app.editorShowPreview
-                    ? tr(app, "toast.preview_shown")
-                    : tr(app, "toast.preview_hidden");
-                app.showEditModeNotification = true;
-                app.editModeNotificationAlpha = 1.0f;
-                app.editModeNotificationStart = std::chrono::steady_clock::now();
-                startNotificationTimer(app);
+                signalPushKey(app, SIG_INFO, SIGI_EYE,
+                              app.editorShowPreview ? "toast.preview_shown"
+                                                    : "toast.preview_hidden");
                 app.layoutDirty = app.editorShowPreview;
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
@@ -1681,13 +1663,9 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 app.editorDesiredX = -1.0f;
                 rebuildEditorRowMetrics(app);
                 editorEnsureCursorVisible(app);
-                app.editorNotificationMsg = editorWrapOn(app)
-                    ? tr(app, "toast.wrap_on")
-                    : tr(app, "toast.wrap_off");
-                app.showEditModeNotification = true;
-                app.editModeNotificationAlpha = 1.0f;
-                app.editModeNotificationStart = std::chrono::steady_clock::now();
-                startNotificationTimer(app);
+                signalPushKey(app, SIG_INFO, SIGI_INFO,
+                              editorWrapOn(app) ? "toast.wrap_on"
+                                                : "toast.wrap_off");
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
             }
@@ -3084,61 +3062,4 @@ void renderEditor(App& app, float editorWidth) {
     app.renderTarget->PopAxisAlignedClip();
 }
 
-void renderEditModeNotification(App& app) {
-    if (!app.showEditModeNotification) return;
 
-    auto now = std::chrono::steady_clock::now();
-    float elapsed = std::chrono::duration<float>(now - app.editModeNotificationStart).count();
-
-    // The exit-confirm prompt chip (t13) is its own visible modal now, so
-    // this hint pill no longer needs to hold itself on screen for it
-    if (app.confirmExitPending) {
-        app.showEditModeNotification = false;
-        return;
-    }
-    float alpha = 1.0f;
-    if (elapsed > 3.0f) {
-        app.showEditModeNotification = false;
-        return;
-    }
-    if (elapsed > 1.5f) {
-        alpha = 1.0f - (elapsed - 1.5f) / 1.5f;
-    }
-
-    const wchar_t* msg = app.editorNotificationMsg.c_str();
-    size_t msgLen = app.editorNotificationMsg.size();
-
-    // Size the pill to the message so long prompts aren't clipped
-    IDWriteTextFormat* measureFmt = app.searchTextFormat ? app.searchTextFormat : app.textFormat;
-    float pillWidth = dpi(app, 120.0f);
-    if (measureFmt) {
-        float textWidth = measureText(app, app.editorNotificationMsg, measureFmt);
-        pillWidth = std::min(textWidth + dpi(app, 40.0f), (float)app.width - dpi(app, 20.0f));
-    }
-    float pillHeight = dpi(app, 30.0f);
-    float pillX = (float)(app.width - pillWidth) / 2.0f;
-    float pillY = (float)app.height - dpi(app, 60.0f);
-
-    // Use the active theme for transient editor feedback as well as the
-    // translated message, so a light theme does not carry a fixed green UI.
-    D2D1_COLOR_F pillColor = app.theme.accent;
-    pillColor.a = 0.92f * alpha;
-    app.brush->SetColor(pillColor);
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(D2D1::RectF(pillX, pillY, pillX + pillWidth, pillY + pillHeight), dpi(app, 15.0f), dpi(app, 15.0f)),
-        app.brush);
-
-    // Text
-    D2D1_COLOR_F textColor = app.theme.background;
-    textColor.a = alpha;
-    app.brush->SetColor(textColor);
-    IDWriteTextFormat* fmt = app.searchTextFormat ? app.searchTextFormat : app.textFormat;
-    if (fmt) {
-        fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        app.renderTarget->DrawText(msg, (UINT32)msgLen, fmt,
-            D2D1::RectF(pillX, pillY, pillX + pillWidth, pillY + pillHeight), app.brush);
-        fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-    }
-}
