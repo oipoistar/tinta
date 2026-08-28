@@ -2817,6 +2817,11 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                     return;
                 }
                 scrollToHeadingY(app, app.headings[hit].y);
+                // The clicked heading is the active one even when the
+                // scroll cannot physically reach it (short documents);
+                // the next real scroll hands back to the spy
+                app.tocSpyOverride = hit;
+                app.tocSpyOverrideScroll = app.targetScrollY;
 
                 // Close TOC - a pinned panel stays for the next jump
                 if (!app.tocPinned) {
@@ -3615,12 +3620,15 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             }
             if (wParam == VK_RETURN) {
                 std::wstring needle = toLower(app.tocFilter);
-                for (const auto& heading : app.headings) {
+                for (size_t i = 0; i < app.headings.size(); i++) {
+                    const auto& heading = app.headings[i];
                     if (needle.empty() ||
                         toLower(heading.text).find(needle) !=
                             std::wstring::npos) {
                         ensureLayoutComplete(app);
                         scrollToHeadingY(app, heading.y);
+                        app.tocSpyOverride = (int)i;
+                        app.tocSpyOverrideScroll = app.targetScrollY;
                         app.showToc = false;
                         app.tocAnimation = 0;
                         app.tocFilter.clear();

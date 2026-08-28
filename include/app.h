@@ -748,6 +748,10 @@ struct App {
     bool tocPinned = false;
     bool browserPinned = false;
     float tocAnimation = 0.0f;  // 0 to 1 slide-in from the chosen side
+    // A clicked heading stays the active row even when the scroll cannot
+    // reach it (short documents); any real scroll hands back to the spy
+    int tocSpyOverride = -1;
+    float tocSpyOverrideScroll = 0.0f;  // targetScrollY at the jump
     struct HeadingInfo {
         std::wstring text;
         int level;       // 1-6
