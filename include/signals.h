@@ -43,6 +43,9 @@ void signalPushKey(App& app, int severity, int icon, const char* trKey,
 
 // True while chips are draining or animating (keeps TIMER_NOTIFICATION)
 bool signalsNeedTicks(const App& app);
+// The severity hue on the current theme's luminance row (prompt chips in
+// overlays.cpp share the palette)
+D2D1_COLOR_F signalSeverityHue(const App& app, int severity);
 // Stack + bell + tray; call late in render so chips ride above overlays
 void renderSignalChips(App& app);
 // Mouse press over a chip, the bell, or the open tray. Returns true when

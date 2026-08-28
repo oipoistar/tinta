@@ -274,6 +274,10 @@ void signalPushKey(App& app, int severity, int icon, const char* trKey,
                std::move(context));
 }
 
+D2D1_COLOR_F signalSeverityHue(const App& app, int severity) {
+    return signalHue(app, severity);
+}
+
 bool signalsNeedTicks(const App& app) {
     for (const auto& c : app.signalChips) {
         if (c.tuckT >= 0.0f) return true;
@@ -320,6 +324,13 @@ void renderSignalChips(App& app) {
     float bottom = (float)app.height - margin -
                    (app.showStats ? dpi(app, 55.0f) : 0.0f);
     float right = (float)app.width - margin;
+
+    // The unsaved-exit / create-file prompt chip owns the corner slot
+    if (!app.confirmExitPending && !app.createRefPending) {
+        app.promptChipRect = D2D1_RECT_F{};
+    } else if (app.promptChipRect.right > app.promptChipRect.left) {
+        bottom = std::min(bottom, app.promptChipRect.top - dpi(app, 8.0f));
+    }
 
     // Bell: bottom-right corner, only once something has parked
     app.signalBellRect = D2D1_RECT_F{};
