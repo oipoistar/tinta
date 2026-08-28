@@ -58,6 +58,8 @@ void saveSettings(const Settings& settings) {
     file << "zenWidthPct=" << settings.zenWidthPct << "\n";
     file << "headingRules=" << (settings.headingRules ? 1 : 0) << "\n";
     file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
+    file << "tocPinned=" << (settings.tocPinned ? 1 : 0) << "\n";
+    file << "browserPinned=" << (settings.browserPinned ? 1 : 0) << "\n";
     file << "language=" << settings.language << "\n";
     file << "keyProfile=" << settings.keyProfile << "\n";
     file << "checkUpdates=" << (settings.checkUpdates ? 1 : 0) << "\n";
@@ -304,6 +306,10 @@ Settings loadSettings() {
             settings.headingRules = (value == "1");
         } else if (key == "tocOnLeft") {
             settings.tocOnLeft = (value == "1");
+        } else if (key == "tocPinned") {
+            settings.tocPinned = (value == "1");
+        } else if (key == "browserPinned") {
+            settings.browserPinned = (value == "1");
         } else if (key == "language") {
             if (!value.empty()) settings.language = value;  // "auto" or an id
         } else if (key == "keyProfile") {

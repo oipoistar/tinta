@@ -193,6 +193,10 @@ struct Settings {
     bool headingRules = true;
     // Table of contents panel side: false = right (default), true = left
     bool tocOnLeft = false;
+    // Pinned side panels (#156): a pinned panel stops dismissing on
+    // document clicks and hands the keyboard back to the document
+    bool tocPinned = false;
+    bool browserPinned = false;
     // UI language id ("auto" follows the Windows display language; else a
     // registry id like "en"/"zh"/"de" — see i18n.h). Persisted as a string
     // because languages.ini languages have no stable numeric index.
@@ -739,6 +743,10 @@ struct App {
     // Table of contents overlay
     bool showToc = false;
     bool tocOnLeft = false;     // panel side (persisted)
+    // Pinned panels (#156, persisted): no dismissal on document clicks,
+    // the document keeps hover, selection, and the keyboard
+    bool tocPinned = false;
+    bool browserPinned = false;
     float tocAnimation = 0.0f;  // 0 to 1 slide-in from the chosen side
     struct HeadingInfo {
         std::wstring text;
@@ -1027,8 +1035,10 @@ struct App {
     // The unsaved-exit / create-file prompt chip occupies the corner slot;
     // the chip stack starts above it (set by the prompt renderers)
     D2D1_RECT_F promptChipRect{};
-    // Close cross on the floating Contents card (t13)
+    // Close cross and pin on the floating Contents card (t13/#156)
     D2D1_RECT_F tocCloseRect{};
+    D2D1_RECT_F tocPinRect{};
+    D2D1_RECT_F folderPinRect{};  // pin button on the browser card
     // Breadcrumb segments on the browser card: rect -> number of path
     // components the click keeps (refreshed by renderFolderBrowser)
     std::vector<std::pair<D2D1_RECT_F, int>> folderCrumbHits;

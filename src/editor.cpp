@@ -757,6 +757,16 @@ void editorReparse(App& app) {
 // --- Mode transitions ---
 
 static void enterEditModeWithContent(App& app, const std::string& content) {
+    // The unified editor owns the whole layout: side panels close on
+    // entry, pinned or not (#156) - the pin survives for the next open
+    app.showToc = false;
+    app.tocAnimation = 0.0f;
+    app.tocFilter.clear();
+    app.showFolderBrowser = false;
+    app.folderBrowserAnimation = 0.0f;
+    app.folderBrowserEditingPath = false;
+    app.folderBrowserNaming = 0;
+
     app.editorText = fromUtf8(content);
     // Normalize \r\n to \n
     std::wstring normalized;

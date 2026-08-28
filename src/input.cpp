@@ -128,26 +128,14 @@ static void setThemeChooserCursor(const App& app, float x, float y) {
                                                       : cursorArrow);
 }
 
-static void setTocCursor(const App& app, float x, float y) {
-    float panelWidth = tocPanelWidth(app);
-    float panelX = tocPanelX(app, panelWidth);
-    float padding = dpi(app, 12.0f);
-    float listStartY = padding + dpi(app, 40.0f) + dpi(app, 8.0f);
-    float listBottom = app.height - padding;
-    float itemHeight = dpi(app, 28.0f);
-    if (x < panelX + padding || x > panelX + panelWidth - padding ||
-        y < listStartY || y > listBottom || app.headings.empty()) {
-        SetCursor(cursorArrow);
+static void setTocCursor(App& app, float x, float y) {
+    // Shares the floating card's geometry (t13); the pin and close
+    // controls get the hand as well
+    if (cursorPointInRect(x, y, app.tocPinRect) ||
+        cursorPointInRect(x, y, app.tocCloseRect) ||
+        tocItemIndexAt(app, x, y) >= 0) {
+        SetCursor(cursorHand);
         return;
-    }
-
-    int index = (int)((y - listStartY + app.tocScroll) / itemHeight);
-    if (index >= 0 && index < (int)app.headings.size()) {
-        float itemY = listStartY + index * itemHeight - app.tocScroll;
-        if (y >= itemY && y <= itemY + itemHeight) {
-            SetCursor(cursorHand);
-            return;
-        }
     }
     SetCursor(cursorArrow);
 }
@@ -166,7 +154,8 @@ static void setFolderBrowserCursor(const App& app, float x, float y) {
         return;
     }
     if (inHeader && y >= g.btnY && y <= g.btnY + g.btnSize &&
-        ((x >= g.folderBtnX && x <= g.folderBtnX + g.btnSize) ||
+        ((x >= g.pinBtnX && x <= g.pinBtnX + g.btnSize) ||
+         (x >= g.folderBtnX && x <= g.folderBtnX + g.btnSize) ||
          (x >= g.fileBtnX && x <= g.fileBtnX + g.btnSize))) {
         SetCursor(cursorHand);
         return;
@@ -1135,12 +1124,25 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     }
 
     if (app.showFolderBrowser) {
-        setFolderBrowserCursor(app, (float)app.mouseX, (float)app.mouseY);
-        return;
+        FolderBrowserMetrics fbm = folderBrowserMetrics(app);
+        bool inside = app.mouseX >= fbm.panelX &&
+                      app.mouseX <= fbm.panelX + fbm.panelWidth;
+        if (inside || !app.browserPinned) {
+            setFolderBrowserCursor(app, (float)app.mouseX, (float)app.mouseY);
+            if (inside) InvalidateRect(hwnd, nullptr, FALSE);  // row hover
+            return;
+        }
+        // Pinned (#156): the document beside the panel keeps its hover
     }
     if (app.showToc) {
-        setTocCursor(app, (float)app.mouseX, (float)app.mouseY);
-        return;
+        float tocW = tocPanelWidth(app);
+        float tocX = tocPanelX(app, tocW);
+        bool inside = app.mouseX >= tocX && app.mouseX <= tocX + tocW;
+        if (inside || !app.tocPinned) {
+            setTocCursor(app, (float)app.mouseX, (float)app.mouseY);
+            if (inside) InvalidateRect(hwnd, nullptr, FALSE);  // row hover
+            return;
+        }
     }
     if (app.showThemeChooser) {
         setThemeChooserCursor(app, (float)app.mouseX, (float)app.mouseY);
@@ -1938,23 +1940,43 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         return;
     }
 
-    // If theme chooser, folder browser, or TOC is open, don't start selection - just record for click handling
-    if (app.showThemeChooser || app.showFolderBrowser || app.showToc) {
-        // The content scrollbar stays usable beside a side panel: a click
-        // on it dismisses the folder browser ("back to the document") and
-        // simply works alongside the TOC, which is a navigation aid
-        bool scrollbarClick =
-            (app.scrollbarHovered && app.verticalScrollbarVisible) ||
-            (app.hScrollbarHovered &&
-             app.contentWidth > documentViewportWidth(app));
-        if (!app.showThemeChooser && scrollbarClick) {
-            if (app.showFolderBrowser) {
-                app.showFolderBrowser = false;
-                closeFolderBrowserInput(app);
+    // If theme chooser, folder browser, or TOC is open, don't start
+    // selection - just record for click handling. A PINNED panel only
+    // claims presses inside its own envelope (#156): the document beside
+    // it keeps selection and every other press behavior.
+    {
+        bool browserClaims = false;
+        if (app.showFolderBrowser) {
+            FolderBrowserMetrics fbm = folderBrowserMetrics(app);
+            browserClaims = !app.browserPinned ||
+                            ((float)app.mouseX >= fbm.panelX &&
+                             (float)app.mouseX <= fbm.panelX + fbm.panelWidth);
+        }
+        bool tocClaims = false;
+        if (app.showToc) {
+            float tocW = tocPanelWidth(app);
+            float tocX = tocPanelX(app, tocW);
+            tocClaims = !app.tocPinned ||
+                        ((float)app.mouseX >= tocX &&
+                         (float)app.mouseX <= tocX + tocW);
+        }
+        if (app.showThemeChooser || browserClaims || tocClaims) {
+            // The content scrollbar stays usable beside a side panel: a
+            // click on it dismisses an unpinned folder browser ("back to
+            // the document") and simply works alongside the TOC
+            bool scrollbarClick =
+                (app.scrollbarHovered && app.verticalScrollbarVisible) ||
+                (app.hScrollbarHovered &&
+                 app.contentWidth > documentViewportWidth(app));
+            if (!app.showThemeChooser && scrollbarClick) {
+                if (app.showFolderBrowser && !app.browserPinned) {
+                    app.showFolderBrowser = false;
+                    closeFolderBrowserInput(app);
+                }
+                // fall through to the scrollbar handling below
+            } else {
+                return;
             }
-            // fall through to the scrollbar handling below
-        } else {
-            return;
         }
     }
 
@@ -2747,6 +2769,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             // render-time hover can be a frame stale on fast move+click
             int hit = tocItemIndexAt(app, (float)clickX, (float)clickY);
             if (cursorPointInRect((float)clickX, (float)clickY,
+                                  app.tocPinRect)) {
+                // Pin toggle (#156): pinned survives document clicks
+                app.tocPinned = !app.tocPinned;
+            } else if (cursorPointInRect((float)clickX, (float)clickY,
                                   app.tocCloseRect)) {
                 app.showToc = false;
                 app.tocAnimation = 0;
@@ -2760,20 +2786,25 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 }
                 scrollToHeadingY(app, app.headings[hit].y);
 
-                // Close TOC
-                app.showToc = false;
-                app.tocAnimation = 0;
-                app.tocFilter.clear();
+                // Close TOC - a pinned panel stays for the next jump
+                if (!app.tocPinned) {
+                    app.showToc = false;
+                    app.tocAnimation = 0;
+                    app.tocFilter.clear();
+                }
             }
-        } else {
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        if (!app.tocPinned) {
             // Click outside panel = close TOC
             app.showToc = false;
             app.tocAnimation = 0;
             app.tocFilter.clear();
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
         }
-
-        InvalidateRect(hwnd, nullptr, FALSE);
-        return;
+        // Pinned (#156): the click belongs to the document - fall through
     }
 
     // Folder browser click handling
@@ -2806,6 +2837,13 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 return;
             }
 
+            if (cursorPointInRect((float)clickX, (float)clickY,
+                                  app.folderPinRect)) {
+                // Pin toggle (#156)
+                app.browserPinned = !app.browserPinned;
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return;
+            }
             if (inHeader && clickY >= g.btnY && clickY <= g.btnY + g.btnSize &&
                 clickX >= g.folderBtnX && clickX <= g.fileBtnX + g.btnSize) {
                 // + folder / + file buttons: start naming a new item
@@ -2908,15 +2946,18 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                     }
                 }
             }
-        } else {
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        if (!app.browserPinned) {
             // Click outside panel = close browser
             closeFolderBrowserInput(app);
             app.showFolderBrowser = false;
             app.folderBrowserAnimation = 0;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
         }
-
-        InvalidateRect(hwnd, nullptr, FALSE);
-        return;
+        // Pinned (#156): the click belongs to the document - fall through
     }
 
     // Theme chooser click handling
@@ -3532,8 +3573,9 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             return;
         }
         // TOC filter: printable keys narrow the heading list via WM_CHAR,
-        // Backspace edits, Enter jumps to the first match
-        if (app.showToc && !app.editMode) {
+        // Backspace edits, Enter jumps to the first match. A pinned panel
+        // hands the keyboard back to the document (#156).
+        if (app.showToc && !app.editMode && !app.tocPinned) {
             if (wParam == VK_BACK) {
                 if (!app.tocFilter.empty()) app.tocFilter.pop_back();
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -3843,8 +3885,9 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
         return;
     }
 
-    // TOC filter: typing narrows the heading list
-    if (app.showToc && !app.showSearch) {
+    // TOC filter: typing narrows the heading list (a pinned panel leaves
+    // the keyboard with the document, #156)
+    if (app.showToc && !app.showSearch && !app.tocPinned) {
         wchar_t ch = (wchar_t)wParam;
         if (ch >= 0x20 && ch != 127) {
             app.tocFilter += ch;
