@@ -38,6 +38,7 @@ set(SOURCES
     src/markdown.cpp
     src/themes.cpp
     src/settings.cpp
+    src/config_dir.cpp
     src/d2d_init.cpp
     src/syntax.cpp
     src/utils.cpp
@@ -173,18 +174,20 @@ if(BUILD_TESTING)
         src/inline_style.cpp
         src/markdown.cpp
         src/themes.cpp
+        src/config_dir.cpp
     )
     target_include_directories(inline_style_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${md4c_SOURCE_DIR}/src
     )
-    target_link_libraries(inline_style_tests PRIVATE md4c d2d1 dwrite windowscodecs)
+    target_link_libraries(inline_style_tests PRIVATE md4c d2d1 dwrite windowscodecs shell32)
     target_compile_definitions(inline_style_tests PRIVATE UNICODE _UNICODE)
     add_test(NAME inline_styles COMMAND inline_style_tests)
 
     add_executable(i18n_tests
         tests/i18n_tests.cpp
         src/i18n.cpp
+        src/config_dir.cpp
     )
     target_include_directories(i18n_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
