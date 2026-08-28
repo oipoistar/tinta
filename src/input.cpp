@@ -3714,6 +3714,13 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 if (!app.showSearch && !app.showThemeChooser && !app.showToc &&
                     !app.showFolderBrowser) {
                     annotationBeginCreate(app);
+                    // The keystroke that opened the editor must not leak
+                    // its character into the note box (#161)
+                    if (app.annotEditorOpen) {
+                        app.swallowCharsUntil =
+                            std::chrono::steady_clock::now() +
+                            std::chrono::milliseconds(150);
+                    }
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
                 break;
