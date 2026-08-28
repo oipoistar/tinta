@@ -80,8 +80,9 @@ enum class SyntaxTokenType { Plain, Keyword, String, Comment, Number, Function, 
 // Theme colors
 struct D2DTheme {
     const wchar_t* name;
-    const wchar_t* fontFamily;       // Main font
-    const wchar_t* codeFontFamily;   // Monospace font
+    const wchar_t* fontFamily;        // Main font
+    const wchar_t* headingFontFamily; // Headings; null/empty inherits fontFamily
+    const wchar_t* codeFontFamily;    // Monospace font
     bool isDark;
     D2D1_COLOR_F background;
     D2D1_COLOR_F text;
@@ -127,17 +128,26 @@ extern const int THEME_COUNT;
 // stable addresses for the app lifetime, so D2DTheme's const wchar_t*
 // members stay valid. Indices: [0, THEME_COUNT) built-in, then customs.
 struct CustomTheme {
-    std::wstring name, fontFamily, codeFontFamily;
+    std::wstring name, fontFamily, headingFontFamily, codeFontFamily;
     D2DTheme theme;
 };
 int themeCount();
 const D2DTheme& themeAt(int index);  // out-of-range clamps to theme 0
+
+// The face headings render with: headingfont= when the theme sets one,
+// else the theme's main font - so font= means the whole document (#155)
+inline const wchar_t* themeHeadingFont(const D2DTheme& t) {
+    return (t.headingFontFamily && t.headingFontFamily[0])
+               ? t.headingFontFamily
+               : t.fontFamily;
+}
 void loadCustomThemes();
 // Adds or replaces (by name) a user theme and rewrites themes.ini.
 // Returns the theme's registry index, or -1 on failure.
 int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
                     const std::wstring& fontFamily,
-                    const std::wstring& codeFontFamily);
+                    const std::wstring& codeFontFamily,
+                    const std::wstring& headingFontFamily = L"");
 
 // Persistent settings
 struct Settings {
