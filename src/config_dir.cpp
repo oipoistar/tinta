@@ -44,3 +44,32 @@ std::wstring tintaConfigDir() {
     }
     return cached;
 }
+
+std::wstring configFilePathForShell(const std::wstring& path) {
+    if (path.empty()) return path;
+    // Resolve the file, not just its parent: MSIX can merge redirected
+    // files with existing, unvirtualized files in the same AppData folder.
+    HANDLE file = CreateFileW(path.c_str(), 0,
+                             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                             nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return path;
+
+    DWORD size = GetFinalPathNameByHandleW(file, nullptr, 0, VOLUME_NAME_DOS);
+    std::wstring resolved(size, L'\0');
+    DWORD length = size ? GetFinalPathNameByHandleW(file, resolved.data(), size,
+                                                  VOLUME_NAME_DOS) : 0;
+    CloseHandle(file);
+    if (!length || length >= size) return path;
+    resolved.resize(length);
+
+    // Shell file associations expect ordinary DOS/UNC paths, not the
+    // extended-path prefix returned by GetFinalPathNameByHandleW.
+    if (resolved.rfind(L"\\\\?\\UNC\\", 0) == 0) {
+        return L"\\\\" + resolved.substr(8);
+    }
+    if (resolved.rfind(L"\\\\?\\", 0) == 0 && resolved.size() > 6 &&
+        resolved[5] == L':') {
+        resolved.erase(0, 4);
+    }
+    return resolved;
+}
