@@ -939,7 +939,11 @@ ID2D1Bitmap* renderPeekBitmap(App& app, const std::wstring& path,
     updateTextFormats(app);
     app.root = parsed.root;
     app.currentFile = toUtf8(path);  // relative images resolve at the target
+    // Plain-text targets drop the whole-file code block's card: the peek
+    // panel is already the frame
+    app.peekFrameless = isPlainTextDocumentPath(std::wstring_view(path));
     layoutAtPrintWidth(app, widthDips);
+    app.peekFrameless = false;
     // The layout starts below the (invisible) title strip; the peek slice
     // begins there and shrinks to short targets
     float topPad = chromeTopHeight(app);

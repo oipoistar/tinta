@@ -1744,6 +1744,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     if (app.showThemeEditor || app.showShortcutEditor) return;
     // Unsaved-changes dialog is modal: buttons act on the release
     if (app.editMode && app.confirmExitPending) return;
+    // Create-missing-reference dialog: buttons act on the release; the
+    // press must not start a document selection underneath it
+    if (app.createRefPending) return;
 
     // Settings: sliders drag from the press; everything else acts on release
     if (app.showSettings) {
@@ -2197,12 +2200,20 @@ static void navRecordJump(App& app, const std::string& fromPath,
     app.navForward.clear();
 }
 
-// A live .md reference joins the window as a tab (#127)
-static void openFileRefTarget(App& app, HWND hwnd, const std::string& path) {
+// A live reference: markdown joins the window as a tab (#127), other
+// text files open with their registered application (#162). Returns
+// true when the target opened inside Tinta.
+static bool openFileRefTarget(App& app, HWND hwnd, const std::string& path) {
+    if (!qmd::fileRefIsMarkdown(path)) {
+        ShellExecuteW(hwnd, L"open", toWide(path).c_str(), nullptr,
+                      nullptr, SW_SHOWNORMAL);
+        return false;
+    }
     if (_stricmp(app.currentFile.c_str(), path.c_str()) != 0) {
         navRecordJump(app, app.currentFile, app.scrollY);
     }
     tabOpenPath(app, hwnd, path, true);
+    return true;
 }
 
 // Start page actions (design t7). Ids match startPageHitAt: 1 open,
@@ -2316,8 +2327,11 @@ static void createRefAction(App& app, HWND hwnd, int action) {
             out.close();
             // The layout cached this path as missing; the ghost turns live
             app.fileRefCache.erase(app.createRefPath);
-            openFileRefTarget(app, hwnd, app.createRefPath);
-            enterEditMode(app);
+            // A markdown target opens in a tab ready to type; other text
+            // files hand off to their registered application (#162)
+            if (openFileRefTarget(app, hwnd, app.createRefPath)) {
+                enterEditMode(app);
+            }
         }
     }
     app.createRefPath.clear();
@@ -2585,7 +2599,6 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     if (app.createRefPending) {
         float mx = (float)GET_X_LPARAM(lParam);
         float my = (float)GET_Y_LPARAM(lParam);
-        app.swallowNextMouseUp = true;
         for (const auto& hit : app.createRefHits) {
             if (mx >= hit.first.left && mx <= hit.first.right &&
                 my >= hit.first.top && my <= hit.first.bottom) {

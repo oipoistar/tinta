@@ -2066,8 +2066,13 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
 
     float blockHeight = lineCount * lineHeight + padding * 2;
     size_t bgRectIndex = app.layoutRects.size();
-    app.layoutRects.push_back({D2D1::RectF(indent, y, indent + maxWidth, y + blockHeight),
-                               app.theme.codeBackground});
+    // Peeking a plain-text file: the panel already frames the content,
+    // so the whole-file wrapper block skips its own card
+    bool frameless = app.peekFrameless;
+    if (!frameless) {
+        app.layoutRects.push_back({D2D1::RectF(indent, y, indent + maxWidth, y + blockHeight),
+                                   app.theme.codeBackground});
+    }
 
     std::wstring wcode = toWide(code);
 
@@ -2166,7 +2171,9 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
     // wide code participates in horizontal scrolling like diagrams do
     float widestExtent = maxLineWidth + padding * 2;
     if (widestExtent > maxWidth) {
-        app.layoutRects[bgRectIndex].rect.right = indent + widestExtent;
+        if (!frameless) {
+            app.layoutRects[bgRectIndex].rect.right = indent + widestExtent;
+        }
         app.contentWidth = std::max(app.contentWidth, indent + widestExtent);
     }
 
