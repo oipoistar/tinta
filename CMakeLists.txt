@@ -40,6 +40,7 @@ set(SOURCES
     src/settings.cpp
     src/config_dir.cpp
     src/signals.cpp
+    src/tableedit.cpp
     src/d2d_init.cpp
     src/syntax.cpp
     src/utils.cpp

@@ -2880,6 +2880,27 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
         rowHeights[r] = maxRowH;
     }
 
+    // The Table element itself never receives a sourceOffset (the parser
+    // stamps the deepest element at text time), so the table's source
+    // anchor is its first text-bearing descendant - the same convention
+    // the in-place cell editor's source parser assumes (#148)
+    size_t tableSrc = SIZE_MAX;
+    {
+        std::function<void(const ElementPtr&)> firstSrc =
+            [&](const ElementPtr& e) {
+                if (!e || tableSrc != SIZE_MAX) return;
+                if (e->sourceOffset != SIZE_MAX) {
+                    tableSrc = e->sourceOffset;
+                    return;
+                }
+                for (const auto& child : e->children) firstSrc(child);
+            };
+        for (const auto& child : elem->children) {
+            firstSrc(child);
+            if (tableSrc != SIZE_MAX) break;
+        }
+    }
+
     // Pass 2: Render cells via layoutInlineContent (produces real text runs, links, etc.)
     float tableStartY = y;
     D2D1_COLOR_F borderColor = app.theme.blockquoteBorder;
@@ -2906,6 +2927,15 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
             const auto& cell = row->children[c];
             IDWriteTextFormat* fmt = isHeader ? app.boldFormat : app.textFormat;
             D2D1_COLOR_F textColor = isHeader ? app.theme.heading : app.theme.text;
+
+            // In-place editing (#148): the preview records every cell's
+            // rect keyed by the table's source anchor plus row/col
+            if (app.editMode && tableSrc != SIZE_MAX) {
+                app.tableCellRects.push_back(
+                    {tableSrc, (int)r, (int)c,
+                     D2D1::RectF(cellX, y, cellX + colWidths[c],
+                                 y + rowHeights[r])});
+            }
 
             if (!cell->children.empty()) {
                 float cellW = colWidths[c] - cellPadding * 2;
@@ -2973,6 +3003,7 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
         info.fitKey = fitKey;
         info.fitCandidate = fitCandidate || fitActive;
         info.fitActive = fitActive;
+        info.sourceOffset = tableSrc;
         app.tableRects.push_back(std::move(info));
     }
 

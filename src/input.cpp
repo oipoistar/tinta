@@ -14,6 +14,7 @@
 #include "render.h"
 #include "overlays.h"
 #include "signals.h"
+#include "tableedit.h"
 #include "pandoc.h"
 #include "print.h"
 #include "export.h"
@@ -1829,6 +1830,21 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             quickNoteOpenFile(app, hwnd);
             return;
         }
+        // In-place table editing (#148): cells and the + affordances
+        // catch preview presses before selection handling
+        if (app.editorShowPreview) {
+            float docX = (float)x - documentViewportX(app) + app.scrollX;
+            float docY = (float)y + app.scrollY;
+            if (tableEditMouseDown(app, hwnd, docX, docY)) {
+                app.swallowNextMouseUp = true;
+                return;
+            }
+            if (app.tableEditActive) {
+                // A press anywhere else in the preview commits the cell
+                tableEditCommit(app);
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+        }
         // Fall through for preview pane clicks
     }
 
@@ -3344,6 +3360,8 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 
     // Edit mode: Ctrl+C with preview pane selection should copy from preview
     if (app.editMode) {
+        // An open table cell editor owns the keyboard (#148)
+        if (tableEditKeyDown(app, hwnd, wParam)) return;
         if (ctrl && wParam == 'C' && app.hasSelection &&
             app.selAnchor != app.selFocus) {
             std::wstring selected = selectionTextForRange(
@@ -3930,6 +3948,8 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
 
     // Edit mode: ':' enters edit mode, otherwise route to editor
     if (app.editMode) {
+        // An open table cell editor takes the typing (#148)
+        if (tableEditChar(app, (wchar_t)wParam)) return;
         handleEditorCharInput(app, hwnd, wParam);
         return;
     }

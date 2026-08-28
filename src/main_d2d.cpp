@@ -30,6 +30,7 @@
 #include "annotations.h"
 #include "drafts.h"
 #include "signals.h"
+#include "tableedit.h"
 #include "editrail.h"
 #include "startpage.h"
 
@@ -1062,6 +1063,9 @@ render_document:
 
         // Quick-note empty state: Open button in the blank preview pane
         renderQuickNoteEmptyState(app);
+
+        // In-place table editing: cell input + hover affordances (#148)
+        renderTableEditOverlay(app);
 
         // Render search overlay in screen coordinates (over editor pane)
         if (app.showSearch) renderSearchOverlay(app);
