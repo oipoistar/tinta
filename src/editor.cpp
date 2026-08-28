@@ -1210,11 +1210,10 @@ void saveEditorFile(App& app, HWND hwnd) {
         editorReparse(app);
 
         // Show "Saved!" notification
-        app.editorNotificationMsg = tr(app, "toast.saved");
-        app.showEditModeNotification = true;
-        app.editModeNotificationAlpha = 1.0f;
-        app.editModeNotificationStart = std::chrono::steady_clock::now();
-        startNotificationTimer(app);
+        signalPush(app, SIG_SUCCESS, SIGI_CHECK,
+                   std::wstring(tr(app, "toast.saved")) + L" \u2014 ",
+                   app.tabs[app.activeTab].title,
+                   app.tabs[app.activeTab].title);
 
         // Update window title
         updateWindowTitle(app);
@@ -1222,12 +1221,13 @@ void saveEditorFile(App& app, HWND hwnd) {
         InvalidateRect(hwnd, nullptr, FALSE);
     } else {
         // Surface the failure — a silent no-op here leaves the document
-        // permanently dirty and traps the user in the exit-confirm prompt
-        app.editorNotificationMsg = tr(app, "toast.save_failed");
-        app.showEditModeNotification = true;
-        app.editModeNotificationAlpha = 1.0f;
-        app.editModeNotificationStart = std::chrono::steady_clock::now();
-        startNotificationTimer(app);
+        // permanently dirty and traps the user in the exit-confirm prompt.
+        // The chip stays until answered and offers a retry from the tray.
+        signalPush(app, SIG_ERROR, SIGI_WARNING,
+                   std::wstring(tr(app, "toast.save_failed")) + L" \u2014 ",
+                   app.tabs[app.activeTab].title,
+                   app.tabs[app.activeTab].title, SIGA_RETRY_SAVE,
+                   SIGC_NONE, false);
         InvalidateRect(hwnd, nullptr, FALSE);
     }
 }
@@ -3080,19 +3080,19 @@ void renderEditModeNotification(App& app) {
     auto now = std::chrono::steady_clock::now();
     float elapsed = std::chrono::duration<float>(now - app.editModeNotificationStart).count();
 
-    float alpha = 1.0f;
+    // The exit-confirm prompt chip (t13) is its own visible modal now, so
+    // this hint pill no longer needs to hold itself on screen for it
     if (app.confirmExitPending) {
-        // The exit-confirm prompt stays fully visible until answered —
-        // fading it out while confirmExitPending is still armed leaves the
-        // app in an invisible modal state
-    } else {
-        if (elapsed > 3.0f) {
-            app.showEditModeNotification = false;
-            return;
-        }
-        if (elapsed > 1.5f) {
-            alpha = 1.0f - (elapsed - 1.5f) / 1.5f;
-        }
+        app.showEditModeNotification = false;
+        return;
+    }
+    float alpha = 1.0f;
+    if (elapsed > 3.0f) {
+        app.showEditModeNotification = false;
+        return;
+    }
+    if (elapsed > 1.5f) {
+        alpha = 1.0f - (elapsed - 1.5f) / 1.5f;
     }
 
     const wchar_t* msg = app.editorNotificationMsg.c_str();

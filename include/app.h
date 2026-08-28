@@ -1014,6 +1014,9 @@ struct App {
     double signalLastTick = 0.0;           // seconds, drain integration
     D2D1_RECT_F signalBellRect{};
     D2D1_RECT_F signalTrayRect{}, signalTrayClearRect{};
+    // The unsaved-exit / create-file prompt chip occupies the corner slot;
+    // the chip stack starts above it (set by the prompt renderers)
+    D2D1_RECT_F promptChipRect{};
     std::vector<std::pair<D2D1_RECT_F, int>> signalTrayHits;  // action row: chip id
 
     // Cursor blink state, toggled by TIMER_CURSOR_BLINK (editor + search cursor)
