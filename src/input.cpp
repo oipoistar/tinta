@@ -2744,20 +2744,29 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // TOC click handling
     if (app.showToc) {
         int clickX = GET_X_LPARAM(lParam);
+        int clickY = GET_Y_LPARAM(lParam);
 
         float panelWidth = tocPanelWidth(app);
         float panelX = tocPanelX(app, panelWidth);
 
         if (clickX >= panelX && (float)clickX <= panelX + panelWidth) {
             // Click inside panel
-            if (app.hoveredTocIndex >= 0 && app.hoveredTocIndex < (int)app.headings.size()) {
+            // Hit-test the click's own coordinates (#114 pattern) - the
+            // render-time hover can be a frame stale on fast move+click
+            int hit = tocItemIndexAt(app, (float)clickX, (float)clickY);
+            if (cursorPointInRect((float)clickX, (float)clickY,
+                                  app.tocCloseRect)) {
+                app.showToc = false;
+                app.tocAnimation = 0;
+                app.tocFilter.clear();
+            } else if (hit >= 0 && hit < (int)app.headings.size()) {
                 // Scroll document to heading
                 ensureLayoutComplete(app);
-                if (app.hoveredTocIndex >= (int)app.headings.size()) {
+                if (hit >= (int)app.headings.size()) {
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return;
                 }
-                scrollToHeadingY(app, app.headings[app.hoveredTocIndex].y);
+                scrollToHeadingY(app, app.headings[hit].y);
 
                 // Close TOC
                 app.showToc = false;

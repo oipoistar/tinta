@@ -44,6 +44,9 @@ enum SettingsAction {
 // TOC panel X for the configured side at the current animation state;
 // geometry shared between render and the input hit tests
 float tocPanelX(const App& app, float panelWidth);
+// Heading index under a point in the floating Contents card, or -1 -
+// clicks hit-test their own coordinates (#114 pattern)
+int tocItemIndexAt(App& app, float x, float y);
 void renderSettingsOverlay(App& app);
 
 // Theme editor ("+ New" in settings). Font-list entries encode their
