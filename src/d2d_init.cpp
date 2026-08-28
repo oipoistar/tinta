@@ -245,14 +245,29 @@ void updateTextFormats(App& app) {
                 };
                 builder->AddMapping(krRanges, 5, krFamilies, 3);
 
-                // --- CJK ideographs: Chinese font first ---
-                // Putting Microsoft YaHei UI before Japanese fonts ensures
-                // Chinese characters use the Chinese glyph variant and a
-                // consistent Regular weight instead of Yu Gothic UI's
-                // visually-heavier strokes.
-                const wchar_t* cjkFamilies[] = {
+                // --- CJK ideographs: ordered by the Windows UI language ---
+                // Han unification shares code points across languages but
+                // the glyph shapes differ, so whichever family sits first
+                // decides the variant every ideograph renders with. The
+                // default keeps Microsoft YaHei UI first (Chinese variants
+                // and a consistent Regular weight instead of Yu Gothic UI's
+                // visually-heavier strokes); Japanese and Korean systems
+                // reorder so kanji/hanja match the kana or hangul around
+                // them instead of coming out Simplified-Chinese (#155).
+                const wchar_t* cjkZh[] = {
                     L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo", L"Malgun Gothic"
                 };
+                const wchar_t* cjkJa[] = {
+                    L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI", L"Malgun Gothic"
+                };
+                const wchar_t* cjkKo[] = {
+                    L"Malgun Gothic", L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo"
+                };
+                WORD uiLang = PRIMARYLANGID(GetUserDefaultUILanguage());
+                const wchar_t** cjkFamilies =
+                    uiLang == LANG_JAPANESE ? cjkJa
+                    : uiLang == LANG_KOREAN ? cjkKo
+                                            : cjkZh;
                 DWRITE_UNICODE_RANGE cjkRanges[] = {
                     { 0x2E80, 0x303F },    // CJK radicals, Kangxi, CJK symbols & punctuation
                     { 0x3100, 0x312F },    // Bopomofo
