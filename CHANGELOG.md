@@ -1,5 +1,25 @@
 # Changelog
 
+## [v3.5.0] - 2026-08-28
+
+The table editor release: edit tables by clicking them in the rendered view, pin the side panels, floating outline and browser cards, and one calm chip system for every notification.
+
+### Added
+- In-place table editing: in edit mode, click any table cell in the rendered page to type into it - Tab and Shift+Tab move between cells, Enter commits, Esc cancels, Tab past the last cell starts a new row, and + buttons under and beside the table add rows and columns; every change lands in the Markdown source as a single undo step (#148, #178)
+- Pinned side panels: pin the table of contents or the file browser and it stays open beside the document while keys and clicks pass through to the page; pinned panels come back on the next launch, and both can be open at once with the document reflowing between them (#156, #171, #173, #175)
+- One signal system: every notification is a uniform chip in the bottom right - passive ones drain away, actionable ones wait to be answered, hovering holds them, and missed ones collect in a bell tray; save results, update offers, draft recovery, and the exit/create prompts all share the same anatomy (#165, #167, #177)
+- The table of contents is a floating card with type-scaled entries and a scroll thread tracking your position; the file browser card gains a clickable breadcrumb path, cleaner icons, and folder/file counts (#168, #169)
+- Custom themes can set a heading font separately from the body font via headingfont= in themes.ini; themes derived in the theme editor keep their base theme's heading face (#155, #170)
+- File references to any known text format get the full link treatment (.xml added), and non-Markdown targets open in their registered application (#162, #163)
+
+### Fixed
+- Store installs: the Settings buttons that open the configuration .ini files now resolve the virtualized AppData path so the editor finds the real file - contributed by @brianhassel-gh (#166)
+- Pressing A to create an annotation no longer leaks the keystroke into the note box (#161, #164)
+- Plain-text link peeks render frameless instead of as a code block, and cancelling the create-reference dialog no longer leaves a stuck selection (#163)
+- Heading jumps from the table of contents land clear of the tab strip (#176)
+- Clicking a TOC section no longer latches the scrollbar to the mouse (#172)
+- The clicked heading stays highlighted in the TOC even when the whole document fits on screen (#174)
+
 ## [v3.4.0] - 2026-08-28
 
 The feedback release: every change came from a user report - one document per window fixed, portable mode, two table measurement fixes, locale-correct kanji, and a heading separator toggle.

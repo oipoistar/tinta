@@ -45,30 +45,34 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.** The feedback release: every change in this one came from a user report - portable mode, one document per window fixed, correct table widths, locale-correct kanji, and a heading separator toggle.
+            **Markdown, distilled.** The table editor release: edit tables by clicking them in the rendered view, pin the side panels, floating outline and browser cards, and one calm chip system for every notification.
 
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Portable mode (#147)
-            - Create a settings.ini next to tinta.exe (even an empty one) and that folder becomes the config home: settings, custom themes, UI languages, and drafts all travel with the exe
-            - Without it, configuration stays in `%APPDATA%\Tinta` as before; Store installs are unaffected
+            ### Edit tables in place (#148)
+            - In edit mode, click any table cell in the rendered page and type into it: Tab and Shift+Tab move between cells, Enter commits, Esc cancels, and Tab past the last cell starts a new row
+            - + buttons under and beside the table add rows and columns; every change lands in the Markdown source as a single undo step
 
-            ### One document per window (#147)
-            - With "Open files in tabs" off, every file opens in its own window again: new windows no longer inherit the previous session's tabs
-            - The toggle now takes effect immediately for the next file you open - no need to close every Tinta window first
+            ### Pinned side panels (#156)
+            - Pin the table of contents or the file browser and it stays open beside the document: keys and clicks pass through to the page, and pinned panels come back on the next launch
+            - Both panels can be open and pinned at once, with the document reflowing between them
 
-            ### Tables measure what they render (#148)
-            - Column widths are measured with the renderer's own font shaping, so CJK tables no longer wrap their last line over the bottom border
-            - Inline code in cells is measured as the padded mono chip it actually renders as, so long code spans stay inside the table
+            ### One signal system
+            - Every notification is now a uniform chip in the bottom right: passive ones drain away, actionable ones wait to be answered, hovering holds them, and missed ones collect in a bell tray
+            - Save results, update offers, draft recovery, and the exit/create prompts all share the same look
 
-            ### Japanese and Korean text (#155)
-            - Kanji now follow the Windows UI language: Japanese systems prefer Yu Gothic and Meiryo instead of Simplified-Chinese glyph variants, and Korean systems prefer Malgun Gothic
+            ### Redesigned side panels
+            - The table of contents is a floating card with type-scaled entries and a scroll thread tracking your position
+            - The file browser card gains a clickable breadcrumb path, cleaner icons, and folder and file counts
 
-            ### Heading separators are optional (#154)
-            - Settings > Appearance gains a toggle for the lines drawn under level 1 and 2 headings; it applies live and is remembered
+            ### Smaller improvements
+            - Custom themes can set a heading font separately from the body font (#155)
+            - File references cover more text formats, and non-Markdown targets open in their registered application (#162)
+            - Store installs: the Settings buttons that open the configuration files now find the real virtualized file (#166)
+            - Creating an annotation no longer leaks the A keystroke into the note box (#161)
 
             ### What's included
             - Export as HTML, DOCX, or PDF - plus the Pandoc formats above
