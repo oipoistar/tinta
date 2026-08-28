@@ -2633,8 +2633,14 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             } else if (action == TE_SAVE) {
                 std::wstring name = app.themeEditorName.empty()
                     ? L"My theme" : app.themeEditorName;
+                const D2DTheme& base = themeAt(app.themeEditorBase);
+                // Carry the base theme's heading face so deriving from a
+                // theme with headingfont= (Abyss included) keeps its look
+                std::wstring baseHeading =
+                    (base.headingFontFamily && base.headingFontFamily[0])
+                        ? base.headingFontFamily : L"";
                 int idx = saveCustomTheme(app.themeEditorTheme, name,
-                    app.themeEditorFont, themeAt(app.themeEditorBase).codeFontFamily);
+                    app.themeEditorFont, base.codeFontFamily, baseHeading);
                 if (idx >= 0) {
                     // Preview format cache must grow for the chooser
                     for (auto& pf : app.themePreviewFormats) {

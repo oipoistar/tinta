@@ -141,7 +141,7 @@ void updateTextFormats(App& app) {
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         fontSize, L"en-us", &app.textFormat);
 
-    app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
+    app.dwriteFactory->CreateTextFormat(themeHeadingFont(app.theme), nullptr,
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         28.0f * scale, L"en-us", &app.headingFormat);
 
@@ -180,8 +180,11 @@ void updateTextFormats(App& app) {
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         fontSize * 0.68f, L"en-us", &app.supSubFormat);
 
-    // Heading formats by level (use Segoe UI to match previous behavior)
-    const wchar_t* headingFont = L"Segoe UI";
+    // Heading formats by level: the theme's heading face, which inherits
+    // the main font unless the theme sets headingfont= (#155). Abyss pins
+    // its headings to Segoe UI in data - bolding its Light body family
+    // would render faux-bold.
+    const wchar_t* headingFont = themeHeadingFont(app.theme);
     float headingSizes[] = {32, 26, 22, 18, 16, 14};
     for (int i = 0; i < 6; i++) {
         app.dwriteFactory->CreateTextFormat(headingFont, nullptr,
