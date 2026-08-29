@@ -24,4 +24,11 @@ void tableEditCancel(App& app);
 // (call after the edit-mode clip pops)
 void renderTableEditOverlay(App& app);
 
+// Excel/TSV paste (#181): true when pasted text reads as a uniform
+// tab-separated grid (2+ rows, equal tab counts per row)
+bool tsvLooksLikeTable(const std::wstring& text);
+// That grid as a markdown table, first row as the header (no trailing
+// newline - the caller pads for its insertion context)
+std::wstring tsvToMarkdownTable(const std::wstring& text);
+
 #endif  // TINTA_TABLEEDIT_H
