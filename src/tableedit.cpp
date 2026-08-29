@@ -300,6 +300,81 @@ const App::TableCellRect* activeCellRect(const App& app) {
 
 }  // namespace
 
+// --- Excel/TSV paste (#181) -----------------------------------------
+
+// Clipboard text as lines, tolerating CRLF; Excel terminates a range
+// copy with one newline, so trailing empty lines are dropped
+static std::vector<std::wstring> tsvLines(const std::wstring& text) {
+    std::vector<std::wstring> lines;
+    size_t start = 0;
+    while (start <= text.size()) {
+        size_t nl = text.find(L'\n', start);
+        std::wstring line = (nl == std::wstring::npos)
+            ? text.substr(start) : text.substr(start, nl - start);
+        if (!line.empty() && line.back() == L'\r') line.pop_back();
+        lines.push_back(std::move(line));
+        if (nl == std::wstring::npos) break;
+        start = nl + 1;
+    }
+    while (!lines.empty() && lines.back().empty()) lines.pop_back();
+    return lines;
+}
+
+// A paste reads as a spreadsheet grid when it has 2+ rows and every row
+// carries the same number of tabs - exactly what Excel (or any TSV
+// export) puts on the clipboard for a range copy. Single lines and
+// ragged tab counts paste untouched; tabs in code are common.
+bool tsvLooksLikeTable(const std::wstring& text) {
+    if (text.find(L'\t') == std::wstring::npos) return false;
+    std::vector<std::wstring> lines = tsvLines(text);
+    if (lines.size() < 2) return false;
+    size_t tabs = std::wstring::npos;
+    for (const std::wstring& line : lines) {
+        size_t count = (size_t)std::count(line.begin(), line.end(), L'\t');
+        if (count == 0) return false;
+        if (tabs == std::wstring::npos) tabs = count;
+        else if (count != tabs) return false;
+    }
+    return true;
+}
+
+// The grid as a markdown table: first row becomes the header, cells are
+// trimmed and pipe-escaped. No trailing newline - the caller pads for
+// its insertion context.
+std::wstring tsvToMarkdownTable(const std::wstring& text) {
+    std::vector<std::wstring> lines = tsvLines(text);
+    std::wstring out;
+    size_t cols = 0;
+    for (size_t r = 0; r < lines.size(); r++) {
+        const std::wstring& line = lines[r];
+        std::vector<std::wstring> cells;
+        size_t start = 0;
+        while (start <= line.size()) {
+            size_t tab = line.find(L'\t', start);
+            std::wstring cell = (tab == std::wstring::npos)
+                ? line.substr(start) : line.substr(start, tab - start);
+            size_t a = cell.find_first_not_of(L' ');
+            size_t b = cell.find_last_not_of(L' ');
+            cell = (a == std::wstring::npos) ? L"" : cell.substr(a, b - a + 1);
+            cells.push_back(sanitizeCellText(cell));
+            if (tab == std::wstring::npos) break;
+            start = tab + 1;
+        }
+        if (r == 0) cols = cells.size();
+        cells.resize(cols);
+        out += L"|";
+        for (const std::wstring& cell : cells) {
+            out += L" " + cell + L" |";
+        }
+        if (r == 0) {
+            out += L"\n|";
+            for (size_t c = 0; c < cols; c++) out += L" --- |";
+        }
+        if (r + 1 < lines.size()) out += L"\n";
+    }
+    return out;
+}
+
 bool tableEditMouseDown(App& app, HWND hwnd, float docX, float docY) {
     // + row / + column affordances first: they sit outside cell rects
     if (app.tableAddRowRect.right > app.tableAddRowRect.left &&

@@ -406,6 +406,21 @@ void editorReplaceRangeExternal(App& app, size_t start, size_t end,
     app.editorRowMetricsWidth = -1.0f;
 }
 
+// Pad a markdown table for insertion at pos: a table cannot interrupt a
+// paragraph, so a blank line must separate it on both sides (#181)
+static std::wstring padTableForInsert(const App& app,
+                                      const std::wstring& table, size_t pos) {
+    int nlBefore = 0;
+    for (size_t k = pos; k > 0 && app.editorText[k - 1] == L'\n' && nlBefore < 2; k--) {
+        nlBefore++;
+    }
+    std::wstring pre;
+    if (pos > 0 && nlBefore < 2) pre = (nlBefore == 1) ? L"\n" : L"\n\n";
+    std::wstring post = L"\n";
+    if (pos < app.editorText.size() && app.editorText[pos] != L'\n') post = L"\n\n";
+    return pre + table + post;
+}
+
 static void editorUndo(App& app) {
     if (app.undoStack.empty()) return;
     auto action = app.undoStack.back();
@@ -1652,6 +1667,15 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 if (!paste.empty()) {
                     if (app.editorHasSelection) editorDeleteSelection(app);
+                    // Excel range copies arrive as TSV: paste them as a
+                    // markdown table (#181). Ctrl+Shift+V pastes raw.
+                    if (!(GetKeyState(VK_SHIFT) & 0x8000) &&
+                        tsvLooksLikeTable(paste)) {
+                        paste = padTableForInsert(
+                            app, tsvToMarkdownTable(paste), app.editorCursorPos);
+                        signalPushKey(app, SIG_SUCCESS, SIGI_CHECK,
+                                      "toast.paste_table");
+                    }
                     size_t before = app.editorCursorPos;
                     app.editorText.insert(app.editorCursorPos, paste);
                     app.editorCursorPos += paste.size();
@@ -2165,6 +2189,13 @@ void editorClipboardPaste(App& app, HWND hwnd) {
     std::wstring paste = editorGetClipboard(hwnd);
     if (paste.empty()) return;
     if (app.editorHasSelection) editorDeleteSelection(app);
+    // Same Excel/TSV conversion as Ctrl+V (#181); the rail button has
+    // no modifier, Ctrl+Shift+V is the raw-paste escape hatch
+    if (tsvLooksLikeTable(paste)) {
+        paste = padTableForInsert(app, tsvToMarkdownTable(paste),
+                                  app.editorCursorPos);
+        signalPushKey(app, SIG_SUCCESS, SIGI_CHECK, "toast.paste_table");
+    }
     size_t before = app.editorCursorPos;
     app.editorText.insert(app.editorCursorPos, paste);
     app.editorCursorPos += paste.size();
