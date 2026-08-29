@@ -2050,7 +2050,7 @@ void renderHelpOverlay(App& app) {
         {kToc.c_str(),    tr(app, "help.view.toc")},
         {L"Ctrl+T",       tr(app, "help.view.new_tab")},
         {L"Ctrl+Tab",     tr(app, "help.view.next_tab")},
-        {L"Ctrl+W",       tr(app, "help.view.close_tab")},
+        {L"Ctrl+W / Ctrl+F4", tr(app, "help.view.close_tab")},
         {kTheme.c_str(),  tr(app, "help.view.theme")},
         {kStats.c_str(),  tr(app, "help.view.stats")},
         {kHelp.c_str(),   tr(app, "help.view.help")},

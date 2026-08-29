@@ -3327,6 +3327,12 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             tabCloseIndex(app, hwnd, app.activeTab);
             return;
         }
+        if (wParam == VK_F4) {
+            // Ctrl+F4 closes the tab in BOTH modes - the reachable close
+            // while editing, where Ctrl+W means word wrap (#181)
+            tabCloseIndex(app, hwnd, app.activeTab);
+            return;
+        }
         if (wParam == 'T') {
             // New tab = the start page (browser-style new-tab page); its
             // Open/Browse/recents land in this tab. The old open-into-a-
