@@ -404,7 +404,9 @@ void updateOverlayFormats(App& app) {
         editorFontSize, L"en-us", &app.editorTextFormat);
     if (app.editorTextFormat) {
         app.editorTextFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-        // Measure actual monospace character width
+        // Measure actual monospace character width and the font's natural
+        // line metrics (before uniform spacing overrides them below)
+        float naturalHeight = 0.0f, naturalBaseline = 0.0f;
         IDWriteTextLayout* measureLayout = nullptr;
         app.dwriteFactory->CreateTextLayout(L"M", 1, app.editorTextFormat,
             10000.0f, 100.0f, &measureLayout);
@@ -412,8 +414,28 @@ void updateOverlayFormats(App& app) {
             DWRITE_TEXT_METRICS metrics{};
             measureLayout->GetMetrics(&metrics);
             app.editorCharWidth = metrics.widthIncludingTrailingWhitespace;
+            DWRITE_LINE_METRICS lm{};
+            UINT32 lineCount = 0;
+            if (SUCCEEDED(measureLayout->GetLineMetrics(&lm, 1, &lineCount)) &&
+                lineCount >= 1) {
+                naturalHeight = lm.height;
+                naturalBaseline = lm.baseline;
+            }
             measureLayout->Release();
         }
+        // The editor positions every visual row on a fontSize*1.5 grid, but
+        // by default each layout spaces its wrapped rows at the fonts' own
+        // (tighter) line height - so a long wrapped paragraph drew shorter
+        // than the rows it occupies, leaving a blank band before the next
+        // line that grows with paragraph length, and skewing click/caret/
+        // arrow math inside it (#181). Uniform spacing pins layout rows to
+        // the grid; the baseline centers the natural line box in the cell.
+        float editorLineHeight = editorFontSize * 1.5f;
+        float editorBaseline = (naturalHeight > 0.0f && naturalBaseline > 0.0f)
+            ? naturalBaseline + (editorLineHeight - naturalHeight) * 0.5f
+            : editorFontSize * 1.2f;
+        app.editorTextFormat->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM,
+            editorLineHeight, editorBaseline);
     }
 
     // Slim line-number gutter (design t11): small mono digits,
