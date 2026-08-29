@@ -3813,9 +3813,11 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 InvalidateRect(hwnd, nullptr, FALSE);
                 break;
             case 'A':
-                // Annotate the current selection (#126)
-                if (!app.showSearch && !app.showThemeChooser && !app.showToc &&
-                    !app.showFolderBrowser) {
+                // Annotate the current selection (#126); pinned panels
+                // pass the key through like the rest (#185)
+                if (!app.showSearch && !app.showThemeChooser &&
+                    (!app.showToc || app.tocPinned) &&
+                    (!app.showFolderBrowser || app.browserPinned)) {
                     annotationBeginCreate(app);
                     // The keystroke that opened the editor must not leak
                     // its character into the note box (#161)
@@ -3972,8 +3974,12 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
         return;
     }
 
-    // ':' to enter edit mode, '?' to toggle help — when no overlay is active
-    if (!app.showSearch && !app.showFolderBrowser && !app.showToc && !app.showThemeChooser) {
+    // ':' to enter edit mode, '?' to toggle help — when no overlay is
+    // active. Pinned panels are layout, not overlays: commands still
+    // reach the document through them (#185)
+    if (!app.showSearch &&
+        (!app.showFolderBrowser || app.browserPinned) &&
+        (!app.showToc || app.tocPinned) && !app.showThemeChooser) {
         // Chinese IME full-width forms count as their ASCII keys, so the
         // shortcuts work without switching input modes (#85)
         WPARAM key = wParam;
