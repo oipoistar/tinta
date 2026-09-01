@@ -118,24 +118,24 @@ int main() {
     // in presentational <font> tags. They must not become literal table text.
     {
         auto styledTable = parseDocument(parser,
-            "# 数智润德预案管理后台系统功能测试用例表\n"
+            "# 示例测试文档\n"
             "**<font style=\"color:#000000;\">文档版本</font>**：V1.0\n\n"
             "| **<font style=\"color:rgb(0, 0, 0);\">序号</font>** | "
             "**<font style=\"color:rgb(0, 0, 0);\">功能项</font>** | "
-            "**<font style=\"color:rgb(0, 0, 0);\">测试结果（正常/异常）</font>** | "
-            "**<font style=\"color:rgb(0, 0, 0);\">异常描述</font>** |\n"
+            "**<font style=\"color:rgb(0, 0, 0);\">测试状态</font>** | "
+            "**<font style=\"color:rgb(0, 0, 0);\">备注</font>** |\n"
             "| --- | --- | --- | --- |\n"
             "| <font style=\"color:rgb(0, 0, 0);\">1</font> | "
-            "<font style=\"color:#000000;\">登录：输入正确账号和密码。</font> | "
+            "<font style=\"color:#000000;\">检查输入框。</font> | "
             "<font style=\"color:#000000;\">正常</font> |  |\n"
             "| <font style=\"color:rgb(0, 0, 0);\">2</font> | "
-            "<font style=\"color:#000000;\">提交后检查异常描述。</font> | "
+            "<font style=\"color:#000000;\">提交示例数据。</font> | "
             "<font style=\"color:#000000;\">异常</font> | "
-            "<font style=\"color:#000000;\">截图</font>![](https://cdn.example.test/error.png) |\n"
+            "<font style=\"color:#000000;\">截图</font>![](https://example.test/error.png) |\n"
             "| <font style=\"color:rgb(0, 0, 0);\">3</font> | "
-            "<font style=\"color:#000000;\">空结果占位。</font> | "
+            "<font style=\"color:#000000;\">空状态占位。</font> | "
             "<font style=\"color:#000000;\">正常</font> | <br/> |\n",
-            "数智润德预案管理后台系统功能测试用例表.md");
+            "sample.md");
         check(styledTable.success, "font-wrapped Chinese table parses");
         bool sawTable = false;
         bool sawLiteralFont = false;
