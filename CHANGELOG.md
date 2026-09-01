@@ -13,6 +13,8 @@ The table editor release: edit tables by clicking them in the rendered view, pin
 - File references to any known text format get the full link treatment (.xml added), and non-Markdown targets open in their registered application (#162, #163)
 
 ### Fixed
+- Presentational `<font style="...">` wrappers exported by office and AI tools are ignored while their content remains visible, so Chinese test-case tables render with clean text and correct column measurements
+- Table layout measurements no longer leave temporary images at the document origin, and images in centered or right-aligned cells now move with the cell content
 - Store installs: the Settings buttons that open the configuration .ini files now resolve the virtualized AppData path so the editor finds the real file - contributed by @brianhassel-gh (#166)
 - Pressing A to create an annotation no longer leaks the keystroke into the note box (#161, #164)
 - Plain-text link peeks render frameless instead of as a code block, and cancelling the create-reference dialog no longer leaves a stuck selection (#163)

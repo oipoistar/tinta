@@ -305,6 +305,29 @@ static bool isBrTag(const MD_CHAR* text, MD_SIZE size) {
     return norm == "<br>" || norm == "<br/>";
 }
 
+// Some Markdown producers wrap every cell and paragraph in a presentational
+// <font> tag. It has no semantic value for the native renderer, and keeping
+// it in a Text node makes the tag visible and inflates table column widths.
+static bool isTransparentFontTag(const MD_CHAR* text, MD_SIZE size) {
+    if (size < 6 || text[0] != '<' || text[size - 1] != '>') return false;
+
+    MD_SIZE nameStart = 1;
+    if (text[nameStart] == '/') nameStart++;
+    if (nameStart + 4 >= size) return false;
+    if (tolower((unsigned char)text[nameStart]) != 'f' ||
+        tolower((unsigned char)text[nameStart + 1]) != 'o' ||
+        tolower((unsigned char)text[nameStart + 2]) != 'n' ||
+        tolower((unsigned char)text[nameStart + 3]) != 't') {
+        return false;
+    }
+
+    // Do not mistake tags such as <fontface> for <font>.
+    MD_SIZE afterName = nameStart + 4;
+    return afterName == size - 1 ||
+           isspace((unsigned char)text[afterName]) ||
+           text[afterName] == '/';
+}
+
 static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata) {
     auto* ctx = static_cast<ParserContext*>(userdata);
 
@@ -323,6 +346,10 @@ static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, voi
                 auto elem = std::make_shared<Element>(ElementType::HardBreak);
                 elem->parent = ctx->current();
                 ctx->current()->children.push_back(elem);
+                break;
+            }
+            if (ctx->current() && ctx->current()->type != ElementType::HtmlBlock &&
+                isTransparentFontTag(text, size)) {
                 break;
             }
             ctx->addText(text, size);
