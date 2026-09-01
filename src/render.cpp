@@ -133,7 +133,7 @@ static void addTextRun(App& app, LayoutInfo&& info, const D2D1_POINT_2F& pos,
 }
 
 struct LayoutSnapshot {
-    size_t textRuns, rects, lines, shapes, connectors;
+    size_t textRuns, rects, lines, shapes, connectors, bitmaps;
     size_t links, textRects, lineBuckets, docTextLen, tasks;
 };
 
@@ -144,6 +144,7 @@ static LayoutSnapshot takeSnapshot(App& app) {
         app.layoutLines.size(),
         app.layoutShapes.size(),
         app.layoutConnectors.size(),
+        app.layoutBitmaps.size(),
         app.linkRects.size(),
         app.textRects.size(),
         app.lineBuckets.size(),
@@ -168,6 +169,7 @@ static void rollbackTo(App& app, const LayoutSnapshot& s) {
     app.layoutLines.resize(s.lines);
     app.layoutShapes.resize(s.shapes);
     app.layoutConnectors.resize(s.connectors);
+    app.layoutBitmaps.resize(s.bitmaps);
     app.linkRects.resize(s.links);
     app.textRects.resize(s.textRects);
     app.lineBuckets.resize(s.lineBuckets);
@@ -203,6 +205,11 @@ static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
         connector.bounds.left += dx;
         connector.bounds.right += dx;
         for (auto& point : connector.points) point.x += dx;
+    }
+    for (size_t i = from.bitmaps; i < app.layoutBitmaps.size(); i++) {
+        auto& bitmap = app.layoutBitmaps[i].destRect;
+        bitmap.left += dx;
+        bitmap.right += dx;
     }
     for (size_t i = from.links; i < app.linkRects.size(); i++) {
         auto& r = app.linkRects[i];
@@ -2777,6 +2784,10 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
                     maxRight = std::max(maxRight,
                                         app.layoutRects[i].rect.right);
                 }
+                for (size_t i = snap.bitmaps; i < app.layoutBitmaps.size(); i++) {
+                    maxRight = std::max(maxRight,
+                                        app.layoutBitmaps[i].destRect.right);
+                }
                 rollbackTo(app, snap);
                 textWidth = maxRight;
             }
@@ -2953,6 +2964,9 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
                     float maxRight = 0.0f;
                     for (size_t i = cellSnap.textRuns; i < app.layoutTextRuns.size(); i++) {
                         maxRight = std::max(maxRight, app.layoutTextRuns[i].bounds.right);
+                    }
+                    for (size_t i = cellSnap.bitmaps; i < app.layoutBitmaps.size(); i++) {
+                        maxRight = std::max(maxRight, app.layoutBitmaps[i].destRect.right);
                     }
                     float contentW = maxRight - textX;
                     float dx = 0.0f;

@@ -114,6 +114,56 @@ int main() {
         check(literalBr == 0, "no literal <br> text remains");
     }
 
+    // Exported documents from office/AI tools often wrap all visible content
+    // in presentational <font> tags. They must not become literal table text.
+    {
+        auto styledTable = parseDocument(parser,
+            "# 数智润德预案管理后台系统功能测试用例表\n"
+            "**<font style=\"color:#000000;\">文档版本</font>**：V1.0\n\n"
+            "| **<font style=\"color:rgb(0, 0, 0);\">序号</font>** | "
+            "**<font style=\"color:rgb(0, 0, 0);\">功能项</font>** | "
+            "**<font style=\"color:rgb(0, 0, 0);\">测试结果（正常/异常）</font>** | "
+            "**<font style=\"color:rgb(0, 0, 0);\">异常描述</font>** |\n"
+            "| --- | --- | --- | --- |\n"
+            "| <font style=\"color:rgb(0, 0, 0);\">1</font> | "
+            "<font style=\"color:#000000;\">登录：输入正确账号和密码。</font> | "
+            "<font style=\"color:#000000;\">正常</font> |  |\n"
+            "| <font style=\"color:rgb(0, 0, 0);\">2</font> | "
+            "<font style=\"color:#000000;\">提交后检查异常描述。</font> | "
+            "<font style=\"color:#000000;\">异常</font> | "
+            "<font style=\"color:#000000;\">截图</font>![](https://cdn.example.test/error.png) |\n"
+            "| <font style=\"color:rgb(0, 0, 0);\">3</font> | "
+            "<font style=\"color:#000000;\">空结果占位。</font> | "
+            "<font style=\"color:#000000;\">正常</font> | <br/> |\n",
+            "数智润德预案管理后台系统功能测试用例表.md");
+        check(styledTable.success, "font-wrapped Chinese table parses");
+        bool sawTable = false;
+        bool sawLiteralFont = false;
+        bool sawHeader = false;
+        bool sawImage = false;
+        bool sawHardBreak = false;
+        std::function<void(const qmd::ElementPtr&)> walk =
+            [&](const qmd::ElementPtr& node) {
+            if (node->type == qmd::ElementType::Table) sawTable = true;
+            if (node->type == qmd::ElementType::Image) sawImage = true;
+            if (node->type == qmd::ElementType::HardBreak) sawHardBreak = true;
+            if (node->type == qmd::ElementType::Text) {
+                if (node->text.find("<font") != std::string::npos ||
+                    node->text.find("</font>") != std::string::npos) {
+                    sawLiteralFont = true;
+                }
+                if (node->text == "序号") sawHeader = true;
+            }
+            for (const auto& child : node->children) walk(child);
+        };
+        if (styledTable.root) walk(styledTable.root);
+        check(sawTable, "font-wrapped content remains a Markdown table");
+        check(sawHeader, "font-wrapped table header text is preserved");
+        check(sawImage, "remote images inside table cells are preserved");
+        check(sawHardBreak, "HTML line breaks inside table cells are preserved");
+        check(!sawLiteralFont, "font tags are hidden from rendered text");
+    }
+
     // YAML frontmatter is hidden instead of rendering as a setext heading (#61)
     auto fm = parseDocument(parser,
         "---\ntitle: 'Barometer'\naliases:\ntags: [Barometer]\n---\n\n"
