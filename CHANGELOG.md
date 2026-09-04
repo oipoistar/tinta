@@ -1,5 +1,20 @@
 # Changelog
 
+## [v3.5.5] - 2026-08-29
+
+The follow-up release: everything reported in the first day of 3.5.0, fixed - and Excel ranges paste as tables.
+
+### Added
+- Paste a range copied from Excel (or any tab-separated text with two or more rows) in edit mode and it becomes a markdown table with the first row as the header; Ctrl+Shift+V pastes the raw text (#181, #183)
+- Ctrl+F4 closes the current tab in both viewer and edit mode, where Ctrl+W keeps its word-wrap meaning (#181, #184)
+
+### Fixed
+- Long wrapped paragraphs in the editor no longer leave a blank band before the next line: wrapped rows sit on the same grid the editor scrolls by, which also makes clicks and arrow keys inside them exact (#181, #182)
+- Entering edit mode, opening help, and annotating work through pinned side panels (#185, #186)
+- The right-click menu opens beside an open side panel: a pinned panel stays, an unpinned one is dismissed first (#185, #188)
+- Presentational `<font style="...">` wrappers exported by office and AI tools are ignored while their content remains visible, so such tables render with clean text and correct column widths - contributed by @wxh-777 (#187)
+- Table layout measurements no longer leave a ghost image at the document origin, and images in centered or right-aligned cells size and move with the cell content - contributed by @wxh-777 (#187)
+
 ## [v3.5.0] - 2026-08-28
 
 The table editor release: edit tables by clicking them in the rendered view, pin the side panels, floating outline and browser cards, and one calm chip system for every notification.
@@ -13,8 +28,6 @@ The table editor release: edit tables by clicking them in the rendered view, pin
 - File references to any known text format get the full link treatment (.xml added), and non-Markdown targets open in their registered application (#162, #163)
 
 ### Fixed
-- Presentational `<font style="...">` wrappers exported by office and AI tools are ignored while their content remains visible, so Chinese test-case tables render with clean text and correct column measurements
-- Table layout measurements no longer leave temporary images at the document origin, and images in centered or right-aligned cells now move with the cell content
 - Store installs: the Settings buttons that open the configuration .ini files now resolve the virtualized AppData path so the editor finds the real file - contributed by @brianhassel-gh (#166)
 - Pressing A to create an annotation no longer leaks the keystroke into the note box (#161, #164)
 - Plain-text link peeks render frameless instead of as a code block, and cancelling the create-reference dialog no longer leaves a stuck selection (#163)

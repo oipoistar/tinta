@@ -45,34 +45,24 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.** The table editor release: edit tables by clicking them in the rendered view, pin the side panels, floating outline and browser cards, and one calm chip system for every notification.
+            **Markdown, distilled.** The follow-up release: everything reported in the first day of 3.5.0, fixed - and Excel ranges paste as tables.
 
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Edit tables in place (#148)
-            - In edit mode, click any table cell in the rendered page and type into it: Tab and Shift+Tab move between cells, Enter commits, Esc cancels, and Tab past the last cell starts a new row
-            - + buttons under and beside the table add rows and columns; every change lands in the Markdown source as a single undo step
+            ### Excel ranges paste as tables (#181)
+            - Copy a range in Excel (or any tab-separated text with two or more rows), paste it in edit mode, and it becomes a markdown table with the first row as the header
+            - Ctrl+Shift+V pastes the raw text; a chip confirms the conversion
 
-            ### Pinned side panels (#156)
-            - Pin the table of contents or the file browser and it stays open beside the document: keys and clicks pass through to the page, and pinned panels come back on the next launch
-            - Both panels can be open and pinned at once, with the document reflowing between them
+            ### Close a tab from the editor (#181)
+            - Ctrl+F4 closes the current tab in both viewer and edit mode, where Ctrl+W keeps its word-wrap meaning
 
-            ### One signal system
-            - Every notification is now a uniform chip in the bottom right: passive ones drain away, actionable ones wait to be answered, hovering holds them, and missed ones collect in a bell tray
-            - Save results, update offers, draft recovery, and the exit/create prompts all share the same look
-
-            ### Redesigned side panels
-            - The table of contents is a floating card with type-scaled entries and a scroll thread tracking your position
-            - The file browser card gains a clickable breadcrumb path, cleaner icons, and folder and file counts
-
-            ### Smaller improvements
-            - Custom themes can set a heading font separately from the body font (#155)
-            - File references cover more text formats, and non-Markdown targets open in their registered application (#162)
-            - Store installs: the Settings buttons that open the configuration files now find the real virtualized file (#166)
-            - Creating an annotation no longer leaks the A keystroke into the note box (#161)
+            ### Fixed
+            - Long wrapped paragraphs in the editor no longer leave a blank band before the next line; clicks and arrow keys inside them land exactly (#181)
+            - Entering edit mode, opening help, annotating, and the right-click menu all work beside pinned side panels (#185)
+            - Presentational `<font>` wrappers from office and AI-tool exports are hidden while their text stays, and images inside table cells no longer leave a ghost at the top of the document and now size and align with their cell (#187)
 
             ### What's included
             - Export as HTML, DOCX, or PDF - plus the Pandoc formats above
