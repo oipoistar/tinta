@@ -1665,10 +1665,29 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
     // Document menu: viewer mode only, and never on top of a modal
     // overlay. The search bar is fine — it shares the viewport rather
     // than covering it.
-    if (app.editMode || app.showThemeChooser || app.showToc ||
-        app.showFolderBrowser || app.showHelp || app.showPrintPreview ||
-        app.showSettings || app.showThemeEditor) {
+    if (app.editMode || app.showThemeChooser || app.showHelp ||
+        app.showPrintPreview || app.showSettings || app.showThemeEditor) {
         return;
+    }
+    // Side panels are not modal (#185): a right-click over the document
+    // beside a PINNED panel opens the menu there, and beside an unpinned
+    // one it dismisses the panel like any outside click first. Over the
+    // panel itself there is no document to act on.
+    if (app.showToc || app.showFolderBrowser) {
+        float docLeft = documentViewportX(app);
+        bool overDocument = (float)pt.x >= docLeft &&
+                            (float)pt.x < docLeft + documentViewportWidth(app);
+        if (!overDocument) return;
+        if (app.showToc && !app.tocPinned) {
+            app.showToc = false;
+            app.tocAnimation = 0;
+            app.tocFilter.clear();
+        }
+        if (app.showFolderBrowser && !app.browserPinned) {
+            app.showFolderBrowser = false;
+            app.folderBrowserAnimation = 0;
+            closeFolderBrowserInput(app);
+        }
     }
     openContextMenu(app, (float)pt.x, (float)pt.y);
     InvalidateRect(hwnd, nullptr, FALSE);
