@@ -8,6 +8,13 @@ int failures = 0;
 void check(bool condition, const char* message) {
     if (!condition) { std::cerr << "FAIL: " << message << '\n'; ++failures; }
 }
+std::wstring textOf(const MNodePtr& node) {
+    if (!node) return {};
+    std::wstring result = node->text;
+    for (const auto& child : node->kids) result += textOf(child);
+    for (const auto& row : node->cells) for (const auto& cell : row) result += textOf(cell);
+    return result;
+}
 }
 
 int main() {
@@ -40,6 +47,23 @@ int main() {
     check(!parseLatex(std::wstring(200, L'{') + L"x" + std::wstring(200, L'}')), "nesting is bounded");
     check(!parseLatex(std::wstring(40000, L'x')), "input size is bounded");
     check(parseLatex(L"x % ignored command \\unknown\n + y") != nullptr, "TeX comments");
+    check(textOf(parseLatex(LR"(\text{for all }x\text{ and }y)")) == L"for all x and y", "text spaces survive");
+    check(textOf(parseLatex(LR"(\text{a \textbf{bold} word \& \{x\}})")) == L"a bold word & {x}", "nested text and escapes");
+    check(textOf(parseLatex(LR"(\mathbb{RNCZ})")) == L"\u211D\u2115\u2102\u2124", "braced blackboard alphabet");
+    check(textOf(parseLatex(LR"(\mathcal{BL}\mathfrak{CH})")) == L"\u212C\u2112\u212D\u210C", "script and fraktur exceptions");
+    check(textOf(parseLatex(LR"(\epsilon\varepsilon\phi\varphi)")) == L"\u03F5\u03B5\u03D5\u03C6", "Greek variants remain distinct");
+    for (const auto* tex : {
+        LR"(\sqrt[3]{x+1})", LR"(\binom{n}{k}+\dbinom{n}{2})", LR"(\cfrac{1}{1+\cfrac{1}{x}})",
+        LR"(\sum\limits_{i=1}^n x_i)", LR"(\int\nolimits_0^1 f(x))", LR"(\operatorname*{arg max}_{x}f(x))",
+        LR"(\sum_{\substack{i>0\\j>0}}a_{ij})", LR"(\overset{!}{=}\underset{x}{y})",
+        LR"(A\xrightarrow[n\to\infty]{f}B)", LR"(\underbrace{a+b}_{\text{sum}})",
+        LR"(\widetilde{xy}+\dot{x}+\ddot{x}+\underline{y}+\boxed{x=2}+\cancel{x})",
+        LR"(\mathbb{ABCabc123}\mathsf{XYZ}\mathtt{abc}\boldsymbol{\alpha})"}) {
+        check(parseLatex(tex) != nullptr, "common extended notation parses");
+    }
+    for (const auto* tex : {LR"(\sqrt[3{x})", LR"(\text{unterminated)", LR"(x^2^3)",
+                            LR"(\overset{a})", LR"(\limits x)", LR"(\overline)", LR"(\mathbf)"})
+        check(!parseLatex(tex), "invalid extended notation fails cleanly");
     std::cout << "Math parser: " << failures << " failures\n";
     return failures ? 1 : 0;
 }
