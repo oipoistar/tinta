@@ -2225,6 +2225,7 @@ static void layoutBlockquote(App& app, const ElementPtr& elem, float& y, float i
     float scale = app.contentScale * app.zoomFactor;
     float quoteIndent = 20.0f * scale;
     float startY = y;
+    const LayoutSnapshot contentStart = takeSnapshot(app);
 
     // GitHub alert callouts: accent-colored bar plus a bold title line.
     // Colors are github.com's light/dark alert accents, picked by theme.
@@ -2262,7 +2263,28 @@ static void layoutBlockquote(App& app, const ElementPtr& elem, float& y, float i
         layoutElement(app, child, y, indent + quoteIndent, maxWidth - quoteIndent);
     }
 
-    app.layoutRects.push_back({D2D1::RectF(indent, startY, indent + 4, y), barColor});
+    // Child layout advances y past its trailing margin. Keep that spacing
+    // outside the bar, without moving the next block. Use retained content
+    // bounds so nested quotes, code padding, tables and math stay covered.
+    float contentBottom = startY;
+    for (size_t i = contentStart.textRuns; i < app.layoutTextRuns.size(); ++i)
+        contentBottom = std::max(contentBottom, app.layoutTextRuns[i].bounds.bottom);
+    for (size_t i = contentStart.textRects; i < app.textRects.size(); ++i)
+        contentBottom = std::max(contentBottom, app.textRects[i].rect.bottom);
+    for (size_t i = contentStart.rects; i < app.layoutRects.size(); ++i)
+        contentBottom = std::max(contentBottom, app.layoutRects[i].rect.bottom);
+    for (size_t i = contentStart.lines; i < app.layoutLines.size(); ++i) {
+        const auto& line = app.layoutLines[i];
+        contentBottom = std::max(contentBottom, std::max(line.p1.y, line.p2.y) + line.stroke / 2);
+    }
+    for (size_t i = contentStart.shapes; i < app.layoutShapes.size(); ++i)
+        contentBottom = std::max(contentBottom, app.layoutShapes[i].rect.bottom);
+    for (size_t i = contentStart.connectors; i < app.layoutConnectors.size(); ++i)
+        contentBottom = std::max(contentBottom, app.layoutConnectors[i].bounds.bottom);
+    for (size_t i = contentStart.bitmaps; i < app.layoutBitmaps.size(); ++i)
+        contentBottom = std::max(contentBottom, app.layoutBitmaps[i].destRect.bottom);
+
+    app.layoutRects.push_back({D2D1::RectF(indent, startY, indent + 4, std::min(y, contentBottom)), barColor});
 }
 
 static void layoutList(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
