@@ -7,11 +7,77 @@
 #include <algorithm>
 #include <vector>
 #include <functional>
+#include <filesystem>
+#include <map>
 
 namespace {
 int failures = 0;
 void check(bool condition, const char* message) {
     if (!condition) { std::cerr << "FAIL: " << message << '\n'; ++failures; }
+}
+
+void checkMarkdownFixture(App& app, const char* filename, size_t minimumMath,
+                          bool mixed, int tableColumns = 0) {
+    using qmd::ElementType;
+    auto path = std::filesystem::path(TINTA_MATH_FIXTURE).parent_path() / filename;
+    std::ifstream file(path, std::ios::binary);
+    check(file.good(), "Markdown fixture is available");
+    std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    auto doc = app.parser.parse(source);
+    check(doc.success, "mixed Markdown parses");
+    std::map<ElementType, size_t> counts, mathWithin;
+    std::vector<ElementType> ancestors;
+    size_t equations = 0;
+    bool literalCode = false;
+    std::function<void(const qmd::ElementPtr&)> visit = [&](const qmd::ElementPtr& element) {
+        if (!element) return;
+        ++counts[element->type];
+        if (element->type == ElementType::TableRow && tableColumns > 0)
+            check(element->children.size() == static_cast<size_t>(tableColumns),
+                  "math separators do not split Markdown table cells");
+        if (element->type == ElementType::Text &&
+            std::find(ancestors.begin(), ancestors.end(), ElementType::Code) != ancestors.end() &&
+            element->text.find('$') != std::string::npos) literalCode = true;
+        if (element->type == ElementType::MathInline || element->type == ElementType::MathDisplay) {
+            ++equations;
+            for (auto ancestor : ancestors) ++mathWithin[ancestor];
+            int length = MultiByteToWideChar(CP_UTF8, 0, element->text.data(),
+                                            static_cast<int>(element->text.size()), nullptr, 0);
+            std::wstring tex(length, L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, element->text.data(),
+                               static_cast<int>(element->text.size()), tex.data(), length);
+            if (!mathParse(app, tex, 24, element->type == ElementType::MathDisplay)) {
+                std::cerr << filename << ": unrendered equation: " << element->text << '\n';
+                check(false, "every mixed fixture equation renders");
+            }
+        }
+        ancestors.push_back(element->type);
+        for (const auto& child : element->children) visit(child);
+        ancestors.pop_back();
+    };
+    if (doc.success) visit(doc.root);
+    check(minimumMath ? equations >= minimumMath : equations == 0,
+          "fixture math spans are recognized without parsing literal code");
+    check(mathWithin[ElementType::Code] == 0 && mathWithin[ElementType::CodeBlock] == 0,
+          "inline and fenced code remain literal");
+    if (mixed) {
+        for (auto type : {ElementType::Heading, ElementType::TableCell,
+                          ElementType::ListItem, ElementType::BlockQuote})
+            check(mathWithin[type] > 0, "math survives inside existing block structures");
+        for (auto type : {ElementType::Strong, ElementType::Emphasis, ElementType::Code,
+                          ElementType::Link, ElementType::Highlight, ElementType::Strikethrough})
+            if (counts[type] == 0) {
+                std::cerr << filename << ": missing inline type " << static_cast<int>(type) << '\n';
+                check(false, "surrounding inline formatting survives");
+            }
+    }
+    if (std::string(filename) == "math-mixed-layout.md") {
+        check(mathWithin[ElementType::Link] > 0 && mathWithin[ElementType::Strong] > 0 &&
+              mathWithin[ElementType::Emphasis] > 0, "math preserves inline wrappers");
+        check(literalCode && counts[ElementType::CodeBlock] == 2,
+              "literal TeX and Mermaid fences survive mixed parsing");
+    }
+    std::cout << filename << ": " << equations << " equations\n";
 }
 
 bool rasterize(const std::vector<MathBoxPtr>& boxes, const wchar_t* path = nullptr) {
@@ -85,6 +151,9 @@ int main(int argc, char** argv) {
         };
         if (fixtureDoc.success) visit(fixtureDoc.root);
         check(equations >= 15, "all fixture equations were recognized by Markdown");
+        checkMarkdownFixture(app, "math-mixed-layout.md", 25, true, 3);
+        checkMarkdownFixture(app, "math-inline-stress.md", 9, true, 2);
+        checkMarkdownFixture(app, "markdown-regression-control.md", 0, false, 3);
         auto markdown = app.parser.parse("$$\n\\begin{bmatrix}1&2\\\\5&6\\end{bmatrix}\\longrightarrow 6\n$$");
         check(markdown.success && !markdown.root->children.empty(), "display math Markdown parses");
         if (markdown.success && !markdown.root->children.empty()) {

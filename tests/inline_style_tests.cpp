@@ -213,6 +213,36 @@ int main() {
         }
     }
 
+    // Math stays opaque to Markdown extensions while inheriting wrappers.
+    {
+        auto runs = flattenFirstBlock(app, parser,
+            "==before $\\text{a==b}+x^2$ after== and ~~old $x_1$ result~~\n");
+        size_t equations = 0;
+        for (const auto& run : runs) {
+            if (run.elem->type != ElementType::MathInline) continue;
+            ++equations;
+            if (equations == 1) {
+                check(run.style.hasBg && !run.style.hasStrike, "highlight includes math");
+                check(run.elem->text == "\\text{a==b}+x^2", "TeX delimiters remain literal within math");
+            } else {
+                check(run.style.hasStrike && !run.style.hasBg, "strikethrough includes math");
+            }
+        }
+        check(equations == 2, "both styled equations remain math nodes");
+        check(!runs.empty() && !runs.back().style.hasBg, "highlight does not leak into later text");
+    }
+    {
+        auto runs = flattenFirstBlock(app, parser, "[$x^2$](https://example.com)\n");
+        const auto* math = firstOfType(runs, ElementType::MathInline);
+        check(math && math->style.isLink && math->style.linkUrl == "https://example.com",
+              "math-only link retains its target");
+    }
+    {
+        auto runs = flattenFirstBlock(app, parser, "==unclosed $x$ and `~~$y$~~`\n");
+        for (const auto& run : runs)
+            check(!run.style.hasBg && !run.style.hasStrike, "unclosed markers and literal code stay untouched");
+    }
+
     // Leaves are emitted in document order, none dropped
     {
         auto runs = flattenFirstBlock(app, parser, "a **b `c` d** e\n");

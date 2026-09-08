@@ -549,7 +549,19 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 // Align the box baseline with the surrounding text baseline
                 float textBaseline = mathBaselines[runIndex];
                 float boxTop = y + drawYOffset + textBaseline - mathBoxBaseline(box);
-                mathBoxRetain(app, box, x, boxTop, app.theme.text);
+                if (hasBg) {
+                    app.layoutRects.push_back({D2D1::RectF(x - 2,
+                        std::min(boxTop, y + mathTextOffset + 1), x + w + 2,
+                        std::max(boxTop + mathBoxHeight(box), y + mathTextOffset + normalLineHeight - 1)),
+                        bgColor});
+                }
+                if (hasStrike) {
+                    float strikeY = y + mathTextOffset + normalLineHeight * 0.55f;
+                    app.layoutLines.push_back({D2D1::Point2F(x, strikeY),
+                                               D2D1::Point2F(x + w, strikeY), color, 1.0f});
+                }
+                mathBoxRetain(app, box, x, boxTop, color);
+                if (isLink) addLinkSegment(x, x + w, y, linkUrl, color);
 
                 size_t docStart = app.docText.size();
                 std::wstring source = L"$" + latex + L"$";
