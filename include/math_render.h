@@ -8,7 +8,7 @@
 
 // Native TeX-subset math rendering (#80). No MathJax, no KaTeX, no web
 // engine: a recursive-descent parser builds a box tree (runs, scripts,
-// fractions, stretchy delimiters, decorations), DirectWrite measures it,
+// fractions, grids, stretchy delimiters, decorations), DirectWrite measures it,
 // Direct2D draws it. Unsupported input returns null and the caller falls
 // back to showing the raw source in code style - the mermaid pattern.
 

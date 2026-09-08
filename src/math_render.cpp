@@ -1,4 +1,5 @@
 #include "math_render.h"
+#include "math_parser.h"
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +31,7 @@ struct MathRule {   // fraction bars, overlines, radical bars
 
 struct MathLine {   // arrowheads
     float x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    float thickness = 1.2f;
 };
 
 } // namespace
@@ -52,427 +54,7 @@ namespace {
 // Parse tree
 // ---------------------------------------------------------------------------
 
-struct MNode;
-using MNodePtr = std::shared_ptr<MNode>;
-
-struct MNode {
-    enum Kind {
-        Row,     // kids in sequence
-        Sym,     // text (variable, number, operator, mapped symbol)
-        Frac,    // kids = {num, den}
-        Script,  // kids = {base, sub-or-null, sup-or-null}
-        Delim,   // \left..\right, kids = {content}
-        Deco,    // kids = {content}; decoKind below
-        Space,   // explicit spacing; scale in "space"
-    } kind = Row;
-
-    std::wstring text;
-    std::vector<MNodePtr> kids;
-    wchar_t open = 0, close = 0;   // Delim
-    int decoKind = 0;              // 1 overline/bar 2 overrightarrow/vec 3 sqrt 4 hat
-    bool roman = false;            // upright (functions, \mathrm, \text)
-    bool bold = false;             // \mathbf
-    float space = 0.0f;            // Space: width in em
-};
-
-MNodePtr mk(MNode::Kind k) {
-    auto n = std::make_shared<MNode>();
-    n->kind = k;
-    return n;
-}
-
-// ---------------------------------------------------------------------------
-// Command tables
-// ---------------------------------------------------------------------------
-
-struct CmdSym { const wchar_t* name; const wchar_t* text; };
-
-// Symbols and greek letters mapped straight to Unicode text runs
-const CmdSym kSymbols[] = {
-    {L"alpha", L"\u03B1"}, {L"beta", L"\u03B2"}, {L"gamma", L"\u03B3"},
-    {L"delta", L"\u03B4"}, {L"epsilon", L"\u03B5"}, {L"varepsilon", L"\u03B5"},
-    {L"zeta", L"\u03B6"}, {L"eta", L"\u03B7"}, {L"theta", L"\u03B8"},
-    {L"vartheta", L"\u03D1"}, {L"iota", L"\u03B9"}, {L"kappa", L"\u03BA"},
-    {L"lambda", L"\u03BB"}, {L"mu", L"\u03BC"}, {L"nu", L"\u03BD"},
-    {L"xi", L"\u03BE"}, {L"pi", L"\u03C0"}, {L"rho", L"\u03C1"},
-    {L"sigma", L"\u03C3"}, {L"tau", L"\u03C4"}, {L"upsilon", L"\u03C5"},
-    {L"phi", L"\u03C6"}, {L"varphi", L"\u03C6"}, {L"chi", L"\u03C7"},
-    {L"psi", L"\u03C8"}, {L"omega", L"\u03C9"},
-    {L"Gamma", L"\u0393"}, {L"Delta", L"\u0394"}, {L"Theta", L"\u0398"},
-    {L"Lambda", L"\u039B"}, {L"Xi", L"\u039E"}, {L"Pi", L"\u03A0"},
-    {L"Sigma", L"\u03A3"}, {L"Upsilon", L"\u03A5"}, {L"Phi", L"\u03A6"},
-    {L"Psi", L"\u03A8"}, {L"Omega", L"\u03A9"},
-    {L"in", L"\u2208"}, {L"notin", L"\u2209"}, {L"ni", L"\u220B"},
-    {L"cup", L"\u222A"}, {L"cap", L"\u2229"},
-    {L"subset", L"\u2282"}, {L"supset", L"\u2283"},
-    {L"subseteq", L"\u2286"}, {L"supseteq", L"\u2287"},
-    {L"geq", L"\u2265"}, {L"ge", L"\u2265"}, {L"leq", L"\u2264"},
-    {L"le", L"\u2264"}, {L"neq", L"\u2260"}, {L"ne", L"\u2260"},
-    {L"equiv", L"\u2261"}, {L"approx", L"\u2248"}, {L"sim", L"\u223C"},
-    {L"propto", L"\u221D"}, {L"pm", L"\u00B1"}, {L"mp", L"\u2213"},
-    {L"times", L"\u00D7"}, {L"div", L"\u00F7"}, {L"cdot", L"\u22C5"},
-    {L"cdots", L"\u22EF"}, {L"ldots", L"\u2026"}, {L"dots", L"\u2026"},
-    {L"vdots", L"\u22EE"}, {L"ddots", L"\u22F1"},
-    {L"mid", L"\u2223"}, {L"parallel", L"\u2225"}, {L"perp", L"\u22A5"},
-    {L"angle", L"\u2220"}, {L"triangle", L"\u25B3"},
-    {L"bigtriangleup", L"\u25B3"}, {L"square", L"\u25A1"},
-    {L"infty", L"\u221E"}, {L"partial", L"\u2202"}, {L"nabla", L"\u2207"},
-    {L"forall", L"\u2200"}, {L"exists", L"\u2203"},
-    {L"emptyset", L"\u2205"}, {L"varnothing", L"\u2205"},
-    {L"because", L"\u2235"}, {L"therefore", L"\u2234"},
-    {L"to", L"\u2192"}, {L"rightarrow", L"\u2192"},
-    {L"leftarrow", L"\u2190"}, {L"Rightarrow", L"\u21D2"},
-    {L"Leftarrow", L"\u21D0"}, {L"Leftrightarrow", L"\u21D4"},
-    {L"leftrightarrow", L"\u2194"}, {L"mapsto", L"\u21A6"},
-    {L"circ", L"\u2218"}, {L"bullet", L"\u2219"}, {L"star", L"\u22C6"},
-    {L"oplus", L"\u2295"}, {L"otimes", L"\u2297"},
-    {L"sum", L"\u2211"}, {L"prod", L"\u220F"}, {L"int", L"\u222B"},
-    {L"oint", L"\u222E"}, {L"sqrt", nullptr},  // structural, handled apart
-    {L"prime", L"\u2032"}, {L"degree", L"\u00B0"},
-    {L"lfloor", L"\u230A"}, {L"rfloor", L"\u230B"},
-    {L"lceil", L"\u2308"}, {L"rceil", L"\u2309"},
-    {L"langle", L"\u27E8"}, {L"rangle", L"\u27E9"},
-    {L"lbrack", L"["}, {L"rbrack", L"]"},
-    {L"lbrace", L"{"}, {L"rbrace", L"}"},
-    {L"lvert", L"|"}, {L"rvert", L"|"}, {L"vert", L"|"},
-    {L"lVert", L"\u2016"}, {L"rVert", L"\u2016"}, {L"Vert", L"\u2016"},
-    {L"backslash", L"\\"}, {L"setminus", L"\u2216"},
-    {L"hbar", L"\u210F"}, {L"ell", L"\u2113"}, {L"Re", L"\u211C"},
-    {L"Im", L"\u2111"}, {L"aleph", L"\u2135"}, {L"wp", L"\u2118"},
-    {L"neg", L"\u00AC"}, {L"lnot", L"\u00AC"},
-    {L"land", L"\u2227"}, {L"wedge", L"\u2227"},
-    {L"lor", L"\u2228"}, {L"vee", L"\u2228"},
-};
-
-// Function names rendered upright with a trailing thin space
-const wchar_t* kFunctions[] = {
-    L"log", L"ln", L"lg", L"sin", L"cos", L"tan", L"cot", L"sec", L"csc",
-    L"arcsin", L"arccos", L"arctan", L"sinh", L"cosh", L"tanh", L"coth",
-    L"lim", L"limsup", L"liminf", L"max", L"min", L"sup", L"inf",
-    L"gcd", L"det", L"dim", L"ker", L"deg", L"arg", L"exp", L"mod", L"Pr",
-};
-
-// \mathbb single letters -> double-struck
-const CmdSym kBlackboard[] = {
-    {L"R", L"\u211D"}, {L"N", L"\u2115"}, {L"Z", L"\u2124"},
-    {L"Q", L"\u211A"}, {L"C", L"\u2102"}, {L"P", L"\u2119"},
-    {L"E", L"\U0001D53C"}, {L"F", L"\U0001D53D"},
-};
-
-const wchar_t* lookupSymbol(const std::wstring& cmd) {
-    for (const auto& s : kSymbols) {
-        if (cmd == s.name) return s.text;
-    }
-    return nullptr;
-}
-
-bool isFunctionName(const std::wstring& cmd) {
-    for (const auto* f : kFunctions) {
-        if (cmd == f) return true;
-    }
-    return false;
-}
-
-// Spacing classes for row layout (fractions of an em on each side)
-float symbolSpacing(const std::wstring& t, bool roman) {
-    if (t.size() != 1) {
-        if (t == L"\u22EF" || t == L"\u2026") return 0.16f;
-        // Upright function names (sin, log, ...) take thin spaces so
-        // \sin m\alpha reads "sin m\u03B1" rather than "sinm\u03B1"
-        if (roman) {
-            bool allAlpha = true;
-            for (wchar_t c : t) {
-                if (!iswalpha(c)) { allAlpha = false; break; }
-            }
-            if (allAlpha) return 0.16f;
-        }
-        return 0.0f;
-    }
-    wchar_t c = t[0];
-    switch (c) {
-        case L'=': case L'<': case L'>':
-        case 0x2264: case 0x2265: case 0x2260: case 0x2261: case 0x2248:
-        case 0x2208: case 0x2209: case 0x2282: case 0x2283: case 0x2286:
-        case 0x2287: case 0x2192: case 0x21D2: case 0x2194: case 0x21D4:
-        case 0x223C: case 0x221D: case 0x2223: case 0x2225:
-            return 0.26f;   // relations
-        case L'+': case 0x2212: case 0x00B1: case 0x2213: case 0x00D7:
-        case 0x00F7: case 0x22C5: case 0x222A: case 0x2229: case 0x2227:
-        case 0x2228: case 0x2216:
-            return 0.2f;    // binary operators
-        case L',': case L';':
-            return 0.12f;   // punctuation (space after only, approximated)
-        default:
-            return 0.0f;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tokenizer + parser
-// ---------------------------------------------------------------------------
-
-struct Parser {
-    const std::wstring& src;
-    size_t pos = 0;
-    bool failed = false;
-
-    explicit Parser(const std::wstring& s) : src(s) {}
-
-    void skipWs() {
-        while (pos < src.size() && iswspace(src[pos])) pos++;
-    }
-    bool eof() { return pos >= src.size(); }
-    wchar_t peek() { return pos < src.size() ? src[pos] : 0; }
-
-    std::wstring readCommand() {  // after the backslash
-        std::wstring cmd;
-        while (pos < src.size() && iswalpha(src[pos])) cmd += src[pos++];
-        if (cmd.empty() && pos < src.size()) cmd += src[pos++];  // \{ \, etc.
-        return cmd;
-    }
-
-    // One brace group or a single atom (TeX: \frac ab == \frac{a}{b})
-    MNodePtr parseArg() {
-        skipWs();
-        if (peek() == L'{') {
-            pos++;
-            MNodePtr row = parseRow(L'}');
-            if (peek() == L'}') pos++;
-            else failed = true;
-            return row;
-        }
-        return parseAtom();
-    }
-
-    MNodePtr parseAtom() {
-        skipWs();
-        if (eof()) return nullptr;
-        wchar_t c = src[pos];
-
-        if (c == L'{') {
-            pos++;
-            MNodePtr row = parseRow(L'}');
-            if (peek() == L'}') pos++;
-            else failed = true;
-            return row;
-        }
-        if (c == L'\\') {
-            pos++;
-            return parseCommand();
-        }
-        pos++;
-        MNodePtr sym = mk(MNode::Sym);
-        if (c == L'-') sym->text = L"\u2212";       // proper minus
-        else if (c == L'\'') sym->text = L"\u2032"; // prime
-        else if (c == L'*') sym->text = L"\u2217";
-        else sym->text.assign(1, c);
-        return sym;
-    }
-
-    MNodePtr parseCommand() {
-        std::wstring cmd = readCommand();
-        if (cmd.empty()) { failed = true; return nullptr; }
-
-        // Escapes and explicit spacing
-        if (cmd == L"{" || cmd == L"}" || cmd == L"$" || cmd == L"%" ||
-            cmd == L"&" || cmd == L"#" || cmd == L"_") {
-            MNodePtr s = mk(MNode::Sym);
-            s->text = cmd;
-            return s;
-        }
-        if (cmd == L"|") {
-            MNodePtr s = mk(MNode::Sym);
-            s->text = L"\u2016";
-            return s;
-        }
-        if (cmd == L"," || cmd == L":" || cmd == L";" || cmd == L" " ||
-            cmd == L"quad" || cmd == L"qquad" || cmd == L"!") {
-            MNodePtr s = mk(MNode::Space);
-            if (cmd == L",") s->space = 0.17f;
-            else if (cmd == L":") s->space = 0.22f;
-            else if (cmd == L";") s->space = 0.28f;
-            else if (cmd == L" ") s->space = 0.33f;
-            else if (cmd == L"quad") s->space = 1.0f;
-            else if (cmd == L"qquad") s->space = 2.0f;
-            else s->space = 0.0f;  // \! ignored (negative space)
-            return s;
-        }
-
-        if (cmd == L"frac" || cmd == L"dfrac" || cmd == L"tfrac") {
-            MNodePtr f = mk(MNode::Frac);
-            f->kids.push_back(parseArg());
-            f->kids.push_back(parseArg());
-            if (!f->kids[0] || !f->kids[1]) failed = true;
-            return f;
-        }
-        if (cmd == L"sqrt") {
-            MNodePtr d = mk(MNode::Deco);
-            d->decoKind = 3;
-            d->kids.push_back(parseArg());
-            if (!d->kids[0]) failed = true;
-            return d;
-        }
-        if (cmd == L"overline" || cmd == L"bar") {
-            MNodePtr d = mk(MNode::Deco);
-            d->decoKind = 1;
-            d->kids.push_back(parseArg());
-            return d;
-        }
-        if (cmd == L"overrightarrow" || cmd == L"vec") {
-            MNodePtr d = mk(MNode::Deco);
-            d->decoKind = 2;
-            d->kids.push_back(parseArg());
-            return d;
-        }
-        if (cmd == L"hat" || cmd == L"widehat") {
-            MNodePtr d = mk(MNode::Deco);
-            d->decoKind = 4;
-            d->kids.push_back(parseArg());
-            return d;
-        }
-        if (cmd == L"left") {
-            skipWs();
-            wchar_t open = 0;
-            if (peek() == L'\\') {
-                pos++;
-                std::wstring dc = readCommand();
-                const wchar_t* mapped = lookupSymbol(dc);
-                open = mapped && mapped[0] ? mapped[0] : 0;
-                if (dc == L"{") open = L'{';
-                if (dc == L"}") open = L'}';
-            } else {
-                open = peek();
-                if (!eof()) pos++;
-            }
-            MNodePtr content = parseRow(0, /*stopAtRight=*/true);
-            // consume \right and its delimiter
-            wchar_t close = 0;
-            if (pos + 5 < src.size() && src.compare(pos, 6, L"\\right") == 0) {
-                pos += 6;
-                skipWs();
-                if (peek() == L'\\') {
-                    pos++;
-                    std::wstring dc = readCommand();
-                    const wchar_t* mapped = lookupSymbol(dc);
-                    close = mapped && mapped[0] ? mapped[0] : 0;
-                    if (dc == L"{") close = L'{';
-                    if (dc == L"}") close = L'}';
-                } else {
-                    close = peek();
-                    if (!eof()) pos++;
-                }
-            } else {
-                failed = true;
-            }
-            MNodePtr d = mk(MNode::Delim);
-            d->open = open == L'.' ? 0 : open;
-            d->close = close == L'.' ? 0 : close;
-            d->kids.push_back(content ? content : mk(MNode::Row));
-            return d;
-        }
-        if (cmd == L"mathrm" || cmd == L"text" || cmd == L"operatorname" ||
-            cmd == L"textrm") {
-            MNodePtr arg = parseArg();
-            if (arg) arg = markRoman(arg);
-            return arg;
-        }
-        if (cmd == L"mathbf" || cmd == L"boldsymbol" || cmd == L"bm" ||
-            cmd == L"textbf") {
-            MNodePtr arg = parseArg();
-            if (arg) arg = markBold(arg);
-            return arg;
-        }
-        if (cmd == L"mathbb") {
-            MNodePtr arg = parseArg();
-            // single-letter blackboard bold via Unicode double-struck
-            if (arg && arg->kind == MNode::Sym && arg->text.size() == 1) {
-                for (const auto& b : kBlackboard) {
-                    if (arg->text == b.name) {
-                        arg->text = b.text;
-                        break;
-                    }
-                }
-            }
-            return arg;
-        }
-        if (cmd == L"mathcal" || cmd == L"mathscr" || cmd == L"mathit") {
-            return parseArg();  // rendered as regular italic
-        }
-        if (cmd == L"displaystyle" || cmd == L"textstyle" || cmd == L"nolimits" ||
-            cmd == L"limits" || cmd == L"middle") {
-            return parseAtom();  // pass-through niladics: render what follows
-        }
-        if (isFunctionName(cmd)) {
-            MNodePtr f = mk(MNode::Sym);
-            f->text = cmd;
-            f->roman = true;
-            return f;
-        }
-        if (const wchar_t* sym = lookupSymbol(cmd)) {
-            MNodePtr s = mk(MNode::Sym);
-            s->text = sym;
-            return s;
-        }
-
-        failed = true;  // unknown command: whole span falls back to source
-        return nullptr;
-    }
-
-    static MNodePtr markRoman(MNodePtr n) {
-        n->roman = true;
-        for (auto& k : n->kids) {
-            if (k) markRoman(k);
-        }
-        return n;
-    }
-    static MNodePtr markBold(MNodePtr n) {
-        n->bold = true;
-        n->roman = true;
-        for (auto& k : n->kids) {
-            if (k) markBold(k);
-        }
-        return n;
-    }
-
-    MNodePtr parseRow(wchar_t terminator, bool stopAtRight = false) {
-        MNodePtr row = mk(MNode::Row);
-        while (!eof() && !failed) {
-            skipWs();
-            if (eof()) break;
-            if (terminator && peek() == terminator) break;
-            if (stopAtRight && peek() == L'\\' &&
-                src.compare(pos, 6, L"\\right") == 0) {
-                break;
-            }
-            if (peek() == L'^' || peek() == L'_') {
-                // Attach scripts to the previous atom (or an empty base)
-                MNodePtr base = row->kids.empty() ? mk(MNode::Row)
-                                                  : row->kids.back();
-                if (!row->kids.empty()) row->kids.pop_back();
-                MNodePtr script;
-                if (base->kind == MNode::Script) {
-                    script = base;  // x_1^m: add the second script
-                } else {
-                    script = mk(MNode::Script);
-                    script->kids = {base, nullptr, nullptr};
-                }
-                while (!eof() && (peek() == L'^' || peek() == L'_')) {
-                    wchar_t which = src[pos++];
-                    MNodePtr arg = parseArg();
-                    if (!arg) { failed = true; break; }
-                    if (which == L'^') script->kids[2] = arg;
-                    else script->kids[1] = arg;
-                    skipWs();
-                }
-                row->kids.push_back(script);
-                continue;
-            }
-            MNodePtr atom = parseAtom();
-            if (atom) row->kids.push_back(atom);
-        }
-        return row;
-    }
-};
+using namespace tinta_math;
 
 // ---------------------------------------------------------------------------
 // Layout
@@ -602,6 +184,53 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
             m.width = cx - x;
             return m;
         }
+        case MNode::Grid: {
+            float cellSize = node->compact ? size * 0.7f : size;
+            size_t columns = node->alignment.size();
+            for (const auto& row : node->cells) columns = std::max(columns, row.size());
+            if (!columns || node->cells.empty()) return m;
+            std::vector<float> widths(columns, 0), ascents, descents;
+            std::vector<std::vector<Metrics>> cells;
+            float totalHeight = 0;
+            float rowGap = cellSize * 0.35f;
+            for (const auto& row : node->cells) {
+                float ascent = cellSize * 0.8f, descent = cellSize * 0.2f;
+                std::vector<Metrics> measured;
+                for (size_t col = 0; col < row.size(); ++col) {
+                    Metrics cm = measureNode(ctx, row[col], cellSize);
+                    widths[col] = std::max(widths[col], cm.width);
+                    ascent = std::max(ascent, cm.ascent);
+                    descent = std::max(descent, cm.descent);
+                    measured.push_back(cm);
+                }
+                ascents.push_back(ascent); descents.push_back(descent);
+                totalHeight += ascent + descent;
+                cells.push_back(std::move(measured));
+            }
+            totalHeight += rowGap * static_cast<float>(cells.size() - 1);
+            m.ascent = totalHeight / 2 + em * 0.26f;
+            m.descent = totalHeight - m.ascent;
+            float top = baselineY - m.ascent;
+            for (size_t row = 0; row < cells.size(); ++row) {
+                float cx = x;
+                for (size_t col = 0; col < columns; ++col) {
+                    wchar_t align = node->aligned ? (col % 2 ? L'l' : L'r') : L'c';
+                    if (col < node->alignment.size()) align = node->alignment[col];
+                    if (col < cells[row].size() && record) {
+                        float extra = widths[col] - cells[row][col].width;
+                        float offset = align == L'r' ? extra : align == L'c' ? extra / 2 : 0;
+                        layoutNodeImpl(ctx, node->cells[row][col], cellSize,
+                                       cx + offset, top + ascents[row], true);
+                    }
+                    cx += widths[col];
+                    if (col + 1 < columns)
+                        cx += cellSize * (node->aligned && col % 2 == 0 ? 0.26f : 1.0f);
+                }
+                m.width = std::max(m.width, cx - x);
+                top += ascents[row] + descents[row] + rowGap;
+            }
+            return m;
+        }
         case MNode::Script: {
             const MNodePtr& base = node->kids[0];
             const MNodePtr& sub = node->kids[1];
@@ -656,12 +285,66 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
         }
         case MNode::Delim: {
             Metrics cm = measureNode(ctx, node->kids[0], size);
+            // Tall common delimiters use native strokes at a constant width.
+            // Increasing the font size also widens glyphs, and used to cap
+            // brackets at 3.5 em, leaving large matrices unenclosed.
+            if (cm.height() > em * 1.4f &&
+                (!node->open || std::wstring(L"()[]{}|\u2016").find(node->open) != std::wstring::npos) &&
+                (!node->close || std::wstring(L"()[]{}|\u2016").find(node->close) != std::wstring::npos)) {
+                float top = baselineY - cm.ascent - em * 0.08f;
+                float height = cm.height() + em * 0.16f;
+                float width = em * 0.38f, pad = em * 0.12f;
+                float stroke = std::max(1.0f, em * 0.055f);
+                auto line = [&](float x1, float y1, float x2, float y2) {
+                    if (record) ctx.box.lines.push_back({x1, y1, x2, y2, stroke});
+                };
+                auto draw = [&](wchar_t d, float dx) {
+                    if (!d) return;
+                    float bottom = top + height;
+                    bool right = d == L')' || d == L']' || d == L'}';
+                    if (d == L'[' || d == L']') {
+                        float edge = dx + (right ? width : 0);
+                        line(edge, top, edge, bottom);
+                        line(dx, top, dx + width, top);
+                        line(dx, bottom, dx + width, bottom);
+                    } else if (d == L'|' || d == L'\u2016') {
+                        line(dx + width * 0.4f, top, dx + width * 0.4f, bottom);
+                        if (d == L'\u2016')
+                            line(dx + width * 0.8f, top, dx + width * 0.8f, bottom);
+                    } else {
+                        auto point = [&](float t) {
+                            float u;
+                            if (d == L'{' || d == L'}') {
+                                // Shoulder, waist, shoulder of a curly brace.
+                                float v = std::abs(t - 0.5f) * 2;
+                                u = 0.5f + 0.5f * (2 * v - 1) * (2 * v - 1) * (2 * v - 1);
+                            } else u = 1 - std::sin(t * 3.14159265f);
+                            return D2D1::Point2F(dx + width * (right ? 1 - u : u), top + t * height);
+                        };
+                        auto prev = point(0);
+                        for (int step = 1; step <= 32; ++step) {
+                            auto next = point(static_cast<float>(step) / 32);
+                            line(prev.x, prev.y, next.x, next.y);
+                            prev = next;
+                        }
+                    }
+                };
+                float leftWidth = node->open ? width + pad : 0;
+                float rightWidth = node->close ? width + pad : 0;
+                draw(node->open, x);
+                layoutNodeImpl(ctx, node->kids[0], size, x + leftWidth, baselineY, record);
+                draw(node->close, x + leftWidth + cm.width + pad);
+                m.width = leftWidth + cm.width + rightWidth;
+                m.ascent = cm.ascent + em * 0.08f + stroke / 2;
+                m.descent = cm.descent + em * 0.08f + stroke / 2;
+                return m;
+            }
             // Delimiters stretch to the content: scale the glyph size so a
             // paren grows with a fraction inside it
             float contentH = std::max(cm.height(), em);
             float glyphSize = size;
             if (contentH > em * 1.15f) {
-                glyphSize = size * std::min(3.5f, contentH / em);
+                glyphSize = contentH;
             }
             float cx = x;
             auto emitDelim = [&](wchar_t d) -> float {
@@ -795,9 +478,8 @@ MathBoxPtr mathParse(App& app, const std::wstring& latex, float fontSize,
     auto it = g_mathCache.find(key);
     if (it != g_mathCache.end()) return it->second;
 
-    Parser parser(latex);
-    MNodePtr root = parser.parseRow(0);
-    if (parser.failed || !root || root->kids.empty()) {
+    MNodePtr root = parseLatex(latex);
+    if (!root) {
         g_mathCache[key] = nullptr;   // remember the failure too
         return nullptr;
     }
@@ -840,7 +522,7 @@ void mathBoxDrawTo(ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush,
         target->DrawLine(
             D2D1::Point2F(x + line.x1, y + line.y1),
             D2D1::Point2F(x + line.x2, y + line.y2), brush,
-            std::max(1.0f, mathBoxHeight(box) * 0.02f));
+            line.thickness);
     }
 }
 
@@ -875,7 +557,7 @@ void mathBoxRetain(App& app, const MathBoxPtr& box, float x, float y,
     for (const auto& line : box->lines) {
         app.layoutLines.push_back({D2D1::Point2F(x + line.x1, y + line.y1),
                                    D2D1::Point2F(x + line.x2, y + line.y2),
-                                   color, 1.2f});
+                                   color, line.thickness});
     }
 }
 
@@ -936,7 +618,7 @@ std::string mathBoxSvg(const MathBoxPtr& box, const std::string& colorCss,
     for (const auto& l : box->lines) {
         s += "<line x1=\"" + svgNum(l.x1) + "\" y1=\"" + svgNum(l.y1) +
              "\" x2=\"" + svgNum(l.x2) + "\" y2=\"" + svgNum(l.y2) +
-             "\" stroke=\"" + colorCss + "\" stroke-width=\"1.2\"/>";
+             "\" stroke=\"" + colorCss + "\" stroke-width=\"" + svgNum(l.thickness) + "\"/>";
     }
     for (const auto& r : box->runs) {
         s += "<text x=\"" + svgNum(r.x) + "\" y=\"" +
