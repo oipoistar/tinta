@@ -1844,7 +1844,7 @@ void renderThemeChooser(App& app) {
                 app.brush);
             if (codeFormat) {
                 codeFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-                D2D1_COLOR_F codeColor = t.code;
+                D2D1_COLOR_F codeColor = themeInlineCodeColor(t);
                 codeColor.a = anim;
                 app.brush->SetColor(codeColor);
                 app.renderTarget->DrawText(L"code()", 6, codeFormat,
@@ -3967,7 +3967,7 @@ void renderThemeEditor(App& app) {
             app.brush->SetColor(work.codeBackground);
             app.renderTarget->FillRoundedRectangle(
                 D2D1::RoundedRect(pill, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush);
-            app.brush->SetColor(work.code);
+            app.brush->SetColor(themeInlineCodeColor(work));
             app.renderTarget->DrawText(L"inline_code()", 13, m,
                 D2D1::RectF(pill.left + dpi(app, 8.0f), pill.top + dpi(app, 2.0f),
                             pill.right, pill.bottom), app.brush);

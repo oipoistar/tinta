@@ -319,6 +319,10 @@ void applyThemeKey(CustomTheme& ct, const std::string& key, const std::string& v
     else if (key == "heading") parseHexColor(value, t.heading);
     else if (key == "link") parseHexColor(value, t.link);
     else if (key == "code") parseHexColor(value, t.code);
+    else if (key == "inlinecode") {
+        D2D1_COLOR_F color;
+        if (parseHexColor(value, color)) t.inlineCode = color;
+    }
     else if (key == "codebackground") parseHexColor(value, t.codeBackground);
     else if (key == "blockquoteborder") parseHexColor(value, t.blockquoteBorder);
     else if (key == "accent") parseHexColor(value, t.accent);
@@ -338,6 +342,7 @@ void writeThemesIni() {
     if (!file) return;
     file << "; User themes. Colors are RRGGBB hex. Restart not required for\n";
     file << "; themes saved from the editor; hand edits load at next launch.\n";
+    file << "; Optional inlinecode overrides code for inline spans only.\n";
     for (const auto& ct : g_customThemes) {
         const D2DTheme& t = ct->theme;
         file << "\n[theme]\n";
@@ -354,6 +359,7 @@ void writeThemesIni() {
         file << "heading=" << colorToHex(t.heading) << "\n";
         file << "link=" << colorToHex(t.link) << "\n";
         file << "code=" << colorToHex(t.code) << "\n";
+        if (t.inlineCode) file << "inlinecode=" << colorToHex(*t.inlineCode) << "\n";
         file << "codebackground=" << colorToHex(t.codeBackground) << "\n";
         file << "blockquoteborder=" << colorToHex(t.blockquoteBorder) << "\n";
         file << "accent=" << colorToHex(t.accent) << "\n";
