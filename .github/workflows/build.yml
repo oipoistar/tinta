@@ -45,27 +45,35 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.** The follow-up release: everything reported in the first day of 3.5.0, fixed - and Excel ranges paste as tables.
+            **Markdown, distilled.** Expanded native LaTeX math support, with regression coverage for equations inside everyday Markdown.
 
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Excel ranges paste as tables (#181)
-            - Copy a range in Excel (or any tab-separated text with two or more rows), paste it in edit mode, and it becomes a markdown table with the first row as the header
-            - Ctrl+Shift+V pastes the raw text; a chip confirms the conversion
+            ### Matrices and multiline math (#190)
+            - Matrix variants, nested cells, column alignment and scalable delimiters
+            - Cases, aligned and gathered equations, arrays with rules, and long arrows
 
-            ### Close a tab from the editor (#181)
-            - Ctrl+F4 closes the current tab in both viewer and edit mode, where Ctrl+W keeps its word-wrap meaning
+            ### More native LaTeX notation (#190)
+            - Indexed roots, binomial coefficients, continued fractions and operator limits
+            - Stacked annotations, labelled arrows, additional accents and symbols, and mathematical alphabets
+            - Explicit delimiter sizes and spacing, plus equation-local macros and custom operators
+            - Uses installed Cambria Math when available, with the theme font as fallback; no font files or web engine are bundled
+            - See the [math compatibility guide](https://github.com/oipoistar/tinta/blob/v3.5.6/docs/math-support.md) for supported syntax and remaining limitations
+
+            ### Mixed Markdown coverage (#190)
+            - 49 fixture equations checked alongside headings, tables, lists, links, emphasis, quotes, callouts, code and Mermaid
+            - Native viewer, print-page and HTML checks, including narrow windows and light/dark themes
 
             ### Fixed
-            - Long wrapped paragraphs in the editor no longer leave a blank band before the next line; clicks and arrow keys inside them land exactly (#181)
-            - Entering edit mode, opening help, annotating, and the right-click menu all work beside pinned side panels (#185)
-            - Presentational `<font>` wrappers from office and AI-tool exports are hidden while their text stays, and images inside table cells no longer leave a ghost at the top of the document and now size and align with their cell (#187)
+            - Math text retains spaces, fraction styles differ correctly, and limits, negative spacing and mathematical alphabets follow their intended layout (#190)
+            - Tall inline equations reserve enough vertical space to avoid overlap; spacing is currently expanded uniformly across their paragraph (#190)
+            - Inline math preserves highlight and strikethrough spans, link colors and clickable link areas; HTML math inherits surrounding colors (#190)
 
             ### What's included
-            - Export as HTML, DOCX, or PDF - plus the Pandoc formats above
+            - Export as HTML, DOCX, or PDF, plus optional Pandoc formats
             - 22 natively rendered Mermaid diagram families
             - Tabbed interface with drag, session restore, and a tab context menu
             - 10 tuned themes (5 light, 5 dark) plus custom themes
