@@ -443,12 +443,16 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
     // Reserve a common baseline and enough vertical room before retaining
     // any runs. Uniform spacing within this paragraph keeps wrapping and
     // selection consistent even when a tall inline matrix occurs mid-line.
-    std::vector<MathBoxPtr> mathBoxes(runs.size());
-    std::vector<float> mathBaselines(runs.size(), 0);
+    std::vector<MathBoxPtr> mathBoxes;
+    std::vector<float> mathBaselines;
     float mathBelow = 0;
     for (size_t i = 0; i < runs.size(); ++i) {
         const auto& run = runs[i];
         if (run.elem->type != ElementType::MathInline && run.elem->type != ElementType::MathDisplay) continue;
+        if (mathBoxes.empty()) {
+            mathBoxes.resize(runs.size());
+            mathBaselines.resize(runs.size(), 0);
+        }
         IDWriteTextFormat* format = run.style.format ? run.style.format : baseFormat;
         float size = format->GetFontSize();
         mathBoxes[i] = mathParse(app, toWide(run.elem->text), size, false);
