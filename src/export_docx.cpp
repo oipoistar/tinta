@@ -578,6 +578,7 @@ struct RunProps {
     bool strike = false;
     bool highlight = false;
     bool code = false;
+    bool isLink = false;
     bool superScript = false;
     bool subScript = false;
     std::string color;  // hex override (links, wiki links)
@@ -597,6 +598,7 @@ struct DocxCtx {
     // Theme palette, guarded so dark themes stay readable on paper
     std::string textHex, headingHex, mutedHex, codeBgHex, borderHex;
     std::string accentHex, linkHex, quoteBorderHex;
+    std::string inlineCodeHex;  // explicit override; legacy paper colors otherwise
     std::string bodyFont, monoFont;
 };
 
@@ -638,7 +640,9 @@ std::string runPropsXml(const DocxCtx& ctx, const RunProps& props) {
     if (props.highlight) xml += "<w:highlight w:val=\"yellow\"/>";
     if (props.superScript) xml += "<w:vertAlign w:val=\"superscript\"/>";
     if (props.subScript) xml += "<w:vertAlign w:val=\"subscript\"/>";
-    if (!props.color.empty()) {
+    if (props.code && !props.isLink && !ctx.inlineCodeHex.empty()) {
+        xml += "<w:color w:val=\"" + ctx.inlineCodeHex + "\"/>";
+    } else if (!props.color.empty()) {
         xml += "<w:color w:val=\"" + props.color + "\"/>";
     }
     if (props.underline) xml += "<w:u w:val=\"single\"/>";
@@ -797,6 +801,7 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
                 }
             } else if (wiki) {
                 RunProps wikiProps = props;
+                wikiProps.isLink = true;
                 wikiProps.color = ctx.linkHex;
                 for (const auto& child : elem->children) {
                     walkInline(ctx, child, wikiProps, out);
@@ -804,6 +809,7 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
             } else {
                 int rel = addLinkRel(ctx, elem->url);
                 RunProps linkProps = props;
+                linkProps.isLink = true;
                 linkProps.color = ctx.linkHex;
                 linkProps.underline = true;
                 out += "<w:hyperlink r:id=\"rId" + std::to_string(rel) +
@@ -1322,6 +1328,7 @@ bool exportDocxFile(App& app, const std::wstring& path) {
     muted.a = 0.65f;
     ctx.mutedHex = dark ? "555555" : hexOver(muted, theme.background);
     ctx.codeBgHex = dark ? "F2F0EE" : hex6(theme.codeBackground);
+    if (theme.inlineCode) ctx.inlineCodeHex = hex6(*theme.inlineCode);
     D2D1_COLOR_F border = theme.text;
     border.a = 0.25f;
     ctx.borderHex = dark ? "C8C8C8" : hexOver(border, theme.background);

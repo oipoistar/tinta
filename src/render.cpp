@@ -491,7 +491,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
 
             case ElementType::Code: {
                 format = inlineCodeFormat(app, run.style.bold, run.style.italic);
-                if (!isLink) color = app.theme.code;
+                if (!isLink) color = themeInlineCodeColor(app.theme);
                 for (const auto& child : elem->children) {
                     if (child->type == ElementType::Text) {
                         text += toWide(child->text);
@@ -537,7 +537,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 if (!box) {
                     // Unsupported TeX: show the raw source in code style
                     format = inlineCodeFormat(app, run.style.bold, run.style.italic);
-                    if (!isLink) color = app.theme.code;
+                    if (!isLink) color = themeInlineCodeColor(app.theme);
                     text = L"$" + latex + L"$";
                     break;
                 }

@@ -1330,11 +1330,15 @@ std::string themeCss(const App& app, const std::string& bodyFont,
     css += ".wikilink{color:" + colorCss(t.link) +
            ";border-bottom:1px dashed " + colorCss(t.link) + ";}";
     css += "code{font-family:" + monoFont + ";background:" +
-           colorCss(t.codeBackground) + ";color:" + colorCss(t.code) +
+           colorCss(t.codeBackground) + ";color:" + colorCss(themeInlineCodeColor(t)) +
            ";padding:2px 6px;border-radius:4px;font-size:0.9em;}";
     css += "pre{background:" + colorCss(t.codeBackground) +
            ";padding:14px 16px;border-radius:8px;overflow-x:auto;}";
     css += "pre code{background:none;padding:0;}";
+    if (t.inlineCode) {
+        css += "pre code{color:" + colorCss(t.code) + ";}";
+        css += "a code{color:inherit;}";
+    }
     css += "blockquote{border-left:4px solid " +
            colorCss(t.blockquoteBorder) +
            ";margin:1em 0;padding:2px 18px;color:" + colorCss(mutedText) +

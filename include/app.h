@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <chrono>
 #include <utility>
+#include <optional>
 
 #include "markdown.h"
 #include "keymap.h"
@@ -101,7 +102,13 @@ struct D2DTheme {
     D2D1_COLOR_F syntaxFunction;
     D2D1_COLOR_F syntaxType;
     D2D1_COLOR_F syntaxControlFlow;
+    // Optional themes.ini override. Missing means inherit code (#197).
+    std::optional<D2D1_COLOR_F> inlineCode = std::nullopt;
 };
+
+inline D2D1_COLOR_F themeInlineCodeColor(const D2DTheme& theme) {
+    return theme.inlineCode.value_or(theme.code);
+}
 
 // Helper to create color from hex
 inline D2D1_COLOR_F hexColor(uint32_t hex, float alpha = 1.0f) {

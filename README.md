@@ -260,6 +260,20 @@ Press `T` to open the theme chooser:
 - Ember - Warm charcoal
 - Abyss - Pure black (OLED-friendly)
 
+Custom themes live in `themes.ini` beside the portable executable, or in
+`%APPDATA%\Tinta`. Add `inlinecode` to a `[theme]` section to color inline code
+independently of fenced blocks:
+
+```ini
+code=334455
+inlinecode=B00020
+```
+
+Here inline code is red and plain fenced code stays neutral. Syntax highlighting
+keeps its own colors. Without `inlinecode`, inline code uses `code` as before.
+The override is preserved when saving a theme from the editor and applies to
+HTML and DOCX exports. Native printing keeps Tinta's existing light print palette.
+
 ## Dependencies
 
 - [MD4C](https://github.com/mity/md4c) - Fast markdown parser (fetched automatically by CMake)
