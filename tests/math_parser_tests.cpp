@@ -64,6 +64,26 @@ int main() {
     for (const auto* tex : {LR"(\sqrt[3{x})", LR"(\text{unterminated)", LR"(x^2^3)",
                             LR"(\overset{a})", LR"(\limits x)", LR"(\overline)", LR"(\mathbf)"})
         check(!parseLatex(tex), "invalid extended notation fails cleanly");
+    check(textOf(parseLatex(LR"(\newcommand{\R}{\mathbb{R}}x\in\R)")) == L"x\u2208\u211D", "custom notation expands");
+    check(textOf(parseLatex(LR"(\newcommand{\f}[2][x]{#1+#2}\f{y}+\f[z]{w})")) == L"x+y+z+w", "optional macro arguments");
+    check(textOf(parseLatex(LR"(\def\f#1#2{#2+#1}\f{a}{b})")) == L"b+a", "basic def arguments");
+    check(textOf(parseLatex(LR"(\def\a{\alpha}\a x)")) == L"\u03B1x", "expanded control words keep token boundaries");
+    check(textOf(parseLatex(LR"(\def\a{x}{\def\a{y}\a}\a)")) == L"yx", "macro definitions respect group scope");
+    check(parseLatex(LR"(\DeclareMathOperator*{\argmin}{arg min}\argmin_x f(x))") != nullptr, "declared operators");
+    check(parseLatex(LR"(\newcommand{\v}[1]{\begin{pmatrix}#1\end{pmatrix}}\v{a\\b})") != nullptr, "macros may generate environments");
+    for (const auto* tex : {LR"(\def\a{\a}\a)", LR"(\newcommand{\a}[1]{#2}\a{x})",
+        LR"(\newcommand{\frac}{x}\frac)", LR"(\renewcommand{\unknown}{x}\unknown)",
+        LR"(\def\f#1{#1}\f)", LR"({\def\a{x}}\a)"})
+        check(!parseLatex(tex), "invalid/recursive macros fail without leaking definitions");
+    check(!parseLatex(LR"(\R)"), "definitions do not leak to another equation");
+    for (const auto* tex : {LR"(\left\{\frac{x}{y}\middle|x>0\right\})",
+        LR"(\bigl( x \Bigr])", LR"(x\hspace{1em}y\kern 2pt z\mkern-3mu w)",
+        LR"(a\equiv b\pmod{n})", LR"(\begin{bmatrix*}[r]1&22\\333&4\end{bmatrix*})",
+        LR"(\begin{array}{r|l}\hline x&y\\\hline z&w\\\hline\end{array})"})
+        check(parseLatex(tex) != nullptr, "spacing and delimiter compatibility");
+    for (const auto* tex : {LR"(\left\bogus x\right))", LR"(\left(x\rightfoo))",
+                            LR"(\middle|x)", LR"(x\hspace{huge}y)", LR"(\big q)"})
+        check(!parseLatex(tex), "malformed delimiters and lengths fail");
     std::cout << "Math parser: " << failures << " failures\n";
     return failures ? 1 : 0;
 }

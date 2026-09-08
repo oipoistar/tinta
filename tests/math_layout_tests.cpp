@@ -57,6 +57,9 @@ int main(int argc, char** argv) {
         auto width = [&](const wchar_t* tex) { return mathBoxWidth(mathParse(app, tex, 24, false)); };
         check(width(LR"(x\!y)") < width(L"xy"), "negative spacing reduces width");
         check(width(LR"(\sqrt[123]{x})") > width(LR"(\sqrt{x})"), "radical index reserves width");
+        check(std::abs(width(LR"(x\hspace{1em}y)") - width(L"xy") - 24) < 0.01f, "em spacing uses current size");
+        check(std::abs(width(LR"(x\kern 3pt y)") - width(L"xy") - 4) < 0.01f, "point spacing uses logical pixels");
+        check(height(LR"(\Bigg(x\Bigg))") > height(LR"(\big(x\big))"), "explicit delimiter sizes differ");
         auto textSvg = mathBoxSvg(mathParse(app, LR"(\text{for all }x\in\mathbb{R})", 24, true), "#111", "Segoe UI");
         check(textSvg.find("for all ") != std::string::npos && textSvg.find("xml:space=\"preserve\"") != std::string::npos,
               "SVG preserves text spaces");
@@ -77,7 +80,10 @@ int main(int argc, char** argv) {
                 LR"(\text{for all }x\in\mathbb{R},\quad\mathcal{L}=\mathfrak{g}+\boldsymbol{\alpha})",
                 LR"(A\xrightarrow[n\to\infty]{f}B\qquad\overset{!}{=}\qquad\underbrace{a+b+c}_{\text{sum}})",
                 LR"(\widetilde{xyz}+\dot{x}+\ddot{x}+\underline{y}+\boxed{x=2}+\cancel{x})",
-                LR"(\sum_{\substack{i>0\\j>0}}a_{ij}\qquad x^{y^{z^2}})"}) {
+                LR"(\sum_{\substack{i>0\\j>0}}a_{ij}\qquad x^{y^{z^2}})",
+                LR"(\left\{\frac{x}{y}\middle|x>0\right\}\qquad\bigl(x\bigr)\Bigl(x\Bigr)\Biggl(x\Biggr))",
+                LR"(\begin{array}{r|l}\hline 1&22\\\hline 333&4\\\hline\end{array}\qquad a\equiv b\pmod{n})",
+                LR"(\newcommand{\norm}[1]{\left\lVert#1\right\rVert}\norm{\frac{x}{y}}\geq0)"}) {
                 out << "<section>" << mathBoxSvg(mathParse(app, tex, 24, true), "#17212b", "Segoe UI") << "</section>";
             }
         }

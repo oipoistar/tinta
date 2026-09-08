@@ -1,8 +1,11 @@
 #include "math_parser.h"
+#include "math_macros.h"
 
 #include <algorithm>
 #include <cwctype>
 #include <climits>
+#include <cstdlib>
+#include <cmath>
 
 namespace tinta_math {
 
@@ -121,14 +124,7 @@ const wchar_t* kFunctions[] = {
     L"arcsin", L"arccos", L"arctan", L"sinh", L"cosh", L"tanh", L"coth",
     L"lim", L"limsup", L"liminf", L"max", L"min", L"sup", L"inf",
     L"gcd", L"det", L"dim", L"ker", L"deg", L"arg", L"exp", L"mod", L"Pr",
-    L"argmax", L"argmin", L"hom", L"erf", L"sgn",
-};
-
-// \mathbb single letters -> double-struck
-const CmdSym kBlackboard[] = {
-    {L"R", L"\u211D"}, {L"N", L"\u2115"}, {L"Z", L"\u2124"},
-    {L"Q", L"\u211A"}, {L"C", L"\u2102"}, {L"P", L"\u2119"},
-    {L"E", L"\U0001D53C"}, {L"F", L"\U0001D53D"},
+    L"hom", L"erf", L"sgn",
 };
 
 const wchar_t* lookupSymbol(const std::wstring& cmd) {
@@ -260,6 +256,7 @@ struct Parser {
     bool failed = false;
     int depth = 0;
     size_t atoms = 0;
+    int delimiterDepth = 0;
 
     struct Nest {
         int& depth;
@@ -294,6 +291,50 @@ struct Parser {
         if (peek() != L'}') failed = true;
         else ++pos;
         return value;
+    }
+
+    wchar_t readDelimiter() {
+        skipWs();
+        if (eof()) { failed = true; return 0; }
+        wchar_t value = src[pos++];
+        if (value == L'\\') {
+            std::wstring name = readCommand();
+            if (name == L"{" || name == L"}") value = name[0];
+            else if (name == L"|") value = L'\u2016';
+            else {
+                const wchar_t* symbol = lookupSymbol(name);
+                if (!symbol || !symbol[0] || symbol[1]) { failed = true; return 0; }
+                value = symbol[0];
+            }
+        }
+        if (std::wstring(L".()[]{}|/\\\u2016\u2223\u2225\u2308\u2309\u230A\u230B\u27E8\u27E9\u2191\u2193\u2195\u21D1\u21D3\u21D5").find(value) == std::wstring::npos)
+            failed = true;
+        return value == L'.' ? 0 : value;
+    }
+
+    MNodePtr dimension() {
+        skipWs();
+        bool group = peek() == L'{';
+        if (group) ++pos;
+        const wchar_t* start = src.c_str() + pos;
+        wchar_t* end = nullptr;
+        double number = std::wcstod(start, &end);
+        if (start == end || !std::isfinite(number) || std::abs(number) > 1000) {
+            failed = true; return nullptr;
+        }
+        pos += static_cast<size_t>(end - start);
+        skipWs(); size_t unitStart = pos;
+        while (!eof() && iswalpha(peek())) ++pos;
+        std::wstring unit = src.substr(unitStart, pos - unitStart);
+        auto space = mk(MNode::Space);
+        space->space = static_cast<float>(number);
+        if (unit == L"ex") space->space *= 0.5f;
+        else if (unit == L"mu") space->space /= 18;
+        else if (unit == L"pt" || unit == L"px") space->text = unit;
+        else if (unit != L"em") failed = true;
+        skipWs();
+        if (group) { if (peek() != L'}') failed = true; else ++pos; }
+        return space;
     }
 
     MNodePtr textGroup() {
@@ -338,6 +379,9 @@ struct Parser {
 
     MNodePtr parseEnvironment() {
         std::wstring name = literalGroup();
+        std::wstring endName = name;
+        bool starred = !name.empty() && name.back() == L'*';
+        if (starred) name.pop_back();
         auto grid = mk(MNode::Grid);
         wchar_t open = 0, close = 0;
         if (name == L"pmatrix") { open = L'('; close = L')'; }
@@ -351,15 +395,38 @@ struct Parser {
         } else if (name == L"aligned" || name == L"split") grid->aligned = true;
         else if (name == L"smallmatrix") grid->compact = true;
         else if (name == L"array") {
-            grid->alignment = literalGroup();
-            if (grid->alignment.empty() || grid->alignment.size() > 64 ||
-                grid->alignment.find_first_not_of(L"lcr") != std::wstring::npos)
-                failed = true;
+            auto spec = literalGroup();
+            for (wchar_t c : spec) {
+                if (c == L'|') grid->verticalRules.push_back(grid->alignment.size());
+                else if (c == L'l' || c == L'c' || c == L'r') grid->alignment += c;
+                else if (!iswspace(c)) failed = true;
+            }
+            if (grid->alignment.empty() || grid->alignment.size() > 64) failed = true;
         } else if (name != L"matrix" && name != L"gathered") failed = true;
+        if (starred) {
+            if (name.find(L"matrix") == std::wstring::npos || name == L"smallmatrix") failed = true;
+            skipWs();
+            if (peek() == L'[') {
+                ++pos; skipWs();
+                wchar_t align = peek(); if (!eof()) ++pos;
+                skipWs();
+                if ((align != L'l' && align != L'c' && align != L'r') || peek() != L']') failed = true;
+                else ++pos;
+                grid->alignment.assign(1, align); grid->uniformAlignment = true;
+            }
+        }
         if (failed) return nullptr;
 
         grid->cells.emplace_back();
         while (!failed) {
+            skipWs();
+            while (name == L"array" && grid->cells.back().empty() && atCommand(L"\\hline")) {
+                grid->horizontalRules.push_back(grid->cells.size() - 1);
+                pos += 6; skipWs();
+            }
+            if (atCommand(L"\\end") && grid->cells.back().empty() && grid->cells.size() > 1) {
+                grid->cells.pop_back(); break;
+            }
             if (grid->cells.size() > 64 || grid->cells.back().size() >= 64) {
                 failed = true; break;
             }
@@ -377,9 +444,9 @@ struct Parser {
         }
         if (!atCommand(L"\\end")) { failed = true; return nullptr; }
         pos += 4;
-        if (literalGroup() != name) failed = true;
+        if (literalGroup() != endName) failed = true;
         for (const auto& row : grid->cells) {
-            if ((!grid->alignment.empty() && row.size() > grid->alignment.size()) ||
+            if ((!grid->uniformAlignment && !grid->alignment.empty() && row.size() > grid->alignment.size()) ||
                 (name == L"gathered" && row.size() != 1) ||
                 (name == L"split" && row.size() > 2)) failed = true;
         }
@@ -446,6 +513,40 @@ struct Parser {
         std::wstring cmd = readCommand();
         if (cmd.empty()) { failed = true; return nullptr; }
         if (cmd == L"begin") return parseEnvironment();
+        if (cmd == L"hspace" || cmd == L"kern" || cmd == L"mkern") {
+            if (cmd == L"hspace" && peek() == L'*') ++pos;
+            return dimension();
+        }
+        if (cmd == L"pmod" || cmd == L"bmod" || cmd == L"pod") {
+            auto row = mk(MNode::Row);
+            row->spacing = cmd == L"bmod" ? 0.2f : 0.3f;
+            if (cmd != L"pod") {
+                auto mod = mk(MNode::Sym); mod->roman = true; mod->text = L"mod";
+                row->kids.push_back(mod);
+                auto space = mk(MNode::Space); space->space = 0.33f; row->kids.push_back(space);
+            }
+            if (cmd != L"bmod") {
+                row->kids.push_back(parseArg());
+                auto delim = mk(MNode::Delim); delim->open = L'('; delim->close = L')';
+                delim->kids = {row}; delim->spacing = 0.3f; return delim;
+            }
+            return row;
+        }
+        const std::pair<const wchar_t*, float> sizes[] = {{L"big", 1.2f}, {L"Big", 1.6f}, {L"bigg", 2.0f}, {L"Bigg", 2.4f}};
+        for (const auto& entry : sizes) {
+            std::wstring name = entry.first;
+            if (cmd == name || cmd == name + L"l" || cmd == name + L"r" || cmd == name + L"m") {
+                auto delimiter = mk(MNode::Middle);
+                delimiter->open = readDelimiter(); delimiter->delimiterSize = entry.second;
+                return delimiter;
+            }
+        }
+        if (cmd == L"middle") {
+            if (!delimiterDepth) { failed = true; return nullptr; }
+            auto delimiter = mk(MNode::Middle); delimiter->open = readDelimiter();
+            delimiter->spacing = 0.26f;
+            return delimiter;
+        }
         if (cmd == L"text" || cmd == L"textrm" || cmd == L"textbf" || cmd == L"textit") {
             auto text = textGroup();
             if (text && cmd == L"textbf") markBold(text);
@@ -594,43 +695,15 @@ struct Parser {
             return d;
         }
         if (cmd == L"left") {
-            skipWs();
-            wchar_t open = 0;
-            if (peek() == L'\\') {
-                pos++;
-                std::wstring dc = readCommand();
-                const wchar_t* mapped = lookupSymbol(dc);
-                open = mapped && mapped[0] ? mapped[0] : 0;
-                if (dc == L"{") open = L'{';
-                if (dc == L"}") open = L'}';
-            } else {
-                open = peek();
-                if (!eof()) pos++;
-            }
-            MNodePtr content = parseRow(0, /*stopAtRight=*/true);
-            // consume \right and its delimiter
+            Nest delimiter(delimiterDepth);
+            wchar_t open = readDelimiter();
+            auto content = parseRow(0, true);
             wchar_t close = 0;
-            if (pos + 5 < src.size() && src.compare(pos, 6, L"\\right") == 0) {
-                pos += 6;
-                skipWs();
-                if (peek() == L'\\') {
-                    pos++;
-                    std::wstring dc = readCommand();
-                    const wchar_t* mapped = lookupSymbol(dc);
-                    close = mapped && mapped[0] ? mapped[0] : 0;
-                    if (dc == L"{") close = L'{';
-                    if (dc == L"}") close = L'}';
-                } else {
-                    close = peek();
-                    if (!eof()) pos++;
-                }
-            } else {
-                failed = true;
-            }
-            MNodePtr d = mk(MNode::Delim);
-            d->open = open == L'.' ? 0 : open;
-            d->close = close == L'.' ? 0 : close;
-            d->kids.push_back(content ? content : mk(MNode::Row));
+            if (!atCommand(L"\\right")) failed = true;
+            else { pos += 6; close = readDelimiter(); }
+            auto d = mk(MNode::Delim);
+            d->open = open; d->close = close;
+            d->kids = {content ? content : mk(MNode::Row)};
             return d;
         }
         if (cmd == L"mathrm") {
@@ -655,7 +728,9 @@ struct Parser {
             if (arg) markItalic(arg);
             return arg;
         }
-        if (isFunctionName(cmd)) {
+        // Convenience spellings remain definable with DeclareMathOperator,
+        // as they are not predefined operators in amsmath.
+        if (isFunctionName(cmd) || cmd == L"argmax" || cmd == L"argmin") {
             MNodePtr f = mk(MNode::Sym);
             f->text = cmd;
             f->roman = true;
@@ -774,9 +849,25 @@ struct Parser {
 
 MNodePtr parseLatex(const std::wstring& source) {
     if (source.size() > 32768) return nullptr;
-    Parser parser(source);
+    std::wstring expanded;
+    if (!expandLatexMacros(source, expanded)) return nullptr;
+    Parser parser(expanded);
     auto root = parser.parseRow(0);
     return parser.failed || !root || root->kids.empty() ? nullptr : root;
+}
+
+bool isBuiltinMathCommand(const std::wstring& command) {
+    if (lookupSymbol(command) || isFunctionName(command)) return true;
+    const std::wstring names = L" begin end frac dfrac tfrac cfrac binom dbinom tbinom sqrt "
+        L"left right middle big Big bigg Bigg bigl bigr Bigl Bigr biggl biggr Biggl Biggr "
+        L"text textrm textbf textit operatorname mathrm mathit mathbb mathcal mathscr mathfrak mathsf mathtt "
+        L"mathbf boldsymbol bm displaystyle textstyle scriptstyle scriptscriptstyle limits nolimits "
+        L"overline bar overrightarrow vec hat widehat dot ddot tilde widetilde underline boxed "
+        L"cancel bcancel xcancel overbrace underbrace acute grave breve check not "
+        L"phantom hphantom vphantom smash hspace kern mkern quad qquad thinspace medspace thickspace enspace "
+        L"overset underset stackrel substack xrightarrow xleftarrow pmod bmod pod newcommand renewcommand "
+        L"providecommand def DeclareMathOperator ";
+    return names.find(L" " + command + L" ") != std::wstring::npos;
 }
 
 } // namespace tinta_math

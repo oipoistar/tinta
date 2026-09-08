@@ -70,6 +70,7 @@ set(SOURCES
     src/selection.cpp
     src/math_render.cpp
     src/math_parser.cpp
+    src/math_macros.cpp
     src/tabs.cpp
     src/export_html.cpp
     src/export_docx.cpp
@@ -139,12 +140,12 @@ target_compile_definitions(tinta PRIVATE UNICODE _UNICODE
     TINTA_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 
 if(BUILD_TESTING)
-    add_executable(math_parser_tests tests/math_parser_tests.cpp src/math_parser.cpp)
+    add_executable(math_parser_tests tests/math_parser_tests.cpp src/math_parser.cpp src/math_macros.cpp)
     target_include_directories(math_parser_tests PRIVATE src)
     add_test(NAME math_parser COMMAND math_parser_tests)
 
     add_executable(math_layout_tests tests/math_layout_tests.cpp
-        src/math_parser.cpp src/math_render.cpp src/markdown.cpp src/themes.cpp src/config_dir.cpp)
+        src/math_parser.cpp src/math_macros.cpp src/math_render.cpp src/markdown.cpp src/themes.cpp src/config_dir.cpp)
     target_include_directories(math_layout_tests PRIVATE include src ${md4c_SOURCE_DIR}/src)
     target_link_libraries(math_layout_tests PRIVATE md4c d2d1 dwrite windowscodecs shell32 ole32)
     target_compile_definitions(math_layout_tests PRIVATE UNICODE _UNICODE)

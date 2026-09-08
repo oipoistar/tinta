@@ -72,6 +72,7 @@ struct LayoutCtx {
     // TeX text style vs display style: inline fractions use near-script
     // sizes so they fit the surrounding line
     int style = 1; // display, text, script, scriptscript
+    float delimiterHeight = 0;
 };
 
 float styleScale(int style) {
@@ -185,7 +186,7 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
 
     switch (node->kind) {
         case MNode::Space: {
-            m.width = node->space * em;
+            m.width = node->space * (node->text == L"pt" ? 96.0f / 72 : node->text == L"px" ? 1.0f : em);
             m.ascent = 0;
             m.descent = 0;
             return m;
@@ -218,8 +219,34 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
             m.width = cx - x;
             return m;
         }
+        case MNode::Middle: {
+            if (!node->open) return m;
+            float height = node->delimiterSize > 0 ? node->delimiterSize * em : std::max(em, ctx.delimiterHeight);
+            float center = baselineY - em * 0.26f;
+            if (node->open == L'|' || node->open == L'\u2016' || node->open == L'\u2223' || node->open == L'\u2225') {
+                m.width = em * 0.3f;
+                m.ascent = height / 2 + em * 0.26f; m.descent = height / 2 - em * 0.26f;
+                if (record) {
+                    float stroke = std::max(1.0f, em * 0.055f);
+                    ctx.box.lines.push_back({x + em * 0.1f, center - height / 2, x + em * 0.1f, center + height / 2, stroke});
+                    if (node->open != L'|' && node->open != L'\u2223')
+                        ctx.box.lines.push_back({x + em * 0.25f, center - height / 2, x + em * 0.25f, center + height / 2, stroke});
+                }
+                return m;
+            }
+            std::wstring text(1, node->open);
+            Metrics glyph = emitRun(ctx, text, height, false, false, 0, 0, false);
+            m.width = glyph.width;
+            m.ascent = glyph.height() / 2 + em * 0.26f;
+            m.descent = std::max(0.0f, glyph.height() / 2 - em * 0.26f);
+            if (record) emitRun(ctx, text, height, false, false, x,
+                                center + (glyph.ascent - glyph.descent) / 2, true);
+            return m;
+        }
         case MNode::Grid: {
-            float cellSize = node->compact ? size * 0.7f : size;
+            LayoutCtx cellCtx = ctx;
+            cellCtx.style = node->compact ? std::max(2, ctx.style) : std::max(1, ctx.style);
+            float cellSize = size * styleScale(cellCtx.style) / styleScale(ctx.style);
             size_t columns = node->alignment.size();
             for (const auto& row : node->cells) columns = std::max(columns, row.size());
             if (!columns || node->cells.empty()) return m;
@@ -231,7 +258,7 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
                 float ascent = cellSize * 0.8f, descent = cellSize * 0.2f;
                 std::vector<Metrics> measured;
                 for (size_t col = 0; col < row.size(); ++col) {
-                    Metrics cm = measureNode(ctx, row[col], cellSize);
+                    Metrics cm = measureNode(cellCtx, row[col], cellSize);
                     widths[col] = std::max(widths[col], cm.width);
                     ascent = std::max(ascent, cm.ascent);
                     descent = std::max(descent, cm.descent);
@@ -242,6 +269,8 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
                 cells.push_back(std::move(measured));
             }
             totalHeight += rowGap * static_cast<float>(cells.size() - 1);
+            float cellPadding = node->verticalRules.empty() ? 0 : cellSize * 0.2f;
+            for (auto& width : widths) width += cellPadding * 2;
             m.ascent = totalHeight / 2 + em * 0.26f;
             m.descent = totalHeight - m.ascent;
             float top = baselineY - m.ascent;
@@ -249,11 +278,12 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
                 float cx = x;
                 for (size_t col = 0; col < columns; ++col) {
                     wchar_t align = node->aligned ? (col % 2 ? L'l' : L'r') : L'c';
-                    if (col < node->alignment.size()) align = node->alignment[col];
+                    if (node->uniformAlignment) align = node->alignment.front();
+                    else if (col < node->alignment.size()) align = node->alignment[col];
                     if (col < cells[row].size() && record) {
-                        float extra = widths[col] - cells[row][col].width;
-                        float offset = align == L'r' ? extra : align == L'c' ? extra / 2 : 0;
-                        layoutNodeImpl(ctx, node->cells[row][col], cellSize,
+                        float extra = widths[col] - cells[row][col].width - 2 * cellPadding;
+                        float offset = cellPadding + (align == L'r' ? extra : align == L'c' ? extra / 2 : 0);
+                        layoutNodeImpl(cellCtx, node->cells[row][col], cellSize,
                                        cx + offset, top + ascents[row], true);
                     }
                     cx += widths[col];
@@ -262,6 +292,26 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
                 }
                 m.width = std::max(m.width, cx - x);
                 top += ascents[row] + descents[row] + rowGap;
+            }
+            if (record) {
+                float stroke = std::max(1.0f, em * 0.045f);
+                float y1 = baselineY - m.ascent, y2 = baselineY + m.descent;
+                for (size_t boundary : node->verticalRules) {
+                    float dx = x;
+                    for (size_t col = 0; col < boundary && col < columns; ++col) {
+                        dx += widths[col];
+                        if (col + 1 < columns) dx += cellSize * (col + 1 == boundary ? 0.5f : 1.0f);
+                    }
+                    ctx.box.lines.push_back({dx, y1, dx, y2, stroke});
+                }
+                for (size_t boundary : node->horizontalRules) {
+                    float dy = y1;
+                    for (size_t row = 0; row < boundary && row < cells.size(); ++row) {
+                        dy += ascents[row] + descents[row];
+                        if (row + 1 < cells.size()) dy += rowGap * (row + 1 == boundary ? 0.5f : 1.0f);
+                    }
+                    ctx.box.lines.push_back({x, dy, x + m.width, dy, stroke});
+                }
             }
             return m;
         }
@@ -381,7 +431,9 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
             return m;
         }
         case MNode::Delim: {
+            ctx.delimiterHeight = 0;
             Metrics cm = measureNode(ctx, node->kids[0], size);
+            ctx.delimiterHeight = cm.height();
             // Tall common delimiters use native strokes at a constant width.
             // Increasing the font size also widens glyphs, and used to cap
             // brackets at 3.5 em, leaving large matrices unenclosed.

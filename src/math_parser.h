@@ -22,6 +22,7 @@ struct MNode {
         Grid,    // cells by row; each cell is a complete expression
         Stack,   // kids = base, below-or-null, above-or-null
         Phantom, // invisible width/height (decoKind: 0 both, 1 horizontal, 2 vertical)
+        Middle,  // delimiter sized by an enclosing \left ... \right
     } kind = Row;
 
     std::wstring text;
@@ -44,6 +45,9 @@ struct MNode {
     std::wstring alignment;        // Grid: l/c/r per column (empty = centered)
     bool aligned = false;          // Grid: alternating right/left equation columns
     bool compact = false;            // Grid: smallmatrix / substack
+    bool uniformAlignment = false;
+    std::vector<size_t> verticalRules;
+    std::vector<size_t> horizontalRules;
 };
 
 
