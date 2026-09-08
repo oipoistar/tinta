@@ -1,4 +1,5 @@
 #include "math_render.h"
+#include "math_parser.h"
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +31,7 @@ struct MathRule {   // fraction bars, overlines, radical bars
 
 struct MathLine {   // arrowheads
     float x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    float thickness = 1.2f;
 };
 
 } // namespace
@@ -39,6 +41,7 @@ struct MathBox {
     std::vector<MathRule> rules;
     std::vector<MathLine> lines;
     float width = 0, height = 0, baseline = 0;
+    std::wstring fontFamily;
     ~MathBox() {
         for (auto& r : runs) {
             if (r.layout) r.layout->Release();
@@ -52,427 +55,7 @@ namespace {
 // Parse tree
 // ---------------------------------------------------------------------------
 
-struct MNode;
-using MNodePtr = std::shared_ptr<MNode>;
-
-struct MNode {
-    enum Kind {
-        Row,     // kids in sequence
-        Sym,     // text (variable, number, operator, mapped symbol)
-        Frac,    // kids = {num, den}
-        Script,  // kids = {base, sub-or-null, sup-or-null}
-        Delim,   // \left..\right, kids = {content}
-        Deco,    // kids = {content}; decoKind below
-        Space,   // explicit spacing; scale in "space"
-    } kind = Row;
-
-    std::wstring text;
-    std::vector<MNodePtr> kids;
-    wchar_t open = 0, close = 0;   // Delim
-    int decoKind = 0;              // 1 overline/bar 2 overrightarrow/vec 3 sqrt 4 hat
-    bool roman = false;            // upright (functions, \mathrm, \text)
-    bool bold = false;             // \mathbf
-    float space = 0.0f;            // Space: width in em
-};
-
-MNodePtr mk(MNode::Kind k) {
-    auto n = std::make_shared<MNode>();
-    n->kind = k;
-    return n;
-}
-
-// ---------------------------------------------------------------------------
-// Command tables
-// ---------------------------------------------------------------------------
-
-struct CmdSym { const wchar_t* name; const wchar_t* text; };
-
-// Symbols and greek letters mapped straight to Unicode text runs
-const CmdSym kSymbols[] = {
-    {L"alpha", L"\u03B1"}, {L"beta", L"\u03B2"}, {L"gamma", L"\u03B3"},
-    {L"delta", L"\u03B4"}, {L"epsilon", L"\u03B5"}, {L"varepsilon", L"\u03B5"},
-    {L"zeta", L"\u03B6"}, {L"eta", L"\u03B7"}, {L"theta", L"\u03B8"},
-    {L"vartheta", L"\u03D1"}, {L"iota", L"\u03B9"}, {L"kappa", L"\u03BA"},
-    {L"lambda", L"\u03BB"}, {L"mu", L"\u03BC"}, {L"nu", L"\u03BD"},
-    {L"xi", L"\u03BE"}, {L"pi", L"\u03C0"}, {L"rho", L"\u03C1"},
-    {L"sigma", L"\u03C3"}, {L"tau", L"\u03C4"}, {L"upsilon", L"\u03C5"},
-    {L"phi", L"\u03C6"}, {L"varphi", L"\u03C6"}, {L"chi", L"\u03C7"},
-    {L"psi", L"\u03C8"}, {L"omega", L"\u03C9"},
-    {L"Gamma", L"\u0393"}, {L"Delta", L"\u0394"}, {L"Theta", L"\u0398"},
-    {L"Lambda", L"\u039B"}, {L"Xi", L"\u039E"}, {L"Pi", L"\u03A0"},
-    {L"Sigma", L"\u03A3"}, {L"Upsilon", L"\u03A5"}, {L"Phi", L"\u03A6"},
-    {L"Psi", L"\u03A8"}, {L"Omega", L"\u03A9"},
-    {L"in", L"\u2208"}, {L"notin", L"\u2209"}, {L"ni", L"\u220B"},
-    {L"cup", L"\u222A"}, {L"cap", L"\u2229"},
-    {L"subset", L"\u2282"}, {L"supset", L"\u2283"},
-    {L"subseteq", L"\u2286"}, {L"supseteq", L"\u2287"},
-    {L"geq", L"\u2265"}, {L"ge", L"\u2265"}, {L"leq", L"\u2264"},
-    {L"le", L"\u2264"}, {L"neq", L"\u2260"}, {L"ne", L"\u2260"},
-    {L"equiv", L"\u2261"}, {L"approx", L"\u2248"}, {L"sim", L"\u223C"},
-    {L"propto", L"\u221D"}, {L"pm", L"\u00B1"}, {L"mp", L"\u2213"},
-    {L"times", L"\u00D7"}, {L"div", L"\u00F7"}, {L"cdot", L"\u22C5"},
-    {L"cdots", L"\u22EF"}, {L"ldots", L"\u2026"}, {L"dots", L"\u2026"},
-    {L"vdots", L"\u22EE"}, {L"ddots", L"\u22F1"},
-    {L"mid", L"\u2223"}, {L"parallel", L"\u2225"}, {L"perp", L"\u22A5"},
-    {L"angle", L"\u2220"}, {L"triangle", L"\u25B3"},
-    {L"bigtriangleup", L"\u25B3"}, {L"square", L"\u25A1"},
-    {L"infty", L"\u221E"}, {L"partial", L"\u2202"}, {L"nabla", L"\u2207"},
-    {L"forall", L"\u2200"}, {L"exists", L"\u2203"},
-    {L"emptyset", L"\u2205"}, {L"varnothing", L"\u2205"},
-    {L"because", L"\u2235"}, {L"therefore", L"\u2234"},
-    {L"to", L"\u2192"}, {L"rightarrow", L"\u2192"},
-    {L"leftarrow", L"\u2190"}, {L"Rightarrow", L"\u21D2"},
-    {L"Leftarrow", L"\u21D0"}, {L"Leftrightarrow", L"\u21D4"},
-    {L"leftrightarrow", L"\u2194"}, {L"mapsto", L"\u21A6"},
-    {L"circ", L"\u2218"}, {L"bullet", L"\u2219"}, {L"star", L"\u22C6"},
-    {L"oplus", L"\u2295"}, {L"otimes", L"\u2297"},
-    {L"sum", L"\u2211"}, {L"prod", L"\u220F"}, {L"int", L"\u222B"},
-    {L"oint", L"\u222E"}, {L"sqrt", nullptr},  // structural, handled apart
-    {L"prime", L"\u2032"}, {L"degree", L"\u00B0"},
-    {L"lfloor", L"\u230A"}, {L"rfloor", L"\u230B"},
-    {L"lceil", L"\u2308"}, {L"rceil", L"\u2309"},
-    {L"langle", L"\u27E8"}, {L"rangle", L"\u27E9"},
-    {L"lbrack", L"["}, {L"rbrack", L"]"},
-    {L"lbrace", L"{"}, {L"rbrace", L"}"},
-    {L"lvert", L"|"}, {L"rvert", L"|"}, {L"vert", L"|"},
-    {L"lVert", L"\u2016"}, {L"rVert", L"\u2016"}, {L"Vert", L"\u2016"},
-    {L"backslash", L"\\"}, {L"setminus", L"\u2216"},
-    {L"hbar", L"\u210F"}, {L"ell", L"\u2113"}, {L"Re", L"\u211C"},
-    {L"Im", L"\u2111"}, {L"aleph", L"\u2135"}, {L"wp", L"\u2118"},
-    {L"neg", L"\u00AC"}, {L"lnot", L"\u00AC"},
-    {L"land", L"\u2227"}, {L"wedge", L"\u2227"},
-    {L"lor", L"\u2228"}, {L"vee", L"\u2228"},
-};
-
-// Function names rendered upright with a trailing thin space
-const wchar_t* kFunctions[] = {
-    L"log", L"ln", L"lg", L"sin", L"cos", L"tan", L"cot", L"sec", L"csc",
-    L"arcsin", L"arccos", L"arctan", L"sinh", L"cosh", L"tanh", L"coth",
-    L"lim", L"limsup", L"liminf", L"max", L"min", L"sup", L"inf",
-    L"gcd", L"det", L"dim", L"ker", L"deg", L"arg", L"exp", L"mod", L"Pr",
-};
-
-// \mathbb single letters -> double-struck
-const CmdSym kBlackboard[] = {
-    {L"R", L"\u211D"}, {L"N", L"\u2115"}, {L"Z", L"\u2124"},
-    {L"Q", L"\u211A"}, {L"C", L"\u2102"}, {L"P", L"\u2119"},
-    {L"E", L"\U0001D53C"}, {L"F", L"\U0001D53D"},
-};
-
-const wchar_t* lookupSymbol(const std::wstring& cmd) {
-    for (const auto& s : kSymbols) {
-        if (cmd == s.name) return s.text;
-    }
-    return nullptr;
-}
-
-bool isFunctionName(const std::wstring& cmd) {
-    for (const auto* f : kFunctions) {
-        if (cmd == f) return true;
-    }
-    return false;
-}
-
-// Spacing classes for row layout (fractions of an em on each side)
-float symbolSpacing(const std::wstring& t, bool roman) {
-    if (t.size() != 1) {
-        if (t == L"\u22EF" || t == L"\u2026") return 0.16f;
-        // Upright function names (sin, log, ...) take thin spaces so
-        // \sin m\alpha reads "sin m\u03B1" rather than "sinm\u03B1"
-        if (roman) {
-            bool allAlpha = true;
-            for (wchar_t c : t) {
-                if (!iswalpha(c)) { allAlpha = false; break; }
-            }
-            if (allAlpha) return 0.16f;
-        }
-        return 0.0f;
-    }
-    wchar_t c = t[0];
-    switch (c) {
-        case L'=': case L'<': case L'>':
-        case 0x2264: case 0x2265: case 0x2260: case 0x2261: case 0x2248:
-        case 0x2208: case 0x2209: case 0x2282: case 0x2283: case 0x2286:
-        case 0x2287: case 0x2192: case 0x21D2: case 0x2194: case 0x21D4:
-        case 0x223C: case 0x221D: case 0x2223: case 0x2225:
-            return 0.26f;   // relations
-        case L'+': case 0x2212: case 0x00B1: case 0x2213: case 0x00D7:
-        case 0x00F7: case 0x22C5: case 0x222A: case 0x2229: case 0x2227:
-        case 0x2228: case 0x2216:
-            return 0.2f;    // binary operators
-        case L',': case L';':
-            return 0.12f;   // punctuation (space after only, approximated)
-        default:
-            return 0.0f;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tokenizer + parser
-// ---------------------------------------------------------------------------
-
-struct Parser {
-    const std::wstring& src;
-    size_t pos = 0;
-    bool failed = false;
-
-    explicit Parser(const std::wstring& s) : src(s) {}
-
-    void skipWs() {
-        while (pos < src.size() && iswspace(src[pos])) pos++;
-    }
-    bool eof() { return pos >= src.size(); }
-    wchar_t peek() { return pos < src.size() ? src[pos] : 0; }
-
-    std::wstring readCommand() {  // after the backslash
-        std::wstring cmd;
-        while (pos < src.size() && iswalpha(src[pos])) cmd += src[pos++];
-        if (cmd.empty() && pos < src.size()) cmd += src[pos++];  // \{ \, etc.
-        return cmd;
-    }
-
-    // One brace group or a single atom (TeX: \frac ab == \frac{a}{b})
-    MNodePtr parseArg() {
-        skipWs();
-        if (peek() == L'{') {
-            pos++;
-            MNodePtr row = parseRow(L'}');
-            if (peek() == L'}') pos++;
-            else failed = true;
-            return row;
-        }
-        return parseAtom();
-    }
-
-    MNodePtr parseAtom() {
-        skipWs();
-        if (eof()) return nullptr;
-        wchar_t c = src[pos];
-
-        if (c == L'{') {
-            pos++;
-            MNodePtr row = parseRow(L'}');
-            if (peek() == L'}') pos++;
-            else failed = true;
-            return row;
-        }
-        if (c == L'\\') {
-            pos++;
-            return parseCommand();
-        }
-        pos++;
-        MNodePtr sym = mk(MNode::Sym);
-        if (c == L'-') sym->text = L"\u2212";       // proper minus
-        else if (c == L'\'') sym->text = L"\u2032"; // prime
-        else if (c == L'*') sym->text = L"\u2217";
-        else sym->text.assign(1, c);
-        return sym;
-    }
-
-    MNodePtr parseCommand() {
-        std::wstring cmd = readCommand();
-        if (cmd.empty()) { failed = true; return nullptr; }
-
-        // Escapes and explicit spacing
-        if (cmd == L"{" || cmd == L"}" || cmd == L"$" || cmd == L"%" ||
-            cmd == L"&" || cmd == L"#" || cmd == L"_") {
-            MNodePtr s = mk(MNode::Sym);
-            s->text = cmd;
-            return s;
-        }
-        if (cmd == L"|") {
-            MNodePtr s = mk(MNode::Sym);
-            s->text = L"\u2016";
-            return s;
-        }
-        if (cmd == L"," || cmd == L":" || cmd == L";" || cmd == L" " ||
-            cmd == L"quad" || cmd == L"qquad" || cmd == L"!") {
-            MNodePtr s = mk(MNode::Space);
-            if (cmd == L",") s->space = 0.17f;
-            else if (cmd == L":") s->space = 0.22f;
-            else if (cmd == L";") s->space = 0.28f;
-            else if (cmd == L" ") s->space = 0.33f;
-            else if (cmd == L"quad") s->space = 1.0f;
-            else if (cmd == L"qquad") s->space = 2.0f;
-            else s->space = 0.0f;  // \! ignored (negative space)
-            return s;
-        }
-
-        if (cmd == L"frac" || cmd == L"dfrac" || cmd == L"tfrac") {
-            MNodePtr f = mk(MNode::Frac);
-            f->kids.push_back(parseArg());
-            f->kids.push_back(parseArg());
-            if (!f->kids[0] || !f->kids[1]) failed = true;
-            return f;
-        }
-        if (cmd == L"sqrt") {
-            MNodePtr d = mk(MNode::Deco);
-            d->decoKind = 3;
-            d->kids.push_back(parseArg());
-            if (!d->kids[0]) failed = true;
-            return d;
-        }
-        if (cmd == L"overline" || cmd == L"bar") {
-            MNodePtr d = mk(MNode::Deco);
-            d->decoKind = 1;
-            d->kids.push_back(parseArg());
-            return d;
-        }
-        if (cmd == L"overrightarrow" || cmd == L"vec") {
-            MNodePtr d = mk(MNode::Deco);
-            d->decoKind = 2;
-            d->kids.push_back(parseArg());
-            return d;
-        }
-        if (cmd == L"hat" || cmd == L"widehat") {
-            MNodePtr d = mk(MNode::Deco);
-            d->decoKind = 4;
-            d->kids.push_back(parseArg());
-            return d;
-        }
-        if (cmd == L"left") {
-            skipWs();
-            wchar_t open = 0;
-            if (peek() == L'\\') {
-                pos++;
-                std::wstring dc = readCommand();
-                const wchar_t* mapped = lookupSymbol(dc);
-                open = mapped && mapped[0] ? mapped[0] : 0;
-                if (dc == L"{") open = L'{';
-                if (dc == L"}") open = L'}';
-            } else {
-                open = peek();
-                if (!eof()) pos++;
-            }
-            MNodePtr content = parseRow(0, /*stopAtRight=*/true);
-            // consume \right and its delimiter
-            wchar_t close = 0;
-            if (pos + 5 < src.size() && src.compare(pos, 6, L"\\right") == 0) {
-                pos += 6;
-                skipWs();
-                if (peek() == L'\\') {
-                    pos++;
-                    std::wstring dc = readCommand();
-                    const wchar_t* mapped = lookupSymbol(dc);
-                    close = mapped && mapped[0] ? mapped[0] : 0;
-                    if (dc == L"{") close = L'{';
-                    if (dc == L"}") close = L'}';
-                } else {
-                    close = peek();
-                    if (!eof()) pos++;
-                }
-            } else {
-                failed = true;
-            }
-            MNodePtr d = mk(MNode::Delim);
-            d->open = open == L'.' ? 0 : open;
-            d->close = close == L'.' ? 0 : close;
-            d->kids.push_back(content ? content : mk(MNode::Row));
-            return d;
-        }
-        if (cmd == L"mathrm" || cmd == L"text" || cmd == L"operatorname" ||
-            cmd == L"textrm") {
-            MNodePtr arg = parseArg();
-            if (arg) arg = markRoman(arg);
-            return arg;
-        }
-        if (cmd == L"mathbf" || cmd == L"boldsymbol" || cmd == L"bm" ||
-            cmd == L"textbf") {
-            MNodePtr arg = parseArg();
-            if (arg) arg = markBold(arg);
-            return arg;
-        }
-        if (cmd == L"mathbb") {
-            MNodePtr arg = parseArg();
-            // single-letter blackboard bold via Unicode double-struck
-            if (arg && arg->kind == MNode::Sym && arg->text.size() == 1) {
-                for (const auto& b : kBlackboard) {
-                    if (arg->text == b.name) {
-                        arg->text = b.text;
-                        break;
-                    }
-                }
-            }
-            return arg;
-        }
-        if (cmd == L"mathcal" || cmd == L"mathscr" || cmd == L"mathit") {
-            return parseArg();  // rendered as regular italic
-        }
-        if (cmd == L"displaystyle" || cmd == L"textstyle" || cmd == L"nolimits" ||
-            cmd == L"limits" || cmd == L"middle") {
-            return parseAtom();  // pass-through niladics: render what follows
-        }
-        if (isFunctionName(cmd)) {
-            MNodePtr f = mk(MNode::Sym);
-            f->text = cmd;
-            f->roman = true;
-            return f;
-        }
-        if (const wchar_t* sym = lookupSymbol(cmd)) {
-            MNodePtr s = mk(MNode::Sym);
-            s->text = sym;
-            return s;
-        }
-
-        failed = true;  // unknown command: whole span falls back to source
-        return nullptr;
-    }
-
-    static MNodePtr markRoman(MNodePtr n) {
-        n->roman = true;
-        for (auto& k : n->kids) {
-            if (k) markRoman(k);
-        }
-        return n;
-    }
-    static MNodePtr markBold(MNodePtr n) {
-        n->bold = true;
-        n->roman = true;
-        for (auto& k : n->kids) {
-            if (k) markBold(k);
-        }
-        return n;
-    }
-
-    MNodePtr parseRow(wchar_t terminator, bool stopAtRight = false) {
-        MNodePtr row = mk(MNode::Row);
-        while (!eof() && !failed) {
-            skipWs();
-            if (eof()) break;
-            if (terminator && peek() == terminator) break;
-            if (stopAtRight && peek() == L'\\' &&
-                src.compare(pos, 6, L"\\right") == 0) {
-                break;
-            }
-            if (peek() == L'^' || peek() == L'_') {
-                // Attach scripts to the previous atom (or an empty base)
-                MNodePtr base = row->kids.empty() ? mk(MNode::Row)
-                                                  : row->kids.back();
-                if (!row->kids.empty()) row->kids.pop_back();
-                MNodePtr script;
-                if (base->kind == MNode::Script) {
-                    script = base;  // x_1^m: add the second script
-                } else {
-                    script = mk(MNode::Script);
-                    script->kids = {base, nullptr, nullptr};
-                }
-                while (!eof() && (peek() == L'^' || peek() == L'_')) {
-                    wchar_t which = src[pos++];
-                    MNodePtr arg = parseArg();
-                    if (!arg) { failed = true; break; }
-                    if (which == L'^') script->kids[2] = arg;
-                    else script->kids[1] = arg;
-                    skipWs();
-                }
-                row->kids.push_back(script);
-                continue;
-            }
-            MNodePtr atom = parseAtom();
-            if (atom) row->kids.push_back(atom);
-        }
-        return row;
-    }
-};
+using namespace tinta_math;
 
 // ---------------------------------------------------------------------------
 // Layout
@@ -488,15 +71,35 @@ struct LayoutCtx {
     MathBox& box;
     // TeX text style vs display style: inline fractions use near-script
     // sizes so they fit the surrounding line
-    bool display = false;
+    int style = 1; // display, text, script, scriptscript
+    float delimiterHeight = 0;
 };
+
+float styleScale(int style) {
+    return style < 2 ? 1.0f : style == 2 ? 0.7f : 0.5f;
+}
+
+std::wstring g_mathFontFamily;
+const wchar_t* mathFontFamily(App& app) {
+    if (g_mathFontFamily.empty()) {
+        g_mathFontFamily = app.theme.fontFamily ? app.theme.fontFamily : L"Segoe UI";
+        IDWriteFontCollection* fonts = nullptr;
+        if (SUCCEEDED(app.dwriteFactory->GetSystemFontCollection(&fonts))) {
+            UINT32 index = 0; BOOL exists = FALSE;
+            if (SUCCEEDED(fonts->FindFamilyName(L"Cambria Math", &index, &exists)) && exists)
+                g_mathFontFamily = L"Cambria Math";
+            fonts->Release();
+        }
+    }
+    return g_mathFontFamily.c_str();
+}
 
 IDWriteTextLayout* makeRunLayout(App& app, const std::wstring& text,
                                  float size, bool italic, bool bold,
                                  float& outBaseline, Metrics& m) {
     IDWriteTextFormat* fmt = nullptr;
     app.dwriteFactory->CreateTextFormat(
-        app.theme.fontFamily, nullptr,
+        mathFontFamily(app), nullptr,
         bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
         italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, size, L"en-us", &fmt);
@@ -554,30 +157,45 @@ Metrics emitRun(LayoutCtx& ctx, const std::wstring& text, float size,
 }
 
 bool isMathVariableChar(wchar_t c) {
-    return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z');
+    return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') ||
+           (c >= 0x03B1 && c <= 0x03D6) || c == 0x03F0 || c == 0x03F1 || c == 0x03F5;
+}
+
+float nodeSpacing(const MNodePtr& node) {
+    if (!node) return 0;
+    if (node->spacing >= 0) return node->spacing;
+    if (node->literalText) return 0;
+    if (node->kind == MNode::Sym) return symbolSpacing(node->text, node->roman);
+    if ((node->kind == MNode::Script || node->kind == MNode::Stack) && !node->kids.empty())
+        return nodeSpacing(node->kids[0]);
+    return 0;
 }
 
 // The workhorse: recursively lay out `node` with the baseline at
 // `baselineY`, starting at `x`. Returns the node's metrics. When
 // record=false (measure pass), nothing is emitted.
-Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
+Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
                        float x, float baselineY, bool record) {
     Metrics m;
     if (!node) return m;
+    if (node->style >= 0) {
+        size *= styleScale(node->style) / styleScale(ctx.style);
+        ctx.style = node->style;
+    }
     float em = size;
 
     switch (node->kind) {
         case MNode::Space: {
-            m.width = node->space * em;
+            m.width = node->space * (node->text == L"pt" ? 96.0f / 72 : node->text == L"px" ? 1.0f : em);
             m.ascent = 0;
             m.descent = 0;
             return m;
         }
         case MNode::Sym: {
-            bool italic = !node->roman && node->text.size() >= 1 &&
-                          isMathVariableChar(node->text[0]) &&
-                          !(node->text.size() > 1 && node->roman);
-            Metrics rm = emitRun(ctx, node->text, size, italic, node->bold,
+            bool italic = node->forceItalic || (!node->roman && !node->text.empty() &&
+                          isMathVariableChar(node->text[0]));
+            float runSize = size * (node->largeOp && ctx.style == 0 ? 1.45f : 1);
+            Metrics rm = emitRun(ctx, node->text, runSize, italic, node->bold,
                                  x, baselineY, record);
             return rm;
         }
@@ -587,10 +205,9 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
             bool first = true;
             for (const auto& kid : node->kids) {
                 if (!kid) continue;
-                float kidSpace = 0.0f;
-                if (kid->kind == MNode::Sym) {
-                    kidSpace = symbolSpacing(kid->text, kid->roman) * em;
-                }
+                float kidSpace = nodeSpacing(kid) * em;
+                // A leading sign (or a sign after another operator) is unary.
+                if (nodeSpacing(kid) == 0.2f && (first || prevSpace >= em * 0.2f)) kidSpace = 0;
                 if (!first) cx += std::max(prevSpace, kidSpace);
                 Metrics km = layoutNodeImpl(ctx, kid, size, cx, baselineY, record);
                 cx += km.width;
@@ -602,11 +219,168 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
             m.width = cx - x;
             return m;
         }
+        case MNode::Middle: {
+            if (!node->open) return m;
+            float height = node->delimiterSize > 0 ? node->delimiterSize * em : std::max(em, ctx.delimiterHeight);
+            float center = baselineY - em * 0.26f;
+            if (node->open == L'|' || node->open == L'\u2016' || node->open == L'\u2223' || node->open == L'\u2225') {
+                m.width = em * 0.3f;
+                m.ascent = height / 2 + em * 0.26f; m.descent = height / 2 - em * 0.26f;
+                if (record) {
+                    float stroke = std::max(1.0f, em * 0.055f);
+                    ctx.box.lines.push_back({x + em * 0.1f, center - height / 2, x + em * 0.1f, center + height / 2, stroke});
+                    if (node->open != L'|' && node->open != L'\u2223')
+                        ctx.box.lines.push_back({x + em * 0.25f, center - height / 2, x + em * 0.25f, center + height / 2, stroke});
+                }
+                return m;
+            }
+            std::wstring text(1, node->open);
+            Metrics glyph = emitRun(ctx, text, height, false, false, 0, 0, false);
+            m.width = glyph.width;
+            m.ascent = glyph.height() / 2 + em * 0.26f;
+            m.descent = std::max(0.0f, glyph.height() / 2 - em * 0.26f);
+            if (record) emitRun(ctx, text, height, false, false, x,
+                                center + (glyph.ascent - glyph.descent) / 2, true);
+            return m;
+        }
+        case MNode::Grid: {
+            LayoutCtx cellCtx = ctx;
+            cellCtx.style = node->compact ? std::max(2, ctx.style) : std::max(1, ctx.style);
+            float cellSize = size * styleScale(cellCtx.style) / styleScale(ctx.style);
+            size_t columns = node->alignment.size();
+            for (const auto& row : node->cells) columns = std::max(columns, row.size());
+            if (!columns || node->cells.empty()) return m;
+            std::vector<float> widths(columns, 0), ascents, descents;
+            std::vector<std::vector<Metrics>> cells;
+            float totalHeight = 0;
+            float rowGap = cellSize * 0.35f;
+            for (const auto& row : node->cells) {
+                float ascent = cellSize * 0.8f, descent = cellSize * 0.2f;
+                std::vector<Metrics> measured;
+                for (size_t col = 0; col < row.size(); ++col) {
+                    Metrics cm = measureNode(cellCtx, row[col], cellSize);
+                    widths[col] = std::max(widths[col], cm.width);
+                    ascent = std::max(ascent, cm.ascent);
+                    descent = std::max(descent, cm.descent);
+                    measured.push_back(cm);
+                }
+                ascents.push_back(ascent); descents.push_back(descent);
+                totalHeight += ascent + descent;
+                cells.push_back(std::move(measured));
+            }
+            totalHeight += rowGap * static_cast<float>(cells.size() - 1);
+            float cellPadding = node->verticalRules.empty() ? 0 : cellSize * 0.2f;
+            for (auto& width : widths) width += cellPadding * 2;
+            m.ascent = totalHeight / 2 + em * 0.26f;
+            m.descent = totalHeight - m.ascent;
+            float top = baselineY - m.ascent;
+            for (size_t row = 0; row < cells.size(); ++row) {
+                float cx = x;
+                for (size_t col = 0; col < columns; ++col) {
+                    wchar_t align = node->aligned ? (col % 2 ? L'l' : L'r') : L'c';
+                    if (node->uniformAlignment) align = node->alignment.front();
+                    else if (col < node->alignment.size()) align = node->alignment[col];
+                    if (col < cells[row].size() && record) {
+                        float extra = widths[col] - cells[row][col].width - 2 * cellPadding;
+                        float offset = cellPadding + (align == L'r' ? extra : align == L'c' ? extra / 2 : 0);
+                        layoutNodeImpl(cellCtx, node->cells[row][col], cellSize,
+                                       cx + offset, top + ascents[row], true);
+                    }
+                    cx += widths[col];
+                    if (col + 1 < columns)
+                        cx += cellSize * (node->aligned && col % 2 == 0 ? 0.26f : 1.0f);
+                }
+                m.width = std::max(m.width, cx - x);
+                top += ascents[row] + descents[row] + rowGap;
+            }
+            if (record) {
+                float stroke = std::max(1.0f, em * 0.045f);
+                float y1 = baselineY - m.ascent, y2 = baselineY + m.descent;
+                for (size_t boundary : node->verticalRules) {
+                    float dx = x;
+                    for (size_t col = 0; col < boundary && col < columns; ++col) {
+                        dx += widths[col];
+                        if (col + 1 < columns) dx += cellSize * (col + 1 == boundary ? 0.5f : 1.0f);
+                    }
+                    ctx.box.lines.push_back({dx, y1, dx, y2, stroke});
+                }
+                for (size_t boundary : node->horizontalRules) {
+                    float dy = y1;
+                    for (size_t row = 0; row < boundary && row < cells.size(); ++row) {
+                        dy += ascents[row] + descents[row];
+                        if (row + 1 < cells.size()) dy += rowGap * (row + 1 == boundary ? 0.5f : 1.0f);
+                    }
+                    ctx.box.lines.push_back({x, dy, x + m.width, dy, stroke});
+                }
+            }
+            return m;
+        }
+        case MNode::Phantom: {
+            m = layoutNodeImpl(ctx, node->kids[0], size, x, baselineY,
+                               record && node->decoKind == 3);
+            if (node->decoKind == 1 || node->decoKind == 3) m.ascent = m.descent = 0;
+            if (node->decoKind == 2) m.width = 0;
+            return m;
+        }
+        case MNode::Stack: {
+            LayoutCtx child = ctx;
+            child.style = std::min(3, std::max(2, ctx.style + 1));
+            float annotationSize = size * styleScale(child.style) / styleScale(ctx.style);
+            Metrics base = measureNode(ctx, node->kids[0], size);
+            Metrics below = measureNode(child, node->kids[1], annotationSize);
+            Metrics above = measureNode(child, node->kids[2], annotationSize);
+            if (node->decoKind) {
+                base.width = std::max(em * 1.6f, std::max(below.width, above.width) + em * 0.6f);
+                base.ascent = em * 0.45f; base.descent = 0;
+            }
+            m.width = std::max(base.width, std::max(below.width, above.width));
+            float gap = em * 0.12f;
+            m.ascent = base.ascent + (node->kids[2] ? gap + above.height() : 0);
+            m.descent = base.descent + (node->kids[1] ? gap + below.height() : 0);
+            if (record) {
+                if (node->decoKind) {
+                    float ay = baselineY - em * 0.26f, head = em * 0.22f;
+                    float tip = node->decoKind == 1 ? x + m.width : x;
+                    float tail = tip + (node->decoKind == 1 ? -head : head);
+                    float stroke = std::max(1.0f, em * 0.055f);
+                    ctx.box.lines.push_back({x, ay, x + m.width, ay, stroke});
+                    ctx.box.lines.push_back({tail, ay - head * 0.6f, tip, ay, stroke});
+                    ctx.box.lines.push_back({tail, ay + head * 0.6f, tip, ay, stroke});
+                } else layoutNodeImpl(ctx, node->kids[0], size, x + (m.width - base.width) / 2, baselineY, true);
+                if (node->kids[2]) layoutNodeImpl(child, node->kids[2], annotationSize,
+                    x + (m.width - above.width) / 2, baselineY - base.ascent - gap - above.descent, true);
+                if (node->kids[1]) layoutNodeImpl(child, node->kids[1], annotationSize,
+                    x + (m.width - below.width) / 2, baselineY + base.descent + gap + below.ascent, true);
+            }
+            return m;
+        }
         case MNode::Script: {
             const MNodePtr& base = node->kids[0];
             const MNodePtr& sub = node->kids[1];
             const MNodePtr& sup = node->kids[2];
-            float scriptSize = std::max(8.0f, size * 0.68f);
+            LayoutCtx child = ctx;
+            child.style = std::min(3, std::max(2, ctx.style + 1));
+            float scriptSize = size * styleScale(child.style) / styleScale(ctx.style);
+
+            bool centered = base->limits == 1 || (base->limits < 0 && base->limitOp &&
+                             (ctx.style == 0 || base->kind == MNode::Deco));
+            if (centered) {
+                Metrics bm = measureNode(ctx, base, size);
+                Metrics sm = measureNode(child, sub, scriptSize);
+                Metrics tm = measureNode(child, sup, scriptSize);
+                m.width = std::max(bm.width, std::max(sm.width, tm.width));
+                float gap = em * 0.16f;
+                m.ascent = bm.ascent + (sup ? gap + tm.height() : 0);
+                m.descent = bm.descent + (sub ? gap + sm.height() : 0);
+                if (record) {
+                    layoutNodeImpl(ctx, base, size, x + (m.width - bm.width) / 2, baselineY, true);
+                    if (sup) layoutNodeImpl(child, sup, scriptSize, x + (m.width - tm.width) / 2,
+                                            baselineY - bm.ascent - gap - tm.descent, true);
+                    if (sub) layoutNodeImpl(child, sub, scriptSize, x + (m.width - sm.width) / 2,
+                                            baselineY + bm.descent + gap + sm.ascent, true);
+                }
+                return m;
+            }
 
             Metrics bm = layoutNodeImpl(ctx, base, size, x, baselineY, record);
             float sx = x + bm.width + em * 0.03f;
@@ -615,11 +389,11 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
 
             Metrics supM, subM;
             if (sup) {
-                supM = layoutNodeImpl(ctx, sup, scriptSize, sx,
+                supM = layoutNodeImpl(child, sup, scriptSize, sx,
                                       baselineY - supShift, record);
             }
             if (sub) {
-                subM = layoutNodeImpl(ctx, sub, scriptSize, sx,
+                subM = layoutNodeImpl(child, sub, scriptSize, sx,
                                       baselineY + subShift, record);
             }
             m.width = bm.width + em * 0.03f + std::max(supM.width, subM.width);
@@ -628,25 +402,27 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
             return m;
         }
         case MNode::Frac: {
-            float inner = std::max(8.0f, size * (ctx.display ? 0.92f : 0.72f));
-            Metrics num = measureNode(ctx, node->kids[0], inner);
-            Metrics den = measureNode(ctx, node->kids[1], inner);
+            LayoutCtx child = ctx;
+            child.style = std::min(3, ctx.style + 1);
+            float inner = size * styleScale(child.style) / styleScale(ctx.style);
+            Metrics num = measureNode(child, node->kids[0], inner);
+            Metrics den = measureNode(child, node->kids[1], inner);
             float pad = em * 0.12f;
             float ruleW = std::max(num.width, den.width) + pad * 2;
-            float ruleH = std::max(1.0f, em * 0.055f);
+            float ruleH = node->noBar ? 0 : std::max(1.0f, em * 0.055f);
             float axis = em * 0.26f;   // fraction line sits on the math axis
-            float gap = em * (ctx.display ? 0.14f : 0.1f);
+            float gap = em * (ctx.style == 0 ? 0.14f : 0.1f);
 
             float ruleY = baselineY - axis - ruleH / 2;
             if (record) {
                 // numerator baseline so its descent clears the rule
-                layoutNodeImpl(ctx, node->kids[0], inner,
+                layoutNodeImpl(child, node->kids[0], inner,
                                x + pad + (ruleW - 2 * pad - num.width) / 2,
                                ruleY - gap - num.descent, true);
-                layoutNodeImpl(ctx, node->kids[1], inner,
+                layoutNodeImpl(child, node->kids[1], inner,
                                x + pad + (ruleW - 2 * pad - den.width) / 2,
                                ruleY + ruleH + gap + den.ascent, true);
-                ctx.box.rules.push_back({x, ruleY, ruleW, ruleH});
+                if (!node->noBar) ctx.box.rules.push_back({x, ruleY, ruleW, ruleH});
             }
             m.width = ruleW;
             m.ascent = axis + ruleH / 2 + gap + num.height();
@@ -655,13 +431,69 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
             return m;
         }
         case MNode::Delim: {
+            ctx.delimiterHeight = 0;
             Metrics cm = measureNode(ctx, node->kids[0], size);
+            ctx.delimiterHeight = cm.height();
+            // Tall common delimiters use native strokes at a constant width.
+            // Increasing the font size also widens glyphs, and used to cap
+            // brackets at 3.5 em, leaving large matrices unenclosed.
+            if (cm.height() > em * 1.4f &&
+                (!node->open || std::wstring(L"()[]{}|\u2016").find(node->open) != std::wstring::npos) &&
+                (!node->close || std::wstring(L"()[]{}|\u2016").find(node->close) != std::wstring::npos)) {
+                float top = baselineY - cm.ascent - em * 0.08f;
+                float height = cm.height() + em * 0.16f;
+                float width = em * 0.38f, pad = em * 0.12f;
+                float stroke = std::max(1.0f, em * 0.055f);
+                auto line = [&](float x1, float y1, float x2, float y2) {
+                    if (record) ctx.box.lines.push_back({x1, y1, x2, y2, stroke});
+                };
+                auto draw = [&](wchar_t d, float dx) {
+                    if (!d) return;
+                    float bottom = top + height;
+                    bool right = d == L')' || d == L']' || d == L'}';
+                    if (d == L'[' || d == L']') {
+                        float edge = dx + (right ? width : 0);
+                        line(edge, top, edge, bottom);
+                        line(dx, top, dx + width, top);
+                        line(dx, bottom, dx + width, bottom);
+                    } else if (d == L'|' || d == L'\u2016') {
+                        line(dx + width * 0.4f, top, dx + width * 0.4f, bottom);
+                        if (d == L'\u2016')
+                            line(dx + width * 0.8f, top, dx + width * 0.8f, bottom);
+                    } else {
+                        auto point = [&](float t) {
+                            float u;
+                            if (d == L'{' || d == L'}') {
+                                // Shoulder, waist, shoulder of a curly brace.
+                                float v = std::abs(t - 0.5f) * 2;
+                                u = 0.5f + 0.5f * (2 * v - 1) * (2 * v - 1) * (2 * v - 1);
+                            } else u = 1 - std::sin(t * 3.14159265f);
+                            return D2D1::Point2F(dx + width * (right ? 1 - u : u), top + t * height);
+                        };
+                        auto prev = point(0);
+                        for (int step = 1; step <= 32; ++step) {
+                            auto next = point(static_cast<float>(step) / 32);
+                            line(prev.x, prev.y, next.x, next.y);
+                            prev = next;
+                        }
+                    }
+                };
+                float leftWidth = node->open ? width + pad : 0;
+                float rightWidth = node->close ? width + pad : 0;
+                draw(node->open, x);
+                layoutNodeImpl(ctx, node->kids[0], size, x + leftWidth, baselineY, record);
+                draw(node->close, x + leftWidth + cm.width + pad);
+                m.width = leftWidth + cm.width + rightWidth;
+                m.ascent = cm.ascent + em * 0.08f + stroke / 2;
+                m.descent = cm.descent + em * 0.08f + stroke / 2;
+                return m;
+            }
             // Delimiters stretch to the content: scale the glyph size so a
             // paren grows with a fraction inside it
             float contentH = std::max(cm.height(), em);
             float glyphSize = size;
             if (contentH > em * 1.15f) {
-                glyphSize = size * std::min(3.5f, contentH / em);
+                glyphSize = contentH;
             }
             float cx = x;
             auto emitDelim = [&](wchar_t d) -> float {
@@ -700,39 +532,94 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
         case MNode::Deco: {
             if (node->decoKind == 3) {  // sqrt
                 Metrics cm = measureNode(ctx, node->kids[0], size);
-                float radSize = size * std::min(
-                    3.0f, std::max(1.0f, cm.height() / em));
-                Metrics rm;
-                float bl = 0;
-                float gap = em * 0.1f;
-                float ruleH = std::max(1.0f, em * 0.05f);
-                IDWriteTextLayout* rad = makeRunLayout(
-                    ctx.app, L"\u221A", radSize, false, false, bl, rm);
-                float cx = x;
-                if (rad) {
-                    if (record) {
-                        float radTop = baselineY - cm.ascent - gap - ruleH -
-                                       (rm.height() - (cm.height() + gap + ruleH)) * 0.5f;
-                        // anchor: radical bottom near content bottom
-                        radTop = baselineY + cm.descent - rm.height();
-                        ctx.box.runs.push_back({rad, cx, radTop,
-                                                std::wstring(L"\u221A"),
-                                                radSize, false, false, bl});
-                    } else {
-                        rad->Release();
-                    }
-                    cx += rm.width * 0.95f;
-                }
-                Metrics inner = layoutNodeImpl(ctx, node->kids[0], size, cx,
-                                               baselineY, record);
+                LayoutCtx child = ctx; child.style = 3;
+                float indexSize = size * styleScale(3) / styleScale(ctx.style);
+                MNodePtr index = node->kids.size() > 1 ? node->kids[1] : nullptr;
+                Metrics im = measureNode(child, index, indexSize);
+                float indexWidth = index ? std::max(0.0f, im.width - em * 0.15f) : 0;
+                float start = x + indexWidth;
+                float cx = start + em * 0.65f;
+                float top = baselineY - cm.ascent - em * 0.14f;
+                float bottom = baselineY + cm.descent;
+                float stroke = std::max(1.0f, em * 0.055f);
+                float indexBaseline = top + em * 0.25f;
                 if (record) {
-                    ctx.box.rules.push_back(
-                        {cx - em * 0.05f, baselineY - cm.ascent - gap - ruleH,
-                         inner.width + em * 0.15f, ruleH});
+                    layoutNodeImpl(ctx, node->kids[0], size, cx, baselineY, true);
+                    if (index) layoutNodeImpl(child, index, indexSize, x, indexBaseline, true);
+                    float shoulder = bottom - std::min(cm.height() * 0.4f, em * 0.45f);
+                    ctx.box.lines.push_back({start, shoulder + em * 0.06f, start + em * 0.16f, shoulder, stroke});
+                    ctx.box.lines.push_back({start + em * 0.16f, shoulder, start + em * 0.33f, bottom, stroke});
+                    ctx.box.lines.push_back({start + em * 0.33f, bottom, cx - em * 0.06f, top, stroke});
+                    ctx.box.lines.push_back({cx - em * 0.06f, top, cx + cm.width + em * 0.1f, top, stroke});
                 }
-                m.width = (cx - x) + inner.width + em * 0.15f;
-                m.ascent = cm.ascent + gap + ruleH + em * 0.05f;
-                m.descent = cm.descent;
+                m.width = cx - x + cm.width + em * 0.1f;
+                m.ascent = std::max(baselineY - top + stroke / 2,
+                                    index ? baselineY - indexBaseline + im.ascent : 0);
+                m.descent = cm.descent + stroke / 2;
+                return m;
+            }
+            if (node->decoKind >= 5) {
+                Metrics cm = measureNode(ctx, node->kids[0], size);
+                int kind = node->decoKind;
+                float pad = kind == 9 ? em * 0.2f : 0;
+                m = cm; m.width += 2 * pad;
+                float stroke = std::max(1.0f, em * 0.055f);
+                float top = baselineY - cm.ascent, bottom = baselineY + cm.descent;
+                bool under = kind == 8 || kind == 13;
+                bool overlay = kind == 10 || kind == 11 || kind == 18 || kind == 19;
+                float extra = overlay ? 0 : (kind == 12 || kind == 13 ? em * 0.45f : em * 0.3f);
+                if (under) m.descent += extra; else m.ascent += extra;
+                if (kind == 9) m.descent += extra;
+                if (record) {
+                    layoutNodeImpl(ctx, node->kids[0], size, x + pad, baselineY, true);
+                    auto line = [&](float x1, float y1, float x2, float y2) {
+                        ctx.box.lines.push_back({x1, y1, x2, y2, stroke});
+                    };
+                    float center = x + m.width / 2;
+                    if (kind == 5 || kind == 6) {
+                        float dot = em * 0.1f, y = top - em * 0.2f;
+                        if (kind == 5) ctx.box.rules.push_back({center - dot / 2, y, dot, dot});
+                        else {
+                            ctx.box.rules.push_back({center - em * 0.16f, y, dot, dot});
+                            ctx.box.rules.push_back({center + em * 0.06f, y, dot, dot});
+                        }
+                    } else if (kind == 7 || kind == 16) {
+                        float w = kind == 16 ? std::min(cm.width, em * 0.55f) : cm.width;
+                        float prevX = center - w / 2;
+                        float prevY = top - em * 0.17f;
+                        for (int i = 1; i <= 16; ++i) {
+                            float t = static_cast<float>(i) / 16;
+                            float nx = center - w / 2 + w * t;
+                            float ny = top - em * 0.17f + em * 0.07f * std::sin(t * (kind == 7 ? -6.2831853f : 3.14159265f));
+                            line(prevX, prevY, nx, ny); prevX = nx; prevY = ny;
+                        }
+                    } else if (kind == 8) line(x, bottom + em * 0.12f, x + cm.width, bottom + em * 0.12f);
+                    else if (kind == 9) {
+                        float y1 = top - pad, y2 = bottom + pad;
+                        line(x, y1, x + m.width, y1); line(x, y2, x + m.width, y2);
+                        line(x, y1, x, y2); line(x + m.width, y1, x + m.width, y2);
+                    } else if (overlay) {
+                        if (kind != 11) line(x, bottom, x + cm.width, top);
+                        if (kind == 11 || kind == 19) line(x, top, x + cm.width, bottom);
+                    } else if (kind == 12 || kind == 13) {
+                        float sign = under ? 1.0f : -1.0f;
+                        float y = under ? bottom + em * 0.12f : top - em * 0.12f;
+                        float h = em * 0.18f;
+                        line(x, y, x + em * 0.15f, y + sign * h);
+                        line(x + em * 0.15f, y + sign * h, center - em * 0.15f, y + sign * h);
+                        line(center - em * 0.15f, y + sign * h, center, y + sign * h * 1.5f);
+                        line(center, y + sign * h * 1.5f, center + em * 0.15f, y + sign * h);
+                        line(center + em * 0.15f, y + sign * h, x + cm.width - em * 0.15f, y + sign * h);
+                        line(x + cm.width - em * 0.15f, y + sign * h, x + cm.width, y);
+                    } else if (kind == 17) {
+                        line(center - em * 0.18f, top - em * 0.25f, center, top - em * 0.1f);
+                        line(center, top - em * 0.1f, center + em * 0.18f, top - em * 0.25f);
+                    } else {
+                        float sign = kind == 14 ? 1.0f : -1.0f;
+                        line(center - sign * em * 0.1f, top - em * 0.1f,
+                             center + sign * em * 0.1f, top - em * 0.27f);
+                    }
+                }
                 return m;
             }
             // overline / overrightarrow / hat
@@ -750,16 +637,16 @@ Metrics layoutNodeImpl(LayoutCtx& ctx, const MNodePtr& node, float size,
                     float ay = topY + ruleH / 2;
                     ctx.box.rules.push_back({x, topY, cm.width, ruleH});
                     ctx.box.lines.push_back(
-                        {x + cm.width - aw, ay - aw * 0.6f, x + cm.width, ay});
+                        {x + cm.width - aw, ay - aw * 0.6f, x + cm.width, ay, ruleH});
                     ctx.box.lines.push_back(
-                        {x + cm.width - aw, ay + aw * 0.6f, x + cm.width, ay});
+                        {x + cm.width - aw, ay + aw * 0.6f, x + cm.width, ay, ruleH});
                 } else if (node->decoKind == 4) {
                     float cxm = x + cm.width / 2;
                     float hw = std::min(cm.width / 2, em * 0.28f);
                     ctx.box.lines.push_back(
-                        {cxm - hw, topY + ruleH + em * 0.08f, cxm, topY});
+                        {cxm - hw, topY + ruleH + em * 0.08f, cxm, topY, ruleH});
                     ctx.box.lines.push_back(
-                        {cxm, topY, cxm + hw, topY + ruleH + em * 0.08f});
+                        {cxm, topY, cxm + hw, topY + ruleH + em * 0.08f, ruleH});
                 }
             }
             m.width = std::max(inner.width, cm.width);
@@ -795,17 +682,17 @@ MathBoxPtr mathParse(App& app, const std::wstring& latex, float fontSize,
     auto it = g_mathCache.find(key);
     if (it != g_mathCache.end()) return it->second;
 
-    Parser parser(latex);
-    MNodePtr root = parser.parseRow(0);
-    if (parser.failed || !root || root->kids.empty()) {
+    MNodePtr root = parseLatex(latex);
+    if (!root) {
         g_mathCache[key] = nullptr;   // remember the failure too
         return nullptr;
     }
 
     auto box = std::make_shared<MathBox>();
-    LayoutCtx ctx{app, *box, display};
+    box->fontFamily = mathFontFamily(app);
+    LayoutCtx ctx{app, *box, display ? 0 : 1};
     Metrics probe = measureNode(ctx, root, fontSize);
-    float pad = display ? fontSize * 0.15f : 0.0f;
+    float pad = fontSize * (display ? 0.15f : 0.08f);
     float baseline = probe.ascent + pad;
     Metrics final = layoutNode(ctx, root, fontSize, pad, baseline);
     box->width = final.width + pad * 2;
@@ -819,6 +706,13 @@ MathBoxPtr mathParse(App& app, const std::wstring& latex, float fontSize,
 float mathBoxWidth(const MathBoxPtr& box) { return box ? box->width : 0; }
 float mathBoxHeight(const MathBoxPtr& box) { return box ? box->height : 0; }
 float mathBoxBaseline(const MathBoxPtr& box) { return box ? box->baseline : 0; }
+
+void mathExpandLine(const MathBoxPtr& box, float textBaseline, float lineHeight,
+                    float& above, float& below) {
+    if (!box) return;
+    above = std::max(above, box->baseline - textBaseline);
+    below = std::max(below, box->height - box->baseline + textBaseline - lineHeight);
+}
 
 void mathBoxDrawTo(ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush,
                    const MathBoxPtr& box, float x, float y,
@@ -840,7 +734,7 @@ void mathBoxDrawTo(ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush,
         target->DrawLine(
             D2D1::Point2F(x + line.x1, y + line.y1),
             D2D1::Point2F(x + line.x2, y + line.y2), brush,
-            std::max(1.0f, mathBoxHeight(box) * 0.02f));
+            line.thickness);
     }
 }
 
@@ -875,12 +769,13 @@ void mathBoxRetain(App& app, const MathBoxPtr& box, float x, float y,
     for (const auto& line : box->lines) {
         app.layoutLines.push_back({D2D1::Point2F(x + line.x1, y + line.y1),
                                    D2D1::Point2F(x + line.x2, y + line.y2),
-                                   color, 1.2f});
+                                   color, line.thickness});
     }
 }
 
 void mathClearCache() {
     g_mathCache.clear();
+    g_mathFontFamily.clear();
 }
 
 // --- SVG export (#export_as) ---
@@ -936,13 +831,13 @@ std::string mathBoxSvg(const MathBoxPtr& box, const std::string& colorCss,
     for (const auto& l : box->lines) {
         s += "<line x1=\"" + svgNum(l.x1) + "\" y1=\"" + svgNum(l.y1) +
              "\" x2=\"" + svgNum(l.x2) + "\" y2=\"" + svgNum(l.y2) +
-             "\" stroke=\"" + colorCss + "\" stroke-width=\"1.2\"/>";
+             "\" stroke=\"" + colorCss + "\" stroke-width=\"" + svgNum(l.thickness) + "\"/>";
     }
     for (const auto& r : box->runs) {
         s += "<text x=\"" + svgNum(r.x) + "\" y=\"" +
              svgNum(r.y + r.baseline) + "\" font-size=\"" + svgNum(r.size) +
-             "\" font-family=\"" + fontFamilyCss + "\" fill=\"" + colorCss +
-             "\"";
+             "\" font-family=\"" + (box->fontFamily.empty() ? fontFamilyCss : svgEscape(svgUtf8(box->fontFamily))) +
+             "\" fill=\"" + colorCss + "\" xml:space=\"preserve\"";
         if (r.italic) s += " font-style=\"italic\"";
         if (r.bold) s += " font-weight=\"bold\"";
         s += ">" + svgEscape(svgUtf8(r.text)) + "</text>";

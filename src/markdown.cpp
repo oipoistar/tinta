@@ -421,8 +421,8 @@ static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, voi
 // --- Inline extension post-pass (==highlight==, ^sup^, ~sub~) ---
 //
 // md4c has no extension hooks for these Obsidian/Typora spans, so a pass
-// over the finished tree splits Text nodes that contain them. Code spans,
-// code blocks, and Mermaid sources are never touched.
+// over the finished tree splits Text nodes, keeping intervening inline
+// math opaque. Code spans, code blocks, and Mermaid sources are never touched.
 
 namespace {
 
@@ -531,37 +531,85 @@ static void splitInlineExtensions(const ElementPtr& parent) {
 
     std::vector<ElementPtr> rebuilt;
     bool changed = false;
-    for (auto& child : parent->children) {
-        if (child->type != ElementType::Text) {
+    for (size_t i = 0; i < parent->children.size();) {
+        auto child = parent->children[i];
+        if (child->type != ElementType::Text && child->type != ElementType::MathInline) {
             splitInlineExtensions(child);
             rebuilt.push_back(child);
+            ++i;
             continue;
         }
 
-        const std::string& text = child->text;
+        // TeX is an opaque atom between text nodes: ==before $x$ after==
+        // must wrap the equation without interpreting delimiters inside it.
+        // Other wrappers and block boundaries keep their existing scope.
+        size_t begin = i;
+        while (i < parent->children.size()) {
+            const auto& part = parent->children[i];
+            if (part->type != ElementType::Text && part->type != ElementType::MathInline) break;
+            ++i;
+        }
+        if (i == begin + 1 && child->type == ElementType::MathInline) {
+            rebuilt.push_back(child);
+            continue;
+        }
+        // The usual single Text node needs neither a string copy nor an
+        // offset map. Allocate those only for a group containing math.
+        std::string combined;
+        std::vector<size_t> offsets;
+        if (i > begin + 1) {
+            offsets.push_back(0);
+            for (size_t j = begin; j < i; ++j) {
+                const auto& part = parent->children[j];
+                if (part->type == ElementType::Text) combined += part->text;
+                else combined += '\x01';
+                offsets.push_back(combined.size());
+            }
+        }
+        const std::string& text = offsets.empty() ? child->text : combined;
+        size_t partIndex = 0;
+        auto appendRange = [&](size_t start, size_t end, const ElementPtr& owner,
+                               std::vector<ElementPtr>& output) {
+            if (offsets.empty()) {
+                if (end > start) output.push_back(makeTextElement(text.substr(start, end - start), owner.get()));
+                return;
+            }
+            while (partIndex + 1 < offsets.size() && offsets[partIndex] < end) {
+                size_t lo = std::max(start, offsets[partIndex]);
+                size_t hi = std::min(end, offsets[partIndex + 1]);
+                if (lo < hi) {
+                    auto part = parent->children[begin + partIndex];
+                    if (part->type == ElementType::Text) {
+                        output.push_back(makeTextElement(text.substr(lo, hi - lo), owner.get()));
+                    } else {
+                        part->parent = owner.get();
+                        output.push_back(part);
+                    }
+                }
+                if (offsets[partIndex + 1] > end) break;
+                ++partIndex;
+            }
+        };
         size_t cursor = 0;
         ExtensionMatch m;
         bool any = false;
         while (findExtensionSpan(text, cursor, m)) {
             any = true;
-            if (m.start > cursor) {
-                rebuilt.push_back(makeTextElement(text.substr(cursor, m.start - cursor), parent.get()));
-            }
+            appendRange(cursor, m.start, parent, rebuilt);
             auto span = std::make_shared<Element>(m.type);
             span->parent = parent.get();
-            span->children.push_back(makeTextElement(
-                text.substr(m.start + m.delimLen, m.contentLen), span.get()));
+            appendRange(m.start + m.delimLen, m.start + m.delimLen + m.contentLen,
+                        span, span->children);
             rebuilt.push_back(std::move(span));
             cursor = m.start + m.delimLen + m.contentLen + m.delimLen;
         }
         if (!any) {
-            rebuilt.push_back(child);
+            rebuilt.insert(rebuilt.end(), parent->children.begin() + begin,
+                           parent->children.begin() + i);
             continue;
         }
         changed = true;
-        if (cursor < text.size()) {
-            rebuilt.push_back(makeTextElement(text.substr(cursor), parent.get()));
-        }
+        appendRange(cursor, text.size(), parent, rebuilt);
     }
     if (changed) parent->children = std::move(rebuilt);
 }

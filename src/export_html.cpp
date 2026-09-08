@@ -1055,7 +1055,7 @@ void emitMath(ExportCtx& ctx, const ElementPtr& elem, bool display) {
     MathBoxPtr box = mathParse(ctx.app, tex, display ? 18.0f : 16.0f, display);
     if (box) {
         std::string svg =
-            mathBoxSvg(box, ctx.textColorCss, ctx.bodyFontCss);
+            mathBoxSvg(box, "currentColor", ctx.bodyFontCss);
         if (display) {
             ctx.out += "<div class=\"math-display\">" + svg + "</div>";
         } else {

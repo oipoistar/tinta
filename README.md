@@ -67,7 +67,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **10 beautiful themes** - 5 light and 5 dark themes to choose from
 - **Hardware-accelerated** - Smooth text rendering via DirectWrite
 - **Word wrap** - Optional soft wrap in the editor (Ctrl+W)
-- **Native LaTeX math** - `$inline$` and `$$display$$` equations rendered natively (fractions, scripts, stretchy delimiters, Greek — no MathJax, no web engine)
+- **Native LaTeX math** - `$inline$` and `$$display$$` equations with matrices, cases, aligned equations, fractions, limits, accents and custom macros. Uses an installed math font; no bundled fonts or web engine. See the [supported math syntax](docs/math-support.md).
 - **Focused editing** - Hide the preview pane while writing (Ctrl+E)
 - **Native Mermaid diagrams** - 22 diagram families, from flowcharts with subgraphs through sequence, class, state, ER, gantt, and pie to C4, sankey, kanban, and radar - rendered without a web engine
 - **Export as HTML, DOCX, or PDF** - Right-click and pick "Export as..." for a self-contained web page, a Word document that opens natively, or a vector PDF; diagrams and math come along in every format
