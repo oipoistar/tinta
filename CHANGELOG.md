@@ -1,17 +1,17 @@
 # Changelog
 
-## Unreleased
+## [v3.5.6] - 2026-09-08
 
 ### Added
-- Native math matrices (`matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `Vmatrix`, `smallmatrix`), cases, aligned equations, gathered equations and arrays; nested cells, column alignment, array rules and long arrows (#190)
-- Indexed roots, binomial coefficients, continued fractions, stacked annotations, labelled arrows, more accents and symbols, mathematical alphabets, explicit delimiter sizes and spacing, and equation-local macros (#190)
-- A [math compatibility guide](docs/math-support.md) and regression coverage for parsing, native drawing, SVG output and malformed input (#190)
+- Native math matrices (`matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `Vmatrix`, `smallmatrix`), cases, aligned equations, gathered equations and arrays; nested cells, column alignment, array rules and long arrows (#190, #191)
+- Indexed roots, binomial coefficients, continued fractions, stacked annotations, labelled arrows, more accents and symbols, mathematical alphabets, explicit delimiter sizes and spacing, and equation-local macros (#190, #191)
+- A [math compatibility guide](docs/math-support.md) and regression coverage for parsing, native drawing, SVG output and malformed input (#190, #191)
 
 ### Fixed
-- Math text retains spaces; display/text fraction sizes, operator limits, negative spacing and grouped mathematical alphabets now have their intended behavior (#190)
-- Tall delimiters grow with their contents, and paragraphs containing tall inline equations reserve enough vertical space to avoid overlapping adjacent lines (#190)
-- Math uses installed Cambria Math when available, falling back to the theme font. SVG exports retain the chosen font family; no font data is bundled (#190)
-- Inline math preserves highlight and strikethrough spans, link colors and clickable link areas, including in mixed Markdown documents and HTML exports (#190)
+- Math text retains spaces; display/text fraction sizes, operator limits, negative spacing and grouped mathematical alphabets now have their intended behavior (#190, #191)
+- Tall delimiters grow with their contents, and paragraphs containing tall inline equations reserve enough vertical space to avoid overlapping adjacent lines (#190, #191)
+- Math uses installed Cambria Math when available, falling back to the theme font. SVG exports retain the chosen font family; no font data is bundled (#190, #191)
+- Inline math preserves highlight and strikethrough spans, link colors and clickable link areas, including in mixed Markdown documents and HTML exports (#190, #191)
 
 ## [v3.5.5] - 2026-08-29
 
