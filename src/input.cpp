@@ -594,7 +594,7 @@ static void settingsSliderApply(App& app, int which, float mx) {
 // Applies one settings-overlay action (id from app.settingsHits)
 // Shortcut editor: bind the armed action to `key` and land in the custom
 // profile so the change persists via [Keys]
-static void shortcutAssign(App& app, unsigned key) {
+static void shortcutAssign(App& app, KeyBinding key) {
     int row = app.shortcutEditorRow;
     if (row < 0 || row >= KEY_ACTION_COUNT) return;
     std::string value = keyIniName(key);
@@ -741,39 +741,6 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             break;
     }
     InvalidateRect(hwnd, nullptr, FALSE);
-}
-
-// Maps a pressed key through the user keymap ([Keys] in settings.ini): a
-// remapped key becomes the built-in default the switches below expect, and
-// a default key the user moved elsewhere is swallowed. Non-action keys pass
-// through untouched. (#77)
-static WPARAM translateActionKey(App& app, WPARAM key, bool isChar) {
-    auto norm = [&](unsigned k) {
-        return isChar ? (unsigned)towupper((wint_t)k) : k;
-    };
-    unsigned pressed = norm((unsigned)key);
-    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
-        if (KEY_ACTIONS[i].isChar != isChar) {
-            // Punctuation bound to a keydown action (vim '/'-search) only
-            // arrives as a character — its VK depends on the layout — so
-            // the char pass matches it too. Letters stay keydown-only.
-            bool punctInCharPass = isChar && !KEY_ACTIONS[i].isChar &&
-                app.keymap[i] > ' ' && app.keymap[i] < 128 &&
-                !iswalnum((wint_t)app.keymap[i]);
-            if (!punctInCharPass) continue;
-        }
-        if (norm(app.keymap[i]) == pressed) {
-            return (WPARAM)KEY_ACTIONS[i].defaultKey;
-        }
-    }
-    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
-        if (KEY_ACTIONS[i].isChar != isChar) continue;
-        if (norm(KEY_ACTIONS[i].defaultKey) == pressed &&
-            norm(app.keymap[i]) != pressed) {
-            return 0;  // default key rebound elsewhere: swallow
-        }
-    }
-    return key;
 }
 
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
@@ -3299,7 +3266,7 @@ static void toggleZenMode(App& app, HWND hwnd) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
+bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     float pageSize = app.height * 0.8f;
     float maxScroll = std::max(0.0f, app.contentHeight - app.height);
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -3311,14 +3278,14 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             closeLightbox(app);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
-        return;
+        return false;
     }
 
     // Annotation note editor owns the keyboard while open (#126)
     if (app.annotEditorOpen && !app.editMode) {
         annotationEditorKeyDown(app, hwnd, wParam, ctrl);
         InvalidateRect(hwnd, nullptr, FALSE);
-        return;
+        return false;
     }
 
     // Create-missing-reference dialog owns the keyboard while open
@@ -3332,7 +3299,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                                     std::chrono::milliseconds(150);
             createRefAction(app, hwnd, 2);
         }
-        return;
+        return false;
     }
 
     // Print preview captures the whole keyboard while open
@@ -3360,7 +3327,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 printPreviewSetPage(app, (int)app.printPreviewBounds.size() - 2);
                 break;
         }
-        return;
+        return false;
     }
 
     if (!app.confirmExitPending && app.showContextMenu) {
@@ -3381,7 +3348,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             if (contextMenuItemEnabled(app, item)) invokeContextMenuAction(app, hwnd, item);
         }
         InvalidateRect(hwnd, nullptr, FALSE);
-        return;
+        return false;
     }
     // Shortcut editor: an armed row captures the next key; Esc cancels
     // the capture, then closes back to settings
@@ -3402,15 +3369,15 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 (wParam >= '0' && wParam <= '9')) {
                 key = (unsigned)wParam;
             }
-            if (key) shortcutAssign(app, key);
+            if (key) shortcutAssign(app, {(unsigned)key, false});
         }
         InvalidateRect(hwnd, nullptr, FALSE);
-        return;
+        return false;
     }
     // Theme editor: Esc returns to settings; text arrives via WM_CHAR
     if (app.showThemeEditor) {
         if (wParam == VK_ESCAPE) closeThemeEditor(app, true);
-        return;
+        return false;
     }
     // Settings overlay captures the keyboard while open
     if (app.showSettings) {
@@ -3419,19 +3386,21 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             app.settingsAnimation = 0;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
-        return;
+        return false;
     }
 
     if (app.showHelp || app.showThemeChooser) {
         if (wParam == VK_ESCAPE ||
-            (!ctrl && app.showHelp && wParam == app.keymap[KA_HELP]) ||
-            (!ctrl && app.showThemeChooser && wParam == app.keymap[KA_THEME])) {
+            (!ctrl && app.showHelp && keyBindingMatches(app.keymap[KA_HELP], (unsigned)wParam, false)) ||
+            (!ctrl && app.showThemeChooser && keyBindingMatches(app.keymap[KA_THEME], (unsigned)wParam, false))) {
             if (app.themeChooserPreviewBase >= 0) {
                 applyTheme(app, app.themeChooserPreviewBase);
                 app.themeChooserPreviewBase = -1;
             }
             app.showThemeChooser = false;
             app.showHelp = false;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return true;
         } else if (app.showHelp) {
             float step = dpi(app, 60.0f);
             if (wParam == VK_NEXT || wParam == VK_PRIOR) step = app.helpVisibleHeight;
@@ -3441,23 +3410,23 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 app.helpContentHeight - app.helpVisibleHeight));
         }
         InvalidateRect(hwnd, nullptr, FALSE);
-        return;
+        return false;  // punctuation Help bindings still need WM_CHAR
     }
     if (appMenuAvailable(app)) {
         if (wParam == VK_F10) {
             toggleApplicationMenu(app, hwnd, true);
-            return;
+            return false;
         }
         if (ctrl && wParam == 'O') {
             openFileDialog(app, hwnd);
-            return;
+            return false;
         }
         if (ctrl && wParam == VK_OEM_COMMA) {
             closeSearchIfOpen(app);
             app.showSettings = true;
             app.settingsAnimation = 0;
             InvalidateRect(hwnd, nullptr, FALSE);
-            return;
+            return false;
         }
     }
 
@@ -3470,68 +3439,79 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         if (wParam == VK_TAB) {
             tabCycle(app, hwnd, shift ? -1 : 1);
-            return;
+            return false;
         }
         if (wParam == 'W' && !app.editMode) {
             // In edit mode Ctrl+W keeps its documented word-wrap toggle
             tabCloseIndex(app, hwnd, app.activeTab);
-            return;
+            return false;
         }
         if (wParam == VK_F4) {
             // Ctrl+F4 closes the tab in BOTH modes - the reachable close
             // while editing, where Ctrl+W means word wrap (#181)
             tabCloseIndex(app, hwnd, app.activeTab);
-            return;
+            return false;
         }
         if (wParam == 'T') {
             // New tab = the start page (browser-style new-tab page); its
             // Open/Browse/recents land in this tab. The old open-into-a-
             // new-tab browser flow lives on as Ctrl+click in the browser.
             tabOpenStartPage(app, hwnd);
-            return;
+            return false;
         }
         if (wParam >= '1' && wParam <= '9' && app.tabs.size() > 1) {
             int index = (int)(wParam - '1');
             if (index < (int)app.tabs.size()) tabActivate(app, hwnd, index);
-            return;
+            return false;
         }
     }
     if (app.showTabSwitcher && wParam == VK_ESCAPE) {
         app.showTabSwitcher = false;
         InvalidateRect(hwnd, nullptr, FALSE);
-        return;
+        return false;
     }
     // Esc aborts a tab drag in flight (ghost vanishes, tab snaps home)
     if (app.tabDragIndex >= 0 && wParam == VK_ESCAPE) {
         tabDragCancel(app, hwnd);
-        return;
+        return false;
     }
     // An open tab menu takes Esc before anything else (edit mode too —
     // the strip stays interactive while editing)
     if (app.showTabMenu && wParam == VK_ESCAPE) {
         closeTabMenu(app);
         InvalidateRect(hwnd, nullptr, FALSE);
-        return;
+        return false;
+    }
+
+    // Function-key Help remains available while editing. Printable custom
+    // bindings stay with the text editor, as do Tab and Space.
+    if (app.editMode && !app.confirmExitPending && !ctrl &&
+        wParam >= VK_F1 && wParam <= VK_F12 &&
+        keyBindingMatches(app.keymap[KA_HELP], (unsigned)wParam, false)) {
+        app.showHelp = true;
+        app.helpAnimation = 0;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return true;
     }
 
     // Edit mode: Ctrl+C with preview pane selection should copy from preview
     if (app.editMode) {
         // An open table cell editor owns the keyboard (#148)
-        if (tableEditKeyDown(app, hwnd, wParam)) return;
+        if (tableEditKeyDown(app, hwnd, wParam)) return false;
         if (ctrl && wParam == 'C' && app.hasSelection &&
             app.selAnchor != app.selFocus) {
             std::wstring selected = selectionTextForRange(
                 app, std::min(app.selAnchor, app.selFocus),
                 std::max(app.selAnchor, app.selFocus));
-            if (selected.empty()) return;
+            if (selected.empty()) return false;
             copyToClipboard(hwnd, selected);
             signalPushKey(app, SIG_INFO, SIGI_COPY, "toast.copied");
             app.hasSelection = false;
             InvalidateRect(hwnd, nullptr, FALSE);
-            return;
+            return false;
         }
         handleEditorKeyDown(app, hwnd, wParam);
-        return;
+        return false;
     }
 
     // Folder browser path/name input captures the keyboard while active
@@ -3573,7 +3553,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             }
         }
         InvalidateRect(hwnd, nullptr, FALSE);
-        return;
+        return false;
     }
 
     // Handle search-specific keys when search is active
@@ -3590,7 +3570,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 clearFolderSearch(app);
                 updateBlinkTimer(app);
                 InvalidateRect(hwnd, nullptr, FALSE);
-                return;
+                return false;
             case VK_RETURN:
                 // Cycle to next match
                 if (!app.searchMatches.empty()) {
@@ -3598,7 +3578,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     scrollToCurrentMatch(app);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
-                return;
+                return false;
             case VK_BACK:
                 // Delete last character
                 if (!app.searchQuery.empty()) {
@@ -3610,7 +3590,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     }
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
-                return;
+                return false;
         }
     }
 
@@ -3743,7 +3723,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             if (wParam == VK_BACK) {
                 if (!app.tocFilter.empty()) app.tocFilter.pop_back();
                 InvalidateRect(hwnd, nullptr, FALSE);
-                return;
+                return false;
             }
             if (wParam == VK_RETURN) {
                 std::wstring needle = toLower(app.tocFilter);
@@ -3763,11 +3743,11 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     }
                 }
                 InvalidateRect(hwnd, nullptr, FALSE);
-                return;
+                return false;
             }
             if ((wParam >= 'A' && wParam <= 'Z') ||
                 (wParam >= '0' && wParam <= '9') || wParam == VK_SPACE) {
-                return;  // swallowed here; WM_CHAR feeds the filter
+                return false;  // swallowed here; WM_CHAR feeds the filter
             }
         }
 
@@ -3778,21 +3758,37 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         if (startPageActive(app)) {
             if (ctrl && wParam == 'O') {
                 startPageInvoke(app, hwnd, 1);
-                return;
+                return false;
             }
-            if (!ctrl && wParam == app.keymap[KA_NEWFILE]) {
+            if (!ctrl && keyBindingMatches(app.keymap[KA_NEWFILE], (unsigned)wParam, false)) {
                 startPageInvoke(app, hwnd, 2);
-                return;
+                return false;
             }
             if (!ctrl && wParam >= '1' && wParam <= '5' &&
                 (int)(wParam - '1') < (int)app.startPageRecents.size()) {
                 startPageInvoke(app, hwnd, 10 + (int)(wParam - '1'));
-                return;
+                return false;
             }
         }
 
-        wParam = translateActionKey(app, wParam, false);
+        wParam = translateActionKey(app.keymap, (unsigned)wParam, false);
         switch (wParam) {
+            case ':':
+            case '?':
+                if (!app.showSearch &&
+                    (!app.showFolderBrowser || app.browserPinned) &&
+                    (!app.showToc || app.tocPinned)) {
+                    if (wParam == ':') enterEditMode(app);
+                    else {
+                        app.showHelp = true;
+                        app.helpAnimation = 0;
+                        InvalidateRect(hwnd, nullptr, FALSE);
+                    }
+                    // The message loop skips TranslateMessage for this
+                    // keystroke, so E cannot become the first edit (#195).
+                    return true;
+                }
+                break;
             case VK_ESCAPE:
                 // Priority: ContextMenu > Help > Search > FolderBrowser > TOC > Theme chooser > Quit
                 if (app.showContextMenu) {
@@ -4002,6 +3998,7 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     app.targetScrollY = std::max(0.0f, std::min(app.targetScrollY, maxScroll));
     app.scrollY = app.targetScrollY;
     InvalidateRect(hwnd, nullptr, FALSE);
+    return false;
 }
 
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
@@ -4025,7 +4022,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
         wchar_t ch = (wchar_t)wParam;
         if (app.shortcutEditorRow >= 0 && ch > 32 && ch < 127 &&
             !iswalnum(ch)) {
-            shortcutAssign(app, (unsigned)ch);
+            shortcutAssign(app, {(unsigned)ch, true});
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return;  // the editor swallows all other typing
@@ -4059,7 +4056,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
 
     if (app.showContextMenu || app.showSettings || app.showThemeChooser) return;
     if (app.showHelp) {
-        if ((unsigned)wParam == app.keymap[KA_HELP]) {
+        if (translateActionKey(app.keymap, (unsigned)wParam, true) == '?') {
             app.showHelp = false;
             app.helpAnimation = 0;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -4098,12 +4095,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
         WPARAM key = wParam;
         if (key == 0xFF1A) key = L':';  // ：
         if (key == 0xFF1F) key = L'?';  // ？
-        wchar_t ch = (wchar_t)translateActionKey(app, key, true);
-        // Universal fallbacks: raw ':' and '?' keep working in every
-        // profile — the docs and years of habit point at them
-        if (ch == 0 && (key == L':' || key == L'?')) {
-            ch = (wchar_t)key;
-        }
+        wchar_t ch = (wchar_t)translateActionKey(app.keymap, (unsigned)key, true);
         if (ch == L':' && !app.showHelp) {
             enterEditMode(app);
             return;
@@ -4124,7 +4116,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
             app.searchQuery.clear();
             app.searchMatches.clear();
             app.searchCurrentIndex = 0;
-            app.searchJustOpened = true;
+            app.searchJustOpened = false;
             updateBlinkTimer(app);
             InvalidateRect(app.hwnd, nullptr, FALSE);
             return;
