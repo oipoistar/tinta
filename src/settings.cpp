@@ -75,7 +75,7 @@ void saveSettings(const Settings& settings) {
     file << "[Keys]\n";
     file << "; single letters/digits, Tab, Space, F1-F12, or one character\n";
     for (int i = 0; i < KEY_ACTION_COUNT; i++) {
-        std::string value = keyIniName(KEY_ACTIONS[i].defaultKey);
+        std::string value = keyIniName({KEY_ACTIONS[i].defaultKey, KEY_ACTIONS[i].isChar});
         for (const auto& kv : settings.keyOverrides) {
             if (kv.first == KEY_ACTIONS[i].name) { value = kv.second; break; }
         }
@@ -110,58 +110,8 @@ void saveSettings(const Settings& settings) {
     }
 }
 
-// "G" -> 'G', "Tab"/"Space"/"F1".."F12" -> VK code, ":" -> ':'; 0 = invalid
-static unsigned parseKeyName(const std::string& value) {
-    if (value.empty()) return 0;
-    if (value.size() == 1) return (unsigned)toupper((unsigned char)value[0]);
-    std::string lower;
-    for (char c : value) lower += (char)tolower((unsigned char)c);
-    if (lower == "tab") return VK_TAB;
-    if (lower == "space") return VK_SPACE;
-    if (lower.size() >= 2 && lower[0] == 'f') {
-        int n = atoi(lower.c_str() + 1);
-        if (n >= 1 && n <= 12) return VK_F1 + n - 1;
-    }
-    return 0;
-}
-
-std::string keyIniName(unsigned key) {
-    if (key == VK_TAB) return "Tab";
-    if (key == VK_SPACE) return "Space";
-    if (key >= VK_F1 && key <= VK_F12) return "F" + std::to_string(key - VK_F1 + 1);
-    return std::string(1, (char)key);
-}
-
-std::wstring keyLabel(unsigned key) {
-    std::string narrow = keyIniName(key);
-    return std::wstring(narrow.begin(), narrow.end());
-}
-
-int keyProfileIndexById(const std::string& id) {
-    for (int i = 0; i < KEY_PROFILE_COUNT; i++) {
-        if (id == KEY_PROFILES[i].id) return i;
-    }
-    return -1;
-}
-
 void applyKeymap(App& app, const Settings& settings) {
-    int prof = keyProfileIndexById(settings.keyProfile);
-    for (int i = 0; i < KEY_ACTION_COUNT; i++) {
-        app.keymap[i] = prof >= 0 ? KEY_PROFILES[prof].keys[i]
-                                  : KEY_ACTIONS[i].defaultKey;
-    }
-    if (prof < 0) {
-        // Custom: [Keys] overrides over the defaults, the #77 semantics
-        for (const auto& kv : settings.keyOverrides) {
-            for (int i = 0; i < KEY_ACTION_COUNT; i++) {
-                if (kv.first == KEY_ACTIONS[i].name) {
-                    unsigned key = parseKeyName(kv.second);
-                    if (key) app.keymap[i] = key;
-                    break;
-                }
-            }
-        }
-    }
+    resolveKeymap(app.keymap, settings.keyProfile, settings.keyOverrides);
     app.keyProfile = settings.keyProfile;
 }
 
@@ -413,7 +363,7 @@ Settings loadSettings() {
         for (const auto& kv : settings.keyOverrides) {
             for (int i = 0; i < KEY_ACTION_COUNT; i++) {
                 if (kv.first == KEY_ACTIONS[i].name &&
-                    kv.second != keyIniName(KEY_ACTIONS[i].defaultKey)) {
+                    kv.second != keyIniName({KEY_ACTIONS[i].defaultKey, KEY_ACTIONS[i].isChar})) {
                     customized = true;
                     break;
                 }

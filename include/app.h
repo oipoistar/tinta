@@ -19,6 +19,7 @@
 #include <utility>
 
 #include "markdown.h"
+#include "keymap.h"
 
 using namespace qmd;
 
@@ -640,9 +641,8 @@ struct App {
     std::vector<std::pair<D2D1_RECT_F, int>> shortcutHits;  // rebuilt each paint
 
     // Resolved single-key bindings, indexed like KEY_ACTIONS (#77).
-    // Filled by applyKeymap from settings; slots beyond the action count
-    // stay zero.
-    unsigned keymap[16] = {};
+    // Filled by applyKeymap; each binding retains its input message kind.
+    KeyBinding keymap[KEY_ACTION_COUNT] = {};
 
     // Reading position restore (#77): applied once enough of the document is
     // laid out for the target to be reachable (chunked layout grows

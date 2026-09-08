@@ -1504,7 +1504,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_KEYDOWN:
-            if (app) handleKeyDown(*app, hwnd, wParam);
+            if (app) return handleKeyDown(*app, hwnd, wParam) ? 1 : 0;
             return 0;
 
         case WM_XBUTTONUP:
@@ -2257,8 +2257,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     // Message loop
     MSG msg;
     while (GetMessage(&msg, nullptr, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+        if (msg.hwnd == app.hwnd && msg.message == WM_KEYDOWN) {
+            // Give command shortcuts the first chance to consume a key.
+            // Only unconsumed keystrokes generate WM_CHAR; no timed input
+            // suppression is needed when E opens the editor (#195).
+            if (!DispatchMessage(&msg)) TranslateMessage(&msg);
+        } else {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
     }
 
     g_app = nullptr;

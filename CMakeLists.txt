@@ -38,6 +38,7 @@ set(SOURCES
     src/markdown.cpp
     src/themes.cpp
     src/settings.cpp
+    src/keymap.cpp
     src/config_dir.cpp
     src/signals.cpp
     src/tableedit.cpp
@@ -87,6 +88,7 @@ set(HEADERS
     include/types.h
     include/app.h
     include/settings.h
+    include/keymap.h
     include/d2d_init.h
     include/syntax.h
     include/utils.h
@@ -141,6 +143,21 @@ target_compile_definitions(tinta PRIVATE UNICODE _UNICODE
     TINTA_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 
 if(BUILD_TESTING)
+    add_executable(keymap_tests tests/keymap_tests.cpp src/keymap.cpp)
+    target_include_directories(keymap_tests PRIVATE include)
+    add_test(NAME keymap COMMAND keymap_tests)
+
+    # Exercise the real input handlers and editor with a message-only test
+    # window, including layout-dependent character sequences (#195).
+    set(INPUT_TEST_SOURCES ${SOURCES})
+    list(REMOVE_ITEM INPUT_TEST_SOURCES src/main_d2d.cpp)
+    add_executable(input_tests tests/input_tests.cpp ${INPUT_TEST_SOURCES})
+    target_include_directories(input_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
+    target_link_libraries(input_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
+    target_compile_definitions(input_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
+        TINTA_SHORTCUT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/shortcuts-layouts.md")
+    add_test(NAME input_shortcuts COMMAND input_tests)
+
     add_executable(context_menu_tests tests/context_menu_tests.cpp src/context_menu.cpp
         src/markdown.cpp src/themes.cpp src/config_dir.cpp)
     target_include_directories(context_menu_tests PRIVATE include ${md4c_SOURCE_DIR}/src)

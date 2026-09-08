@@ -9,7 +9,8 @@ void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam);
 void handleMouseMove(App& app, HWND hwnd, LPARAM lParam);
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam);
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam);
-void handleKeyDown(App& app, HWND hwnd, WPARAM wParam);
+// True consumes this keystroke's character translation as well (#195).
+bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam);
 void handleContextMenu(App& app, HWND hwnd, LPARAM lParam);
 void handleCharInput(App& app, HWND hwnd, WPARAM wParam);
 void handleDropFiles(App& app, HWND hwnd, WPARAM wParam);
