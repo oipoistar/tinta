@@ -566,8 +566,11 @@ struct App {
     bool folderInputJustOpened = false;      // Swallow the WM_CHAR of the key that opened it
     bool folderBrowserInputError = false;    // Last commit failed (bad path/name): red border
 
-    // Right-click context menu overlay
+    // Shared document context menu / icon application menu
     bool showContextMenu = false;
+    bool applicationMenu = false;
+    bool appMenuHover = false;
+    bool contextMenuKeyboard = false;
     // The mouse-up of a menu-item click must not reach the overlay handlers:
     // an action that opens the TOC or theme chooser would otherwise be
     // closed instantly by its own click's release landing "outside the panel"

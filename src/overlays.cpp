@@ -2178,95 +2178,21 @@ void renderHelpOverlay(App& app) {
     }
 }
 
-// --- Right-click context menu ---
-//
-// Drawn in the current theme like the folder browser and theme chooser.
-// Every entry shows its keyboard shortcut, so the menu doubles as
-// discoverable documentation for the single-key commands.
-
-namespace {
-
-struct ContextMenuEntry {
-    const wchar_t* label;
-    const wchar_t* shortcut;
-    bool separatorAfter;
-};
-
-const ContextMenuEntry CTX_ENTRIES[CTX_ITEM_COUNT] = {
-    { L"Copy",               L"Ctrl+C", false },
-    { L"Select All",         L"Ctrl+A", false },
-    { L"Annotate",           L"",       true  },
-    { L"New File",           L"N",      false },
-    { L"Print / PDF",        L"Ctrl+P", false },
-    { L"Export as...",       L"",       false },
-    { L"Edit",               L":",      false },
-    { L"Search",             L"F",      false },
-    { L"Table of Contents",  L"Tab",    true  },
-    { L"Browse Files",       L"B",      false },
-    { L"Reveal in Explorer", L"",       true  },
-    { L"Theme",              L"T",      false },
-    { L"Settings",           L"Ctrl+,", false },
-    { L"Help",               L"?",      false },
-};
-
-float ctxItemHeight(const App& app) { return dpi(app, 30.0f); }
-float ctxSeparatorHeight(const App& app) { return dpi(app, 9.0f); }
-float ctxWidth(const App& app) { return dpi(app, 210.0f); }
-float ctxPadding(const App& app) { return dpi(app, 6.0f); }
-
-float ctxTotalHeight(const App& app) {
-    float h = ctxPadding(app) * 2;
-    for (const auto& entry : CTX_ENTRIES) {
-        h += ctxItemHeight(app);
-        if (entry.separatorAfter) h += ctxSeparatorHeight(app);
-    }
-    return h;
-}
-
-// Top y of the item at `index` relative to the menu top
-float ctxItemTop(const App& app, int index) {
-    float y = ctxPadding(app);
-    for (int i = 0; i < index; i++) {
-        y += ctxItemHeight(app);
-        if (CTX_ENTRIES[i].separatorAfter) y += ctxSeparatorHeight(app);
-    }
-    return y;
-}
-
-} // namespace
-
-bool contextMenuItemEnabled(const App& app, int item) {
-    switch (item) {
-        case CTX_COPY:   return app.hasSelection && app.selAnchor != app.selFocus;
-        case CTX_ANNOTATE:
-            // Viewer-only: annotating writes a comment into the file (#126)
-            return !app.editMode && !app.currentFile.empty() &&
-                   app.hasSelection && app.selAnchor != app.selFocus;
-        case CTX_REVEAL: return !app.currentFile.empty();
-        default:         return item >= 0 && item < CTX_ITEM_COUNT;
-    }
-}
-
-int contextMenuItemAt(const App& app, float x, float y) {
-    if (x < app.contextMenuX || x > app.contextMenuX + ctxWidth(app)) return -1;
-    float rel = y - app.contextMenuY;
-    for (int i = 0; i < CTX_ITEM_COUNT; i++) {
-        float top = ctxItemTop(app, i);
-        if (rel >= top && rel < top + ctxItemHeight(app)) return i;
-    }
-    return -1;
-}
-
-void openContextMenu(App& app, float x, float y) {
-    float w = ctxWidth(app);
-    float h = ctxTotalHeight(app);
-    app.contextMenuX = std::max(0.0f, std::min(x, (float)app.width - w));
-    app.contextMenuY = std::max(0.0f, std::min(y, (float)app.height - h));
-    app.showContextMenu = true;
-    app.hoveredContextMenuItem = -1;
-    app.contextMenuAnimation = 0.0f;
-    app.hoveredCodeBlock = -1;
-    app.hoveredLink.clear();
+// The caption icon and document right-click share the same themed popup.
+void renderAppMenuButtonBackground(App& app) {
+    if (!appMenuAvailable(app) ||
+        !(app.appMenuHover || (app.showContextMenu && app.applicationMenu))) return;
+    auto r = appMenuButtonRect(app);
+    float inset = dpi(app, 4.0f);
+    r.left += inset;
+    r.right -= inset;
+    r.top += inset;
+    r.bottom -= inset;
+    D2D1_COLOR_F c = app.theme.accent;
+    c.a = app.showContextMenu && app.applicationMenu ? 0.2f : 0.1f;
+    app.brush->SetColor(c);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(r, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush);
 }
 
 void renderContextMenu(App& app) {
@@ -2283,8 +2209,8 @@ void renderContextMenu(App& app) {
 
     float x = app.contextMenuX;
     float y = app.contextMenuY;
-    float w = ctxWidth(app);
-    float h = ctxTotalHeight(app);
+    float w = contextMenuWidth(app);
+    float h = contextMenuHeight(app);
 
     D2D1_COLOR_F panelBg = app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
                                             : hexColor(0xF8F8F8, 0.97f);
@@ -2297,17 +2223,14 @@ void renderContextMenu(App& app) {
     app.renderTarget->DrawRoundedRectangle(
         D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6, 6), app.brush, 1.0f);
 
-    app.hoveredContextMenuItem = contextMenuItemAt(app, app.mouseX, app.mouseY);
-
-    // Labels come from the translation table (order matches ContextMenuItem)
-    static const char* kCtxKeys[CTX_ITEM_COUNT] = {
-        "ctx.copy", "ctx.select_all", "ctx.annotate", "ctx.new", "ctx.print",
-        "ctx.export", "ctx.edit", "ctx.search", "ctx.toc", "ctx.browse",
-        "ctx.reveal", "ctx.theme", "ctx.settings", "ctx.help",
-    };
+    const auto& entries = contextMenuEntries(app);
 
     // Shortcut hints reflect the user keymap ([Keys] in settings.ini)
-    auto shortcutLabel = [&](int item) -> std::wstring {
+    auto shortcutLabel = [&](const ContextMenuEntry& entry) -> std::wstring {
+        int item = entry.action;
+        // Single-key reading commands type text in the editor.
+        if (app.applicationMenu && app.editMode &&
+            (item == CTX_THEME || item == CTX_HELP)) return L"";
         switch (item) {
             case CTX_ANNOTATE: return keyLabel(app.keymap[KA_ANNOTATE]);
             case CTX_NEW:    return keyLabel(app.keymap[KA_NEWFILE]);
@@ -2317,15 +2240,17 @@ void renderContextMenu(App& app) {
             case CTX_BROWSE: return keyLabel(app.keymap[KA_BROWSE]);
             case CTX_THEME:  return keyLabel(app.keymap[KA_THEME]);
             case CTX_HELP:   return keyLabel(app.keymap[KA_HELP]);
-            default:         return CTX_ENTRIES[item].shortcut;
+            default:         return entry.shortcut;
         }
     };
 
-    float pad = ctxPadding(app);
-    float itemH = ctxItemHeight(app);
+    float pad = contextMenuPadding(app);
+    float itemH = contextMenuItemHeight(app);
     float inset = dpi(app, 12.0f);
-    for (int i = 0; i < CTX_ITEM_COUNT; i++) {
-        float top = y + ctxItemTop(app, i);
+    for (int row = 0; row < (int)entries.size(); row++) {
+        const auto& entry = entries[row];
+        int i = entry.action;
+        float top = y + contextMenuItemTop(app, row);
         bool enabled = contextMenuItemEnabled(app, i);
 
         if (i == app.hoveredContextMenuItem && enabled) {
@@ -2342,12 +2267,12 @@ void renderContextMenu(App& app) {
         textColor.a = (enabled ? 1.0f : 0.35f) * anim;
         app.brush->SetColor(textColor);
         float textY = top + (itemH - dpi(app, 18.0f)) / 2;
-        const wchar_t* itemLabel = tr(app, kCtxKeys[i]);
+        const wchar_t* itemLabel = tr(app, entry.key);
         app.renderTarget->DrawText(
             itemLabel, (UINT32)wcslen(itemLabel), format,
             D2D1::RectF(x + inset, textY, x + w - inset, top + itemH), app.brush);
 
-        std::wstring hintText = shortcutLabel(i);
+        std::wstring hintText = shortcutLabel(entry);
         if (!hintText.empty()) {
             IDWriteTextLayout* hint = nullptr;
             app.dwriteFactory->CreateTextLayout(
@@ -2366,8 +2291,8 @@ void renderContextMenu(App& app) {
             }
         }
 
-        if (CTX_ENTRIES[i].separatorAfter) {
-            float sepY = top + itemH + ctxSeparatorHeight(app) * 0.5f;
+        if (entry.separatorAfter) {
+            float sepY = top + itemH + contextMenuSeparatorHeight(app) * 0.5f;
             app.brush->SetColor(borderColor);
             app.renderTarget->DrawLine(
                 D2D1::Point2F(x + pad, sepY), D2D1::Point2F(x + w - pad, sepY),

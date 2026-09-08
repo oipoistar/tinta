@@ -937,9 +937,20 @@ void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 }
 
 void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
+    bool mouseMoved = app.mouseX != GET_X_LPARAM(lParam) || app.mouseY != GET_Y_LPARAM(lParam);
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
 
+    bool iconHover = appMenuButtonAt(app, (float)app.mouseX, (float)app.mouseY);
+    if (iconHover != app.appMenuHover) {
+        app.appMenuHover = iconHover;
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+    if (iconHover && appMenuAvailable(app) && app.tabDragIndex < 0 &&
+        !app.editorSelecting && !app.draggingSeparator && !app.selecting) {
+        SetCursor(cursorHand);
+        return;
+    }
     // An armed tab drag owns the mouse until release (capture held)
     if (app.tabDragIndex >= 0) {
         tabDragMove(app, hwnd, app.mouseX, app.mouseY);
@@ -1067,12 +1078,9 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // Context menu open: hover tracks menu items only — document hover
     // (code-block copy button, link underline) stays suppressed underneath
     if (app.showContextMenu) {
-        bool repaint = false;
-        int item = contextMenuItemAt(app, (float)app.mouseX, (float)app.mouseY);
-        if (item != app.hoveredContextMenuItem) {
-            app.hoveredContextMenuItem = item;
-            repaint = true;
-        }
+        bool repaint = updateContextMenuHover(app, (float)app.mouseX,
+                                             (float)app.mouseY, mouseMoved);
+        int item = app.hoveredContextMenuItem;
         if (app.hoveredCodeBlock != -1) {
             app.hoveredCodeBlock = -1;
             repaint = true;
@@ -1497,12 +1505,6 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
 
 // --- Right-click context menu ---
 
-static void closeContextMenu(App& app) {
-    app.showContextMenu = false;
-    app.contextMenuAnimation = 0.0f;
-    app.hoveredContextMenuItem = -1;
-}
-
 static void closeSearchIfOpen(App& app) {
     if (!app.showSearch) {
         std::wstring().swap(app.docTextLower);
@@ -1545,16 +1547,35 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
         case CTX_ANNOTATE:
             annotationBeginCreate(app);
             break;
+        case CTX_QUICK_NOTE:
+            closeSearchIfOpen(app);
+            if (startPageActive(app)) startPageInvoke(app, hwnd, 2);
+            else tabOpenQuickNote(app, hwnd);
+            break;
+        case CTX_OPEN:
+            openFileDialog(app, hwnd);
+            break;
+        case CTX_SAVE:
+            if (app.editMode) saveEditorFile(app, hwnd);
+            break;
+        case CTX_SAVE_AS:
+            saveFileAs(app, hwnd);
+            break;
+        case CTX_EXIT:
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            break;
         case CTX_NEW:
             closeSearchIfOpen(app);
             startNewFileFlow(app, hwnd);
             break;
         case CTX_PRINT:
             closeSearchIfOpen(app);
+            if (app.editMode) editorReparse(app, true);
             openPrintPreview(app, hwnd);
             break;
         case CTX_EXPORT:
             closeSearchIfOpen(app);
+            if (app.editMode) editorReparse(app, true);
             exportDocumentAs(app, hwnd);
             break;
         case CTX_EDIT:
@@ -1626,6 +1647,11 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
 }
 
 void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
+    // App panels own both mouse buttons in either reading or editing mode.
+    if (app.showSettings || app.showHelp || app.showThemeChooser ||
+        app.showThemeEditor || app.showShortcutEditor || app.showPrintPreview ||
+        app.confirmExitPending || app.createRefPending || app.showLightbox) return;
+    closeContextMenu(app);
     POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
     bool fromKeyboard = pt.x == -1 && pt.y == -1;
     if (fromKeyboard) {
@@ -1693,7 +1719,54 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
+static void toggleApplicationMenu(App& app, HWND hwnd, bool keyboard = false) {
+    if (!appMenuAvailable(app)) return;
+    if (app.showContextMenu && app.applicationMenu) {
+        closeContextMenu(app);
+    } else {
+        closeSearchIfOpen(app);
+        closeTabMenu(app);
+        app.showTabSwitcher = false;
+        app.editCtxOpen = false;
+        app.showHelp = false;
+        app.showSettings = false;
+        if (app.themeChooserPreviewBase >= 0) {
+            applyTheme(app, app.themeChooserPreviewBase);
+            app.themeChooserPreviewBase = -1;
+        }
+        app.showThemeChooser = false;
+        tableEditCommit(app);
+        openContextMenu(app, dpi(app, 4.0f), chromeTopHeight(app), true);
+        if (keyboard) {
+            app.contextMenuKeyboard = true;
+            app.hoveredContextMenuItem = nextContextMenuItem(app, -1, 1);
+        }
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    if (appMenuButtonAt(app, (float)GET_X_LPARAM(lParam), (float)GET_Y_LPARAM(lParam))) {
+        toggleApplicationMenu(app, hwnd);
+        app.swallowNextMouseUp = true;
+        return;
+    }
+    // Context menu: a click lands on an item or dismisses the menu; either
+    // way the click is consumed
+    if (app.showContextMenu) {
+        int clickX = GET_X_LPARAM(lParam);
+        int clickY = GET_Y_LPARAM(lParam);
+        int item = contextMenuItemAt(app, (float)clickX, (float)clickY);
+        closeContextMenu(app);
+        app.swallowNextMouseUp = true;
+        if (item >= 0 && contextMenuItemEnabled(app, item)) {
+            invokeContextMenuAction(app, hwnd, item);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
+
     // Title-bar tab strip and its switcher sit above every overlay
     {
         int mx = GET_X_LPARAM(lParam);
@@ -1778,21 +1851,6 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Print preview: controls act on the release
     if (app.showPrintPreview) return;
 
-    // Context menu: a click lands on an item or dismisses the menu; either
-    // way the click is consumed
-    if (app.showContextMenu) {
-        int clickX = GET_X_LPARAM(lParam);
-        int clickY = GET_Y_LPARAM(lParam);
-        int item = contextMenuItemAt(app, (float)clickX, (float)clickY);
-        closeContextMenu(app);
-        app.swallowNextMouseUp = true;
-        if (item >= 0 && contextMenuItemEnabled(app, item)) {
-            invokeContextMenuAction(app, hwnd, item);
-        }
-        InvalidateRect(hwnd, nullptr, FALSE);
-        return;
-    }
-
     // Annotation editor is modal: buttons act, outside dismisses (#126)
     if (app.annotEditorOpen && !app.editMode) {
         float mx = (float)GET_X_LPARAM(lParam);
@@ -1811,6 +1869,44 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
+
+    // Help overlay: check scrollbar click
+    if (app.showHelp) {
+        float maxScroll = std::max(0.0f, app.helpContentHeight - app.helpVisibleHeight);
+        if (maxScroll > 0) {
+            int clickX = GET_X_LPARAM(lParam);
+            int clickY = GET_Y_LPARAM(lParam);
+            // Scrollbar hit area: right edge of panel
+            float panelWidth = std::min(dpi(app, 520.0f), app.width - dpi(app, 40.0f));
+            float panelRight = (app.width + panelWidth) / 2;
+            float sbHitWidth = dpi(app, 16.0f);
+            if (clickX >= panelRight - sbHitWidth && clickX <= panelRight &&
+                clickY >= app.helpScrollbarTop && clickY <= app.helpScrollbarTop + app.helpVisibleHeight) {
+                app.helpScrollbarDragging = true;
+                app.helpScrollbarDragStartY = (float)clickY;
+                app.helpScrollbarDragStartScroll = app.helpScroll;
+                SetCapture(hwnd);
+
+                // Jump if clicked outside thumb
+                float sbHeight = app.helpVisibleHeight / app.helpContentHeight * app.helpVisibleHeight;
+                sbHeight = std::max(sbHeight, dpi(app, 20.0f));
+                float sbY = app.helpScrollbarTop + (app.helpScroll / maxScroll * (app.helpVisibleHeight - sbHeight));
+                if (clickY < sbY || clickY > sbY + sbHeight) {
+                    float trackHeight = app.helpVisibleHeight - sbHeight;
+                    float clickPos = (float)clickY - app.helpScrollbarTop - sbHeight / 2;
+                    clickPos = std::max(0.0f, std::min(clickPos, trackHeight));
+                    app.helpScroll = (trackHeight > 0) ? (clickPos / trackHeight) * maxScroll : 0;
+                    app.helpScrollbarDragStartScroll = app.helpScroll;
+                    app.helpScrollbarDragStartY = (float)clickY;
+                }
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+        }
+        return;
+    }
+
+    // The chooser acts on release; do not place an editor caret under it.
+    if (app.showThemeChooser) return;
 
     // Edit mode: route to editor or preview
     if (app.editMode) {
@@ -1846,7 +1942,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             (float)y >= app.quickNoteButtonRect.top &&
             (float)y <= app.quickNoteButtonRect.bottom) {
             app.swallowNextMouseUp = true;
-            quickNoteOpenFile(app, hwnd);
+            openFileDialog(app, hwnd);
             return;
         }
         // In-place table editing (#148): cells and the + affordances
@@ -1939,46 +2035,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
             }
         }
     }
-
-    // Help overlay: check scrollbar click
-    if (app.showHelp) {
-        float maxScroll = std::max(0.0f, app.helpContentHeight - app.helpVisibleHeight);
-        if (maxScroll > 0) {
-            int clickX = GET_X_LPARAM(lParam);
-            int clickY = GET_Y_LPARAM(lParam);
-            // Scrollbar hit area: right edge of panel
-            float panelWidth = std::min(dpi(app, 520.0f), app.width - dpi(app, 40.0f));
-            float panelRight = (app.width + panelWidth) / 2;
-            float sbHitWidth = dpi(app, 16.0f);
-            if (clickX >= panelRight - sbHitWidth && clickX <= panelRight &&
-                clickY >= app.helpScrollbarTop && clickY <= app.helpScrollbarTop + app.helpVisibleHeight) {
-                app.helpScrollbarDragging = true;
-                app.helpScrollbarDragStartY = (float)clickY;
-                app.helpScrollbarDragStartScroll = app.helpScroll;
-                SetCapture(hwnd);
-
-                // Jump if clicked outside thumb
-                float sbHeight = app.helpVisibleHeight / app.helpContentHeight * app.helpVisibleHeight;
-                sbHeight = std::max(sbHeight, dpi(app, 20.0f));
-                float sbY = app.helpScrollbarTop + (app.helpScroll / maxScroll * (app.helpVisibleHeight - sbHeight));
-                if (clickY < sbY || clickY > sbY + sbHeight) {
-                    float trackHeight = app.helpVisibleHeight - sbHeight;
-                    float clickPos = (float)clickY - app.helpScrollbarTop - sbHeight / 2;
-                    clickPos = std::max(0.0f, std::min(clickPos, trackHeight));
-                    app.helpScroll = (trackHeight > 0) ? (clickPos / trackHeight) * maxScroll : 0;
-                    app.helpScrollbarDragStartScroll = app.helpScroll;
-                    app.helpScrollbarDragStartY = (float)clickY;
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
-            }
-        }
-        return;
-    }
-
-    // If theme chooser, folder browser, or TOC is open, don't start
-    // selection - just record for click handling. A PINNED panel only
-    // claims presses inside its own envelope (#156): the document beside
-    // it keeps selection and every other press behavior.
+    // Pinned side panels only claim presses inside their own envelope.
     {
         bool browserClaims = false;
         if (app.showFolderBrowser) {
@@ -2245,34 +2302,7 @@ static bool openFileRefTarget(App& app, HWND hwnd, const std::string& path) {
 // 2 new document, 3 browse, 4 clear, 5 shortcuts, 10+i recent, 20+i learn.
 static void startPageInvoke(App& app, HWND hwnd, int id) {
     if (id == 1) {
-        // Open a file: picker, then the picked document takes over the
-        // launcher shell (same handover as the quick-note empty state)
-        wchar_t path[MAX_PATH] = L"";
-        OPENFILENAMEW ofn = {};
-        ofn.lStructSize = sizeof(ofn);
-        ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter =
-            L"Documents (*.md;*.mmd;*.txt;*.json;*.yaml;...)\0"
-            L"*.md;*.markdown;*.mmd;*.txt;*.json;*.yaml;*.yml;*.toml;"
-            L"*.ini;*.csv;*.log\0"
-            L"Markdown / Mermaid (*.md;*.markdown;*.mmd)\0"
-            L"*.md;*.markdown;*.mmd\0"
-            L"All files (*.*)\0*.*\0";
-        ofn.lpstrFile = path;
-        ofn.nMaxFile = MAX_PATH;
-        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
-                    OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
-        if (GetOpenFileNameW(&ofn)) {
-            tabsInit(app);
-            int shellId = app.tabs[app.activeTab].id;
-            tabOpenPath(app, hwnd, toUtf8(path));
-            for (int i = 0; i < (int)app.tabs.size(); i++) {
-                if (app.tabs[i].id == shellId) {
-                    tabCloseIndex(app, hwnd, i);
-                    break;
-                }
-            }
-        }
+        openFileDialog(app, hwnd);
     } else if (id == 2) {
         // New document: the note takes over this window (#121 semantics);
         // the keystroke's WM_CHAR must not type into the fresh editor
@@ -2799,6 +2829,70 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         return;
     }
 
+    if (app.showHelp) return;
+
+    // Theme chooser click handling
+    if (app.showThemeChooser) {
+        float clickX = (float)GET_X_LPARAM(lParam);
+        float clickY = (float)GET_Y_LPARAM(lParam);
+        int hit = themeChooserHitAt(app, clickX, clickY);
+
+        auto restorePreview = [&]() {
+            if (app.themeChooserPreviewBase >= 0) {
+                applyTheme(app, app.themeChooserPreviewBase);
+                app.themeChooserPreviewBase = -1;
+            }
+        };
+
+        if (hit == -1) {
+            // "Follow Windows" toggle
+            restorePreview();
+            app.followSystemTheme = !app.followSystemTheme;
+            if (app.followSystemTheme) {
+                // Adopt the current theme as this mode's preference, then
+                // snap to whatever the system mode wants
+                if (app.theme.isDark) app.darkThemeIndex = app.currentThemeIndex;
+                else app.lightThemeIndex = app.currentThemeIndex;
+                PostMessageW(hwnd, WM_SETTINGCHANGE, 0,
+                             (LPARAM)L"ImmersiveColorSet");
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        if (hit == -3) {
+            // Footer: open the theme editor on the committed theme
+            restorePreview();
+            app.showThemeChooser = false;
+            app.themeChooserAnimation = 0;
+            openThemeEditor(app, true);
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        if (hit >= 0) {
+            // Commit the pick (the hover preview already applied it)
+            applyTheme(app, hit);
+            app.themeChooserPreviewBase = -1;
+            // While auto mode is on, picking a card records it as the
+            // preference for that card's light/dark class
+            if (app.followSystemTheme) {
+                if (themeAt(hit).isDark) app.darkThemeIndex = hit;
+                else app.lightThemeIndex = hit;
+            }
+            // New windows spawned from here on come up in this theme
+            persistThemeChoice(app);
+            app.showThemeChooser = false;
+            app.themeChooserAnimation = 0;
+        } else {
+            // Close (x) or a click on empty panel / outside: put the
+            // committed theme back and dismiss
+            restorePreview();
+            app.showThemeChooser = false;
+            app.themeChooserAnimation = 0;
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Edit mode: route to editor
     if (app.editMode && (app.draggingSeparator || app.editorSelecting ||
                          app.editorScrollbarDragging)) {
@@ -3032,67 +3126,6 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         // Pinned (#156): the click belongs to the document - fall through
     }
 
-    // Theme chooser click handling
-    if (app.showThemeChooser) {
-        float clickX = (float)GET_X_LPARAM(lParam);
-        float clickY = (float)GET_Y_LPARAM(lParam);
-        int hit = themeChooserHitAt(app, clickX, clickY);
-
-        auto restorePreview = [&]() {
-            if (app.themeChooserPreviewBase >= 0) {
-                applyTheme(app, app.themeChooserPreviewBase);
-                app.themeChooserPreviewBase = -1;
-            }
-        };
-
-        if (hit == -1) {
-            // "Follow Windows" toggle
-            restorePreview();
-            app.followSystemTheme = !app.followSystemTheme;
-            if (app.followSystemTheme) {
-                // Adopt the current theme as this mode's preference, then
-                // snap to whatever the system mode wants
-                if (app.theme.isDark) app.darkThemeIndex = app.currentThemeIndex;
-                else app.lightThemeIndex = app.currentThemeIndex;
-                PostMessageW(hwnd, WM_SETTINGCHANGE, 0,
-                             (LPARAM)L"ImmersiveColorSet");
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-        if (hit == -3) {
-            // Footer: open the theme editor on the committed theme
-            restorePreview();
-            app.showThemeChooser = false;
-            app.themeChooserAnimation = 0;
-            openThemeEditor(app, true);
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-        if (hit >= 0) {
-            // Commit the pick (the hover preview already applied it)
-            applyTheme(app, hit);
-            app.themeChooserPreviewBase = -1;
-            // While auto mode is on, picking a card records it as the
-            // preference for that card's light/dark class
-            if (app.followSystemTheme) {
-                if (themeAt(hit).isDark) app.darkThemeIndex = hit;
-                else app.lightThemeIndex = hit;
-            }
-            // New windows spawned from here on come up in this theme
-            persistThemeChoice(app);
-            app.showThemeChooser = false;
-            app.themeChooserAnimation = 0;
-        } else {
-            // Close (x) or a click on empty panel / outside: put the
-            // committed theme back and dismiss
-            restorePreview();
-            app.showThemeChooser = false;
-            app.themeChooserAnimation = 0;
-        }
-        InvalidateRect(hwnd, nullptr, FALSE);
-        return;
-    }
 
     if (app.scrollbarDragging) {
         app.scrollbarDragging = false;
@@ -3330,6 +3363,104 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return;
     }
 
+    if (!app.confirmExitPending && app.showContextMenu) {
+        if (wParam == VK_ESCAPE || wParam == VK_F10) {
+            closeContextMenu(app);
+        } else if (wParam == VK_DOWN || wParam == VK_UP ||
+                   wParam == VK_HOME || wParam == VK_END) {
+            int current = (wParam == VK_HOME || wParam == VK_END)
+                              ? -1 : app.hoveredContextMenuItem;
+            app.contextMenuKeyboard = true;
+            app.hoveredContextMenuItem = nextContextMenuItem(
+                app, current, (wParam == VK_UP || wParam == VK_END) ? -1 : 1);
+        } else if (wParam == VK_RETURN || wParam == VK_SPACE) {
+            int item = app.hoveredContextMenuItem;
+            closeContextMenu(app);
+            app.swallowCharsUntil = std::chrono::steady_clock::now() +
+                                    std::chrono::milliseconds(150);
+            if (contextMenuItemEnabled(app, item)) invokeContextMenuAction(app, hwnd, item);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    // Shortcut editor: an armed row captures the next key; Esc cancels
+    // the capture, then closes back to settings
+    if (app.showShortcutEditor) {
+        if (wParam == VK_ESCAPE) {
+            if (app.shortcutEditorRow >= 0) {
+                app.shortcutEditorRow = -1;
+            } else {
+                app.showShortcutEditor = false;
+                app.showSettings = true;
+                app.settingsAnimation = 0;
+            }
+        } else if (app.shortcutEditorRow >= 0) {
+            unsigned key = 0;
+            if (wParam == VK_TAB || wParam == VK_SPACE ||
+                (wParam >= VK_F1 && wParam <= VK_F12) ||
+                (wParam >= 'A' && wParam <= 'Z') ||
+                (wParam >= '0' && wParam <= '9')) {
+                key = (unsigned)wParam;
+            }
+            if (key) shortcutAssign(app, key);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    // Theme editor: Esc returns to settings; text arrives via WM_CHAR
+    if (app.showThemeEditor) {
+        if (wParam == VK_ESCAPE) closeThemeEditor(app, true);
+        return;
+    }
+    // Settings overlay captures the keyboard while open
+    if (app.showSettings) {
+        if (wParam == VK_ESCAPE || (ctrl && wParam == VK_OEM_COMMA)) {
+            app.showSettings = false;
+            app.settingsAnimation = 0;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return;
+    }
+
+    if (app.showHelp || app.showThemeChooser) {
+        if (wParam == VK_ESCAPE ||
+            (!ctrl && app.showHelp && wParam == app.keymap[KA_HELP]) ||
+            (!ctrl && app.showThemeChooser && wParam == app.keymap[KA_THEME])) {
+            if (app.themeChooserPreviewBase >= 0) {
+                applyTheme(app, app.themeChooserPreviewBase);
+                app.themeChooserPreviewBase = -1;
+            }
+            app.showThemeChooser = false;
+            app.showHelp = false;
+        } else if (app.showHelp) {
+            float step = dpi(app, 60.0f);
+            if (wParam == VK_NEXT || wParam == VK_PRIOR) step = app.helpVisibleHeight;
+            if (wParam == VK_DOWN || wParam == VK_NEXT) app.helpScroll += step;
+            if (wParam == VK_UP || wParam == VK_PRIOR) app.helpScroll -= step;
+            app.helpScroll = std::max(0.0f, std::min(app.helpScroll,
+                app.helpContentHeight - app.helpVisibleHeight));
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    if (appMenuAvailable(app)) {
+        if (wParam == VK_F10) {
+            toggleApplicationMenu(app, hwnd, true);
+            return;
+        }
+        if (ctrl && wParam == 'O') {
+            openFileDialog(app, hwnd);
+            return;
+        }
+        if (ctrl && wParam == VK_OEM_COMMA) {
+            closeSearchIfOpen(app);
+            app.showSettings = true;
+            app.settingsAnimation = 0;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+    }
+
     // Tab shortcuts work everywhere except modal capture states: Ctrl+Tab
     // cycles, Ctrl+W closes, Ctrl+T opens the browser into a new tab,
     // Ctrl+1..9 jumps (a dirty editor parks its buffer in the tab)
@@ -3441,15 +3572,6 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     break;
             }
         }
-        InvalidateRect(hwnd, nullptr, FALSE);
-        return;
-    }
-
-    // An open context menu takes Esc before any overlay
-    if (app.showContextMenu && wParam == VK_ESCAPE) {
-        app.showContextMenu = false;
-        app.contextMenuAnimation = 0;
-        app.hoveredContextMenuItem = -1;
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
@@ -3614,44 +3736,6 @@ void handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 break;
         }
     } else {
-        // Shortcut editor: an armed row captures the next key; Esc cancels
-        // the capture, then closes back to settings
-        if (app.showShortcutEditor) {
-            if (wParam == VK_ESCAPE) {
-                if (app.shortcutEditorRow >= 0) {
-                    app.shortcutEditorRow = -1;
-                } else {
-                    app.showShortcutEditor = false;
-                    app.showSettings = true;
-                    app.settingsAnimation = 0;
-                }
-            } else if (app.shortcutEditorRow >= 0) {
-                unsigned key = 0;
-                if (wParam == VK_TAB || wParam == VK_SPACE ||
-                    (wParam >= VK_F1 && wParam <= VK_F12) ||
-                    (wParam >= 'A' && wParam <= 'Z') ||
-                    (wParam >= '0' && wParam <= '9')) {
-                    key = (unsigned)wParam;
-                }
-                if (key) shortcutAssign(app, key);
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-        // Theme editor: Esc returns to settings; text arrives via WM_CHAR
-        if (app.showThemeEditor) {
-            if (wParam == VK_ESCAPE) closeThemeEditor(app, true);
-            return;
-        }
-        // Settings overlay captures the keyboard while open
-        if (app.showSettings) {
-            if (wParam == VK_ESCAPE) {
-                app.showSettings = false;
-                app.settingsAnimation = 0;
-                InvalidateRect(hwnd, nullptr, FALSE);
-            }
-            return;
-        }
         // TOC filter: printable keys narrow the heading list via WM_CHAR,
         // Backspace edits, Enter jumps to the first match. A pinned panel
         // hands the keyboard back to the document (#156).
@@ -3970,6 +4054,16 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
             }
         }
         InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
+    if (app.showContextMenu || app.showSettings || app.showThemeChooser) return;
+    if (app.showHelp) {
+        if ((unsigned)wParam == app.keymap[KA_HELP]) {
+            app.showHelp = false;
+            app.helpAnimation = 0;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
         return;
     }
 

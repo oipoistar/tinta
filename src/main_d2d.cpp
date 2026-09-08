@@ -1047,13 +1047,6 @@ render_document:
     if (app.showFolderBrowser) renderFolderBrowser(app);
     if (app.showToc) renderToc(app);
     if (app.annotEditorOpen) renderAnnotationEditor(app);
-    if (app.showContextMenu) renderContextMenu(app);
-    if (app.showThemeChooser) renderThemeChooser(app);
-    if (app.showHelp) renderHelpOverlay(app);
-    if (app.showSettings) renderSettingsOverlay(app);
-    if (app.showLightbox) renderLightbox(app);
-    if (app.showThemeEditor) renderThemeEditor(app);
-    if (app.showShortcutEditor) renderShortcutEditor(app);
 
     // Close edit mode split view clipping
     if (app.editMode) {
@@ -1085,8 +1078,16 @@ render_document:
         renderEditRail(app);
         renderEditCtxMenu(app);
     }
+    if (app.showThemeChooser) renderThemeChooser(app);
+    if (app.showHelp) renderHelpOverlay(app);
+    if (app.showSettings) renderSettingsOverlay(app);
+    if (app.showLightbox) renderLightbox(app);
+    if (app.showThemeEditor) renderThemeEditor(app);
+    if (app.showShortcutEditor) renderShortcutEditor(app);
+
     renderTabSwitcher(app);
     renderTabMenu(app);
+    if (app.showContextMenu) renderContextMenu(app);
 
     // Unsaved-changes dialog above it all (also entered from tab closes)
     if (app.confirmExitPending) renderConfirmExitDialog(app);
@@ -1221,6 +1222,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 y < (float)GetSystemMetrics(SM_CYSIZEFRAME)) {
                 return HTTOP;
             }
+            if (appMenuButtonAt(*app, x, y)) return HTCLIENT;
             int button = captionHitTest(*app, x, y);
             if (button == 1) return HTMINBUTTON;
             if (button == 2) return HTMAXBUTTON;  // Win11 snap flyout
@@ -1263,7 +1265,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             break;
 
+        case WM_KILLFOCUS:
+            if (app && app->showContextMenu) {
+                closeContextMenu(*app);
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            break;
+
         case WM_NCLBUTTONDOWN:
+            if (app && app->showContextMenu) {
+                closeContextMenu(*app);
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
             if (app && !app->zenMode &&
                 (wParam == HTMINBUTTON || wParam == HTMAXBUTTON ||
                  wParam == HTCLOSE)) {
@@ -1367,6 +1380,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_SIZE:
             if (app && app->d2dFactory) {
+                closeContextMenu(*app);  // its anchor belongs to the old viewport
                 // The preview's geometry is stale after a resize: restore
                 // the document at the new size and close the overlay
                 if (app->showPrintPreview) {
@@ -1505,6 +1519,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return TRUE;
 
         case WM_SYSKEYDOWN:
+            if (app && wParam == VK_F10) {
+                handleKeyDown(*app, hwnd, wParam);
+                return 0;
+            }
             // Alt+Left / Alt+Right mirror the mouse side buttons
             if (app && (lParam & (1 << 29)) &&
                 (wParam == VK_LEFT || wParam == VK_RIGHT)) {
