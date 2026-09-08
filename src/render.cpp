@@ -2096,7 +2096,9 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
     float lineHeight = 20.0f * scale;
     float padding = 12.0f * scale;
 
-    int lineCount = 1;
+    // A terminal newline ends the last row; it does not start another.
+    // Count earlier blank rows normally and keep the empty-block minimum.
+    int lineCount = (code.empty() || code.back() != '\n') ? 1 : 0;
     for (char c : code) if (c == '\n') lineCount++;
 
     app.docText += L"\n";
@@ -2124,7 +2126,7 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
     size_t lineStart = 0;
     float maxLineWidth = 0.0f;
 
-    while (lineStart <= wcode.length()) {
+    while (lineStart < wcode.length()) {
         size_t lineEnd = wcode.find(L'\n', lineStart);
         if (lineEnd == std::wstring::npos) lineEnd = wcode.length();
 
