@@ -396,6 +396,8 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                                 const std::string& baseLinkUrl = {}, float customLineHeight = 0.0f) {
     float x = startX;
     float lineHeight = customLineHeight > 0 ? customLineHeight : baseFormat->GetFontSize() * 1.7f;
+    const float normalLineHeight = lineHeight;
+    float mathTextOffset = 0;
     float maxX = startX + maxWidth;
     float spaceWidth = getSpaceWidth(app, baseFormat);
 
@@ -404,15 +406,15 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         if (lineEndX <= lineStartX) return;
         bool refLive = linkUrl.rfind("fileref-ok:", 0) == 0;
         bool refMissing = linkUrl.rfind("fileref-missing:", 0) == 0;
-        float underlineY = lineY + lineHeight - 2;
+        float underlineY = lineY + mathTextOffset + normalLineHeight - 2;
         if (refLive || refMissing) {
             // .md references underline dashed; a missing target keeps a
             // faint ghost of the same treatment, and its click offers to
             // create the file (#127)
             D2D1_COLOR_F dashColor = color;
             dashColor.a *= 0.55f;
-            float dash = lineHeight * 0.16f;
-            float gap = lineHeight * 0.12f;
+            float dash = normalLineHeight * 0.16f;
+            float gap = normalLineHeight * 0.12f;
             for (float sx = lineStartX; sx < lineEndX; sx += dash + gap) {
                 float ex = std::min(sx + dash, lineEndX);
                 app.layoutLines.push_back({D2D1::Point2F(sx, underlineY),
@@ -438,6 +440,32 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
     std::vector<StyledRun> runs;
     flattenInline(app, elements, rootStyle, lineHeight, runs);
 
+    // Reserve a common baseline and enough vertical room before retaining
+    // any runs. Uniform spacing within this paragraph keeps wrapping and
+    // selection consistent even when a tall inline matrix occurs mid-line.
+    std::vector<MathBoxPtr> mathBoxes(runs.size());
+    std::vector<float> mathBaselines(runs.size(), 0);
+    float mathBelow = 0;
+    for (size_t i = 0; i < runs.size(); ++i) {
+        const auto& run = runs[i];
+        if (run.elem->type != ElementType::MathInline && run.elem->type != ElementType::MathDisplay) continue;
+        IDWriteTextFormat* format = run.style.format ? run.style.format : baseFormat;
+        float size = format->GetFontSize();
+        mathBoxes[i] = mathParse(app, toWide(run.elem->text), size, false);
+        if (!mathBoxes[i]) continue;
+        float baseline = size * 0.8f;
+        IDWriteTextLayout* probe = nullptr;
+        if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(L"Ag", 2, format, 1000, 1000, &probe))) {
+            DWRITE_LINE_METRICS metrics{};
+            UINT32 count = 1;
+            if (SUCCEEDED(probe->GetLineMetrics(&metrics, 1, &count))) baseline = metrics.baseline;
+            probe->Release();
+        }
+        mathBaselines[i] = baseline;
+        mathExpandLine(mathBoxes[i], baseline + run.style.drawYOffset, normalLineHeight, mathTextOffset, mathBelow);
+    }
+    lineHeight += mathTextOffset + mathBelow;
+
     for (size_t runIndex = 0; runIndex < runs.size(); runIndex++) {
         const auto& run = runs[runIndex];
         const ElementPtr& elem = run.elem;
@@ -448,7 +476,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         bool hasBg = run.style.hasBg;
         bool hasStrike = run.style.hasStrike;
         D2D1_COLOR_F bgColor = run.style.bgColor;
-        float drawYOffset = run.style.drawYOffset;
+        float drawYOffset = run.style.drawYOffset + mathTextOffset;
 
         std::wstring text;
 
@@ -475,13 +503,13 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                     y += lineHeight;
                 }
 
-                app.layoutRects.push_back({D2D1::RectF(x - 2, y,
+                app.layoutRects.push_back({D2D1::RectF(x - 2, y + mathTextOffset,
                                                       x + textWidth + kCodeSpanPadding,
-                                                      y + lineHeight),
+                                                      y + mathTextOffset + normalLineHeight),
                                            app.theme.codeBackground});
 
                 float codeFontHeight = format->GetFontSize() * 1.2f;
-                float verticalOffset = (lineHeight - codeFontHeight) / 2.0f;
+                float verticalOffset = mathTextOffset + (normalLineHeight - codeFontHeight) / 2.0f;
                 D2D1_POINT_2F pos = D2D1::Point2F(x, y + verticalOffset);
                 D2D1_RECT_F bounds = D2D1::RectF(x, y, x + textWidth, y + lineHeight);
                 addTextRun(app, std::move(info), pos, bounds, color,
@@ -501,9 +529,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 // Native inline math (#80): an atomic measured box in the
                 // text flow, baseline-aligned with the surrounding line
                 std::wstring latex = toWide(elem->text);
-                float mathSize = format ? format->GetFontSize()
-                                        : app.textFormat->GetFontSize();
-                MathBoxPtr box = mathParse(app, latex, mathSize, false);
+                MathBoxPtr box = mathBoxes[runIndex];
                 if (!box) {
                     // Unsupported TeX: show the raw source in code style
                     format = inlineCodeFormat(app, run.style.bold, run.style.italic);
@@ -517,20 +543,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                     y += lineHeight;
                 }
                 // Align the box baseline with the surrounding text baseline
-                float textBaseline = mathSize * 0.8f;
-                {
-                    IDWriteTextLayout* probe = nullptr;
-                    app.dwriteFactory->CreateTextLayout(
-                        L"Ag", 2, format ? format : app.textFormat,
-                        1000.0f, 1000.0f, &probe);
-                    if (probe) {
-                        DWRITE_LINE_METRICS lm{};
-                        UINT32 n = 1;
-                        probe->GetLineMetrics(&lm, 1, &n);
-                        textBaseline = lm.baseline;
-                        probe->Release();
-                    }
-                }
+                float textBaseline = mathBaselines[runIndex];
                 float boxTop = y + drawYOffset + textBaseline - mathBoxBaseline(box);
                 mathBoxRetain(app, box, x, boxTop, app.theme.text);
 
@@ -615,7 +628,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 float rubyAboveOffset = rubyLineHeight;
                 // If we're at the start of a line, push y down to make room for annotation
                 // For simplicity, always reserve space above
-                float baseY = y + rubyAboveOffset;
+                float baseY = y + mathTextOffset + rubyAboveOffset;
 
                 // Center the narrower one under the wider one
                 float basePosX = x + (totalWidth - baseWidth) / 2.0f;
@@ -625,8 +638,8 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 if (rubyInfo.layout) {
                     D2D1_COLOR_F rubyColor = baseColor;
                     rubyColor.a *= 0.7f;
-                    D2D1_POINT_2F rubyPos = D2D1::Point2F(rubyPosX, y);
-                    D2D1_RECT_F rubyBounds = D2D1::RectF(rubyPosX, y, rubyPosX + rubyWidth, y + rubyLineHeight);
+                    D2D1_POINT_2F rubyPos = D2D1::Point2F(rubyPosX, y + mathTextOffset);
+                    D2D1_RECT_F rubyBounds = D2D1::RectF(rubyPosX, y + mathTextOffset, rubyPosX + rubyWidth, y + mathTextOffset + rubyLineHeight);
                     addTextRun(app, std::move(rubyInfo), rubyPos, rubyBounds, rubyColor, 0, 0, false);
                 }
 
@@ -726,11 +739,12 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
             float segWidth = widthOf(segStart, segEnd);
             if (hasBg) {
                 app.layoutRects.push_back({
-                    D2D1::RectF(segX - 2, y + 1, segX + segWidth + 2, y + lineHeight - 1),
+                    D2D1::RectF(segX - 2, y + mathTextOffset + 1, segX + segWidth + 2,
+                                y + mathTextOffset + normalLineHeight - 1),
                     bgColor});
             }
             if (hasStrike) {
-                float strikeY = y + lineHeight * 0.55f;
+                float strikeY = y + mathTextOffset + normalLineHeight * 0.55f;
                 app.layoutLines.push_back({D2D1::Point2F(segX, strikeY),
                                            D2D1::Point2F(segX + segWidth, strikeY),
                                            color, 1.0f});

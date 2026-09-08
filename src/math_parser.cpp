@@ -323,9 +323,9 @@ struct Parser {
             failed = true; return nullptr;
         }
         pos += static_cast<size_t>(end - start);
-        skipWs(); size_t unitStart = pos;
-        while (!eof() && iswalpha(peek())) ++pos;
-        std::wstring unit = src.substr(unitStart, pos - unitStart);
+        skipWs();
+        std::wstring unit = src.substr(pos, 2);
+        if (unit.size() == 2) pos += 2;
         auto space = mk(MNode::Space);
         space->space = static_cast<float>(number);
         if (unit == L"ex") space->space *= 0.5f;

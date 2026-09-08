@@ -148,7 +148,8 @@ if(BUILD_TESTING)
         src/math_parser.cpp src/math_macros.cpp src/math_render.cpp src/markdown.cpp src/themes.cpp src/config_dir.cpp)
     target_include_directories(math_layout_tests PRIVATE include src ${md4c_SOURCE_DIR}/src)
     target_link_libraries(math_layout_tests PRIVATE md4c d2d1 dwrite windowscodecs shell32 ole32)
-    target_compile_definitions(math_layout_tests PRIVATE UNICODE _UNICODE)
+    target_compile_definitions(math_layout_tests PRIVATE UNICODE _UNICODE
+        TINTA_MATH_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/math-compatibility.md")
     add_test(NAME math_layout COMMAND math_layout_tests)
 
     add_executable(mermaid_tests

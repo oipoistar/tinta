@@ -637,16 +637,16 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
                     float ay = topY + ruleH / 2;
                     ctx.box.rules.push_back({x, topY, cm.width, ruleH});
                     ctx.box.lines.push_back(
-                        {x + cm.width - aw, ay - aw * 0.6f, x + cm.width, ay});
+                        {x + cm.width - aw, ay - aw * 0.6f, x + cm.width, ay, ruleH});
                     ctx.box.lines.push_back(
-                        {x + cm.width - aw, ay + aw * 0.6f, x + cm.width, ay});
+                        {x + cm.width - aw, ay + aw * 0.6f, x + cm.width, ay, ruleH});
                 } else if (node->decoKind == 4) {
                     float cxm = x + cm.width / 2;
                     float hw = std::min(cm.width / 2, em * 0.28f);
                     ctx.box.lines.push_back(
-                        {cxm - hw, topY + ruleH + em * 0.08f, cxm, topY});
+                        {cxm - hw, topY + ruleH + em * 0.08f, cxm, topY, ruleH});
                     ctx.box.lines.push_back(
-                        {cxm, topY, cxm + hw, topY + ruleH + em * 0.08f});
+                        {cxm, topY, cxm + hw, topY + ruleH + em * 0.08f, ruleH});
                 }
             }
             m.width = std::max(inner.width, cm.width);
@@ -706,6 +706,13 @@ MathBoxPtr mathParse(App& app, const std::wstring& latex, float fontSize,
 float mathBoxWidth(const MathBoxPtr& box) { return box ? box->width : 0; }
 float mathBoxHeight(const MathBoxPtr& box) { return box ? box->height : 0; }
 float mathBoxBaseline(const MathBoxPtr& box) { return box ? box->baseline : 0; }
+
+void mathExpandLine(const MathBoxPtr& box, float textBaseline, float lineHeight,
+                    float& above, float& below) {
+    if (!box) return;
+    above = std::max(above, box->baseline - textBaseline);
+    below = std::max(below, box->height - box->baseline + textBaseline - lineHeight);
+}
 
 void mathBoxDrawTo(ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush,
                    const MathBoxPtr& box, float x, float y,

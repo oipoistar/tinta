@@ -26,6 +26,11 @@ float mathBoxHeight(const MathBoxPtr& box);
 // Distance from the box top to the text baseline (for inline alignment)
 float mathBoxBaseline(const MathBoxPtr& box);
 
+// Accumulate the extra space needed above/below a normal text line to
+// contain baseline-aligned inline equations. Call once for each equation.
+void mathExpandLine(const MathBoxPtr& box, float textBaseline, float lineHeight,
+                    float& above, float& below);
+
 // Draw with the box's top-left corner at (x, y) in the current target
 void mathBoxDraw(App& app, const MathBoxPtr& box, float x, float y,
                  const D2D1_COLOR_F& color);

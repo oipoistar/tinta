@@ -1,6 +1,7 @@
 #include "math_parser.h"
 
 #include <iostream>
+#include <cstdint>
 
 using namespace tinta_math;
 namespace {
@@ -84,6 +85,32 @@ int main() {
     for (const auto* tex : {LR"(\left\bogus x\right))", LR"(\left(x\rightfoo))",
                             LR"(\middle|x)", LR"(x\hspace{huge}y)", LR"(\big q)"})
         check(!parseLatex(tex), "malformed delimiters and lengths fail");
+    check(textOf(parseLatex(LR"(\newcommand{\a}{x}\renewcommand{\a}{y}\providecommand{\a}{z}\a)")) == L"y",
+          "renew/provide semantics");
+    check(textOf(parseLatex(LR"(\newcommand{\a}[1]{\text{#1}}\a{two words})")) == L"two words",
+          "macro substitution preserves text whitespace");
+    check(textOf(parseLatex(LR"(\newcommand{\a}[1]{#1x}\a{\alpha})")) == L"\u03B1x", "argument token boundary");
+    std::wstring excessiveRows = L"\\begin{matrix}x";
+    for (int i = 0; i < 64; ++i) excessiveRows += L"\\\\x";
+    check(!parseLatex(excessiveRows + L"\\end{matrix}"), "matrix row count is bounded");
+    // Deterministic mutation smoke test: malformed input must terminate without
+    // crashes, including partially typed environments and macro definitions.
+    const std::vector<std::wstring> seeds = {example,
+        LR"(\newcommand{\v}[1]{\begin{pmatrix}#1\end{pmatrix}}\v{a\\b})",
+        LR"(\left\{\frac{x^2}{y}\middle|x>0\right\})",
+        LR"(\text{for all }x\in\mathbb{R})",
+        LR"(\sum_{\substack{i>0\\j>0}}a_{ij})"};
+    const std::wstring alphabet = L"{}[]\\&_^#% abc123";
+    uint32_t random = 190;
+    for (int i = 0; i < 2000; ++i) {
+        std::wstring input = seeds[static_cast<size_t>(i) % seeds.size()];
+        random = random * 1664525u + 1013904223u;
+        size_t at = random % input.size();
+        if (i % 3 == 0) input.erase(at, 1);
+        else if (i % 3 == 1) input.insert(at, 1, alphabet[random % alphabet.size()]);
+        else input.resize(at);
+        parseLatex(input);
+    }
     std::cout << "Math parser: " << failures << " failures\n";
     return failures ? 1 : 0;
 }
