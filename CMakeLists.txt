@@ -158,6 +158,13 @@ if(BUILD_TESTING)
         TINTA_SHORTCUT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/shortcuts-layouts.md")
     add_test(NAME input_shortcuts COMMAND input_tests)
 
+    add_executable(code_block_layout_tests tests/code_block_layout_tests.cpp ${INPUT_TEST_SOURCES})
+    target_include_directories(code_block_layout_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
+    target_link_libraries(code_block_layout_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
+    target_compile_definitions(code_block_layout_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
+        TINTA_CODE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/code-block-spacing.md")
+    add_test(NAME code_block_layout COMMAND code_block_layout_tests)
+
     add_executable(context_menu_tests tests/context_menu_tests.cpp src/context_menu.cpp
         src/markdown.cpp src/themes.cpp src/config_dir.cpp)
     target_include_directories(context_menu_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
