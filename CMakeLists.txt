@@ -165,6 +165,13 @@ if(BUILD_TESTING)
         TINTA_CODE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/code-block-spacing.md")
     add_test(NAME code_block_layout COMMAND code_block_layout_tests)
 
+    add_executable(blockquote_layout_tests tests/blockquote_layout_tests.cpp ${INPUT_TEST_SOURCES})
+    target_include_directories(blockquote_layout_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
+    target_link_libraries(blockquote_layout_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
+    target_compile_definitions(blockquote_layout_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
+        TINTA_QUOTE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/blockquote-spacing.md")
+    add_test(NAME blockquote_layout COMMAND blockquote_layout_tests)
+
     add_executable(theme_tests tests/theme_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(theme_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(theme_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
