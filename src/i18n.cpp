@@ -43,6 +43,10 @@ struct Entry {
 // Note: kept as a plain array (not unordered_map) on purpose. ~80 entries,
 // linear scan is cache-friendly and avoids a static-init ordering fiasco.
 const Entry kEntries[] = {
+    { "ctx.open", L"Open File...", L"\u6253\u5F00\u6587\u4EF6...", L"\u30D5\u30A1\u30A4\u30EB\u3092\u958B\u304F...", L"\uD30C\uC77C \uC5F4\uAE30..." },
+    { "ctx.save", L"Save", L"\u4FDD\u5B58", L"\u4FDD\u5B58", L"\uC800\uC7A5" },
+    { "ctx.save_as", L"Save As...", L"\u53E6\u5B58\u4E3A...", L"\u540D\u524D\u3092\u4ED8\u3051\u3066\u4FDD\u5B58...", L"\uB2E4\uB978 \uC774\uB984\uC73C\uB85C \uC800\uC7A5..." },
+    { "ctx.exit", L"Exit", L"\u9000\u51FA", L"\u7D42\u4E86", L"\uC885\uB8CC" },
     // ----- Help overlay -----
     { "help.title",            L"Keyboard Shortcuts",                       L"\u952E\u76D8\u5FEB\u6377\u952E",                       L"\u30AD\u30FC\u30DC\u30FC\u30C9\u30B7\u30E7\u30FC\u30C8\u30AB\u30C3\u30C8", L"\uD0A4\uBCF4\uB4DC \uB2E8\uCD95\uD0A4" },
     { "help.section.navigation", L"NAVIGATION",                             L"\u5BFC\u822A",                                          L"\u30CA\u30D3\u30B2\u30FC\u30B7\u30E7\u30F3", L"\uD0D0\uC0C9" },
@@ -956,6 +960,10 @@ const BuiltinTranslation kBuiltinTranslations[] = {
       L"Design",
       L"Th\u00E8me",
       L"Tema" },
+    { "ctx.open", L"Datei \u00F6ffnen...", L"Ouvrir un fichier...", L"Apri file..." },
+    { "ctx.save", L"Speichern", L"Enregistrer", L"Salva" },
+    { "ctx.save_as", L"Speichern unter...", L"Enregistrer sous...", L"Salva con nome..." },
+    { "ctx.exit", L"Beenden", L"Quitter", L"Esci" },
     { "ctx.settings",
       L"Einstellungen",
       L"Param\u00E8tres",

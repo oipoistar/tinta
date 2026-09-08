@@ -154,6 +154,8 @@ int main(int argc, char** argv) {
         checkMarkdownFixture(app, "math-mixed-layout.md", 25, true, 3);
         checkMarkdownFixture(app, "math-inline-stress.md", 9, true, 2);
         checkMarkdownFixture(app, "markdown-regression-control.md", 0, false, 3);
+        checkMarkdownFixture(app, "application-menu.md", 5, false, 3);
+        checkMarkdownFixture(app, "application-menu-companion.md", 1, false, 2);
         auto markdown = app.parser.parse("$$\n\\begin{bmatrix}1&2\\\\5&6\\end{bmatrix}\\longrightarrow 6\n$$");
         check(markdown.success && !markdown.root->children.empty(), "display math Markdown parses");
         if (markdown.success && !markdown.root->children.empty()) {

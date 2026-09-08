@@ -48,6 +48,7 @@ set(SOURCES
     src/render.cpp
     src/file_utils.cpp
     src/overlays.cpp
+    src/context_menu.cpp
     src/input.cpp
     src/editor.cpp
     src/mermaid.cpp
@@ -140,6 +141,13 @@ target_compile_definitions(tinta PRIVATE UNICODE _UNICODE
     TINTA_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 
 if(BUILD_TESTING)
+    add_executable(context_menu_tests tests/context_menu_tests.cpp src/context_menu.cpp
+        src/markdown.cpp src/themes.cpp src/config_dir.cpp)
+    target_include_directories(context_menu_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
+    target_link_libraries(context_menu_tests PRIVATE md4c shell32)
+    target_compile_definitions(context_menu_tests PRIVATE UNICODE _UNICODE)
+    add_test(NAME context_menu COMMAND context_menu_tests)
+
     add_executable(math_parser_tests tests/math_parser_tests.cpp src/math_parser.cpp src/math_macros.cpp)
     target_include_directories(math_parser_tests PRIVATE src)
     add_test(NAME math_parser COMMAND math_parser_tests)

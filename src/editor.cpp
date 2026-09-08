@@ -781,9 +781,9 @@ void editorMarkDirtyAndReparse(App& app) {
     editorReparse(app);
 }
 
-void editorReparse(App& app) {
+void editorReparse(App& app, bool force) {
     KillTimer(app.hwnd, TIMER_EDITOR_REPARSE);
-    if (!app.editMode || !app.editorShowPreview) return;
+    if (!app.editMode || (!app.editorShowPreview && !force)) return;
     std::string utf8 = toUtf8(app.editorText);
 
     // Build line-to-byte-offset mapping for scroll sync
@@ -913,6 +913,9 @@ void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
     app.editorDirty = dirty;
     app.editorCursorPos = std::min(cursor, app.editorText.size());
     app.editorScrollY = std::max(0.0f, scrollY);
+    // Opening another file parks the unsaved source; restore its preview
+    // from that source too, rather than the last saved file or empty note.
+    editorReparse(app);
     updateWindowTitle(app);
 }
 
@@ -1062,12 +1065,15 @@ bool quickNoteEmptyStateActive(const App& app) {
     return app.editMode && app.currentFile.empty() && app.editorText.empty();
 }
 
-void quickNoteOpenFile(App& app, HWND hwnd) {
+void openFileDialog(App& app, HWND hwnd) {
     wchar_t path[MAX_PATH] = L"";
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = L"Markdown / Mermaid (*.md;*.markdown;*.mmd)\0"
+    ofn.lpstrFilter = L"Documents (*.md;*.mmd;*.txt;*.json;*.yaml;...)\0"
+                      L"*.md;*.markdown;*.mmd;*.txt;*.json;*.yaml;*.yml;*.toml;"
+                      L"*.ini;*.csv;*.log\0"
+                      L"Markdown / Mermaid (*.md;*.markdown;*.mmd)\0"
                       L"*.md;*.markdown;*.mmd\0"
                       L"All files (*.*)\0*.*\0";
     ofn.lpstrFile = path;
@@ -1076,11 +1082,12 @@ void quickNoteOpenFile(App& app, HWND hwnd) {
                 OFN_HIDEREADONLY;
     if (!GetOpenFileNameW(&ofn)) return;
 
-    // The picked document takes over: open it as a tab (dedupe and
-    // activation included — this parks and leaves the empty editor),
-    // then drop the untitled shell tab
+    // Only an empty launcher/note is replaced. A document or unsaved
+    // buffer stays in its tab, including when the picked path is open.
+    bool replaceEmpty = app.currentFile.empty() && !app.startPageEmbeddedOpen &&
+                        (!app.editMode || (app.editorText.empty() && !app.editorDirty));
     tabsInit(app);
-    int untitledId = app.tabs[app.activeTab].id;
+    int untitledId = replaceEmpty ? app.tabs[app.activeTab].id : -1;
     tabOpenPath(app, hwnd, toUtf8(path));
     for (int i = 0; i < (int)app.tabs.size(); i++) {
         if (app.tabs[i].id == untitledId) {
@@ -1449,7 +1456,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     // Ctrl+O on an untitled, still-empty note opens the file picker
     // (the empty state's keycap hint; works with the preview hidden too)
     if (ctrl && wParam == 'O' && quickNoteEmptyStateActive(app)) {
-        quickNoteOpenFile(app, hwnd);
+        openFileDialog(app, hwnd);
         return;
     }
 
@@ -3132,5 +3139,4 @@ void renderEditor(App& app, float editorWidth) {
 
     app.renderTarget->PopAxisAlignedClip();
 }
-
 

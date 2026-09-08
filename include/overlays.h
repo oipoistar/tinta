@@ -100,8 +100,34 @@ enum ContextMenuItem {
     CTX_THEME,
     CTX_SETTINGS,
     CTX_HELP,
+    CTX_QUICK_NOTE,
+    CTX_OPEN,
+    CTX_SAVE,
+    CTX_SAVE_AS,
+    CTX_EXIT,
     CTX_ITEM_COUNT
 };
+struct ContextMenuEntry {
+    int action;
+    const char* key;
+    const wchar_t* shortcut;
+    bool separatorAfter;
+};
+const std::vector<ContextMenuEntry>& contextMenuEntries(const App& app);
+float contextMenuItemHeight(const App& app);
+float contextMenuSeparatorHeight(const App& app);
+float contextMenuPadding(const App& app);
+float contextMenuWidth(const App& app);
+float contextMenuHeight(const App& app);
+float contextMenuItemTop(const App& app, int row);
+int nextContextMenuItem(const App& app, int current, int direction);
+bool updateContextMenuHover(App& app, float x, float y, bool mouseMoved);
+void closeContextMenu(App& app);
+// The same icon cell is clickable in the caption and the editor tool rail.
+D2D1_RECT_F appMenuButtonRect(const App& app);
+bool appMenuButtonAt(const App& app, float x, float y);
+bool appMenuAvailable(const App& app);
+void renderAppMenuButtonBackground(App& app);
 void renderContextMenu(App& app);
 
 // Hovering a local .md link for a beat previews the target's first lines
@@ -119,7 +145,7 @@ D2D1_RECT_F lightboxImageRect(const App& app);
 void renderFolderSearchResults(App& app);
 bool folderSearchToggleAt(const App& app, float x, float y);
 // Opens at (x, y) client coordinates, clamped so the menu stays on screen
-void openContextMenu(App& app, float x, float y);
+void openContextMenu(App& app, float x, float y, bool application = false);
 // Item index under the point, or -1 (separators and gaps count as none)
 int contextMenuItemAt(const App& app, float x, float y);
 bool contextMenuItemEnabled(const App& app, int item);

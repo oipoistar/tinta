@@ -34,7 +34,8 @@ void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
 // shows a centered "Open a file" button in the preview pane until typing
 // starts; the button (or Ctrl+O) opens the classic file picker
 bool quickNoteEmptyStateActive(const App& app);
-void quickNoteOpenFile(App& app, HWND hwnd);
+// Open in a tab, preserving existing/unsaved documents in either mode.
+void openFileDialog(App& app, HWND hwnd);
 void renderQuickNoteEmptyState(App& app);
 
 // File save; Save As (Ctrl+Shift+S) re-prompts for the path and moves the
@@ -48,7 +49,8 @@ void saveFileAs(App& app, HWND hwnd);
 void confirmExitAction(App& app, HWND hwnd, int action);
 
 // Editor reparse (called from timer)
-void editorReparse(App& app);
+// Exports need the current buffer even when the preview pane is hidden.
+void editorReparse(App& app, bool force = false);
 // External edits: undo-capable range replace plus dirty + immediate
 // reparse, used by the preview table cell editor (#148)
 void editorReplaceRangeExternal(App& app, size_t start, size_t end,

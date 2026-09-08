@@ -4,6 +4,7 @@
 // a chevron opens the open-files switcher when the strip is crowded.
 
 #include "tabs.h"
+#include "overlays.h"
 
 #include "document.h"
 #include "drafts.h"
@@ -545,6 +546,7 @@ void renderTabStrip(App& app) {
             DestroyIcon(icon);
         }
     }
+    if (!app.editMode) renderAppMenuButtonBackground(app);
     if (app.titleIconBitmap) {
         float iconSize = dpi(app, 16.0f);
         float ix = (iconCell - iconSize) * 0.5f;

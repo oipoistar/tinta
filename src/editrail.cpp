@@ -4,6 +4,7 @@
 // thread seam (also here) ties source blocks to their render.
 
 #include "editrail.h"
+#include "overlays.h"
 #include "editor.h"
 #include "i18n.h"
 #include "pandoc.h"
@@ -194,7 +195,8 @@ void renderEditRail(App& app) {
             app.brush);
     };
 
-    // Logo
+    // Logo also opens the application menu in edit mode (#194).
+    renderAppMenuButtonBackground(app);
     float y = dpi(app, 11.0f);
     startPageEnsureIcon(app);
     if (app.startPageIconBitmap) {
