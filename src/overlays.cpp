@@ -2713,6 +2713,22 @@ void settingsChip(App& app, float& x, float y, const wchar_t* label, bool active
 
 } // namespace
 
+D2D1_RECT_F settingsPanelRect(const App& app) {
+    float w = std::min(dpi(app, 760.0f), app.width - dpi(app, 80.0f));
+    float h = std::min(dpi(app, 540.0f), app.height - dpi(app, 64.0f));
+    float x = (app.width - w) / 2;
+    float y = (app.height - h) / 2 + (1 - app.settingsAnimation) * dpi(app, 30.0f);
+    return D2D1::RectF(x, y, x + w, y + h);
+}
+
+D2D1_RECT_F settingsCloseButtonRect(const App& app) {
+    const auto panel = settingsPanelRect(app);
+    float size = dpi(app, 28.0f);
+    float right = panel.right - dpi(app, 16.0f);
+    float top = panel.top + dpi(app, 16.0f);
+    return D2D1::RectF(right - size, top, right, top + size);
+}
+
 void renderSettingsOverlay(App& app) {
     if (app.settingsAnimation < 1.0f) {
         float prev = app.settingsAnimation;
@@ -2731,10 +2747,12 @@ void renderSettingsOverlay(App& app) {
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
-    float panelW = std::min(dpi(app, 760.0f), app.width - dpi(app, 80.0f));
-    float panelH = std::min(dpi(app, 540.0f), app.height - dpi(app, 64.0f));
-    float px = (app.width - panelW) / 2;
-    float py = (app.height - panelH) / 2 + (1 - anim) * dpi(app, 30.0f);
+    const auto panelRect = settingsPanelRect(app);
+    float panelW = panelRect.right - panelRect.left;
+    float panelH = panelRect.bottom - panelRect.top;
+    float px = panelRect.left;
+    float py = panelRect.top;
+    const auto closeRect = settingsCloseButtonRect(app);
 
     // Elevated panel: soft drop shadow, lifted surface, hairline border
     for (int ring = 3; ring >= 1; ring--) {
@@ -2765,8 +2783,28 @@ void renderSettingsOverlay(App& app) {
         const wchar_t* title = tr(app, "settings.title");
         app.renderTarget->DrawText(title, (UINT32)wcslen(title), app.themeTitleFormat,
             D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 16.0f),
-                        px + panelW, py + dpi(app, 56.0f)), app.brush);
+                        closeRect.left - dpi(app, 8.0f), py + dpi(app, 56.0f)), app.brush);
     }
+
+    bool closeHover = app.mouseX >= closeRect.left && app.mouseX <= closeRect.right &&
+                      app.mouseY >= closeRect.top && app.mouseY <= closeRect.bottom;
+    if (closeHover) {
+        D2D1_COLOR_F bg = app.theme.text; bg.a = 0.10f * anim;
+        app.brush->SetColor(bg);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(closeRect, dpi(app, 5.0f), dpi(app, 5.0f)), app.brush);
+    }
+    D2D1_COLOR_F closeColor = app.theme.text;
+    closeColor.a = (closeHover ? 1.0f : 0.65f) * anim;
+    app.brush->SetColor(closeColor);
+    float closeX = (closeRect.left + closeRect.right) / 2;
+    float closeY = (closeRect.top + closeRect.bottom) / 2;
+    float arm = dpi(app, 4.0f);
+    app.renderTarget->DrawLine(D2D1::Point2F(closeX-arm, closeY-arm),
+        D2D1::Point2F(closeX+arm, closeY+arm), app.brush, dpi(app, 1.5f));
+    app.renderTarget->DrawLine(D2D1::Point2F(closeX+arm, closeY-arm),
+        D2D1::Point2F(closeX-arm, closeY+arm), app.brush, dpi(app, 1.5f));
+    app.settingsHits.push_back({closeRect, SET_CLOSE});
 
     // Section rail
     const wchar_t* sections[] = {tr(app, "settings.section.general"),

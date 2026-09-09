@@ -614,6 +614,17 @@ static void shortcutAssign(App& app, KeyBinding key) {
     app.shortcutEditorRow = -1;
 }
 
+static void closeSettings(App& app, HWND hwnd) {
+    app.showSettings = false;
+    app.settingsAnimation = 0;
+    app.settingsLangOpen = false;
+    app.settingsKeysOpen = false;
+    app.settingsDragSlider = 0;
+    app.settingsHits.clear();
+    if (GetCapture() == hwnd) ReleaseCapture();
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 static void settingsAction(App& app, HWND hwnd, int action) {
     // Shortcut profile picks (checked first: their base is above the
     // language pick base)
@@ -647,6 +658,7 @@ static void settingsAction(App& app, HWND hwnd, int action) {
     if (action != SET_LANG_DROPDOWN) app.settingsLangOpen = false;
     if (action != SET_KEYS_DROPDOWN) app.settingsKeysOpen = false;
     switch (action) {
+        case SET_CLOSE: closeSettings(app, hwnd); return;
         case SET_SECTION_GENERAL: app.settingsSection = 0; break;
         case SET_SECTION_APPEARANCE: app.settingsSection = 1; break;
         case SET_SECTION_EDITOR: app.settingsSection = 2; break;
@@ -1039,6 +1051,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         }
         setCursorFromHits(app.settingsHits, (float)app.mouseX,
                           (float)app.mouseY, false, true);
+        if (mouseMoved) InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
 
@@ -1710,6 +1723,22 @@ static void toggleApplicationMenu(App& app, HWND hwnd, bool keyboard = false) {
 }
 
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // Settings owns the entire click, including the title strip behind it.
+    // Sliders drag from the press; dismissal and other actions use release.
+    if (app.showSettings) {
+        float mx = (float)GET_X_LPARAM(lParam);
+        float my = (float)GET_Y_LPARAM(lParam);
+        for (const auto& hit : app.settingsHits) {
+            if ((hit.second == SET_SLIDER_READING || hit.second == SET_SLIDER_ZEN) &&
+                cursorPointInRect(mx, my, hit.first)) {
+                app.settingsDragSlider = hit.second;
+                SetCapture(hwnd);
+                settingsSliderApply(app, hit.second, mx);
+                return;
+            }
+        }
+        return;
+    }
     if (appMenuButtonAt(app, (float)GET_X_LPARAM(lParam), (float)GET_Y_LPARAM(lParam))) {
         toggleApplicationMenu(app, hwnd);
         app.swallowNextMouseUp = true;
@@ -1796,22 +1825,6 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // press must not start a document selection underneath it
     if (app.createRefPending) return;
 
-    // Settings: sliders drag from the press; everything else acts on release
-    if (app.showSettings) {
-        float mx = (float)GET_X_LPARAM(lParam);
-        float my = (float)GET_Y_LPARAM(lParam);
-        for (const auto& hit : app.settingsHits) {
-            if ((hit.second == SET_SLIDER_READING || hit.second == SET_SLIDER_ZEN) &&
-                mx >= hit.first.left && mx <= hit.first.right &&
-                my >= hit.first.top && my <= hit.first.bottom) {
-                app.settingsDragSlider = hit.second;
-                SetCapture(hwnd);
-                settingsSliderApply(app, hit.second, mx);
-                return;
-            }
-        }
-        return;
-    }
     // Print preview: controls act on the release
     if (app.showPrintPreview) return;
 
@@ -2749,6 +2762,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 return;
             }
         }
+        if (!cursorPointInRect(mx, my, settingsPanelRect(app))) {
+            closeSettings(app, hwnd);
+            return;
+        }
         if (app.settingsLangOpen || app.settingsKeysOpen) {
             app.settingsLangOpen = false;  // click elsewhere collapses them
             app.settingsKeysOpen = false;
@@ -3379,9 +3396,7 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     // Settings overlay captures the keyboard while open
     if (app.showSettings) {
         if (wParam == VK_ESCAPE || (ctrl && wParam == VK_OEM_COMMA)) {
-            app.showSettings = false;
-            app.settingsAnimation = 0;
-            InvalidateRect(hwnd, nullptr, FALSE);
+            closeSettings(app, hwnd);
         }
         return false;
     }
