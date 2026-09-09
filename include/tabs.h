@@ -38,6 +38,7 @@ void renderTabSwitcher(App& app);
 bool tabStripVisible(const App& app);
 
 // Right-click tab context menu (NPP-style close operations)
+int tabContextMenuIndexAt(const App& app, float x, float y);
 void openTabMenu(App& app, int tabIndex, float x, float y);
 void closeTabMenu(App& app);
 int tabMenuItemAt(const App& app, float x, float y);

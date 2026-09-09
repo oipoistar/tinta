@@ -1584,17 +1584,18 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             }
             populateFolderItems(app);
             break;
-        case CTX_REVEAL:
-            if (!app.currentFile.empty()) {
-                std::wstring widePath = toWide(app.currentFile);
-                wchar_t fullPath[MAX_PATH];
-                if (GetFullPathNameW(widePath.c_str(), MAX_PATH, fullPath, nullptr)) {
-                    std::wstring params = L"/select,\"" + std::wstring(fullPath) + L"\"";
-                    ShellExecuteW(nullptr, L"open", L"explorer.exe", params.c_str(),
-                                  nullptr, SW_SHOWNORMAL);
-                }
+        case CTX_COPY_PATH:
+            copyFilePath(app, hwnd, app.currentFile);
+            break;
+        case CTX_REVEAL: {
+            std::wstring fullPath = absoluteFilePath(app.currentFile);
+            if (!fullPath.empty()) {
+                std::wstring params = L"/select,\"" + fullPath + L"\"";
+                ShellExecuteW(nullptr, L"open", L"explorer.exe", params.c_str(),
+                              nullptr, SW_SHOWNORMAL);
             }
             break;
+        }
         case CTX_THEME:
             closeSearchIfOpen(app);
             app.showThemeChooser = true;
@@ -1633,14 +1634,10 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
     // above panels too — the strip stays interactive there)
     if (!fromKeyboard && !app.showPrintPreview && !app.confirmExitPending &&
         (float)pt.y < chromeTopHeight(app)) {
-        for (const App::TabHit& hit : app.tabHits) {
-            if (hit.index >= 0 && (float)pt.x >= hit.rect.left &&
-                (float)pt.x <= hit.rect.right && (float)pt.y >= hit.rect.top &&
-                (float)pt.y <= hit.rect.bottom) {
-                openTabMenu(app, hit.index, (float)pt.x, (float)pt.y);
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
-            }
+        int index = tabContextMenuIndexAt(app, (float)pt.x, (float)pt.y);
+        if (index >= 0) {
+            openTabMenu(app, index, (float)pt.x, (float)pt.y);
+            InvalidateRect(hwnd, nullptr, FALSE);
         }
         return;  // strip right-clicks never reach the document menu
     }

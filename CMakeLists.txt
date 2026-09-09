@@ -158,6 +158,12 @@ if(BUILD_TESTING)
         TINTA_SHORTCUT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/shortcuts-layouts.md")
     add_test(NAME input_shortcuts COMMAND input_tests)
 
+    add_executable(file_path_tests tests/file_path_tests.cpp ${INPUT_TEST_SOURCES})
+    target_include_directories(file_path_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
+    target_link_libraries(file_path_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
+    target_compile_definitions(file_path_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>)
+    add_test(NAME copy_file_path COMMAND file_path_tests)
+
     add_executable(code_block_layout_tests tests/code_block_layout_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(code_block_layout_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(code_block_layout_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)

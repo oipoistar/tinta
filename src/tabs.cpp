@@ -624,6 +624,7 @@ void renderTabStrip(App& app) {
             hit.index = 0;
             hit.closeRect = cb;
             hit.hasClose = true;
+            hit.contextRect = D2D1::RectF(textLeft, 0, cb.right, stripH);
             app.tabHits.push_back(hit);
             nextX = cb.right + dpi(app, 6.0f);
         }
@@ -1116,6 +1117,18 @@ bool tabStripVisible(const App& app) {
     return app.tabs.size() > 1 || (app.forceTabStrip && !app.tabs.empty());
 }
 
+int tabContextMenuIndexAt(const App& app, float x, float y) {
+    if (y < 0 || y >= chromeTopHeight(app)) return -1;
+    for (const App::TabHit& hit : app.tabHits) {
+        if (hit.index < 0 || hit.index >= (int)app.tabs.size()) continue;
+        const auto& rect = hit.contextRect.right > hit.contextRect.left
+                               ? hit.contextRect : hit.rect;
+        if (x >= rect.left && x <= rect.right &&
+            y >= rect.top && y <= rect.bottom) return hit.index;
+    }
+    return -1;
+}
+
 // --- tab context menu: right-click a tab for NPP-style close operations
 // (close, close others, close left/right) plus path utilities ---
 
@@ -1173,7 +1186,8 @@ bool tabMenuItemEnabled(const App& app, int item) {
         case TM_CLOSE_LEFT:   return index > 0;
         case TM_CLOSE_RIGHT:  return index + 1 < (int)app.tabs.size();
         case TM_COPY_PATH:
-        case TM_REVEAL:       return !app.tabs[index].path.empty();
+        case TM_REVEAL:
+            return !(index == app.activeTab ? app.currentFile : app.tabs[index].path).empty();
     }
     return false;
 }
@@ -1352,6 +1366,7 @@ bool tabMenuMouseDown(App& app, HWND hwnd, int x, int y) {
     // Re-validate against the surviving tab row (indices can shift while
     // the menu is up only via external means; the guard is cheap)
     App& a = app;
+    const std::string& path = index == a.activeTab ? a.currentFile : a.tabs[index].path;
     switch (item) {
         case TM_CLOSE:
             if (tabMenuItemEnabled(a, TM_CLOSE)) tabCloseIndex(a, hwnd, index);
@@ -1367,30 +1382,17 @@ bool tabMenuMouseDown(App& app, HWND hwnd, int x, int y) {
                 tabBulkCloseBegin(a, hwnd, 3, index);
             break;
         case TM_COPY_PATH:
-            if (!a.tabs[index].path.empty()) {
-                std::wstring wide = toWide(a.tabs[index].path);
-                wchar_t fullPath[MAX_PATH];
-                if (GetFullPathNameW(wide.c_str(), MAX_PATH, fullPath,
-                                     nullptr)) {
-                    wide = fullPath;
-                }
-                copyToClipboard(hwnd, wide);
-                signalPushKey(a, SIG_INFO, SIGI_COPY, "toast.copied");
+            copyFilePath(a, hwnd, path);
+            break;
+        case TM_REVEAL: {
+            std::wstring fullPath = absoluteFilePath(path);
+            if (!fullPath.empty()) {
+                std::wstring params = L"/select,\"" + fullPath + L"\"";
+                ShellExecuteW(nullptr, L"open", L"explorer.exe",
+                              params.c_str(), nullptr, SW_SHOWNORMAL);
             }
             break;
-        case TM_REVEAL:
-            if (!a.tabs[index].path.empty()) {
-                std::wstring wide = toWide(a.tabs[index].path);
-                wchar_t fullPath[MAX_PATH];
-                if (GetFullPathNameW(wide.c_str(), MAX_PATH, fullPath,
-                                     nullptr)) {
-                    std::wstring params =
-                        L"/select,\"" + std::wstring(fullPath) + L"\"";
-                    ShellExecuteW(nullptr, L"open", L"explorer.exe",
-                                  params.c_str(), nullptr, SW_SHOWNORMAL);
-                }
-            }
-            break;
+        }
     }
     return true;
 }

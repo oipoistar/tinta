@@ -210,6 +210,11 @@ tinta.exe /register
 
 Or simply drag and drop a `.md` or `.mmd` file onto the window.
 
+To copy a document's full path, right-click the document or its tab (the filename
+in the title bar when only one file is open) and choose
+**Copy file path**, beside **Reveal in Explorer**. The tab menu copies the clicked
+tab's path, even if another tab is active. Untitled notes have no path until saved.
+
 ## File Association
 
 On first launch, Tinta will ask if you want to set it as the default viewer for Markdown and Mermaid files. If you choose "No", you won't be asked again.
