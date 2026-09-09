@@ -45,32 +45,34 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.** Expanded native LaTeX math support, with regression coverage for equations inside everyday Markdown.
+            **Markdown, distilled.** An icon menu, easier file-path copying, separate inline-code colors, and fixes for shortcuts and Markdown spacing.
 
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Matrices and multiline math (#190)
-            - Matrix variants, nested cells, column alignment and scalable delimiters
-            - Cases, aligned and gathered equations, arrays with rules, and long arrows
+            ### Top-left icon menu (#194)
+            - Click the icon for New, Open, Save, Save As, Print, Export, Theme, Settings and Help in reading or editing mode
+            - F10 opens the menu; arrow keys and Enter navigate and choose commands
+            - Suggested by @ILCNa, implemented in #198
 
-            ### More native LaTeX notation (#190)
-            - Indexed roots, binomial coefficients, continued fractions and operator limits
-            - Stacked annotations, labelled arrows, additional accents and symbols, and mathematical alphabets
-            - Explicit delimiter sizes and spacing, plus equation-local macros and custom operators
-            - Uses installed Cambria Math when available, with the theme font as fallback; no font files or web engine are bundled
-            - See the [math compatibility guide](https://github.com/oipoistar/tinta/blob/v3.5.6/docs/math-support.md) for supported syntax and remaining limitations
+            ### Copy file path (#203)
+            - Copy file path now sits beside Reveal in Explorer in the document context menu
+            - Right-clicking the filename also opens the tab menu when only one document is open, while left-dragging still moves the window
+            - Copy full paths with spaces and Unicode characters, without long-path truncation; inactive tabs copy their own file's path
+            - Suggested by @Orcomp, implemented in #204
 
-            ### Mixed Markdown coverage (#190)
-            - 49 fixture equations checked alongside headings, tables, lists, links, emphasis, quotes, callouts, code and Mermaid
-            - Native viewer, print-page and HTML checks, including narrow windows and light/dark themes
+            ### Independent inline-code colors (#197)
+            - Custom themes can set `inlinecode` separately from fenced code text
+            - Existing themes fall back to their `code` color; previews and HTML/DOCX exports preserve the setting
+            - Suggested by @hochun836, implemented in #201
 
             ### Fixed
-            - Math text retains spaces, fraction styles differ correctly, and limits, negative spacing and mathematical alphabets follow their intended layout (#190)
-            - Tall inline equations reserve enough vertical space to avoid overlap; spacing is currently expanded uniformly across their paragraph (#190)
-            - Inline math preserves highlight and strikethrough spans, link colors and clickable link areas; HTML math inherits surrounding colors (#190)
+            - E and F1 work across keyboard layouts without leaking the shortcut into the editor, reported by @Fromville (#195, #199)
+            - Fenced code blocks no longer reserve an extra trailing row, while intentional blank lines remain, reported by @hochun836 (#196, #200)
+            - Blockquote bars stop at their content without changing the space before the following paragraph (#202)
+            - Active tabs use the current path after Save As; failed clipboard writes no longer show a Copied confirmation (#203, #204)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats

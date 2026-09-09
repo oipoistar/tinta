@@ -1,5 +1,21 @@
 # Changelog
 
+## [v3.6.7] - 2026-09-09
+
+### Added
+- Click the top-left icon to open New, Open, Save, Save As, Print, Export, Theme, Settings and Help in reading or editing mode; F10 opens the same keyboard-accessible menu. Suggested by @ILCNa (#194, #198)
+- Copy file path beside Reveal in Explorer in the document context menu, using the full path with spaces and Unicode characters. Suggested by @Orcomp (#203, #204)
+- Custom themes can set `inlinecode` independently from fenced code text, with fallback to `code` for existing themes; the setting works in previews and HTML/DOCX exports. Suggested by @hochun836 (#197, #201)
+
+### Changed
+- Refresh the documented executable size to about 2.3 MB (#193)
+
+### Fixed
+- E and F1 route through key handling so Edit and Help work across keyboard layouts without inserting the triggering character into the editor. Reported by @Fromville (#195, #199)
+- Fenced code blocks no longer reserve a phantom trailing row; intentional blank lines remain visible. Reported by @hochun836 (#196, #200)
+- Blockquote bars end at the content instead of extending through its trailing paragraph margin, while preserving spacing before following content (#202)
+- Right-clicking a single document's filename opens the tab menu while left-dragging still moves the window; active tabs copy their current path after Save As, inactive tabs copy their own path, and long paths are not truncated (#203, #204)
+
 ## [v3.5.6] - 2026-09-08
 
 ### Added
