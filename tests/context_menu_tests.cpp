@@ -22,6 +22,7 @@ int main() {
     check(!contextMenuItemEnabled(app, CTX_SAVE_AS), "launcher cannot save a copy");
     check(!contextMenuItemEnabled(app, CTX_PRINT), "launcher cannot print");
     check(!contextMenuItemEnabled(app, CTX_EXPORT), "launcher cannot export");
+    check(!contextMenuItemEnabled(app, CTX_COPY_PATH), "launcher has no file path to copy");
     check(nextContextMenuItem(app, CTX_OPEN, 1) == CTX_THEME,
           "keyboard skips all unavailable document commands");
     check(nextContextMenuItem(app, CTX_QUICK_NOTE, -1) == CTX_EXIT,
@@ -36,12 +37,14 @@ int main() {
           app.hoveredContextMenuItem == CTX_QUICK_NOTE && !app.contextMenuKeyboard,
           "a physical pointer move resumes mouse selection");
     app.currentFile = "fixture.md";
+    check(contextMenuItemEnabled(app, CTX_COPY_PATH), "saved document can copy its file path");
     check(contextMenuItemEnabled(app, CTX_SAVE_AS), "reading mode can save a copy");
     check(!contextMenuItemEnabled(app, CTX_SAVE), "reading mode cannot overwrite from a stale editor buffer");
     app.currentFile.clear();
     app.editMode = true;
     app.editorText = L"unsaved text";
     app.editorDirty = true;
+    check(!contextMenuItemEnabled(app, CTX_COPY_PATH), "untitled editor cannot copy a path");
     check(contextMenuItemEnabled(app, CTX_SAVE) && contextMenuItemEnabled(app, CTX_SAVE_AS),
           "untitled editor can save and save as");
     check(contextMenuItemEnabled(app, CTX_PRINT) && contextMenuItemEnabled(app, CTX_EXPORT),
@@ -70,6 +73,12 @@ int main() {
             check(app.contextMenuY + contextMenuHeight(app) <= app.height + 0.01f,
                   "all rows fit in a short scaled window");
             const auto& entries = contextMenuEntries(app);
+            if (!application) {
+                for (size_t i = 0; i < entries.size(); ++i)
+                    if (entries[i].action == CTX_COPY_PATH)
+                        check(i+1 < entries.size() && entries[i+1].action == CTX_REVEAL,
+                              "Copy file path is immediately beside Reveal in Explorer");
+            }
             std::set<int> actions;
             for (int row = 0; row < (int)entries.size(); row++) {
                 const auto& entry = entries[row];

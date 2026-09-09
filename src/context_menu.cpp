@@ -14,6 +14,7 @@ const std::vector<ContextMenuEntry>& contextMenuEntries(const App& app) {
         {CTX_SEARCH, "ctx.search", L"", false},
         {CTX_TOC, "ctx.toc", L"", true},
         {CTX_BROWSE, "ctx.browse", L"", false},
+        {CTX_COPY_PATH, "tab.menu.copy_path", L"", false},
         {CTX_REVEAL, "ctx.reveal", L"", true},
         {CTX_THEME, "ctx.theme", L"", false},
         {CTX_SETTINGS, "ctx.settings", L"Ctrl+,", false},
@@ -81,7 +82,7 @@ bool contextMenuItemEnabled(const App& app, int item) {
         case CTX_PRINT: case CTX_EXPORT: case CTX_EDIT:
         case CTX_SELECT_ALL: case CTX_SEARCH: case CTX_TOC:
             return document;
-        case CTX_REVEAL: return !app.currentFile.empty();
+        case CTX_COPY_PATH: case CTX_REVEAL: return !app.currentFile.empty();
         default: return item >= 0 && item < CTX_ITEM_COUNT;
     }
 }

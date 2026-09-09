@@ -467,6 +467,8 @@ struct App {
         int index = -1;    // tab index; -2 = plus, -3 = chevron
         D2D1_RECT_F closeRect{};
         bool hasClose = false;
+        // The lone title accepts right-clicks while remaining draggable.
+        D2D1_RECT_F contextRect{};
     };
     std::vector<TabHit> tabHits;       // refreshed by renderTabStrip
     // Pin button in the title bar: keeps this window above every other

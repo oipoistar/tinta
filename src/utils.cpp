@@ -1,6 +1,7 @@
 #include "utils.h"
 #include "render.h"
 #include "i18n.h"
+#include "signals.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -197,24 +198,43 @@ void handleLinkClick(App& app) {
     }
 }
 
-void copyToClipboard(HWND hwnd, const std::wstring& text) {
-    if (text.empty()) return;
-
-    if (!OpenClipboard(hwnd)) return;
-    EmptyClipboard();
-
+bool copyToClipboard(HWND hwnd, const std::wstring& text) {
+    if (text.empty()) return false;
     size_t size = (text.length() + 1) * sizeof(wchar_t);
     HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size);
-    if (hMem) {
-        wchar_t* dest = (wchar_t*)GlobalLock(hMem);
-        if (dest) {
-            memcpy(dest, text.c_str(), size);
-            GlobalUnlock(hMem);
-            SetClipboardData(CF_UNICODETEXT, hMem);
-        }
+    if (!hMem) return false;
+    wchar_t* dest = (wchar_t*)GlobalLock(hMem);
+    if (!dest) {
+        GlobalFree(hMem);
+        return false;
     }
-
+    memcpy(dest, text.c_str(), size);
+    GlobalUnlock(hMem);
+    if (!OpenClipboard(hwnd)) {
+        GlobalFree(hMem);
+        return false;
+    }
+    bool copied = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, hMem);
+    if (!copied) GlobalFree(hMem);  // ownership transfers only on success
     CloseClipboard();
+    return copied;
+}
+
+std::wstring absoluteFilePath(const std::string& path) {
+    if (path.empty()) return {};
+    std::wstring wide = toWide(path);
+    DWORD capacity = GetFullPathNameW(wide.c_str(), 0, nullptr, nullptr);
+    if (!capacity) return {};
+    std::wstring full(capacity, L'\0');
+    DWORD length = GetFullPathNameW(wide.c_str(), capacity, full.data(), nullptr);
+    if (!length || length >= capacity) return {};
+    full.resize(length);
+    return full;
+}
+
+void copyFilePath(App& app, HWND hwnd, const std::string& path) {
+    if (copyToClipboard(hwnd, absoluteFilePath(path)))
+        signalPushKey(app, SIG_INFO, SIGI_COPY, "toast.copied");
 }
 
 void extractText(const ElementPtr& elem, std::wstring& out) {

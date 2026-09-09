@@ -1312,6 +1312,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_NCRBUTTONUP:
             if (app && !app->zenMode && wParam == HTCAPTION) {
+                POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                ScreenToClient(hwnd, &pt);
+                if (tabContextMenuIndexAt(*app, (float)pt.x, (float)pt.y) >= 0) {
+                    handleContextMenu(*app, hwnd, lParam);
+                    return 0;
+                }
                 HMENU menu = GetSystemMenu(hwnd, FALSE);
                 if (menu) {
                     int cmd = TrackPopupMenu(
