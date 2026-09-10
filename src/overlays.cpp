@@ -1,4 +1,5 @@
 #include "overlays.h"
+#include "sidepanels.h"
 #include "utils.h"
 #include "d2d_init.h"
 #include "editor.h"
@@ -20,6 +21,24 @@ static float promptKeycap(App& app, const wchar_t* label, float rightX,
 #include <algorithm>
 #include <cmath>
 #include <utility>
+
+// Panel footers stay on one line even at the minimum panel width.
+static void panelFooterText(App& app, const wchar_t* text, const D2D1_RECT_F& rect) {
+    if (!app.signalSmallFormat || rect.right <= rect.left || rect.bottom <= rect.top) return;
+    IDWriteTextLayout* layout = nullptr;
+    if (FAILED(app.dwriteFactory->CreateTextLayout(text, (UINT32)wcslen(text),
+        app.signalSmallFormat, rect.right - rect.left, rect.bottom - rect.top, &layout))) return;
+    layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+    IDWriteInlineObject* ellipsis = nullptr;
+    if (SUCCEEDED(app.dwriteFactory->CreateEllipsisTrimmingSign(app.signalSmallFormat, &ellipsis))) {
+        layout->SetTrimming(&trimming, ellipsis);
+        ellipsis->Release();
+    }
+    app.renderTarget->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout,
+                                    app.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    layout->Release();
+}
 
 void renderSearchOverlay(App& app) {
     // Animate in (only invalidate if animation is still progressing)
@@ -576,12 +595,11 @@ void renderFolderBrowser(App& app) {
                 // give way when the row runs out
                 if (cx + segW > crumbMax) {
                     // Trim with an ellipsis; the leaf keeps a readable stub
-                    while (seg.size() > 4 &&
+                    while (!seg.empty() &&
                            cx + textWidth(seg + L"\u2026") > crumbMax) {
                         seg.pop_back();
                     }
-                    if (!crumbs[ci].leaf &&
-                        cx + textWidth(seg + L"\u2026") > crumbMax) {
+                    if (cx + textWidth(seg + L"\u2026") > crumbMax) {
                         break;
                     }
                     seg += L"\u2026";
@@ -594,7 +612,7 @@ void renderFolderBrowser(App& app) {
                 app.renderTarget->DrawText(seg.c_str(), (UINT32)seg.size(),
                     leaf && app.tocFormatBold ? app.tocFormatBold : browserFormat,
                     D2D1::RectF(cx, headerCenterY - dpi(app, 9.0f),
-                                cx + segW + dpi(app, 4.0f), headerY + g.headerH),
+                                std::min(crumbMax, cx + segW + dpi(app, 4.0f)), headerY + g.headerH),
                     app.brush);
                 if (!leaf && crumbs[ci].keep > 0) {
                     app.folderCrumbHits.push_back(
@@ -903,45 +921,57 @@ void renderFolderBrowser(App& app) {
                 swprintf_s(counts, tr(app, "browser.counts"), dirs,
                            (int)app.folderItems.size() - g.dirCount);
             }
-            app.renderTarget->DrawText(counts, (UINT32)wcslen(counts),
-                app.signalSmallFormat,
+            panelFooterText(app, counts,
                 D2D1::RectF(g.cardLeft + padding, footTop + dpi(app, 7.0f),
-                            g.cardRight - padding, g.cardBottom),
-                app.brush);
+                            g.cardRight - padding, g.cardBottom));
             const wchar_t* hint = tr(app, app.folderBrowserNaming != 0
                                               ? "browser.naming_hint"
                                               : "browser.hint");
             float hw = measureText(app, hint, app.signalSmallFormat);
-            app.renderTarget->DrawText(hint, (UINT32)wcslen(hint),
-                app.signalSmallFormat,
-                D2D1::RectF(g.cardRight - padding - hw, footTop + dpi(app, 7.0f),
-                            g.cardRight - padding + dpi(app, 2.0f), g.cardBottom),
-                app.brush);
+            if (measureText(app, counts, app.signalSmallFormat) + hw + dpi(app, 12.0f) <
+                g.cardRight - g.cardLeft - padding * 2) {
+                app.renderTarget->DrawText(hint, (UINT32)wcslen(hint),
+                    app.signalSmallFormat,
+                    D2D1::RectF(g.cardRight - padding - hw, footTop + dpi(app, 7.0f),
+                                g.cardRight - padding + dpi(app, 2.0f), g.cardBottom),
+                    app.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            }
         }
     }
+    renderSidePanelResizeGrip(app, SidePanel::Browser);
+}
+
+D2D1_RECT_F tocListRect(const App& app) {
+    const float width = tocPanelWidth(app);
+    const float x = tocPanelX(app, width);
+    return D2D1::RectF(x + dpi(app, 24.0f), chromeTopHeight(app) + dpi(app, 53.0f),
+                       x + width - dpi(app, 18.0f), app.height - dpi(app, 38.0f));
+}
+
+float tocHeadingIndent(const App& app, int level) {
+    const float available = std::max(0.0f, tocPanelWidth(app) - dpi(app, 72.0f));
+    const float step = std::min(dpi(app, 13.0f), available * 0.35f / 5);
+    return std::clamp(level - 1, 0, 5) * step;
+}
+
+float tocMaxScroll(const App& app) {
+    const auto rect = tocListRect(app);
+    const auto needle = toLower(app.tocFilter);
+    size_t count = 0;
+    for (const auto& heading : app.headings)
+        if (needle.empty() || toLower(heading.text).find(needle) != std::wstring::npos) ++count;
+    return std::max(0.0f, count * dpi(app, 26.0f) - std::max(0.0f, rect.bottom - rect.top));
 }
 
 // Click hit-test sharing the renderer's card geometry (#114 pattern:
 // render-time hover must never drive click actions). Keep in step with
 // renderToc below.
 int tocItemIndexAt(App& app, float x, float y) {
-    float panelWidth = tocPanelWidth(app);
-    float panelX = tocPanelX(app, panelWidth);
-    float m = dpi(app, 10.0f);
-    float cardLeft = panelX + m;
-    float cardRight = panelX + panelWidth - m;
-    float cardTop = chromeTopHeight(app) + dpi(app, 10.0f);
-    float cardBottom = (float)app.height - dpi(app, 12.0f);
-    float headerY = cardTop + dpi(app, 9.0f);
-    float dividerY = headerY + dpi(app, 34.0f) - dpi(app, 8.0f);
-    float listStartY = dividerY + dpi(app, 8.0f);
-    float listBottom = cardBottom - dpi(app, 26.0f);
-    float rowLeft = cardLeft + dpi(app, 14.0f);
-    float rowRight = cardRight - dpi(app, 8.0f);
+    const auto rect = tocListRect(app);
     float itemHeight = dpi(app, 26.0f);
-    if (x < rowLeft || x > rowRight || y < listStartY || y > listBottom)
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom)
         return -1;
-    int row = (int)((y - listStartY + app.tocScroll) / itemHeight);
+    int row = (int)((y - rect.top + app.tocScroll) / itemHeight);
     if (row < 0) return -1;
     std::wstring needle = toLower(app.tocFilter);
     int visIdx = -1;
@@ -1011,13 +1041,15 @@ void renderToc(App& app) {
         headerColor.a = anim;
         app.brush->SetColor(headerColor);
         const wchar_t* tocTitle = tr(app, "toc.title");
-        app.renderTarget->DrawText(tocTitle, (UINT32)wcslen(tocTitle), tocBold,
-            D2D1::RectF(cardLeft + padding, headerY, cardRight - padding,
-                        headerY + headerHeight),
-            app.brush);
+        const float titleRight = cardRight - padding - dpi(app, 40.0f);
+        if (app.tocFilter.empty()) {
+            app.renderTarget->DrawText(tocTitle, (UINT32)wcslen(tocTitle), tocBold,
+                D2D1::RectF(cardLeft + padding, headerY, titleRight, headerY + headerHeight),
+                app.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
         float titleW = measureText(app, tocTitle, tocBold);
 
-        if (!app.headings.empty() && app.signalSmallFormat) {
+        if (app.tocFilter.empty() && !app.headings.empty() && app.signalSmallFormat) {
             wchar_t count[8];
             swprintf_s(count, L"%d", (int)app.headings.size());
             float cw = measureText(app, count, app.signalSmallFormat);
@@ -1026,18 +1058,20 @@ void renderToc(App& app) {
                 headerY + dpi(app, 2.0f),
                 cardLeft + padding + titleW + dpi(app, 8.0f) + cw + dpi(app, 11.0f),
                 headerY + dpi(app, 17.0f));
-            D2D1_COLOR_F bb = app.theme.text; bb.a = 0.07f * anim;
-            app.brush->SetColor(bb);
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(badge, dpi(app, 7.0f), dpi(app, 7.0f)),
-                app.brush);
-            D2D1_COLOR_F bi = app.theme.text; bi.a = 0.6f * anim;
-            app.brush->SetColor(bi);
-            app.renderTarget->DrawText(count, (UINT32)wcslen(count),
-                app.signalSmallFormat,
-                D2D1::RectF(badge.left + dpi(app, 5.5f), badge.top + dpi(app, 1.5f),
-                            badge.right, badge.bottom),
-                app.brush);
+            if (badge.right <= titleRight) {
+                D2D1_COLOR_F bb = app.theme.text; bb.a = 0.07f * anim;
+                app.brush->SetColor(bb);
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(badge, dpi(app, 7.0f), dpi(app, 7.0f)),
+                    app.brush);
+                D2D1_COLOR_F bi = app.theme.text; bi.a = 0.6f * anim;
+                app.brush->SetColor(bi);
+                app.renderTarget->DrawText(count, (UINT32)wcslen(count),
+                    app.signalSmallFormat,
+                    D2D1::RectF(badge.left + dpi(app, 5.5f), badge.top + dpi(app, 1.5f),
+                                badge.right, badge.bottom),
+                    app.brush);
+            }
         }
 
         // Close cross at the right edge of the header
@@ -1064,24 +1098,16 @@ void renderToc(App& app) {
                                          headerY + dpi(app, 20.0f));
         }
 
-        // Active filter, right-aligned before the cross
-        if (!app.tocFilter.empty() && app.dwriteFactory) {
-            IDWriteTextLayout* filterLayout = nullptr;
-            app.dwriteFactory->CreateTextLayout(
-                app.tocFilter.c_str(), (UINT32)app.tocFilter.size(),
-                tocNormal, panelWidth, headerHeight, &filterLayout);
-            if (filterLayout) {
-                DWRITE_TEXT_METRICS fm{};
-                filterLayout->GetMetrics(&fm);
-                D2D1_COLOR_F filterColor = app.theme.accent;
-                filterColor.a = anim;
-                app.brush->SetColor(filterColor);
-                app.renderTarget->DrawTextLayout(
-                    D2D1::Point2F(cardRight - padding - dpi(app, 38.0f) - fm.width,
-                                  headerY + dpi(app, 1.0f)),
-                    filterLayout, app.brush);
-                filterLayout->Release();
-            }
+        // The active filter replaces the title, leaving room for the buttons.
+        if (!app.tocFilter.empty()) {
+            D2D1_COLOR_F filterColor = app.theme.accent;
+            filterColor.a = anim;
+            app.brush->SetColor(filterColor);
+            const std::wstring label = L"/ " + app.tocFilter;
+            app.renderTarget->DrawText(label.c_str(), (UINT32)label.size(), tocNormal,
+                D2D1::RectF(cardLeft + padding, headerY + dpi(app, 1.0f),
+                            titleRight, headerY + headerHeight),
+                app.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
 
         // Divider
@@ -1215,7 +1241,7 @@ void renderToc(App& app) {
                 if (itemY + itemHeight < listStartY || itemY > listBottom) continue;
 
                 const auto& heading = app.headings[visible[row]];
-                float indent = (heading.level - 1) * dpi(app, 13.0f);
+                float indent = tocHeadingIndent(app, heading.level);
                 float itemX = rowLeft + dpi(app, 10.0f) + indent;
                 bool isCurrent = visible[row] == currentIdx;
 
@@ -1257,7 +1283,7 @@ void renderToc(App& app) {
                         app.brush);
                 }
 
-                // Type scale by level: H1 bold heading ink, H2 body, H3 quiet
+                // H1 stays bold; deeper levels remain legible at compact widths.
                 IDWriteTextFormat* fmt =
                     (heading.level == 1 || isCurrent) ? tocBold : tocNormal;
                 D2D1_COLOR_F textColor;
@@ -1266,7 +1292,7 @@ void renderToc(App& app) {
                     textColor.a = anim;
                 } else if (heading.level >= 3) {
                     textColor = app.theme.text;
-                    textColor.a = 0.55f * anim;
+                    textColor.a = 0.72f * anim;
                 } else {
                     textColor = app.theme.text;
                     textColor.a = 0.82f * anim;
@@ -1306,7 +1332,7 @@ void renderToc(App& app) {
             }
         }
 
-        // Footer: the hint plus the T keycap
+        // Footer: the hint plus the active Contents shortcut
         float footTop = listBottom;
         app.brush->SetColor(div);
         app.renderTarget->FillRectangle(
@@ -1315,17 +1341,17 @@ void renderToc(App& app) {
             app.brush);
         if (app.signalSmallFormat) {
             const wchar_t* hint = tr(app, "toc.hint");
+            const std::wstring shortcut = keyLabel(app.keymap[KA_TOC]);
+            const float keyWidth = promptKeycap(app, shortcut.c_str(), cardRight - padding,
+                                               footTop + footerHeight * 0.5f);
             D2D1_COLOR_F hc = app.theme.text; hc.a = 0.48f * anim;
             app.brush->SetColor(hc);
-            app.renderTarget->DrawText(hint, (UINT32)wcslen(hint),
-                app.signalSmallFormat,
+            panelFooterText(app, hint,
                 D2D1::RectF(cardLeft + padding, footTop + dpi(app, 7.0f),
-                            cardRight - padding - dpi(app, 26.0f), cardBottom),
-                app.brush);
-            promptKeycap(app, L"T", cardRight - padding,
-                         footTop + footerHeight * 0.5f);
+                            cardRight - padding - keyWidth, cardBottom));
         }
     }
+    renderSidePanelResizeGrip(app, SidePanel::Contents);
 }
 
 // --- Link peek ---

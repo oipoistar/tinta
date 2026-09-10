@@ -13,6 +13,7 @@
 #include "settings.h"
 #include "render.h"
 #include "overlays.h"
+#include "sidepanels.h"
 #include "signals.h"
 #include "tableedit.h"
 #include "pandoc.h"
@@ -870,11 +871,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         float panelX = tocPanelX(app, panelWidth);
         if (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth) {
             app.tocScroll -= delta * dpi(app, 60.0f);
-            float itemHeight = dpi(app, 28.0f);
-            float headerHeight = dpi(app, 48.0f);
-            float listHeight = app.height - headerHeight - dpi(app, 20.0f);
-            float totalItemsHeight = app.headings.size() * itemHeight;
-            float maxScroll = std::max(0.0f, totalItemsHeight - listHeight);
+            float maxScroll = tocMaxScroll(app);
             app.tocScroll = std::max(0.0f, std::min(app.tocScroll, maxScroll));
             InvalidateRect(hwnd, nullptr, FALSE);
             return;
@@ -919,6 +916,12 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     bool mouseMoved = app.mouseX != GET_X_LPARAM(lParam) || app.mouseY != GET_Y_LPARAM(lParam);
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
+
+    if (app.panelResize.panel != SidePanel::None) {
+        sidePanelResizeMove(app, static_cast<float>(app.mouseX));
+        SetCursor(cursorSizeWE);
+        return;
+    }
 
     bool iconHover = appMenuButtonAt(app, (float)app.mouseX, (float)app.mouseY);
     if (iconHover != app.appMenuHover) {
@@ -1109,6 +1112,12 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         } else {
             setSearchCursor(app, (float)app.mouseX, (float)app.mouseY);
         }
+        return;
+    }
+
+    if (sidePanelResizeAt(app, static_cast<float>(app.mouseX), static_cast<float>(app.mouseY)) != SidePanel::None) {
+        SetCursor(cursorSizeWE);
+        if (mouseMoved) InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
 
@@ -1885,6 +1894,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // The chooser acts on release; do not place an editor caret under it.
     if (app.showThemeChooser) return;
 
+    if (sidePanelResizeBegin(app, hwnd, static_cast<float>(GET_X_LPARAM(lParam)),
+                            static_cast<float>(GET_Y_LPARAM(lParam)))) return;
+
     // Edit mode: route to editor or preview
     if (app.editMode) {
         int x = GET_X_LPARAM(lParam);
@@ -2600,6 +2612,11 @@ static void toggleFitBlock(App& app, HWND hwnd, unsigned key) {
 }
 
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    if (app.panelResize.panel != SidePanel::None) {
+        sidePanelResizeMove(app, static_cast<float>(GET_X_LPARAM(lParam)));
+        sidePanelResizeEnd(app, hwnd, false);
+        return;  // the release must not select a heading or dismiss a panel
+    }
     // A tab drag ends on release (its press already consumed the click)
     if (app.tabDragIndex >= 0) {
         tabDragEnd(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
@@ -3281,6 +3298,10 @@ static void toggleZenMode(App& app, HWND hwnd) {
 }
 
 bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
+    if (app.panelResize.panel != SidePanel::None) {
+        if (wParam == VK_ESCAPE) sidePanelResizeEnd(app, hwnd, true);
+        return true;
+    }
     float pageSize = app.height * 0.8f;
     float maxScroll = std::max(0.0f, app.contentHeight - app.height);
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;

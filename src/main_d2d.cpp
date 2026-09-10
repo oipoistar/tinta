@@ -27,6 +27,7 @@
 #include "render.h"
 #include "file_utils.h"
 #include "overlays.h"
+#include "sidepanels.h"
 #include "annotations.h"
 #include "drafts.h"
 #include "signals.h"
@@ -1268,6 +1269,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_KILLFOCUS:
+            if (app) sidePanelResizeEnd(*app, hwnd, true);
             if (app && app->showContextMenu) {
                 closeContextMenu(*app);
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -1384,6 +1386,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_SIZE:
             if (app && app->d2dFactory) {
+                sidePanelResizeEnd(*app, hwnd, true);
                 closeContextMenu(*app);  // its anchor belongs to the old viewport
                 // The preview's geometry is stale after a resize: restore
                 // the document at the new size and close the overlay
@@ -1421,6 +1424,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_DPICHANGED:
             if (app) {
+                sidePanelResizeEnd(*app, hwnd, true);
                 if (app->showPrintPreview) closePrintPreview(*app, hwnd);
                 UINT dpi = HIWORD(wParam);
                 app->contentScale = dpi / 96.0f;
@@ -1493,12 +1497,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_CAPTURECHANGED:
+            if (app && (HWND)lParam != hwnd) sidePanelResizeEnd(*app, hwnd, true);
             // Losing capture mid tab-drag (Alt+Tab, a popup stealing the
             // mouse) aborts the drag instead of leaving a stray ghost
             if (app && app->tabDragIndex >= 0 && (HWND)lParam != hwnd) {
                 tabDragCancel(*app, hwnd);
             }
             return 0;
+
+        case WM_CANCELMODE:
+            if (app) sidePanelResizeEnd(*app, hwnd, true);
+            break;
 
         case WM_SETCURSOR:
             if (app && LOWORD(lParam) == HTCLIENT) {
@@ -1843,6 +1852,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.tocOnLeft = savedSettings.tocOnLeft;
     app.tocPinned = savedSettings.tocPinned;
     app.browserPinned = savedSettings.browserPinned;
+    app.tocWidth = savedSettings.tocWidth;
+    app.browserWidth = savedSettings.browserWidth;
     app.languageSetting = savedSettings.language == "auto"
         ? -1 : languageIndexById(savedSettings.language);
     app.currentLanguageIndex = app.languageSetting >= 0
