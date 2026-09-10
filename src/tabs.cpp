@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <shellapi.h>
 
 namespace {
@@ -178,7 +179,7 @@ void tabActivate(App& app, HWND hwnd, int index) {
 }
 
 void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
-                 bool activate) {
+                 bool activate, int insertBefore) {
     tabsInit(app);
     // A path that is already open switches to its tab instead of duplicating
     for (size_t i = 0; i < app.tabs.size(); i++) {
@@ -194,9 +195,14 @@ void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
     tab.id = ++app.tabIdCounter;
     tab.path = utf8Path;
     tab.title = titleForPath(app, utf8Path);
-    app.tabs.push_back(std::move(tab));
+    int index = insertBefore < 0 ? (int)app.tabs.size()
+                               : std::min(insertBefore, (int)app.tabs.size());
+    app.tabs.insert(app.tabs.begin() + index, std::move(tab));
+    // Keep the old active document attached to its tab until activation
+    // parks its editor buffer; insertion may have shifted that tab right.
+    if (app.activeTab >= index) ++app.activeTab;
     if (activate) {
-        tabActivate(app, hwnd, (int)app.tabs.size() - 1);
+        tabActivate(app, hwnd, index);
     } else {
         InvalidateRect(hwnd, nullptr, FALSE);
     }
@@ -401,6 +407,55 @@ StripMetrics stripMetrics(const App& app) {
 }
 
 }  // namespace
+
+int tabDropInsertionIndex(const App& app, POINT clientPoint) {
+    const int count = (int)app.tabs.size();
+    const auto m = stripMetrics(app);
+    if (!tabStripVisible(app) || clientPoint.y < 0 || clientPoint.y >= m.height ||
+        clientPoint.x < 0 || clientPoint.x >= captionIslandLeft(app) ||
+        (editorPreviewVisible(app) && clientPoint.x >= editorPaneWidth(app))) {
+        return count;
+    }
+    const float step = m.tabWidth + dpi(app, 2.0f);
+    for (int i = 0; i < count; ++i) {
+        if (clientPoint.x < m.tabsLeft + step * i + m.tabWidth / 2) return i;
+    }
+    return count;
+}
+
+bool tabReceiveCopyData(App& app, HWND hwnd, const COPYDATASTRUCT& data) {
+    // Type 1 is the existing path-only launch message. Type 2 adds a
+    // screen-space drop point, resolved using the destination's own DPI
+    // and tab widths before opening the document changes its layout.
+    if (!data.lpData || (data.dwData != 1 && data.dwData != 2)) return false;
+    const size_t prefix = data.dwData == 2 ? sizeof(POINT) : 0;
+    if (data.cbData <= prefix + 1) return false;
+    const char* bytes = static_cast<const char*>(data.lpData);
+    const char* path = bytes + prefix;
+    const size_t length = data.cbData - prefix - 1;
+    if (path[length] != '\0' || std::memchr(path, '\0', length)) return false;
+    int index = -1;
+    if (data.dwData == 2) {
+        POINT point;
+        std::memcpy(&point, bytes, sizeof(point));
+        if (!ScreenToClient(hwnd, &point)) return false;
+        index = tabDropInsertionIndex(app, point);
+    }
+    tabOpenPath(app, hwnd, std::string(path, length), true, index);
+    return true;
+}
+
+bool tabSendDrop(HWND target, const std::string& utf8Path, POINT screenPoint) {
+    std::string payload(sizeof(screenPoint), '\0');
+    std::memcpy(payload.data(), &screenPoint, sizeof(screenPoint));
+    payload += utf8Path;
+    payload += '\0';
+    COPYDATASTRUCT data{};
+    data.dwData = 2;
+    data.cbData = (DWORD)payload.size();
+    data.lpData = payload.data();
+    return SendMessageW(target, WM_COPYDATA, 0, (LPARAM)&data) != FALSE;
+}
 
 D2D1_RECT_F captionButtonRect(const App& app, int button) {
     float w = captionButtonWidth(app);
@@ -1633,28 +1688,25 @@ void tabDragEnd(App& app, HWND hwnd, int x, int y) {
         if (root && root != hwnd &&
             GetClassNameW(root, className, _countof(className)) &&
             wcscmp(className, L"Tinta") == 0) {
-            COPYDATASTRUCT data;
-            data.dwData = 1;
-            data.cbData = (DWORD)path.size() + 1;
-            data.lpData = (void*)path.c_str();
-            SendMessageW(root, WM_COPYDATA, 0, (LPARAM)&data);
-            SetForegroundWindow(root);
-            dragCloseLocal(app, hwnd, index);
-        } else if (root == hwnd) {
-            // Dropped back onto this window's content: snap home
+            if (tabSendDrop(root, path, screen)) {
+                SetForegroundWindow(root);
+                dragCloseLocal(app, hwnd, index);
+            }
         } else if (app.tabs.size() > 1) {
-            // Free drop: a new window appears where the ghost was
+            // Once clear of the strip, releasing over our own document
+            // also tears the tab off. Returning to the strip cancels the
+            // detached state in tabDragMove before we reach this branch.
             wchar_t exePath[MAX_PATH];
             if (GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-                wchar_t args[MAX_PATH * 2];
-                swprintf_s(args, _countof(args),
-                           L"--cascade --tabbed --pos %d %d \"%hs\"",
-                           screen.x - (int)dpi(app, 120.0f),
-                           screen.y - (int)dpi(app, 20.0f), path.c_str());
-                ShellExecuteW(nullptr, L"open", exePath, args, nullptr,
-                              SW_SHOWNORMAL);
+                std::wstring args = L"--cascade --tabbed --pos " +
+                    std::to_wstring(screen.x - (int)dpi(app, 120.0f)) + L" " +
+                    std::to_wstring(screen.y - (int)dpi(app, 20.0f)) + L" \"" +
+                    toWide(path) + L"\"";
+                if ((INT_PTR)ShellExecuteW(nullptr, L"open", exePath, args.c_str(),
+                                          nullptr, SW_SHOWNORMAL) > 32) {
+                    dragCloseLocal(app, hwnd, index);
+                }
             }
-            dragCloseLocal(app, hwnd, index);
         }
     }
     InvalidateRect(hwnd, nullptr, FALSE);
@@ -1688,13 +1740,10 @@ void tabWindowDropMerge(App& app, HWND hwnd) {
     }
     if (!target) return;
 
-    COPYDATASTRUCT data;
-    data.dwData = 1;
-    data.cbData = (DWORD)path.size() + 1;
-    data.lpData = (void*)path.c_str();
-    SendMessageW(target, WM_COPYDATA, 0, (LPARAM)&data);
-    SetForegroundWindow(target);
-    PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    if (tabSendDrop(target, path, cursor)) {
+        SetForegroundWindow(target);
+        PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    }
 }
 
 void tabDragCancel(App& app, HWND hwnd) {

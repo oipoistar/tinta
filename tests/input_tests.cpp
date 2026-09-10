@@ -153,7 +153,12 @@ void settingsDismissal() {
 }
 }
 
-int main() {
+int runTabDropTests();
+int runTabDropLaunchProbe();
+
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--tab-drop-tests") return runTabDropTests();
+    if (argc == 7 && std::string(argv[1]) == "--cascade") return runTabDropLaunchProbe();
     settingsDismissal();
     auto state = std::make_unique<App>();
     App& app = *state;

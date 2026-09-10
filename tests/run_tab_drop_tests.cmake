@@ -1,0 +1,12 @@
+if(NOT DEFINED TEST_BINARY OR NOT DEFINED TEST_DIR)
+    message(FATAL_ERROR "TEST_BINARY and TEST_DIR are required")
+endif()
+file(MAKE_DIRECTORY "${TEST_DIR}")
+configure_file("${TEST_BINARY}" "${TEST_DIR}/input_tests.exe" COPYONLY)
+file(WRITE "${TEST_DIR}/settings.ini" "; Isolated tab drop test configuration\n")
+file(WRITE "${TEST_DIR}/launch-probe-guard.txt" "Tinta tab drop launch probe")
+execute_process(COMMAND "${TEST_DIR}/input_tests.exe" --tab-drop-tests
+    WORKING_DIRECTORY "${TEST_DIR}" RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Native tab drop test failed: ${result}")
+endif()
