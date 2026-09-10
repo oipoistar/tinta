@@ -22,6 +22,17 @@ Repeat with a narrow window, in Paper and Midnight, and with the file browser
 or Contents open on either side. The table, quote and formula below should keep
 their usual layout while the scrollbar appears and disappears.
 
+### Drag across panel boundaries
+
+Hold the document scrollbar, move sideways into Contents, and continue moving
+up and down without releasing. Scrolling should continue smoothly. Try crossing
+the divider, the file browser, the title bar and the window edges too. Release
+over a Contents heading: scrolling should stop without navigating to that heading.
+
+For a horizontal scrollbar, move vertically away from its track while dragging,
+then keep moving left and right. It should keep tracking until release. Switching
+to another application during a drag should cancel it cleanly.
+
 ### Mixed formatting
 
 **Bold**, *italic*, `inline code`, x^2^, H~2~O, and $a+b=c$ should remain readable

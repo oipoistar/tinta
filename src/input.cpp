@@ -912,6 +912,53 @@ void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
+static bool moveDocumentScrollbarDrag(App& app, HWND hwnd) {
+    if (!app.scrollbarDragging && !app.hScrollbarDragging) return false;
+    // Mouse capture owns this gesture across panels, title bars and window
+    // edges. Hover routing must never intercept movement during the drag.
+    SetCursor(cursorArrow);
+    if (app.scrollbarDragging) {
+        const float maxScroll = std::max(0.0f, app.contentHeight - app.height);
+        if (maxScroll > 0 && app.contentHeight > app.height) {
+            const float sbHeight = std::max((float)app.height / app.contentHeight * app.height, 30.0f);
+            const float trackHeight = app.height - sbHeight;
+            if (trackHeight > 0) {
+                const float deltaY = (float)app.mouseY - app.scrollbarDragStartY;
+                app.scrollY = std::clamp(app.scrollbarDragStartScroll + deltaY / trackHeight * maxScroll, 0.0f, maxScroll);
+                app.targetScrollY = app.scrollY;
+            }
+        }
+    } else {
+        const float viewportWidth = documentViewportWidth(app);
+        const float maxScroll = std::max(0.0f, app.contentWidth - viewportWidth);
+        if (maxScroll > 0 && app.contentWidth > viewportWidth) {
+            const float sbWidth = std::max(viewportWidth / app.contentWidth * viewportWidth, 30.0f);
+            const float trackWidth = viewportWidth - sbWidth;
+            if (trackWidth > 0) {
+                const float deltaX = (float)app.mouseX - app.hScrollbarDragStartX;
+                app.scrollX = std::clamp(app.hScrollbarDragStartScroll + deltaX / trackWidth * maxScroll, 0.0f, maxScroll);
+                app.targetScrollX = app.scrollX;
+            }
+        }
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+    return true;
+}
+
+static void endDocumentScrollbarDrag(App& app, HWND hwnd, bool cancel) {
+    if (!app.scrollbarDragging && !app.hScrollbarDragging) return;
+    app.scrollbarDragging = app.hScrollbarDragging = false;
+    app.mouseDown = app.selecting = false;
+    app.swallowNextMouseUp = cancel;
+    // Clear state before ReleaseCapture synchronously sends WM_CAPTURECHANGED.
+    if (GetCapture() == hwnd) ReleaseCapture();
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void cancelDocumentScrollbarDrag(App& app, HWND hwnd) {
+    endDocumentScrollbarDrag(app, hwnd, true);
+}
+
 void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     bool mouseMoved = app.mouseX != GET_X_LPARAM(lParam) || app.mouseY != GET_Y_LPARAM(lParam);
     app.mouseX = GET_X_LPARAM(lParam);
@@ -928,6 +975,8 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         SetCursor(cursorSizeWE);
         return;
     }
+
+    if (moveDocumentScrollbarDrag(app, hwnd)) return;
 
     bool iconHover = appMenuButtonAt(app, (float)app.mouseX, (float)app.mouseY);
     if (iconHover != app.appMenuHover) {
@@ -1269,43 +1318,6 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             app.selFocus = off;
         }
         InvalidateRect(hwnd, nullptr, FALSE);
-        return;
-    }
-
-    // Vertical scrollbar dragging
-    if (app.scrollbarDragging) {
-        float maxScroll = std::max(0.0f, app.contentHeight - app.height);
-        if (maxScroll > 0 && app.contentHeight > app.height) {
-            float sbHeight = (float)app.height / app.contentHeight * app.height;
-            sbHeight = std::max(sbHeight, 30.0f);
-            float trackHeight = app.height - sbHeight;
-
-            float deltaY = (float)app.mouseY - app.scrollbarDragStartY;
-            float scrollDelta = (deltaY / trackHeight) * maxScroll;
-            app.scrollY = app.scrollbarDragStartScroll + scrollDelta;
-            app.scrollY = std::max(0.0f, std::min(app.scrollY, maxScroll));
-            app.targetScrollY = app.scrollY;
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
-        return;
-    }
-
-    // Horizontal scrollbar dragging
-    if (app.hScrollbarDragging) {
-        float viewportWidth = documentViewportWidth(app);
-        float maxScroll = std::max(0.0f, app.contentWidth - viewportWidth);
-        if (maxScroll > 0 && app.contentWidth > viewportWidth) {
-            float sbWidth = viewportWidth / app.contentWidth * viewportWidth;
-            sbWidth = std::max(sbWidth, 30.0f);
-            float trackWidth = viewportWidth - sbWidth;
-
-            float deltaX = (float)app.mouseX - app.hScrollbarDragStartX;
-            float scrollDelta = (deltaX / trackWidth) * maxScroll;
-            app.scrollX = app.hScrollbarDragStartScroll + scrollDelta;
-            app.scrollX = std::max(0.0f, std::min(app.scrollX, maxScroll));
-            app.targetScrollX = app.scrollX;
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
         return;
     }
 
@@ -1738,6 +1750,8 @@ static void toggleApplicationMenu(App& app, HWND hwnd, bool keyboard = false) {
 }
 
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    // A fresh press is a new gesture, even if a cancelled drag released elsewhere.
+    app.swallowNextMouseUp = false;
     // Settings owns the entire click, including the title strip behind it.
     // Sliders drag from the press; dismissal and other actions use release.
     if (app.showSettings) {
@@ -2618,6 +2632,13 @@ static void toggleFitBlock(App& app, HWND hwnd, unsigned key) {
 }
 
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+    if (app.scrollbarDragging || app.hScrollbarDragging) {
+        app.mouseX = GET_X_LPARAM(lParam);
+        app.mouseY = GET_Y_LPARAM(lParam);
+        moveDocumentScrollbarDrag(app, hwnd);
+        endDocumentScrollbarDrag(app, hwnd, false);
+        return;  // releasing over a panel must not activate its controls
+    }
     if (app.panelResize.panel != SidePanel::None) {
         sidePanelResizeMove(app, static_cast<float>(GET_X_LPARAM(lParam)));
         sidePanelResizeEnd(app, hwnd, false);
@@ -2907,18 +2928,6 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     }
 
     ReleaseCapture();
-
-    // A scrollbar drag ends at this release no matter where it lands -
-    // the panel branches below must not run first and leave the drag
-    // latched, which bound the scroll to plain mouse movement
-    if (app.scrollbarDragging || app.hScrollbarDragging) {
-        app.scrollbarDragging = false;
-        app.hScrollbarDragging = false;
-        app.mouseDown = false;
-        app.selecting = false;
-        InvalidateRect(hwnd, nullptr, FALSE);
-        return;
-    }
 
     // TOC click handling
     if (app.showToc) {

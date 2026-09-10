@@ -1298,6 +1298,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_KILLFOCUS:
+            if (app) cancelDocumentScrollbarDrag(*app, hwnd);
             if (app) sidePanelResizeEnd(*app, hwnd, true);
             if (app && app->showContextMenu) {
                 closeContextMenu(*app);
@@ -1526,6 +1527,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_CAPTURECHANGED:
+            if (app && (HWND)lParam != hwnd) cancelDocumentScrollbarDrag(*app, hwnd);
             if (app && (HWND)lParam != hwnd) sidePanelResizeEnd(*app, hwnd, true);
             // Losing capture mid tab-drag (Alt+Tab, a popup stealing the
             // mouse) aborts the drag instead of leaving a stray ghost
@@ -1535,6 +1537,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_CANCELMODE:
+            if (app) cancelDocumentScrollbarDrag(*app, hwnd);
             if (app) sidePanelResizeEnd(*app, hwnd, true);
             break;
 

@@ -93,3 +93,28 @@ are in `out/issue-210/scrollbar-baseline` and `out/issue-210/scrollbar-exports`;
 the preceding executable is in `out/issue-210/before-scrollbar-fade/tinta.exe`.
 Animation timing was verified by the native tests; perceived animation feel
 remains for the maintainer to review in the running app.
+
+## Captured scrollbar drags across panels
+
+The maintainer found that a held scrollbar stopped tracking while the pointer
+was over Contents. Panel hover routing returned before the scrollbar move
+handler. The new native regression reproduced this before the fix.
+
+An active document scrollbar now handles movement and release before panel,
+divider, title-bar and overlay hover/click routing. Both vertical and horizontal
+scrollbars keep tracking across panel and window boundaries. Release consumes
+the gesture without opening a file or jumping to a heading. Losing capture,
+focus or entering Windows cancel mode ends it cleanly; a subsequent fresh press
+does not inherit a swallowed release from the cancelled gesture.
+
+Release build and **17/17 CTests passed** after the implementation change.
+Additional title-bar and cancellation assertions were then added and the focused
+native panel test passed again. The checks cover 24 drag configurations across
+100/150/200% scale, left/right Contents, pinned/unpinned Contents and both scroll
+axes, including release over a real Contents row and movement after release.
+The browser remains pinned during these checks so it is present to cross.
+
+The mixed sample now includes a repeatable cross-panel drag sequence. All **20
+export artifacts** remain byte-identical to the preceding executable using the
+updated fixtures. Logs and exports are in `out/issue-210/capture-*`; the preceding
+executable is preserved in `out/issue-210/before-scrollbar-capture/tinta.exe`.

@@ -26,8 +26,12 @@ std::string read(const std::filesystem::path& path) {
 }
 LRESULT CALLBACK testProc(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
     auto* app = reinterpret_cast<App*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-    if (app && message == WM_CAPTURECHANGED && reinterpret_cast<HWND>(l) != hwnd)
+    if (app && message == WM_CAPTURECHANGED && reinterpret_cast<HWND>(l) != hwnd) {
         sidePanelResizeEnd(*app, hwnd, true);
+        cancelDocumentScrollbarDrag(*app, hwnd);
+    }
+    if (app && (message == WM_KILLFOCUS || message == WM_CANCELMODE))
+        cancelDocumentScrollbarDrag(*app, hwnd);
     return DefWindowProcW(hwnd, message, w, l);
 }
 void layout(App& app, const std::string& source) {
@@ -220,6 +224,101 @@ void quietPanelEdges(App& app) {
     app.tocPinned = app.browserPinned = false;
 }
 
+void scrollbarAcrossPanels(App& app) {
+    for (float scale : {1.0f, 1.5f, 2.0f}) {
+        for (bool left : {false, true}) {
+            for (bool pinned : {false, true}) {
+                app.contentScale = scale;
+                app.width = (int)dpi(app, 1200);
+                app.height = (int)dpi(app, 900);
+                app.showToc = app.showFolderBrowser = true;
+                app.tocPinned = pinned;
+                app.browserPinned = true;
+                app.tocOnLeft = left;
+                app.tocWidth = 280;
+                app.browserWidth = 300;
+                app.tocAnimation = app.folderBrowserAnimation = 1;
+                app.tocScroll = app.folderBrowserScroll = 0;
+                app.tocSpyOverride = -1;
+                app.swallowNextMouseUp = false;
+                updateTextFormats(app);
+                layout(app, read(TINTA_PANEL_FIXTURE));
+                // Keep real mixed-content rows for click guards, with ample
+                // scroll ranges for deterministic movement in either direction.
+                const float viewport = documentViewportWidth(app);
+                const float docLeft = documentViewportX(app);
+                const float docRight = docLeft + viewport;
+                app.contentHeight = dpi(app, 6000);
+                app.contentWidth = viewport * 4;
+                app.verticalScrollbarVisible = true;
+                app.scrollY = app.targetScrollY = dpi(app, 400);
+                app.scrollX = app.targetScrollX = viewport * 1.5f;
+                const float tocCenter = tocPanelX(app, tocPanelWidth(app)) + tocPanelWidth(app) / 2;
+                const float browserCenter = folderBrowserPanelWidth(app) / 2;
+                const auto originalPath = app.currentFile;
+                for (bool horizontal : {false, true}) {
+                    const int startX = (int)(horizontal ? docLeft + viewport / 2 : docRight - dpi(app, 9));
+                    const int startY = (int)(horizontal ? app.height - dpi(app, 8) : dpi(app, 200));
+                    handleMouseMove(app, app.hwnd, MAKELPARAM(startX, startY));
+                    handleMouseDown(app, app.hwnd, 0, MAKELPARAM(startX, startY));
+                    check((horizontal ? app.hScrollbarDragging : app.scrollbarDragging) && GetCapture() == app.hwnd,
+                          "scrollbar drag captures before crossing panels");
+                    int step = 0;
+                    float previousX = (float)startX;
+                    for (float x : {sidePanelResizeEdge(app, SidePanel::Contents), tocCenter,
+                                    browserCenter, -dpi(app, 50), app.width + dpi(app, 50), dpi(app, 20)}) {
+                        const float before = horizontal ? app.scrollX : app.scrollY;
+                        const int y = (int)dpi(app, 250 + 40 * step++);
+                        handleMouseMove(app, app.hwnd, MAKELPARAM((int)x, y));
+                        const float after = horizontal ? app.scrollX : app.scrollY;
+                        if (!horizontal || (x > previousX && before < app.contentWidth - viewport - 1))
+                            check(after > before, "captured scrollbar keeps moving over dividers, Contents, browser and outside the window");
+                        else if (x < previousX && before > 1)
+                            check(after < before, "horizontal scrollbar also follows movement across panels");
+                        check(app.panelResize.panel == SidePanel::None && app.tocSpyOverride == -1 &&
+                              closeEnough(app.tocScroll, 0) && closeEnough(app.folderBrowserScroll, 0),
+                              "scrollbar drag cannot resize or scroll the side panels");
+                        previousX = x;
+                    }
+                    const float beforeTitle = horizontal ? app.scrollX : app.scrollY;
+                    const int titleX = (int)(horizontal ? docLeft + viewport * 0.75f : dpi(app, 20));
+                    handleMouseMove(app, app.hwnd, MAKELPARAM(titleX, (int)dpi(app, 20)));
+                    check(horizontal ? app.scrollX > beforeTitle : app.scrollY < beforeTitle,
+                          "the title bar and application icon cannot intercept a captured scrollbar drag");
+                    const auto list = tocListRect(app);
+                    handleMouseUp(app, app.hwnd, 0, MAKELPARAM((int)tocCenter, (int)list.top + 10));
+                    check(!app.scrollbarDragging && !app.hScrollbarDragging && GetCapture() != app.hwnd &&
+                          app.currentFile == originalPath && app.tocSpyOverride == -1 && app.showToc && app.showFolderBrowser,
+                          "release over a Contents row ends the drag without activating anything");
+                    const float stoppedX = app.scrollX, stoppedY = app.scrollY;
+                    handleMouseMove(app, app.hwnd, MAKELPARAM((int)(docLeft + viewport / 2), (int)dpi(app, 400)));
+                    check(closeEnough(app.scrollX, stoppedX) && closeEnough(app.scrollY, stoppedY),
+                          "ordinary movement after release no longer scrolls");
+                    for (int cancelMode = 0; cancelMode < 3; ++cancelMode) {
+                        handleMouseMove(app, app.hwnd, MAKELPARAM(startX, startY));
+                        handleMouseDown(app, app.hwnd, 0, MAKELPARAM(startX, startY));
+                        check(GetCapture() == app.hwnd, "another scrollbar drag can start");
+                        if (cancelMode == 0) ReleaseCapture();
+                        else SendMessage(app.hwnd, cancelMode == 1 ? WM_KILLFOCUS : WM_CANCELMODE, 0, 0);
+                        check(!app.scrollbarDragging && !app.hScrollbarDragging && GetCapture() != app.hwnd,
+                              "lost capture, focus loss and cancel mode clear the scrollbar gesture");
+                        if (cancelMode == 2) {
+                            // The cancelled release may have gone to another window.
+                            handleMouseDown(app, app.hwnd, 0, MAKELPARAM(startX, startY));
+                            check(!app.swallowNextMouseUp && GetCapture() == app.hwnd,
+                                  "a fresh press is not swallowed after cancellation elsewhere");
+                        }
+                        handleMouseUp(app, app.hwnd, 0, MAKELPARAM((int)tocCenter, (int)list.top + 10));
+                        check(app.tocSpyOverride == -1 && app.currentFile == originalPath && app.showToc,
+                              "release after cancellation cannot activate a Contents heading");
+                    }
+                }
+            }
+        }
+    }
+    app.tocPinned = app.browserPinned = false;
+}
+
 void longContents(App& app) {
     app.contentScale = 1;
     updateTextFormats(app);
@@ -313,6 +412,7 @@ int runSidePanelTests() {
                     resizeGesture(app, panel, left, both, scale);
     widthLimits(app);
     quietPanelEdges(app);
+    scrollbarAcrossPanels(app);
     longContents(app);
 
     app.contentScale = app.zoomFactor = 1;
