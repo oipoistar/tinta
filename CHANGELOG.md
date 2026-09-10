@@ -1,5 +1,26 @@
 # Changelog
 
+## [v3.7.0] - 2026-09-11
+
+### Added
+- Configurable frontmatter properties with ordering, visibility, left/right placement, labels, type-specific formats, list limits and a live preview. Showing `created` or `updated` enables date maintenance on explicit editor saves; missing fields are added only to existing frontmatter. Suggested by @Ra0EL (#208, #217)
+- Native Markdown footnotes with repeated references, rich bodies and text return links; HTML navigation and real DOCX footnotes. Suggested by @Ra0EL (#208, #216)
+- Optional H1-H6 heading colors and independent highlight background/text colors in custom themes and exports. Suggested by @Ra0EL (#208, #215)
+- Native syntax highlighting for SQL, PowerShell, Java, PHP, HTML, XML, CSS, YAML and Markdown, including common aliases and multiline syntax. Suggested by @hochun836 (#207, #214)
+- Contents includes H1-H6; Contents and the file browser have independently resizable, remembered widths. Reported by @125Q (#210, #213)
+
+### Changed
+- Side panels use a quieter divider and active-heading marker; slim document scrollbars fade smoothly (#210, #213)
+- Settings closes on an outside click and has a top-right close button (#209)
+- Transferred tabs insert at the drop position; dragging about 50 logical pixels away from the tab bar can detach a tab into its own window (#211)
+- Built-in Learn examples open as editable, unsaved copies with shortcuts matching the selected keymap. Reported by @Ra0EL (#206, #212)
+
+### Fixed
+- Superscripts and subscripts keep the correct small font and baseline across startup, theme, zoom and DPI changes. Reported by @Ra0EL (#206, #212)
+- Captured scrollbar drags continue when the pointer moves across side panels or window edges (#210, #213)
+- Closing Save As from a Learn example cannot insert the triggering shortcut character (#206, #212)
+- Mixed DOCX exports use schema-valid run-property ordering and table grids (#208, #217)
+
 ## [v3.6.7] - 2026-09-09
 
 ### Added
