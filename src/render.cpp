@@ -2121,7 +2121,7 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
         wcode
     });
     float textY = y + padding;
-    bool inBlockComment = false;
+    SyntaxState syntaxState;
     size_t codeDocStart = app.docText.size();
     size_t lineStart = 0;
     float maxLineWidth = 0.0f;
@@ -2138,7 +2138,7 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
         size_t lineRun = (size_t)-1;
 
         if (language > 0) {
-            std::vector<SyntaxToken> tokens = tokenizeLine(wline, language, inBlockComment);
+            std::vector<SyntaxToken> tokens = tokenizeLine(wline, language, syntaxState);
             float tokenX = indent + padding;
 
             // Merge consecutive same-color tokens into one layout — a line

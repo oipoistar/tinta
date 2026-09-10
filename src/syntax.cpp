@@ -150,6 +150,15 @@ int detectLanguage(const std::wstring& lang) {
         return 6;  // Bash/Shell
     if (lower == L"csharp" || lower == L"cs" || lower == L"c#")
         return 7;  // C#
+    if (lower == L"sql") return LanguageSql;
+    if (lower == L"powershell" || lower == L"ps" || lower == L"pwsh") return LanguagePowerShell;
+    if (lower == L"java") return LanguageJava;
+    if (lower == L"php") return LanguagePhp;
+    if (lower == L"html" || lower == L"htm") return LanguageHtml;
+    if (lower == L"xml") return LanguageXml;
+    if (lower == L"css") return LanguageCss;
+    if (lower == L"yaml" || lower == L"yml") return LanguageYaml;
+    if (lower == L"markdown" || lower == L"md") return LanguageMarkdown;
     return 0;  // Unknown
 }
 
@@ -166,7 +175,10 @@ const std::unordered_set<std::wstring>* getKeywordsForLanguage(int lang) {
     }
 }
 
-std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, bool& inBlockComment) {
+std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, SyntaxState& state) {
+    if (language >= LanguageSql && language <= LanguageMarkdown)
+        return tokenizeExtendedLine(line, language, state);
+    bool& inBlockComment = state.inBlockComment;
     std::vector<SyntaxToken> tokens;
     const std::unordered_set<std::wstring>* keywords = getKeywordsForLanguage(language);
 

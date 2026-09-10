@@ -279,6 +279,9 @@ keeps its own colors. Without `inlinecode`, inline code uses `code` as before.
 The override is preserved when saving a theme from the editor and applies to
 HTML and DOCX exports. Native printing keeps Tinta's existing light print palette.
 
+For supported code-fence languages and aliases, including SQL, PowerShell, Java,
+PHP, HTML/XML, CSS, YAML and Markdown, see [Syntax highlighting](docs/syntax-highlighting.md).
+
 ## Dependencies
 
 - [MD4C](https://github.com/mity/md4c) - Fast markdown parser (fetched automatically by CMake)

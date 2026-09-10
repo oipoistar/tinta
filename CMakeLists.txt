@@ -44,6 +44,7 @@ set(SOURCES
     src/tableedit.cpp
     src/d2d_init.cpp
     src/syntax.cpp
+    src/syntax_extended.cpp
     src/utils.cpp
     src/search.cpp
     src/render.cpp
@@ -186,6 +187,13 @@ if(BUILD_TESTING)
     target_compile_definitions(code_block_layout_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
         TINTA_CODE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/code-block-spacing.md")
     add_test(NAME code_block_layout COMMAND code_block_layout_tests)
+
+    add_executable(syntax_tests tests/syntax_tests.cpp ${INPUT_TEST_SOURCES})
+    target_include_directories(syntax_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
+    target_link_libraries(syntax_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
+    target_compile_definitions(syntax_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
+        TINTA_SYNTAX_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    add_test(NAME syntax_highlighting COMMAND syntax_tests)
 
     add_executable(blockquote_layout_tests tests/blockquote_layout_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(blockquote_layout_tests PRIVATE include ${md4c_SOURCE_DIR}/src)

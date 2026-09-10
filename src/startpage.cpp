@@ -40,7 +40,7 @@ static const char* kSampleDocument = R"(# Welcome to Tinta
 - Search — press **F**
 - Table of contents — press **Tab**
 - Text selection and copy
-- Syntax highlighting in code blocks for C/C++, C#, Python, JavaScript, Rust, Go, and Bash
+- Syntax highlighting in code blocks for C/C++, C#, Python, JavaScript/TypeScript, Rust, Go, Bash, SQL, PowerShell, Java, PHP, HTML/XML, CSS, YAML, and Markdown
 
 ## Code Example
 
