@@ -1227,6 +1227,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (button == 1) return HTMINBUTTON;
             if (button == 2) return HTMAXBUTTON;  // Win11 snap flyout
             if (button == 3) return HTCLOSE;
+            // The settings backdrop also owns clicks on empty caption space.
+            if (app->showSettings) return HTCLIENT;
             // The floating sheet rises past the strip (design 10a):
             // right of the source column the top band is desk gap and
             // page, both of which take normal clicks

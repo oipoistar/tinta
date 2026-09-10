@@ -34,6 +34,7 @@ enum SettingsAction {
     SET_TOC_LEFT, SET_TOC_RIGHT,
     SET_LANG_DROPDOWN, SET_OPEN_LANGS_INI,
     SET_KEYS_DROPDOWN, SET_EDIT_KEYS,
+    SET_CLOSE,
     // Language picks encode as SET_LANG_PICK_BASE + i: 0 = Auto, then the
     // registry languages in order (the list is dynamic via languages.ini)
     SET_LANG_PICK_BASE = 1000,
@@ -66,6 +67,8 @@ FolderBrowserMetrics folderBrowserMetrics(const App& app);
 // relative to the content origin (add listStartY + namingOffset - scroll)
 float folderItemContentY(const FolderBrowserMetrics& g, int index);
 void renderSettingsOverlay(App& app);
+D2D1_RECT_F settingsPanelRect(const App& app);
+D2D1_RECT_F settingsCloseButtonRect(const App& app);
 
 // Theme editor ("+ New" in settings). Font-list entries encode their
 // absolute family index as TE_FONT_BASE + i; everything else stays < 100.
