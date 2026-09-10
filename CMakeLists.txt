@@ -35,7 +35,7 @@ FetchContent_MakeAvailable(md4c)
 # Source files
 set(SOURCES
     src/main_d2d.cpp
-    src/markdown.cpp
+    src/markdown.cpp src/footnotes.cpp
     src/themes.cpp
     src/settings.cpp
     src/keymap.cpp
@@ -195,6 +195,13 @@ if(BUILD_TESTING)
         TINTA_SYNTAX_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     add_test(NAME syntax_highlighting COMMAND syntax_tests)
 
+    add_executable(footnote_tests tests/footnote_tests.cpp ${INPUT_TEST_SOURCES})
+    target_include_directories(footnote_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
+    target_link_libraries(footnote_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
+    target_compile_definitions(footnote_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
+        TINTA_FOOTNOTE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/footnotes.md")
+    add_test(NAME footnotes COMMAND footnote_tests)
+
     add_executable(blockquote_layout_tests tests/blockquote_layout_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(blockquote_layout_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(blockquote_layout_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
@@ -213,7 +220,7 @@ if(BUILD_TESTING)
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_portable_test.cmake)
 
     add_executable(context_menu_tests tests/context_menu_tests.cpp src/context_menu.cpp
-        src/markdown.cpp src/themes.cpp src/config_dir.cpp)
+        src/markdown.cpp src/footnotes.cpp src/themes.cpp src/config_dir.cpp)
     target_include_directories(context_menu_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(context_menu_tests PRIVATE md4c shell32)
     target_compile_definitions(context_menu_tests PRIVATE UNICODE _UNICODE)
@@ -224,7 +231,7 @@ if(BUILD_TESTING)
     add_test(NAME math_parser COMMAND math_parser_tests)
 
     add_executable(math_layout_tests tests/math_layout_tests.cpp
-        src/math_parser.cpp src/math_macros.cpp src/math_render.cpp src/markdown.cpp src/themes.cpp src/config_dir.cpp)
+        src/math_parser.cpp src/math_macros.cpp src/math_render.cpp src/markdown.cpp src/footnotes.cpp src/themes.cpp src/config_dir.cpp)
     target_include_directories(math_layout_tests PRIVATE include src ${md4c_SOURCE_DIR}/src)
     target_link_libraries(math_layout_tests PRIVATE md4c d2d1 dwrite windowscodecs shell32 ole32)
     target_compile_definitions(math_layout_tests PRIVATE UNICODE _UNICODE
@@ -255,7 +262,7 @@ if(BUILD_TESTING)
     add_executable(document_tests
         tests/document_tests.cpp
         src/document.cpp
-        src/markdown.cpp
+        src/markdown.cpp src/footnotes.cpp
     )
     target_include_directories(document_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -267,7 +274,7 @@ if(BUILD_TESTING)
     add_executable(inline_style_tests
         tests/inline_style_tests.cpp
         src/inline_style.cpp
-        src/markdown.cpp
+        src/markdown.cpp src/footnotes.cpp
         src/themes.cpp
         src/config_dir.cpp
     )

@@ -1077,10 +1077,27 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
         case ElementType::Document:
             walkChildren(ctx, elem);
             break;
+        case ElementType::Footnotes:
+            ctx.out += "<section class=\"footnotes\" role=\"doc-endnotes\"><hr/>";
+            walkChildren(ctx, elem);
+            ctx.out += "</section>";
+            break;
+        case ElementType::FootnoteDefinition:
+            ctx.out += "<div id=\"" + htmlEscape(elem->url) + "\" class=\"footnote\"><span>" + std::to_string(elem->level) + ".</span>";
+            walkChildren(ctx, elem); ctx.out += "</div>";
+            break;
+        case ElementType::FootnoteReference:
+            ctx.out += "<sup id=\"" + htmlEscape(elem->title) + "\"><a role=\"doc-noteref\" href=\"" + htmlEscape(elem->url) + "\">";
+            walkChildren(ctx, elem); ctx.out += "</a></sup>";
+            break;
+        case ElementType::FootnoteBacklink:
+            ctx.out += "<a role=\"doc-backlink\" aria-label=\"Back to reference\" href=\"" + htmlEscape(elem->url) + "\">";
+            walkChildren(ctx, elem); ctx.out += "</a>";
+            break;
         case ElementType::Properties:
             break;  // frontmatter stays out of the export, like print
         case ElementType::Paragraph:
-            ctx.out += "<p>";
+            ctx.out += elem->language == "footnote-backlinks" ? "<p class=\"footnote-backlinks\">" : "<p>";
             walkChildren(ctx, elem);
             ctx.out += "</p>\n";
             break;
@@ -1422,6 +1439,8 @@ bool exportHtmlFile(App& app, const std::wstring& path) {
                "initial-scale=1\"/>\n";
     ctx.out += "<title>" + htmlEscape(title) + "</title>\n";
     ctx.out += "<style>" + themeCss(app, bodyFont, monoFont) + "</style>\n";
+    if (std::any_of(app.root->children.begin(), app.root->children.end(), [](const ElementPtr& e) { return e->type == ElementType::Footnotes; }))
+        ctx.out += "<style>.footnote{position:relative;padding-left:2em}.footnote>span{position:absolute;left:0}.footnote>p:first-of-type{margin-top:0}.footnote-backlinks{font-size:.8em}</style>\n";
     ctx.out += "</head>\n<body>\n";
     walk(ctx, app.root);
     ctx.out += "</body>\n</html>\n";

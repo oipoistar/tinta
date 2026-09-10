@@ -146,6 +146,11 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                 if (elem->type == ElementType::Subscript) st.drawYOffset = lineHeight * 0.38f;
                 break;
 
+            case ElementType::FootnoteReference:
+                st.anchorId = elem->title;
+                if (app.supSubFormat) { st.format = app.supSubFormat; st.fixedSize = true; }
+                [[fallthrough]];
+            case ElementType::FootnoteBacklink:
             case ElementType::Link: {
                 st.color = app.theme.link;
                 st.linkUrl = elem->url;

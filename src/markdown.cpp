@@ -1,4 +1,6 @@
 #include "markdown.h"
+#include "footnotes.h"
+#include <cstdint>
 #include <md4c.h>
 #include <fstream>
 #include <sstream>
@@ -43,6 +45,9 @@ struct ParserContext {
     ElementPtr root;
     std::stack<Element*> elementStack;
     std::string currentText;
+    std::vector<size_t> literalBrackets;
+    FootnoteData* notes = nullptr;
+    size_t inputLength = 0;
     const char* inputStart = nullptr;  // start of markdown source for offset tracking
 
     ParserContext() {
@@ -73,6 +78,8 @@ struct ParserContext {
             // For HTML blocks, accumulate raw HTML in the element's text field
             if (current()->type == ElementType::HtmlBlock) {
                 current()->text += currentText;
+            } else if (notes && !notes->definitions.empty()) {
+                appendFootnoteText(current(), currentText, literalBrackets, *notes);
             } else {
                 auto textElem = std::make_shared<Element>(ElementType::Text);
                 textElem->text = currentText;
@@ -80,10 +87,23 @@ struct ParserContext {
                 current()->children.push_back(textElem);
             }
             currentText.clear();
+            literalBrackets.clear();
         }
     }
 
     void addText(const char* text, MD_SIZE size) {
+        if (notes && inputStart) {
+            auto start = reinterpret_cast<uintptr_t>(inputStart);
+            auto pointer = reinterpret_cast<uintptr_t>(text);
+            if (pointer >= start && pointer - start < inputLength) {
+                size_t offset = pointer - start;
+                for (size_t i = 0; i < size; ++i) if (text[i] == '[') {
+                    size_t slashes = 0, p = offset + i;
+                    while (p && inputStart[--p] == '\\') ++slashes;
+                    if (slashes % 2) literalBrackets.push_back(currentText.size() + i);
+                }
+            }
+        }
         currentText.append(text, size);
     }
 };
@@ -456,6 +476,7 @@ static bool findExtensionSpan(const std::string& text, size_t from, ExtensionMat
             i++;  // retry from the second tilde as a potential single opener
             continue;
         } else if (c == '^' || c == '~') {
+            if (c == '^' && i && text[i - 1] == '[') continue;
             size_t close = text.find(c, i + 1);
             if (close == std::string::npos || close == i + 1) continue;
             // Typora rule: no whitespace inside sup/sub spans
@@ -1001,13 +1022,15 @@ static void splitFileRefs(const ElementPtr& parent) {
 MarkdownParser::MarkdownParser() = default;
 MarkdownParser::~MarkdownParser() = default;
 
-ParseResult MarkdownParser::parse(const std::string& markdown) {
+static ParseResult parseCore(const std::string& markdown, FootnoteData* notes) {
     ParseResult result;
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
     ParserContext ctx;
     ctx.inputStart = markdown.c_str();
+    ctx.inputLength = markdown.size();
+    ctx.notes = notes;
 
     MD_PARSER parser = {
         0, // abi_version
@@ -1054,6 +1077,15 @@ ParseResult MarkdownParser::parse(const std::string& markdown) {
     detectGitHubAlerts(ctx.root);
     result.root = ctx.root;
     result.success = true;
+    return result;
+}
+
+ParseResult MarkdownParser::parse(const std::string& markdown) {
+    auto notes = extractFootnotes(markdown);
+    auto result = parseCore(notes.source, &notes);
+    if (result.success) appendFootnotes(result.root, notes, [&](const std::string& body) {
+        return parseCore(body, nullptr); // Nested footnote references stay literal.
+    });
     return result;
 }
 

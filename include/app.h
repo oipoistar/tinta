@@ -803,6 +803,7 @@ struct App {
     };
     std::vector<HeadingInfo> headings;
     std::unordered_map<std::string, int> headingSlugCounts;
+    std::unordered_map<std::string, float> footnoteAnchors;
     int hoveredTocIndex = -1;
     float tocScroll = 0.0f;
     // Typed while the panel is open: case-insensitive substring filter
@@ -1288,6 +1289,7 @@ struct App {
         docTextLower.clear();
         headings.clear();
         headingSlugCounts.clear();
+        footnoteAnchors.clear();
         fileRefCache.clear();
         for (auto& a : annotations) {
             a.docStart = a.docEnd = (size_t)-1;
