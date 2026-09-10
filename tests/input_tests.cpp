@@ -154,9 +154,11 @@ void settingsDismissal() {
 }
 
 int runTabDropTests();
+int runSuperscriptTests();
 int runTabDropLaunchProbe();
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--superscript-tests") return runSuperscriptTests();
     if (argc == 2 && std::string(argv[1]) == "--tab-drop-tests") return runTabDropTests();
     if (argc == 7 && std::string(argv[1]) == "--cascade") return runTabDropLaunchProbe();
     settingsDismissal();

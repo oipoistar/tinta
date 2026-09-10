@@ -3523,7 +3523,9 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             return false;
         }
         handleEditorKeyDown(app, hwnd, wParam);
-        return false;
+        // Save As runs a modal loop: Ctrl may already be released when it
+        // returns. Do not translate its original S into newly typed text (#206).
+        return ctrl && wParam == 'S';
     }
 
     // Folder browser path/name input captures the keyboard while active

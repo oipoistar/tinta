@@ -31,4 +31,4 @@ void startPageOpenEmbedded(App& app, HWND hwnd, int card);
 
 // The embedded sample document (the old bare-launch tutorial), still
 // used as the fallback when a requested file cannot be loaded
-const char* startPageSampleDoc();
+std::string startPageSampleDoc(const App& app);

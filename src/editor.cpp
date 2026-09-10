@@ -921,6 +921,17 @@ void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
 
 void enterEditMode(App& app) {
     if (app.currentFile.empty()) {
+        if (app.startPageEmbeddedOpen) {
+            // Learn documents have no backing file. Edit an untitled copy;
+            // the first save asks for a path and the embedded original stays intact.
+            const std::string content = app.sourceText;
+            app.startPageEmbeddedOpen = false;
+            enterEditModeWithContent(app, content);
+            app.editorDirty = true;
+            editorReparse(app, true);
+            updateWindowTitle(app);
+            return;
+        }
         // Show brief "No file loaded" notification
         signalPushKey(app, SIG_WARN, SIGI_WARNING, "toast.no_file");
         InvalidateRect(app.hwnd, nullptr, FALSE);
