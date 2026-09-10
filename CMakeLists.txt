@@ -49,6 +49,7 @@ set(SOURCES
     src/render.cpp
     src/file_utils.cpp
     src/overlays.cpp
+    src/sidepanels.cpp
     src/context_menu.cpp
     src/input.cpp
     src/editor.cpp
@@ -151,14 +152,19 @@ if(BUILD_TESTING)
     # window, including layout-dependent character sequences (#195).
     set(INPUT_TEST_SOURCES ${SOURCES})
     list(REMOVE_ITEM INPUT_TEST_SOURCES src/main_d2d.cpp)
-    add_executable(input_tests tests/input_tests.cpp tests/tab_drop_tests.cpp tests/superscript_tests.cpp ${INPUT_TEST_SOURCES})
+    add_executable(input_tests tests/input_tests.cpp tests/tab_drop_tests.cpp tests/superscript_tests.cpp tests/sidepanel_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(input_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(input_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
     target_compile_definitions(input_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
         TINTA_SHORTCUT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/shortcuts-layouts.md"
         TINTA_TAB_DROP_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/tab-drop-position.md"
-        TINTA_SUPERSCRIPT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/superscript-subscript.md")
+        TINTA_SUPERSCRIPT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/superscript-subscript.md"
+        TINTA_PANEL_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/toc-browser-resize.md")
     add_test(NAME input_shortcuts COMMAND input_tests)
+    add_test(NAME contents_and_panel_resize COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:input_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/sidepanel-test-$<CONFIG>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_sidepanel_tests.cmake)
     add_test(NAME superscript_and_learn COMMAND ${CMAKE_COMMAND}
         -DTEST_BINARY=$<TARGET_FILE:input_tests>
         -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/superscript-test-$<CONFIG>

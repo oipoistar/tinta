@@ -951,8 +951,8 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
         y += 20 * scale;
     }
 
-    // Record heading for TOC (h1-h3 only)
-    if (elem->level <= 3) {
+    // All Markdown heading levels participate in Contents and anchor navigation (#210).
+    if (elem->level >= 1 && elem->level <= 6) {
         std::wstring headingText;
         std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
             if (!e) return;

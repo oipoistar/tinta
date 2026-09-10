@@ -60,6 +60,8 @@ void saveSettings(const Settings& settings) {
     file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
     file << "tocPinned=" << (settings.tocPinned ? 1 : 0) << "\n";
     file << "browserPinned=" << (settings.browserPinned ? 1 : 0) << "\n";
+    file << "tocWidth=" << settings.tocWidth << "\n";
+    file << "browserWidth=" << settings.browserWidth << "\n";
     file << "language=" << settings.language << "\n";
     file << "keyProfile=" << settings.keyProfile << "\n";
     file << "checkUpdates=" << (settings.checkUpdates ? 1 : 0) << "\n";
@@ -260,6 +262,16 @@ Settings loadSettings() {
             settings.tocPinned = (value == "1");
         } else if (key == "browserPinned") {
             settings.browserPinned = (value == "1");
+        } else if (key == "tocWidth" || key == "browserWidth") {
+            try {
+                size_t consumed = 0;
+                const float width = std::stof(value, &consumed);
+                if (consumed == value.size() && std::isfinite(width) &&
+                    width >= (key == "tocWidth" ? 180.0f : 200.0f) && width <= 4000.0f) {
+                    if (key == "tocWidth") settings.tocWidth = width;
+                    else settings.browserWidth = width;
+                }
+            } catch (const std::exception&) { /* Keep the default for malformed widths. */ }
         } else if (key == "language") {
             if (!value.empty()) settings.language = value;  // "auto" or an id
         } else if (key == "keyProfile") {

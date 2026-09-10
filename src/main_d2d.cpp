@@ -27,6 +27,7 @@
 #include "render.h"
 #include "file_utils.h"
 #include "overlays.h"
+#include "sidepanels.h"
 #include "annotations.h"
 #include "drafts.h"
 #include "signals.h"
@@ -797,6 +798,24 @@ render_document:
     bool needsHScroll = app.contentWidth > documentWidth;
     float scrollbarSize = dpi(app, 14.0f);
 
+    // In the panel layout, scrollbars appear on activity and quietly fade out.
+    const ULONGLONG scrollNow = GetTickCount64();
+    if (std::abs(app.scrollX - app.panelObservedScrollX) > 0.1f ||
+        std::abs(app.scrollY - app.panelObservedScrollY) > 0.1f) {
+        app.panelObservedScrollX = app.scrollX;
+        app.panelObservedScrollY = app.scrollY;
+        app.lastPanelScrollActivity = scrollNow;
+    }
+    const float scrollbarOpacity = sidePanelDocumentScrollbarOpacity(app, scrollNow);
+    const bool scrollbarNeedsTicks = sidePanelScrollbarNeedsTicks(app, scrollNow);
+    if (scrollbarNeedsTicks && !app.panelScrollbarTimerActive) {
+        app.panelScrollbarTimerActive = SetTimer(app.hwnd, TIMER_SIDE_PANEL_SCROLLBARS, 16, nullptr) != 0;
+    } else if (!scrollbarNeedsTicks && app.panelScrollbarTimerActive) {
+        KillTimer(app.hwnd, TIMER_SIDE_PANEL_SCROLLBARS);
+        app.panelScrollbarTimerActive = false;
+    }
+    const bool quietScrollbars = !app.editMode && (app.showToc || app.showFolderBrowser);
+
     // Scrollbar color: dark on light themes, light on dark themes
     float sbColorValue = app.theme.isDark ? 1.0f : 0.0f;
 
@@ -812,13 +831,20 @@ render_document:
         float sbY = trackTop +
             ((maxScrollY > 0) ? (app.scrollY / maxScrollY * (trackHeight - sbHeight)) : 0);
 
-        float sbWidth = (app.scrollbarHovered || app.scrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f);
-        float sbAlpha = (app.scrollbarHovered || app.scrollbarDragging) ? 0.5f : 0.3f;
+        float sbWidth = quietScrollbars ? dpi(app, 4.0f) :
+            ((app.scrollbarHovered || app.scrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f));
+        float sbAlpha = quietScrollbars ? 0.32f :
+            ((app.scrollbarHovered || app.scrollbarDragging) ? 0.5f : 0.3f);
+        sbAlpha *= scrollbarOpacity;
+        // Keep the thin thumb fully inside its hit band, clear of the adjacent
+        // divider's resize target. The existing 14-DIP scrollbar hit area stays.
+        const float sbInset = dpi(app, quietScrollbars ? 6.0f : 4.0f);
 
         app.brush->SetColor(D2D1::ColorF(sbColorValue, sbColorValue, sbColorValue, sbAlpha));
         app.renderTarget->FillRoundedRectangle(
-            D2D1::RoundedRect(D2D1::RectF(documentWidth - sbWidth - dpi(app, 4.0f), sbY,
-                                          documentWidth - dpi(app, 4.0f), sbY + sbHeight), 3, 3),
+            D2D1::RoundedRect(D2D1::RectF(documentWidth - sbWidth - sbInset, sbY,
+                                          documentWidth - sbInset, sbY + sbHeight),
+                             quietScrollbars ? sbWidth / 2 : 3, quietScrollbars ? sbWidth / 2 : 3),
             app.brush);
         app.drawCalls++;
 
@@ -877,13 +903,17 @@ render_document:
         sbWidth = std::max(sbWidth, dpi(app, 30.0f));
         float sbX = (maxScrollX > 0) ? (app.scrollX / maxScrollX * (trackWidth - sbWidth)) : 0;
 
-        float sbHeight = (app.hScrollbarHovered || app.hScrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f);
-        float sbAlpha = (app.hScrollbarHovered || app.hScrollbarDragging) ? 0.5f : 0.3f;
+        float sbHeight = quietScrollbars ? dpi(app, 4.0f) :
+            ((app.hScrollbarHovered || app.hScrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f));
+        float sbAlpha = quietScrollbars ? 0.32f :
+            ((app.hScrollbarHovered || app.hScrollbarDragging) ? 0.5f : 0.3f);
+        sbAlpha *= scrollbarOpacity;
 
         app.brush->SetColor(D2D1::ColorF(sbColorValue, sbColorValue, sbColorValue, sbAlpha));
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(D2D1::RectF(sbX, app.height - sbHeight - dpi(app, 4.0f),
-                                          sbX + sbWidth, app.height - dpi(app, 4.0f)), 3, 3),
+                                          sbX + sbWidth, app.height - dpi(app, 4.0f)),
+                             quietScrollbars ? sbHeight / 2 : 3, quietScrollbars ? sbHeight / 2 : 3),
             app.brush);
         app.drawCalls++;
     }
@@ -1268,6 +1298,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_KILLFOCUS:
+            if (app) cancelDocumentScrollbarDrag(*app, hwnd);
+            if (app) sidePanelResizeEnd(*app, hwnd, true);
             if (app && app->showContextMenu) {
                 closeContextMenu(*app);
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -1384,6 +1416,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_SIZE:
             if (app && app->d2dFactory) {
+                sidePanelResizeEnd(*app, hwnd, true);
                 closeContextMenu(*app);  // its anchor belongs to the old viewport
                 // The preview's geometry is stale after a resize: restore
                 // the document at the new size and close the overlay
@@ -1421,6 +1454,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_DPICHANGED:
             if (app) {
+                sidePanelResizeEnd(*app, hwnd, true);
                 if (app->showPrintPreview) closePrintPreview(*app, hwnd);
                 UINT dpi = HIWORD(wParam);
                 app->contentScale = dpi / 96.0f;
@@ -1493,10 +1527,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_CAPTURECHANGED:
+            if (app && (HWND)lParam != hwnd) cancelDocumentScrollbarDrag(*app, hwnd);
+            if (app && (HWND)lParam != hwnd) sidePanelResizeEnd(*app, hwnd, true);
             // Losing capture mid tab-drag (Alt+Tab, a popup stealing the
             // mouse) aborts the drag instead of leaving a stray ghost
             if (app && app->tabDragIndex >= 0 && (HWND)lParam != hwnd) {
                 tabDragCancel(*app, hwnd);
+            }
+            return 0;
+
+        case WM_CANCELMODE:
+            if (app) cancelDocumentScrollbarDrag(*app, hwnd);
+            if (app) sidePanelResizeEnd(*app, hwnd, true);
+            break;
+
+        case WM_MOUSELEAVE:
+            if (app && GetCapture() != hwnd) {
+                app->mouseX = app->mouseY = -1;
+                app->scrollbarHovered = app->hScrollbarHovered = false;
+                InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
 
@@ -1552,6 +1601,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_TIMER:
+            if (wParam == TIMER_SIDE_PANEL_SCROLLBARS && app) {
+                InvalidateRect(hwnd, nullptr, FALSE);
+                if (app->editMode || app->showPrintPreview || (!app->showToc && !app->showFolderBrowser)) {
+                    KillTimer(hwnd, TIMER_SIDE_PANEL_SCROLLBARS);
+                    app->panelScrollbarTimerActive = false;
+                }
+            }
             if (wParam == TIMER_LINK_PEEK && app) handleLinkPeekTimer(*app, hwnd);
             if (wParam == TIMER_FILE_WATCH && app) handleFileWatchTimer(*app, hwnd);
             if (wParam == 2 && app) editorReparse(*app); // TIMER_EDITOR_REPARSE
@@ -1843,6 +1899,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.tocOnLeft = savedSettings.tocOnLeft;
     app.tocPinned = savedSettings.tocPinned;
     app.browserPinned = savedSettings.browserPinned;
+    app.tocWidth = savedSettings.tocWidth;
+    app.browserWidth = savedSettings.browserWidth;
     app.languageSetting = savedSettings.language == "auto"
         ? -1 : languageIndexById(savedSettings.language);
     app.currentLanguageIndex = app.languageSetting >= 0

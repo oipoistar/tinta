@@ -18,6 +18,8 @@
 #include <chrono>
 #include <utility>
 #include <optional>
+#include <algorithm>
+#include <cmath>
 
 #include "markdown.h"
 #include "keymap.h"
@@ -39,6 +41,7 @@ inline int64_t usElapsed(Clock::time_point start) {
 #define TIMER_SELECT_SCROLL 8
 #define TIMER_LINK_PEEK 9
 #define TIMER_UPDATE_CHECK 10
+#define TIMER_SIDE_PANEL_SCROLLBARS 12
 
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
@@ -158,6 +161,8 @@ int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
                     const std::wstring& headingFontFamily = L"");
 
 // Persistent settings
+enum class SidePanel { None, Contents, Browser };
+
 struct Settings {
     int themeIndex = 5;          // Default to Midnight
     float zoomFactor = 1.0f;
@@ -205,6 +210,8 @@ struct Settings {
     // document clicks and hands the keyboard back to the document
     bool tocPinned = false;
     bool browserPinned = false;
+    float tocWidth = 280.0f;      // preferred logical pixels, independent of zoom
+    float browserWidth = 300.0f;
     // UI language id ("auto" follows the Windows display language; else a
     // registry id like "en"/"zh"/"de" — see i18n.h). Persisted as a string
     // because languages.ini languages have no stable numeric index.
@@ -730,6 +737,7 @@ struct App {
         // from documentViewportWidth, which in edit mode is the preview
         // pane — printing from the editor wrapped at half the page (#81)
         bool editMode = false;
+        bool showToc = false, showFolderBrowser = false;
     };
     bool showPrintPreview = false;
     PrintSavedView printSaved;
@@ -760,6 +768,13 @@ struct App {
     // the document keeps hover, selection, and the keyboard
     bool tocPinned = false;
     bool browserPinned = false;
+    float tocWidth = 280.0f;
+    float browserWidth = 300.0f;
+    struct PanelResize {
+        SidePanel panel = SidePanel::None;
+        float startX = 0, startWidth = 0;
+        float oldTocWidth = 0, oldBrowserWidth = 0;
+    } panelResize;
     float tocAnimation = 0.0f;  // 0 to 1 slide-in from the chosen side
     // A clicked heading stays the active row even when the scroll cannot
     // reach it (short documents); any real scroll hands back to the spy
@@ -790,6 +805,14 @@ struct App {
     float scrollbarContentHeight = 0.0f;
     float scrollbarDragStartY = 0;
     float scrollbarDragStartScroll = 0;
+    ULONGLONG lastPanelScrollActivity = 0;
+    float panelObservedScrollX = 0, panelObservedScrollY = 0;
+    struct ScrollbarFade {
+        float opacity = 0, from = 0, target = 0;
+        ULONGLONG started = 0;
+        bool running = false;
+    } panelScrollbarFade;
+    bool panelScrollbarTimerActive = false;
 
     // Horizontal scrollbar
     bool hScrollbarHovered = false;
@@ -1375,25 +1398,39 @@ inline float chromeTopHeight(const App& app) {
     return dpi(app, 40.0f);
 }
 
-inline float folderBrowserPanelWidth(const App& app) {
-    float cap = dpi(app, 300.0f);
-    float floor_ = dpi(app, 250.0f);
-    float w = app.width * 0.2f;
-    if (w < floor_) w = floor_;
-    if (w > cap) w = cap;
-    return w;
+inline float sidePanelBudget(const App& app) {
+    const float width = std::max(0.0f, static_cast<float>(app.width));
+    return width - std::min(dpi(app, 240.0f), width * 0.4f);
 }
 
-// TOC panel width — shared by input hit-testing, the panel renderer, and
-// the viewport shift
-inline float tocPanelWidth(const App& app) {
-    float cap = dpi(app, 280.0f);
-    float floor_ = dpi(app, 220.0f);
-    float w = app.width * 0.2f;
-    if (w < floor_) w = floor_;
-    if (w > cap) w = cap;
-    return w;
+struct SidePanelWidths { float toc = 0, browser = 0; };
+
+// Clamp the displayed widths together, without changing saved preferences
+// when a window shrinks. Keep room for the document even with both panels open.
+inline SidePanelWidths sidePanelWidths(const App& app) {
+    const float minToc = app.showToc ? dpi(app, 180.0f) : 0;
+    const float minBrowser = app.showFolderBrowser ? dpi(app, 200.0f) : 0;
+    SidePanelWidths widths{
+        app.showToc ? dpi(app, std::clamp(std::isfinite(app.tocWidth) ? app.tocWidth : 280.0f, 180.0f, 4000.0f)) : 0,
+        app.showFolderBrowser ? dpi(app, std::clamp(std::isfinite(app.browserWidth) ? app.browserWidth : 300.0f, 200.0f, 4000.0f)) : 0};
+    const float budget = sidePanelBudget(app);
+    if (widths.toc + widths.browser > budget) {
+        const float minimum = minToc + minBrowser;
+        if (budget <= minimum) {
+            const float ratio = minimum > 0 ? budget / minimum : 0;
+            widths = {minToc * ratio, minBrowser * ratio};
+        } else {
+            const float extra = widths.toc + widths.browser - minimum;
+            const float ratio = (budget - minimum) / extra;
+            widths = {minToc + (widths.toc - minToc) * ratio,
+                      minBrowser + (widths.browser - minBrowser) * ratio};
+        }
+    }
+    return widths;
 }
+
+inline float folderBrowserPanelWidth(const App& app) { return sidePanelWidths(app).browser; }
+inline float tocPanelWidth(const App& app) { return sidePanelWidths(app).toc; }
 
 inline float documentViewportX(const App& app) {
     if (!app.editMode) {

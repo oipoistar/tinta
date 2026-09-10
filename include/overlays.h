@@ -48,6 +48,10 @@ float tocPanelX(const App& app, float panelWidth);
 // Heading index under a point in the floating Contents card, or -1 -
 // clicks hit-test their own coordinates (#114 pattern)
 int tocItemIndexAt(App& app, float x, float y);
+// The row viewport and indentation are shared with wheel handling and tests.
+D2D1_RECT_F tocListRect(const App& app);
+float tocHeadingIndent(const App& app, int level);
+float tocMaxScroll(const App& app);
 
 // Shared geometry for the floating file-browser card (t13 design 13b):
 // one source of truth for render, cursor, and click hit-tests
