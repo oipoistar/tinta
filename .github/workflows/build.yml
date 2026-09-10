@@ -45,34 +45,46 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.** An icon menu, easier file-path copying, separate inline-code colors, and fixes for shortcuts and Markdown spacing.
+            **Markdown, distilled.** Custom frontmatter, footnotes, more syntax colors, and a calmer, resizable outline.
 
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Top-left icon menu (#194)
-            - Click the icon for New, Open, Save, Save As, Print, Export, Theme, Settings and Help in reading or editing mode
-            - F10 opens the menu; arrow keys and Enter navigate and choose commands
-            - Suggested by @ILCNa, implemented in #198
+            ### Frontmatter and theme controls (#208)
+            - Settings has a new Frontmatter page with ordered properties, Show, left/right placement, optional labels, type-specific formats, list limits and a live preview
+            - Showing `created` or `updated` enables maintenance on explicit editor saves: missing fields are added to existing frontmatter, `created` is preserved once present, and `updated` records each save as a quoted UTC timestamp
+            - Date rows default off. Files without frontmatter remain unchanged; hiding the property strip also pauses maintenance
+            - Custom themes can set H1-H6 colors individually and choose highlight background/text colors, with existing colors as defaults
+            - Suggested by @Ra0EL, implemented in #215 and #217
 
-            ### Copy file path (#203)
-            - Copy file path now sits beside Reveal in Explorer in the document context menu
-            - Right-clicking the filename also opens the tab menu when only one document is open, while left-dragging still moves the window
-            - Copy full paths with spaces and Unicode characters, without long-path truncation; inactive tabs copy their own file's path
-            - Suggested by @Orcomp, implemented in #204
+            ### Footnotes (#208)
+            - Named and numeric footnotes are numbered by first use, with repeated references, multiline rich bodies and small text return links
+            - HTML preserves jump/return navigation; DOCX exports contain real Word footnotes
+            - Suggested by @Ra0EL, implemented in #216
 
-            ### Independent inline-code colors (#197)
-            - Custom themes can set `inlinecode` separately from fenced code text
-            - Existing themes fall back to their `code` color; previews and HTML/DOCX exports preserve the setting
-            - Suggested by @hochun836, implemented in #201
+            ### Nine more highlighted languages (#207)
+            - SQL, PowerShell, Java, PHP, HTML, XML, CSS, YAML and Markdown now have native syntax colors
+            - Common aliases and multiline constructs work with existing theme keys
+            - Suggested by @hochun836, implemented in #214
+
+            ### Resizable Contents and file browser (#210)
+            - Contents includes all six heading levels, with compact indentation and filtering
+            - Both panels have independently resizable widths that are remembered between sessions
+            - A quieter divider, shorter active-heading marker and slim fading scrollbars reduce visual clutter
+            - Reported by @125Q, implemented in #213
+
+            ### Everyday controls
+            - Close Settings with an outside click or its new top-right close button (#209)
+            - Drop transferred tabs between existing tabs; pull a tab about 50 logical pixels away from the bar to detach it on release (#211)
+            - Open built-in Learn examples as editable copies, with shortcuts matching the selected keymap, reported by @Ra0EL (#206, #212)
 
             ### Fixed
-            - E and F1 work across keyboard layouts without leaking the shortcut into the editor, reported by @Fromville (#195, #199)
-            - Fenced code blocks no longer reserve an extra trailing row, while intentional blank lines remain, reported by @hochun836 (#196, #200)
-            - Blockquote bars stop at their content without changing the space before the following paragraph (#202)
-            - Active tabs use the current path after Save As; failed clipboard writes no longer show a Copied confirmation (#203, #204)
+            - Superscripts and subscripts retain the right font size and baseline through theme, zoom and DPI changes, reported by @Ra0EL (#206, #212)
+            - Scrollbar drags continue across side panels and window edges (#210, #213)
+            - Save As from Learn examples no longer leaks the shortcut into the document (#206, #212)
+            - Mixed DOCX exports have schema-valid run-property ordering and table grids (#208, #217)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats
@@ -80,7 +92,7 @@ jobs:
             - Tabbed interface with drag, session restore, and a tab context menu
             - 10 tuned themes (5 light, 5 dark) plus custom themes
             - Hardware-accelerated rendering via Direct2D
-            - Single portable executable about 2.3 MB, no dependencies
+            - Single portable executable about 2.4 MB, no dependencies
           files: build/Release/tinta.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
