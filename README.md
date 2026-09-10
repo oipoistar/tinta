@@ -281,6 +281,7 @@ HTML and DOCX exports. Native printing keeps Tinta's existing light print palett
 
 For supported code-fence languages and aliases, including SQL, PowerShell, Java,
 PHP, HTML/XML, CSS, YAML and Markdown, see [Syntax highlighting](docs/syntax-highlighting.md).
+Individual H1-H6 and marked-text overrides are described in [Heading and highlight colours](docs/theme-colours.md).
 
 ## Dependencies
 

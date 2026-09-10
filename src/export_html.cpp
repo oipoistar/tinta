@@ -1326,6 +1326,10 @@ std::string themeCss(const App& app, const std::string& bodyFont,
            ";line-height:1.25;}";
     css += "h1{border-bottom:2px solid " + colorCss(t.accent) +
            ";padding-bottom:8px;}";
+    for (int i = 0; i < 6; ++i) {
+        if (!t.headingColors[i]) continue;
+        css += "h" + std::to_string(i + 1) + "{color:" + colorCss(*t.headingColors[i]) + ";border-color:" + colorCss(*t.headingColors[i]) + ";}";
+    }
     css += "a{color:" + colorCss(t.link) + ";}";
     css += ".wikilink{color:" + colorCss(t.link) +
            ";border-bottom:1px dashed " + colorCss(t.link) + ";}";
@@ -1379,9 +1383,8 @@ std::string themeCss(const App& app, const std::string& bodyFont,
     css += ".math-inline svg{vertical-align:middle;}";
     // ==highlight== uses the viewer's marker-pen yellow, not the accent
     css += "mark{background:" +
-           colorCss(t.isDark ? D2D1::ColorF(0.98f, 0.80f, 0.25f, 0.28f)
-                             : D2D1::ColorF(1.00f, 0.88f, 0.20f, 0.45f)) +
-           ";color:inherit;padding:0 2px;}";
+           colorCss(themeHighlightBackground(t)) +
+           ";color:" + (t.highlightText ? colorCss(*t.highlightText) : "inherit") + ";padding:0 2px;}";
     return css;
 }
 

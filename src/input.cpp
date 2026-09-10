@@ -530,6 +530,12 @@ static D2D1_COLOR_F* themeEditorSlot(App& app, int field) {
     return nullptr;
 }
 
+static std::optional<D2D1_COLOR_F>& themeEditorOverride(App& app, int field) {
+    auto& t = app.themeEditorTheme;
+    if (field < 12) return t.headingColors[field - 6];
+    return field == 12 ? t.highlightBackground : t.highlightText;
+}
+
 // Copies a base theme's colors into the working copy and refreshes the
 // hex field strings (name and focus are preserved)
 static void themeEditorAdoptBase(App& app, int baseIndex) {
@@ -539,6 +545,10 @@ static void themeEditorAdoptBase(App& app, int baseIndex) {
     app.themeEditorFont = bt.fontFamily;
     for (int i = 0; i < 6; i++) {
         app.themeEditorHex[i] = colorToHexW(*themeEditorSlot(app, i));
+    }
+    for (int i = 6; i < 14; ++i) {
+        const auto& color = themeEditorOverride(app, i);
+        app.themeEditorHex[i] = color ? colorToHexW(*color) : L"";
     }
 }
 
@@ -563,8 +573,10 @@ static void openThemeEditor(App& app, bool editCurrent) {
     enumerateSystemFontFamilies(app);
     themeEditorAdoptBase(app, app.currentThemeIndex);
     app.themeEditorName = editCurrent ? app.theme.name : L"My theme";
-    app.themeEditorField = 6;  // name focused first
+    app.themeEditorField = 14;  // name focused first
     app.themeEditorFontScroll = 0.0f;
+    app.themeEditorColorScroll = 0.0f;
+    app.themeEditorHeadingsOpen = false;
     app.showSettings = false;
     app.showThemeEditor = true;
     InvalidateRect(app.hwnd, nullptr, FALSE);
@@ -777,6 +789,13 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     // Theme editor: wheel scrolls the font list
     if (app.showThemeEditor) {
         float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+        const auto& colors = app.themeEditorColorListRect;
+        if (app.mouseX >= colors.left && app.mouseX <= colors.right &&
+            app.mouseY >= colors.top && app.mouseY <= colors.bottom) {
+            app.themeEditorColorScroll = std::max(0.0f, app.themeEditorColorScroll - delta * dpi(app, 78.0f));
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
         const D2D1_RECT_F& list = app.themeEditorFontListRect;
         if (app.mouseX >= list.left && app.mouseX <= list.right &&
             app.mouseY >= list.top && app.mouseY <= list.bottom) {
@@ -2743,14 +2762,17 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
                 if (idx >= 0 && idx < (int)app.systemFontFamilies.size()) {
                     app.themeEditorFont = app.systemFontFamilies[idx];
                 }
-            } else if (action >= TE_FIELD_BG && action <= TE_FIELD_CODEBG) {
+            } else if (action >= TE_FIELD_BG && action <= TE_FIELD_HIGHLIGHT_TEXT) {
                 app.themeEditorField = action - TE_FIELD_BG;
             } else if (action == TE_FIELD_NAME) {
-                app.themeEditorField = 6;
+                app.themeEditorField = 14;
             } else if (action == TE_BASE_PREV || action == TE_BASE_NEXT) {
                 int n = themeCount();
                 int base = app.themeEditorBase + (action == TE_BASE_NEXT ? 1 : n - 1);
                 themeEditorAdoptBase(app, base % n);
+            } else if (action == TE_HEADINGS) {
+                app.themeEditorHeadingsOpen = !app.themeEditorHeadingsOpen;
+                app.themeEditorField = -1;
             } else if (action == TE_DARK) {
                 app.themeEditorTheme.isDark = !app.themeEditorTheme.isDark;
             } else if (action == TE_OPEN_INI) {
@@ -4082,13 +4104,13 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
     if (app.showThemeEditor) {
         wchar_t ch = (wchar_t)wParam;
         int f = app.themeEditorField;
-        if (f == 6) {  // name
+        if (f == 14) {  // name
             if (ch == 8) {
                 if (!app.themeEditorName.empty()) app.themeEditorName.pop_back();
             } else if (ch >= 32 && ch != 127 && app.themeEditorName.size() < 24) {
                 app.themeEditorName += ch;
             }
-        } else if (f >= 0 && f < 6) {  // hex fields
+        } else if (f >= 0 && f < 14) {  // hex fields
             std::wstring& hex = app.themeEditorHex[f];
             if (ch == 8) {
                 if (!hex.empty()) hex.pop_back();
@@ -4097,7 +4119,10 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
             }
             D2D1_COLOR_F parsed;
             if (hexToColorW(hex, parsed)) {
-                *themeEditorSlot(app, f) = parsed;
+                if (f < 6) *themeEditorSlot(app, f) = parsed;
+                else themeEditorOverride(app, f) = parsed;
+            } else if (f >= 6 && hex.empty()) {
+                themeEditorOverride(app, f).reset();
             }
         }
         InvalidateRect(hwnd, nullptr, FALSE);

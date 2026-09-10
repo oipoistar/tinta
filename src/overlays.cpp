@@ -3787,7 +3787,8 @@ void renderThemeEditor(App& app) {
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
-    float panelW = dpi(app, 760.0f), panelH = dpi(app, 520.0f);
+    float panelW = std::min(dpi(app, 760.0f), app.width - dpi(app, 24.0f));
+    float panelH = std::min(dpi(app, 520.0f), app.height - dpi(app, 24.0f));
     float px = (app.width - panelW) / 2, py = (app.height - panelH) / 2;
     D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(
         D2D1::RectF(px, py, px + panelW, py + panelH), dpi(app, 12.0f), dpi(app, 12.0f));
@@ -3809,7 +3810,7 @@ void renderThemeEditor(App& app) {
     }
 
     float x0 = px + dpi(app, 24.0f);
-    float colW = dpi(app, 300.0f);
+    float colW = panelW * 0.43f - dpi(app, 36.0f);
     float y = py + dpi(app, 64.0f);
 
     auto inputBox = [&](float bx, float by, float bw, const std::wstring& text,
@@ -3821,6 +3822,8 @@ void renderThemeEditor(App& app) {
             D2D1::RoundedRect(r, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush,
             focused ? 1.5f : 1.0f);
         std::wstring shown = text;
+        if (shown.empty() && action >= TE_FIELD_H1 && action <= TE_FIELD_HIGHLIGHT_TEXT && !focused)
+            shown = tr(app, "theme.editor.automatic");
         if (focused) shown += L"_";
         c = base.text; c.a = 0.95f;
         app.brush->SetColor(c);
@@ -3838,8 +3841,8 @@ void renderThemeEditor(App& app) {
 
     // Name
     label(x0, y, tr(app, "theme.editor.name"), 0.55f);
-    inputBox(x0, y + dpi(app, 20.0f), dpi(app, 276.0f), app.themeEditorName,
-             app.themeEditorField == 6, TE_FIELD_NAME);
+    inputBox(x0, y + dpi(app, 20.0f), colW, app.themeEditorName,
+             app.themeEditorField == 14, TE_FIELD_NAME);
     y += dpi(app, 56.0f);
 
     // Base theme cycler + dark toggle on one row
@@ -3847,8 +3850,8 @@ void renderThemeEditor(App& app) {
     {
         float by = y + dpi(app, 20.0f);
         D2D1_RECT_F prev = D2D1::RectF(x0, by, x0 + dpi(app, 26.0f), by + dpi(app, 26.0f));
-        D2D1_RECT_F next = D2D1::RectF(x0 + dpi(app, 250.0f), by,
-                                       x0 + dpi(app, 276.0f), by + dpi(app, 26.0f));
+        D2D1_RECT_F next = D2D1::RectF(x0 + colW - dpi(app, 26.0f), by,
+                                       x0 + colW, by + dpi(app, 26.0f));
         D2D1_COLOR_F c = base.text; c.a = 0.7f;
         app.brush->SetColor(c);
         app.renderTarget->DrawText(L"\x2039", 1, fmt,
@@ -3871,7 +3874,7 @@ void renderThemeEditor(App& app) {
     // Dark flag
     label(x0, y + dpi(app, 3.0f), tr(app, "theme.editor.dark"), 0.95f);
     {
-        float tx = x0 + dpi(app, 242.0f), ty = y;
+        float tx = x0 + colW - dpi(app, 34.0f), ty = y;
         float tw = dpi(app, 34.0f), th = dpi(app, 18.0f);
         bool on = work.isDark;
         D2D1_COLOR_F track = on ? base.accent : base.text;
@@ -3891,31 +3894,63 @@ void renderThemeEditor(App& app) {
     }
     y += dpi(app, 34.0f);
 
-    // Six color fields
-    static const char* kColorLabelKeys[6] = {
-        "theme.editor.color.background", "theme.editor.color.text",
-        "theme.editor.color.heading", "theme.editor.color.link",
-        "theme.editor.color.accent", "theme.editor.color.code_background"};
-    const D2D1_COLOR_F* slots[6] = {&work.background, &work.text, &work.heading,
-                                    &work.link, &work.accent, &work.codeBackground};
-    for (int i = 0; i < 6; i++) {
-        float ry = y + i * dpi(app, 36.0f);
-        label(x0, ry + dpi(app, 5.0f), tr(app, kColorLabelKeys[i]), 0.95f);
-        inputBox(x0 + dpi(app, 138.0f), ry, dpi(app, 96.0f), app.themeEditorHex[i],
-                 app.themeEditorField == i, TE_FIELD_BG + i);
-        D2D1_RECT_F sw = D2D1::RectF(x0 + dpi(app, 244.0f), ry,
-                                     x0 + dpi(app, 270.0f), ry + dpi(app, 26.0f));
-        app.brush->SetColor(*slots[i]);
-        app.renderTarget->FillRoundedRectangle(
-            D2D1::RoundedRect(sw, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush);
-        D2D1_COLOR_F c = base.text; c.a = 0.3f;
-        app.brush->SetColor(c);
-        app.renderTarget->DrawRoundedRectangle(
-            D2D1::RoundedRect(sw, dpi(app, 4.0f), dpi(app, 4.0f)), app.brush, 1.0f);
+    // Scrollable colour controls keep the optional six-level palette compact.
+    auto clip = D2D1::RectF(x0, y, x0 + colW, py + panelH - dpi(app, 60.0f));
+    app.themeEditorColorListRect = clip;
+    float rowH = dpi(app, 36.0f);
+    float total = rowH * (app.themeEditorHeadingsOpen ? 15.0f : 9.0f);
+    float maximum = std::max(0.0f, total - (clip.bottom - clip.top));
+    app.themeEditorColorScroll = std::min(app.themeEditorColorScroll, maximum);
+    float rowY = y - app.themeEditorColorScroll;
+    size_t firstHit = app.themeEditorHits.size();
+    app.renderTarget->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_ALIASED);
+    auto colorField = [&](int field, const wchar_t* title, D2D1_COLOR_F color) {
+        float fieldX = x0 + colW - dpi(app, 126.0f);
+        label(x0, rowY + dpi(app, 5.0f), title, 0.95f);
+        inputBox(fieldX, rowY, dpi(app, 86.0f), app.themeEditorHex[field],
+                 app.themeEditorField == field, TE_FIELD_BG + field);
+        auto swatch = D2D1::RectF(x0 + colW - dpi(app, 32.0f), rowY,
+                                x0 + colW - dpi(app, 8.0f), rowY + dpi(app, 26.0f));
+        app.brush->SetColor(color);
+        app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(swatch, 4, 4), app.brush);
+        rowY += rowH;
+    };
+    static const char* keys[6] = {"theme.editor.color.background", "theme.editor.color.text",
+        "theme.editor.color.heading", "theme.editor.color.link", "theme.editor.color.accent",
+        "theme.editor.color.code_background"};
+    const D2D1_COLOR_F colors[6] = {work.background, work.text, work.heading, work.link, work.accent, work.codeBackground};
+    for (int i = 0; i < 6; ++i) colorField(i, tr(app, keys[i]), colors[i]);
+    std::wstring disclosure = (app.themeEditorHeadingsOpen ? L"- " : L"+ ") +
+        std::wstring(tr(app, "theme.editor.heading_colors"));
+    label(x0, rowY + dpi(app, 5.0f), disclosure.c_str(), 0.9f);
+    app.themeEditorHits.push_back({D2D1::RectF(x0, rowY, x0 + colW, rowY + rowH), TE_HEADINGS});
+    rowY += rowH;
+    if (app.themeEditorHeadingsOpen)
+        for (int i = 0; i < 6; ++i) {
+            std::wstring title = L"H" + std::to_wstring(i + 1);
+            colorField(i + 6, title.c_str(), themeHeadingColor(work, i + 1));
+        }
+    colorField(12, tr(app, "theme.editor.highlight_bg"), themeHighlightBackground(work));
+    colorField(13, tr(app, "theme.editor.highlight_text"), work.highlightText.value_or(work.text));
+    app.renderTarget->PopAxisAlignedClip();
+    // Invisible fields must not catch clicks in the footer or other controls.
+    for (size_t i = firstHit; i < app.themeEditorHits.size();) {
+        auto& rect = app.themeEditorHits[i].first;
+        rect.top = std::max(rect.top, clip.top); rect.bottom = std::min(rect.bottom, clip.bottom);
+        if (rect.top >= rect.bottom) app.themeEditorHits.erase(app.themeEditorHits.begin() + i);
+        else ++i;
+    }
+    if (maximum > 0) {
+        float height = clip.bottom - clip.top;
+        float thumb = std::max(dpi(app, 20.0f), height * height / total);
+        float top = clip.top + (height - thumb) * app.themeEditorColorScroll / maximum;
+        auto color = base.text; color.a = 0.3f; app.brush->SetColor(color);
+        app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(
+            D2D1::RectF(clip.right - dpi(app, 3.0f), top, clip.right, top + thumb), 2, 2), app.brush);
     }
 
     // ---- Right column: specimen + font list ----
-    float xr = px + dpi(app, 350.0f);
+    float xr = x0 + colW + dpi(app, 28.0f);
     float xrw = px + panelW - dpi(app, 24.0f) - xr;
 
     // Live ink specimen in the working theme + font
@@ -3946,7 +3981,7 @@ void renderThemeEditor(App& app) {
         float sx = spec.left + dpi(app, 18.0f);
         float sw2 = spec.right - dpi(app, 18.0f) - sx;
         if (h) {
-            app.brush->SetColor(work.heading);
+            app.brush->SetColor(themeHeadingColor(work, 1));
             app.renderTarget->DrawText(L"The Quick Brown Fox", 19, h,
                 D2D1::RectF(sx, spec.top + dpi(app, 14.0f), sx + sw2,
                             spec.top + dpi(app, 44.0f)), app.brush);
@@ -3967,6 +4002,12 @@ void renderThemeEditor(App& app) {
             app.renderTarget->DrawText(L"an accent,", 10, b,
                 D2D1::RectF(sx + dpi(app, 92.0f), spec.top + dpi(app, 96.0f),
                             sx + dpi(app, 170.0f), spec.top + dpi(app, 118.0f)), app.brush);
+            auto marker = D2D1::RectF(sx + dpi(app, 174.0f), spec.top + dpi(app, 96.0f),
+                                     spec.right - dpi(app, 10.0f), spec.top + dpi(app, 117.0f));
+            app.brush->SetColor(themeHighlightBackground(work));
+            app.renderTarget->FillRectangle(marker, app.brush);
+            app.brush->SetColor(work.highlightText.value_or(work.text));
+            app.renderTarget->DrawText(L"Highlight", 9, b, marker, app.brush);
             b->Release();
         }
         if (m) {

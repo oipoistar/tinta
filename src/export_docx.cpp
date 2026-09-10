@@ -597,6 +597,7 @@ struct DocxCtx {
 
     // Theme palette, guarded so dark themes stay readable on paper
     std::string textHex, headingHex, mutedHex, codeBgHex, borderHex;
+    std::string headingColors[6], highlightBgHex, highlightTextHex;
     std::string accentHex, linkHex, quoteBorderHex;
     std::string inlineCodeHex;  // explicit override; legacy paper colors otherwise
     std::string bodyFont, monoFont;
@@ -631,13 +632,17 @@ std::string runPropsXml(const DocxCtx& ctx, const RunProps& props) {
         xml += "<w:rFonts w:ascii=\"" + ctx.monoFont + "\" w:hAnsi=\"" +
                ctx.monoFont + "\" w:cs=\"" + ctx.monoFont + "\"/>";
         xml += "<w:sz w:val=\"21\"/><w:szCs w:val=\"21\"/>";
-        xml += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" +
+        if (!props.highlight || ctx.highlightBgHex.empty())
+            xml += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" +
                ctx.codeBgHex + "\"/>";
     }
     if (props.bold) xml += "<w:b/>";
     if (props.italic) xml += "<w:i/>";
     if (props.strike) xml += "<w:strike/>";
-    if (props.highlight) xml += "<w:highlight w:val=\"yellow\"/>";
+    if (props.highlight) {
+        if (ctx.highlightBgHex.empty()) xml += "<w:highlight w:val=\"yellow\"/>";
+        else xml += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" + ctx.highlightBgHex + "\"/>";
+    }
     if (props.superScript) xml += "<w:vertAlign w:val=\"superscript\"/>";
     if (props.subScript) xml += "<w:vertAlign w:val=\"subscript\"/>";
     if (props.code && !props.isLink && !ctx.inlineCodeHex.empty()) {
@@ -763,6 +768,7 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
         case ElementType::Highlight: {
             RunProps mark = props;
             mark.highlight = true;
+            if (!ctx.highlightTextHex.empty()) mark.color = ctx.highlightTextHex;
             for (const auto& child : elem->children) {
                 walkInline(ctx, child, mark, out);
             }
@@ -1248,7 +1254,7 @@ std::string stylesXml(const DocxCtx& ctx) {
                "<w:pPr><w:keepNext/><w:spacing w:before=\"280\" "
                "w:after=\"120\"/><w:outlineLvl w:val=\"" +
                std::to_string(i) + "\"/></w:pPr><w:rPr><w:b/><w:color "
-               "w:val=\"" + ctx.headingHex + "\"/><w:sz w:val=\"" +
+               "w:val=\"" + ctx.headingColors[i] + "\"/><w:sz w:val=\"" +
                std::to_string(headingSizes[i]) + "\"/><w:szCs w:val=\"" +
                std::to_string(headingSizes[i]) + "\"/></w:rPr></w:style>";
     }
@@ -1324,6 +1330,10 @@ bool exportDocxFile(App& app, const std::wstring& path) {
     // Dark themes bake accent hues but keep readable text on white paper
     ctx.textHex = dark ? "1F1F1F" : hex6(theme.text);
     ctx.headingHex = dark ? "111111" : hex6(theme.heading);
+    for (int i = 0; i < 6; ++i)
+        ctx.headingColors[i] = theme.headingColors[i] ? hex6(*theme.headingColors[i]) : ctx.headingHex;
+    if (theme.highlightBackground) ctx.highlightBgHex = hex6(*theme.highlightBackground);
+    if (theme.highlightText) ctx.highlightTextHex = hex6(*theme.highlightText);
     D2D1_COLOR_F muted = theme.text;
     muted.a = 0.65f;
     ctx.mutedHex = dark ? "555555" : hexOver(muted, theme.background);

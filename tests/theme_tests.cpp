@@ -11,6 +11,8 @@
 #include <iostream>
 #include <memory>
 
+int testThemeColours(App& app, const std::filesystem::path& dir);
+
 namespace {
 int failures = 0;
 void check(bool value, const char* message) {
@@ -157,6 +159,7 @@ int main(int argc, char** argv) {
               "DOCX fenced code does not acquire the inline color");
         check(docxRun(zip, "linked_code").find("<w:color w:val=\"B85A3C\"/>") != std::string::npos,
               "DOCX linked code preserves the link color");
+        failures += testThemeColours(app, dir);
     }
     CoUninitialize();
     std::cout << "Inline code themes: " << failures << " failures\n";

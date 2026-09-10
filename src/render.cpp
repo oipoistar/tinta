@@ -968,11 +968,11 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
         app.headings.push_back({headingText, elem->level, y, id});
     }
 
-    layoutInlineContent(app, elem->children, indent, y, maxWidth, format, app.theme.heading);
+    layoutInlineContent(app, elem->children, indent, y, maxWidth, format, themeHeadingColor(app.theme, elem->level));
 
     if (elem->level <= 2 && app.headingRules) {
         y += 6 * scale;
-        D2D1_COLOR_F lineColor = app.theme.heading;
+        D2D1_COLOR_F lineColor = themeHeadingColor(app.theme, elem->level);
         lineColor.a = 0.3f;
         float lineWidth = (elem->level == 1) ? 2.0f * scale : 1.0f * scale;
         app.layoutLines.push_back({D2D1::Point2F(indent, y),

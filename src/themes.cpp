@@ -317,6 +317,15 @@ void applyThemeKey(CustomTheme& ct, const std::string& key, const std::string& v
     else if (key == "background") parseHexColor(value, t.background);
     else if (key == "text") parseHexColor(value, t.text);
     else if (key == "heading") parseHexColor(value, t.heading);
+    else if (key.size() == 2 && key[0] == 'h' && key[1] >= '1' && key[1] <= '6') {
+        D2D1_COLOR_F color;
+        if (parseHexColor(value, color)) t.headingColors[key[1] - '1'] = color;
+    }
+    else if (key == "highlightbackground" || key == "highlighttext") {
+        D2D1_COLOR_F color;
+        if (parseHexColor(value, color))
+            (key == "highlightbackground" ? t.highlightBackground : t.highlightText) = color;
+    }
     else if (key == "link") parseHexColor(value, t.link);
     else if (key == "code") parseHexColor(value, t.code);
     else if (key == "inlinecode") {
@@ -357,6 +366,10 @@ void writeThemesIni() {
         file << "background=" << colorToHex(t.background) << "\n";
         file << "text=" << colorToHex(t.text) << "\n";
         file << "heading=" << colorToHex(t.heading) << "\n";
+        for (int i = 0; i < 6; ++i)
+            if (t.headingColors[i]) file << "h" << i + 1 << "=" << colorToHex(*t.headingColors[i]) << "\n";
+        if (t.highlightBackground) file << "highlightbackground=" << colorToHex(*t.highlightBackground) << "\n";
+        if (t.highlightText) file << "highlighttext=" << colorToHex(*t.highlightText) << "\n";
         file << "link=" << colorToHex(t.link) << "\n";
         file << "code=" << colorToHex(t.code) << "\n";
         if (t.inlineCode) file << "inlinecode=" << colorToHex(*t.inlineCode) << "\n";

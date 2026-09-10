@@ -132,9 +132,8 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
             case ElementType::Highlight:
                 // ==text== renders on a marker-pen background
                 st.hasBg = true;
-                st.bgColor = app.theme.isDark
-                    ? D2D1::ColorF(0.98f, 0.80f, 0.25f, 0.28f)
-                    : D2D1::ColorF(1.00f, 0.88f, 0.20f, 0.45f);
+                st.bgColor = themeHighlightBackground(app.theme);
+                if (app.theme.highlightText) st.color = *app.theme.highlightText;
                 break;
 
             case ElementType::Superscript:
