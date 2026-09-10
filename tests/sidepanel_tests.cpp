@@ -170,17 +170,27 @@ void quietPanelEdges(App& app) {
     app.verticalScrollbarVisible = true;
     app.contentHeight = 2000;
     app.lastPanelScrollActivity = 0;
+    app.panelScrollbarFade = {};
     app.mouseX = 500;
     app.mouseY = 400;
-    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 2000), 0), "idle side-panel layout hides document scrollbars");
+    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 900), 0) && !sidePanelScrollbarNeedsTicks(app, 900),
+          "idle side-panel layout hides scrollbars without a running animation timer");
     app.lastPanelScrollActivity = 1000;
-    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 1700), 1) &&
-          closeEnough(sidePanelDocumentScrollbarOpacity(app, 1950), 0.5f) &&
-          closeEnough(sidePanelDocumentScrollbarOpacity(app, 2100), 0), "scroll activity holds then fades the document scrollbar");
+    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 1000), 0) && sidePanelScrollbarNeedsTicks(app, 1000),
+          "new scroll activity starts a fade-in without an opacity jump");
+    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 1060), 0.5f) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 1120), 1) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 1700), 1), "scrollbar gently appears over 120ms then holds");
+    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 1801), 1) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 1951), 0.5f) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 2101), 0) && !sidePanelScrollbarNeedsTicks(app, 2101),
+          "scrollbar fades out after inactivity and its timer can stop");
     const float edge = sidePanelResizeEdge(app, SidePanel::Contents);
     handleMouseMove(app, app.hwnd, MAKELPARAM((int)edge - 10, 400));
-    check(documentScrollbarEdgeHovered(app) && closeEnough(sidePanelDocumentScrollbarOpacity(app, 3000), 1),
-          "hover reveals the document scrollbar beside the divider");
+    check(documentScrollbarEdgeHovered(app) && closeEnough(sidePanelDocumentScrollbarOpacity(app, 3000), 0) &&
+          sidePanelScrollbarNeedsTicks(app, 3000) && closeEnough(sidePanelDocumentScrollbarOpacity(app, 3060), 0.5f) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 3120), 1) && !sidePanelScrollbarNeedsTicks(app, 3120),
+          "hover alone fades in the scrollbar and stops ticking once fully visible");
     handleMouseDown(app, app.hwnd, 0, MAKELPARAM((int)edge - 10, 400));
     check(app.scrollbarDragging && app.panelResize.panel == SidePanel::None,
           "the document scrollbar remains draggable beside the invisible resize target");
@@ -188,14 +198,25 @@ void quietPanelEdges(App& app) {
     app.mouseX = (int)edge;
     check(!documentScrollbarEdgeHovered(app) && sidePanelResizeAt(app, edge, 400) == SidePanel::Contents,
           "hover at the shared divider targets resizing only");
+    sidePanelDocumentScrollbarOpacity(app, 3200);
+    const float fading = sidePanelDocumentScrollbarOpacity(app, 3350);
+    app.lastPanelScrollActivity = 3350;
+    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 3350), fading) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 3410), 0.75f) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 3470), 1),
+          "scrolling again during fade-out resumes smoothly from the current opacity");
     check(sidePanelResizeBegin(app, app.hwnd, edge, 400) &&
-          closeEnough(sidePanelDocumentScrollbarOpacity(app, 1700), 0), "resizing does not display a second competing rail");
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 3500), 1) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 3800), 0), "resizing fades away the competing scrollbar");
     sidePanelResizeEnd(app, app.hwnd, true);
     app.swallowNextMouseUp = false;
     app.mouseX = app.mouseY = -1;
     check(!documentScrollbarEdgeHovered(app), "leaving the window clears edge hover");
     app.showToc = app.showFolderBrowser = false;
-    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 3000), 1), "ordinary viewer scrollbar appearance is preserved");
+    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 4000), 1) && !sidePanelScrollbarNeedsTicks(app, 4000),
+          "ordinary viewer scrollbar appearance is preserved without an animation timer");
+    app.showToc = true;
+    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 5000), 0), "reopening the panel does not reuse stale visible opacity");
     app.tocPinned = app.browserPinned = false;
 }
 

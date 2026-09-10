@@ -9,4 +9,5 @@ void sidePanelResizeMove(App& app, float x);
 void sidePanelResizeEnd(App& app, HWND hwnd, bool cancel);
 void renderSidePanelResizeGrip(App& app, SidePanel panel);
 bool documentScrollbarEdgeHovered(const App& app);
-float sidePanelDocumentScrollbarOpacity(const App& app, ULONGLONG now);
+float sidePanelDocumentScrollbarOpacity(App& app, ULONGLONG now);
+bool sidePanelScrollbarNeedsTicks(const App& app, ULONGLONG now);

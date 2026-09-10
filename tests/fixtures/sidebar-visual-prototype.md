@@ -11,6 +11,17 @@ that divider to find the resize cursor, then drag to change the width.
 The document scrollbar appears when you scroll or hover near it, then fades.
 Contents marks the current heading with a short accent beside its row.
 
+### Gentle scrollbar transitions
+
+Scroll once, then pause. The thin scrollbar should fade in briefly, keep a
+steady width, and fade away after you stop. Hover near it and move away again:
+there should be no thick-to-thin jump. Its wider invisible drag area remains
+easy to grab. Try scrolling again while it fades out; it should return smoothly.
+
+Repeat with a narrow window, in Paper and Midnight, and with the file browser
+or Contents open on either side. The table, quote and formula below should keep
+their usual layout while the scrollbar appears and disappears.
+
 ### Mixed formatting
 
 **Bold**, *italic*, `inline code`, x^2^, H~2~O, and $a+b=c$ should remain readable

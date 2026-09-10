@@ -807,6 +807,12 @@ struct App {
     float scrollbarDragStartScroll = 0;
     ULONGLONG lastPanelScrollActivity = 0;
     float panelObservedScrollX = 0, panelObservedScrollY = 0;
+    struct ScrollbarFade {
+        float opacity = 0, from = 0, target = 0;
+        ULONGLONG started = 0;
+        bool running = false;
+    } panelScrollbarFade;
+    bool panelScrollbarTimerActive = false;
 
     // Horizontal scrollbar
     bool hScrollbarHovered = false;

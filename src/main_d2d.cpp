@@ -805,10 +805,16 @@ render_document:
         app.panelObservedScrollX = app.scrollX;
         app.panelObservedScrollY = app.scrollY;
         app.lastPanelScrollActivity = scrollNow;
-        if (!app.editMode && (app.showToc || app.showFolderBrowser))
-            SetTimer(app.hwnd, TIMER_SIDE_PANEL_SCROLLBARS, 33, nullptr);
     }
     const float scrollbarOpacity = sidePanelDocumentScrollbarOpacity(app, scrollNow);
+    const bool scrollbarNeedsTicks = sidePanelScrollbarNeedsTicks(app, scrollNow);
+    if (scrollbarNeedsTicks && !app.panelScrollbarTimerActive) {
+        app.panelScrollbarTimerActive = SetTimer(app.hwnd, TIMER_SIDE_PANEL_SCROLLBARS, 16, nullptr) != 0;
+    } else if (!scrollbarNeedsTicks && app.panelScrollbarTimerActive) {
+        KillTimer(app.hwnd, TIMER_SIDE_PANEL_SCROLLBARS);
+        app.panelScrollbarTimerActive = false;
+    }
+    const bool quietScrollbars = !app.editMode && (app.showToc || app.showFolderBrowser);
 
     // Scrollbar color: dark on light themes, light on dark themes
     float sbColorValue = app.theme.isDark ? 1.0f : 0.0f;
@@ -825,14 +831,20 @@ render_document:
         float sbY = trackTop +
             ((maxScrollY > 0) ? (app.scrollY / maxScrollY * (trackHeight - sbHeight)) : 0);
 
-        float sbWidth = (app.scrollbarHovered || app.scrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f);
-        float sbAlpha = (app.scrollbarHovered || app.scrollbarDragging) ? 0.5f : 0.3f;
+        float sbWidth = quietScrollbars ? dpi(app, 4.0f) :
+            ((app.scrollbarHovered || app.scrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f));
+        float sbAlpha = quietScrollbars ? 0.32f :
+            ((app.scrollbarHovered || app.scrollbarDragging) ? 0.5f : 0.3f);
         sbAlpha *= scrollbarOpacity;
+        // Keep the thin thumb fully inside its hit band, clear of the adjacent
+        // divider's resize target. The existing 14-DIP scrollbar hit area stays.
+        const float sbInset = dpi(app, quietScrollbars ? 6.0f : 4.0f);
 
         app.brush->SetColor(D2D1::ColorF(sbColorValue, sbColorValue, sbColorValue, sbAlpha));
         app.renderTarget->FillRoundedRectangle(
-            D2D1::RoundedRect(D2D1::RectF(documentWidth - sbWidth - dpi(app, 4.0f), sbY,
-                                          documentWidth - dpi(app, 4.0f), sbY + sbHeight), 3, 3),
+            D2D1::RoundedRect(D2D1::RectF(documentWidth - sbWidth - sbInset, sbY,
+                                          documentWidth - sbInset, sbY + sbHeight),
+                             quietScrollbars ? sbWidth / 2 : 3, quietScrollbars ? sbWidth / 2 : 3),
             app.brush);
         app.drawCalls++;
 
@@ -891,14 +903,17 @@ render_document:
         sbWidth = std::max(sbWidth, dpi(app, 30.0f));
         float sbX = (maxScrollX > 0) ? (app.scrollX / maxScrollX * (trackWidth - sbWidth)) : 0;
 
-        float sbHeight = (app.hScrollbarHovered || app.hScrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f);
-        float sbAlpha = (app.hScrollbarHovered || app.hScrollbarDragging) ? 0.5f : 0.3f;
+        float sbHeight = quietScrollbars ? dpi(app, 4.0f) :
+            ((app.hScrollbarHovered || app.hScrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f));
+        float sbAlpha = quietScrollbars ? 0.32f :
+            ((app.hScrollbarHovered || app.hScrollbarDragging) ? 0.5f : 0.3f);
         sbAlpha *= scrollbarOpacity;
 
         app.brush->SetColor(D2D1::ColorF(sbColorValue, sbColorValue, sbColorValue, sbAlpha));
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(D2D1::RectF(sbX, app.height - sbHeight - dpi(app, 4.0f),
-                                          sbX + sbWidth, app.height - dpi(app, 4.0f)), 3, 3),
+                                          sbX + sbWidth, app.height - dpi(app, 4.0f)),
+                             quietScrollbars ? sbHeight / 2 : 3, quietScrollbars ? sbHeight / 2 : 3),
             app.brush);
         app.drawCalls++;
     }
@@ -1585,9 +1600,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_TIMER:
             if (wParam == TIMER_SIDE_PANEL_SCROLLBARS && app) {
                 InvalidateRect(hwnd, nullptr, FALSE);
-                if (GetTickCount64() - app->lastPanelScrollActivity >= 1100 ||
-                    app->editMode || (!app->showToc && !app->showFolderBrowser))
+                if (app->editMode || app->showPrintPreview || (!app->showToc && !app->showFolderBrowser)) {
                     KillTimer(hwnd, TIMER_SIDE_PANEL_SCROLLBARS);
+                    app->panelScrollbarTimerActive = false;
+                }
             }
             if (wParam == TIMER_LINK_PEEK && app) handleLinkPeekTimer(*app, hwnd);
             if (wParam == TIMER_FILE_WATCH && app) handleFileWatchTimer(*app, hwnd);

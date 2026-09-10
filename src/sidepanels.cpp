@@ -113,12 +113,38 @@ bool documentScrollbarEdgeHovered(const App& app) {
     return vertical || horizontal;
 }
 
-float sidePanelDocumentScrollbarOpacity(const App& app, ULONGLONG now) {
-    if (app.editMode || (!app.showToc && !app.showFolderBrowser)) return 1;
-    if (app.panelResize.panel != SidePanel::None) return 0;
-    if (app.scrollbarDragging || app.hScrollbarDragging || documentScrollbarEdgeHovered(app) || app.showSearch) return 1;
-    if (!app.lastPanelScrollActivity) return 0;
-    const ULONGLONG age = now - app.lastPanelScrollActivity;
-    if (age <= 800) return 1;
-    return std::max(0.0f, 1.0f - (float)(age - 800) / 300.0f);
+float sidePanelDocumentScrollbarOpacity(App& app, ULONGLONG now) {
+    auto& fade = app.panelScrollbarFade;
+    if (app.editMode || (!app.showToc && !app.showFolderBrowser)) {
+        fade = {};
+        return 1;
+    }
+
+    // Advance the current transition before retargeting. A new wheel event or
+    // a quick pointer re-entry continues from the visible opacity, never a jump.
+    if (fade.running) {
+        const float duration = fade.target > fade.from ? 120.0f : 300.0f;
+        const float t = std::min(1.0f, (float)(now - fade.started) / duration);
+        const float eased = t * t * (3.0f - 2.0f * t);
+        fade.opacity = fade.from + (fade.target - fade.from) * eased;
+        if (t >= 1) fade.running = false;
+    }
+    const bool recentScroll = app.lastPanelScrollActivity && now - app.lastPanelScrollActivity <= 800;
+    const bool visible = app.panelResize.panel == SidePanel::None &&
+        (recentScroll || app.scrollbarDragging || app.hScrollbarDragging ||
+         documentScrollbarEdgeHovered(app) || app.showSearch);
+    const float target = visible ? 1.0f : 0.0f;
+    if (target != fade.target) {
+        fade.from = fade.opacity;
+        fade.target = target;
+        fade.started = now;
+        fade.running = fade.from != target;
+    }
+    return fade.opacity;
+}
+
+bool sidePanelScrollbarNeedsTicks(const App& app, ULONGLONG now) {
+    if (app.editMode || app.showPrintPreview || (!app.showToc && !app.showFolderBrowser)) return false;
+    return app.panelScrollbarFade.running ||
+        (app.lastPanelScrollActivity && now - app.lastPanelScrollActivity <= 800);
 }
