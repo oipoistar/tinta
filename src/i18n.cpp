@@ -375,6 +375,10 @@ const Entry kEntries[] = {
 
     // ----- Theme editor -----
     { "theme.editor.title", L"New theme", L"\u65B0\u5EFA\u4E3B\u9898", L"\u65B0\u3057\u3044\u30C6\u30FC\u30DE", L"\uC0C8 \uD14C\uB9C8" },
+    { "theme.editor.heading_colors", L"Heading colours", L"\u6807\u9898\u989c\u8272", L"\u898b\u51fa\u3057\u306e\u8272", L"\uc81c\ubaa9 \uc0c9\uc0c1" },
+    { "theme.editor.highlight_bg", L"Highlight", L"\u9ad8\u4eae\u80cc\u666f", L"\u30cf\u30a4\u30e9\u30a4\u30c8", L"\uac15\uc870 \ubc30\uacbd" },
+    { "theme.editor.highlight_text", L"Marked text", L"\u9ad8\u4eae\u6587\u5b57", L"\u5f37\u8abf\u6587\u5b57", L"\uac15\uc870 \uae00\uc790" },
+    { "theme.editor.automatic", L"Auto", L"\u81ea\u52a8", L"\u81ea\u52d5", L"\uc790\ub3d9" },
     { "theme.editor.name", L"Name", L"\u540D\u79F0", L"\u540D\u524D", L"\uC774\uB984" },
     { "theme.editor.based_on", L"Based on", L"\u57FA\u4E8E", L"\u30D9\u30FC\u30B9", L"\uAE30\uBC18" },
     { "theme.editor.dark", L"Dark theme", L"\u6DF1\u8272\u4E3B\u9898", L"\u30C0\u30FC\u30AF\u30C6\u30FC\u30DE", L"\uC5B4\uB450\uC6B4 \uD14C\uB9C8" },
@@ -1124,6 +1128,10 @@ const BuiltinTranslation kBuiltinTranslations[] = {
       L"Neues Design",
        L"Nouveau th\u00E8me",
       L"Nuovo tema" },
+    { "theme.editor.heading_colors", L"Titel-Farben", L"Couleurs des titres", L"Colori dei titoli" },
+    { "theme.editor.highlight_bg", L"Markierung", L"Surlignage", L"Evidenziatore" },
+    { "theme.editor.highlight_text", L"Markierter Text", L"Texte surligne", L"Testo evidenziato" },
+    { "theme.editor.automatic", L"Auto", L"Auto", L"Auto" },
     { "theme.editor.name",
       L"Name",
       L"Nom",

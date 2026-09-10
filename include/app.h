@@ -107,10 +107,22 @@ struct D2DTheme {
     D2D1_COLOR_F syntaxControlFlow;
     // Optional themes.ini override. Missing means inherit code (#197).
     std::optional<D2D1_COLOR_F> inlineCode = std::nullopt;
+    std::optional<D2D1_COLOR_F> headingColors[6]{};
+    std::optional<D2D1_COLOR_F> highlightBackground = std::nullopt;
+    std::optional<D2D1_COLOR_F> highlightText = std::nullopt;
 };
 
 inline D2D1_COLOR_F themeInlineCodeColor(const D2DTheme& theme) {
     return theme.inlineCode.value_or(theme.code);
+}
+
+inline D2D1_COLOR_F themeHeadingColor(const D2DTheme& theme, int level) {
+    return level >= 1 && level <= 6 ? theme.headingColors[level - 1].value_or(theme.heading) : theme.heading;
+}
+inline D2D1_COLOR_F themeHighlightBackground(const D2DTheme& theme) {
+    return theme.highlightBackground.value_or(theme.isDark
+        ? D2D1::ColorF(0.98f, 0.80f, 0.25f, 0.28f)
+        : D2D1::ColorF(1.00f, 0.88f, 0.20f, 0.45f));
 }
 
 // Helper to create color from hex
@@ -629,10 +641,13 @@ struct App {
     D2DTheme themeEditorTheme{};        // working colors (string ptrs unused)
     std::wstring themeEditorName;
     std::wstring themeEditorFont;       // main font family
-    std::wstring themeEditorHex[6];     // bg, text, heading, link, accent, code bg
-    int themeEditorField = -1;          // focused field: 0..5 hex, 6 = name
+    std::wstring themeEditorHex[14];     // base colours, h1-h6, highlight bg/text
+    int themeEditorField = -1;          // focused field: 0..13 hex, 14 = name
     int themeEditorBase = 0;            // registry index the colors started from
     float themeEditorFontScroll = 0.0f;
+    bool themeEditorHeadingsOpen = false;
+    float themeEditorColorScroll = 0.0f;
+    D2D1_RECT_F themeEditorColorListRect{};
     std::vector<std::wstring> systemFontFamilies;  // enumerated on first open
     std::vector<std::pair<D2D1_RECT_F, int>> themeEditorHits;
     D2D1_RECT_F themeEditorFontListRect{};  // for wheel routing (set in render)
