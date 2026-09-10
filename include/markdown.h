@@ -2,6 +2,7 @@
 #define TINTA_MARKDOWN_H
 
 #include "types.h"
+#include "frontmatter.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -57,6 +58,7 @@ using ElementPtr = std::shared_ptr<Element>;
 struct Element {
     ElementType type;
     std::string text;
+    std::vector<fm::Property> properties; // top-level YAML fields
     std::string url;          // for links/images
     std::string title;        // for links/images
     int level = 0;            // for headings (1-6)

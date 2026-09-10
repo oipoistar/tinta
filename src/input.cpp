@@ -1,3 +1,4 @@
+#include "frontmatter_ui.h"
 #include "input.h"
 #include "annotations.h"
 #include "drafts.h"
@@ -270,6 +271,8 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
     // Start page recents: every open (including tab switches) refreshes
     // the document's spot at the head of the list
     persistRecentFile(app.currentFile);
+    for (const auto& e : app.root->children)
+        if (e->type == ElementType::Properties) observeFrontmatter(app, e->properties);
     app.scrollY = 0;
     app.scrollX = 0;
     app.targetScrollY = 0;
@@ -634,11 +637,13 @@ static void closeSettings(App& app, HWND hwnd) {
     app.settingsKeysOpen = false;
     app.settingsDragSlider = 0;
     app.settingsHits.clear();
+    app.frontmatterMenu = app.frontmatterDrag = app.frontmatterDrop = -1;
     if (GetCapture() == hwnd) ReleaseCapture();
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 static void settingsAction(App& app, HWND hwnd, int action) {
+    if (frontmatterAction(app, action)) return;
     // Shortcut profile picks (checked first: their base is above the
     // language pick base)
     if (action >= SET_KEYS_PICK_BASE) {
@@ -674,7 +679,8 @@ static void settingsAction(App& app, HWND hwnd, int action) {
         case SET_CLOSE: closeSettings(app, hwnd); return;
         case SET_SECTION_GENERAL: app.settingsSection = 0; break;
         case SET_SECTION_APPEARANCE: app.settingsSection = 1; break;
-        case SET_SECTION_EDITOR: app.settingsSection = 2; break;
+        case SET_SECTION_EDITOR: app.settingsSection = 2; app.frontmatterMenu = -1; break;
+        case SET_SECTION_FRONTMATTER: app.settingsSection = 3; break;
         case SET_TOGGLE_FOLDERSEARCH:
             app.folderSearchEnabled = !app.folderSearchEnabled;
             if (!app.folderSearchEnabled) clearFolderSearch(app);
@@ -806,8 +812,10 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         return;
     }
 
-    // Settings overlay: consume the wheel (nothing scrolls yet)
-    if (app.showSettings) return;
+    if (app.showSettings) {
+        frontmatterScroll(app, (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA);
+        return;
+    }
 
     // Print preview: the wheel flips pages
     if (app.showPrintPreview) {
@@ -1121,6 +1129,11 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // Settings: drag a slider if one is held, and show a hand over controls
     // instead of the document's text caret
     if (app.showSettings) {
+        if (app.frontmatterDrag >= 0) {
+            frontmatterMouseMove(app, (float)app.mouseX, (float)app.mouseY);
+            SetCursor(LoadCursor(nullptr, IDC_SIZENS));
+            return;
+        }
         if (app.settingsDragSlider) {
             settingsSliderApply(app, app.settingsDragSlider, (float)app.mouseX);
             SetCursor(cursorSizeWE);
@@ -1297,6 +1310,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     float previewOffsetX = documentViewportX(app);
     float docX = (app.mouseX - previewOffsetX) + app.scrollX;
     float docY = app.mouseY + app.scrollY;
+    if (!app.frontmatterOverflow.empty() && mouseMoved) InvalidateRect(hwnd, nullptr, FALSE);
 
     // Text selection dragging: the focus follows the caret offset under
     // the mouse; word/line modes union the current word/line with the
@@ -1776,6 +1790,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     if (app.showSettings) {
         float mx = (float)GET_X_LPARAM(lParam);
         float my = (float)GET_Y_LPARAM(lParam);
+        if (frontmatterMouseDown(app, mx, my)) return;
         for (const auto& hit : app.settingsHits) {
             if ((hit.second == SET_SLIDER_READING || hit.second == SET_SLIDER_ZEN) &&
                 cursorPointInRect(mx, my, hit.first)) {
@@ -2663,6 +2678,12 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
         sidePanelResizeEnd(app, hwnd, false);
         return;  // the release must not select a heading or dismiss a panel
     }
+    // Finish the property reorder before releasing capture: WM_CAPTURECHANGED
+    // cancels unfinished gestures, including one interrupted by another window.
+    if (app.frontmatterDrag >= 0) {
+        frontmatterMouseUp(app, (float)GET_X_LPARAM(lParam), (float)GET_Y_LPARAM(lParam));
+        return;
+    }
     // A tab drag ends on release (its press already consumed the click)
     if (app.tabDragIndex >= 0) {
         tabDragEnd(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
@@ -2813,6 +2834,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
     // Settings overlay: resolve against the hit rects stored during render
     if (app.showSettings) {
+        if (frontmatterMouseUp(app, (float)GET_X_LPARAM(lParam), (float)GET_Y_LPARAM(lParam))) return;
         if (app.settingsDragSlider) {
             app.settingsDragSlider = 0;
             ReleaseCapture();
@@ -3453,6 +3475,12 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     }
     // Settings overlay captures the keyboard while open
     if (app.showSettings) {
+        if (wParam == VK_ESCAPE && (app.frontmatterMenu >= 0 || app.frontmatterDrag >= 0)) {
+            app.frontmatterMenu = app.frontmatterDrag = app.frontmatterDrop = -1;
+            if (GetCapture() == hwnd) ReleaseCapture();
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return false;
+        }
         if (wParam == VK_ESCAPE || (ctrl && wParam == VK_OEM_COMMA)) {
             closeSettings(app, hwnd);
         }
@@ -4420,6 +4448,8 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
                     app.targetScrollY = savedTargetScroll;
                     // Annotations re-derive from the fresh source (#126)
                     app.sourceText = buffer.str();
+                    for (const auto& e : app.root->children)
+                        if (e->type == ElementType::Properties) observeFrontmatter(app, e->properties);
                     annotationsParseSource(app);
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }

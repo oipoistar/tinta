@@ -1,3 +1,4 @@
+#include "frontmatter_ui.h"
 #include "editor.h"
 #include "document.h"
 #include "drafts.h"
@@ -426,7 +427,11 @@ static void editorUndo(App& app) {
     auto action = app.undoStack.back();
     app.undoStack.pop_back();
 
-    if (action.type == App::EditAction::Insert) {
+    if (action.type == App::EditAction::Replace) {
+        app.editorText.replace(action.position, action.replacement.size(), action.text);
+        app.editorCursorPos = action.cursorBefore;
+        app.redoStack.push_back(action);
+    } else if (action.type == App::EditAction::Insert) {
         // Reverse: delete the inserted text
         app.editorText.erase(action.position, action.text.size());
         app.editorCursorPos = action.cursorBefore;
@@ -447,7 +452,11 @@ static void editorRedo(App& app) {
     auto action = app.redoStack.back();
     app.redoStack.pop_back();
 
-    if (action.type == App::EditAction::Insert) {
+    if (action.type == App::EditAction::Replace) {
+        app.editorText.replace(action.position, action.text.size(), action.replacement);
+        app.editorCursorPos = action.cursorAfter;
+        app.undoStack.push_back(action);
+    } else if (action.type == App::EditAction::Insert) {
         app.editorText.insert(action.position, action.text);
         app.editorCursorPos = action.cursorAfter;
         app.undoStack.push_back(action);
@@ -783,8 +792,13 @@ void editorMarkDirtyAndReparse(App& app) {
 
 void editorReparse(App& app, bool force) {
     KillTimer(app.hwnd, TIMER_EDITOR_REPARSE);
-    if (!app.editMode || (!app.editorShowPreview && !force)) return;
+    if (!app.editMode) return;
     std::string utf8 = toUtf8(app.editorText);
+    if (!isPlainTextDocumentPath(app.currentFile) && !isMermaidDocumentPath(app.currentFile)) {
+        auto metadata = fm::parse(utf8);
+        if (metadata.present) observeFrontmatter(app, metadata.properties);
+    }
+    if (!app.editorShowPreview && !force) return;
 
     // Build line-to-byte-offset mapping for scroll sync
     app.editorLineByteOffsets.clear();
@@ -1231,12 +1245,17 @@ void renderQuickNoteEmptyState(App& app) {
 void saveEditorFile(App& app, HWND hwnd) {
     // The open table cell belongs in the save (#148)
     tableEditCommit(app);
+    auto seenKey = frontmatterSeenKey(app);
+    std::string firstSeen = app.frontmatterFirstSeen.count(seenKey) ? app.frontmatterFirstSeen[seenKey] : fm::utcNow();
     if (app.currentFile.empty()) {
         // Untitled quick note: name it now; cancel keeps editing untitled
         if (!promptSaveAsPath(app, hwnd)) return;
     }
 
     std::string utf8 = toUtf8(app.editorText);
+    if (!isPlainTextDocumentPath(app.currentFile) && !isMermaidDocumentPath(app.currentFile))
+        utf8 = fm::stamp(utf8, app.frontmatter, firstSeen, fm::utcNow());
+    const std::wstring savedText = fromUtf8(utf8);
 
     // Detect original line ending style by reading first line
     std::wstring widePath = toWide(app.currentFile);
@@ -1272,6 +1291,26 @@ void saveEditorFile(App& app, HWND hwnd) {
     if (out) {
         out.write(utf8.data(), utf8.size());
         out.close();
+    }
+    if (out.good()) {
+        if (savedText != app.editorText) {
+            size_t begin = 0, oldEnd = app.editorText.size(), newEnd = savedText.size();
+            while (begin < oldEnd && begin < newEnd && app.editorText[begin] == savedText[begin]) ++begin;
+            while (oldEnd > begin && newEnd > begin && app.editorText[oldEnd-1] == savedText[newEnd-1]) { --oldEnd; --newEnd; }
+            auto shifted = [&](size_t position) {
+                if (position <= begin) return position;
+                if (position < oldEnd) return std::min(newEnd, begin + position - begin);
+                return position - oldEnd + newEnd;
+            };
+            size_t cursor = shifted(app.editorCursorPos);
+            App::EditAction action{App::EditAction::Replace, begin, app.editorText.substr(begin, oldEnd-begin), app.editorCursorPos, cursor};
+            action.replacement = savedText.substr(begin, newEnd-begin);
+            app.undoStack.push_back(std::move(action));app.redoStack.clear();
+            app.editorSelStart = shifted(app.editorSelStart);app.editorSelEnd = shifted(app.editorSelEnd);
+            app.editorText = savedText;app.editorCursorPos = cursor;
+            rebuildLineStarts(app);app.clearEditorLineLayoutCache();app.editorRowMetricsWidth = -1;
+        }
+        app.frontmatterFirstSeen[frontmatterSeenKey(app)] = firstSeen;
         app.editorDirty = false;
         updateFileWriteTime(app);
 
@@ -1307,7 +1346,10 @@ void saveEditorFile(App& app, HWND hwnd) {
 
 // Save As (#121): pick a new path, write there, and the tab follows
 void saveEditorFileAs(App& app, HWND hwnd) {
+    auto key = frontmatterSeenKey(app);
+    std::string firstSeen = app.frontmatterFirstSeen.count(key) ? app.frontmatterFirstSeen[key] : "";
     if (!promptSaveAsPath(app, hwnd)) return;  // cancel keeps the old path
+    if (!firstSeen.empty()) app.frontmatterFirstSeen[frontmatterSeenKey(app)] = firstSeen;
     app.editorDirty = true;  // force the write even for a clean buffer
     saveEditorFile(app, hwnd);
     if (app.editorDirty) return;  // write failed (toast already shown)

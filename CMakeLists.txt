@@ -50,6 +50,7 @@ set(SOURCES
     src/render.cpp
     src/file_utils.cpp
     src/overlays.cpp
+    src/frontmatter_ui.cpp
     src/sidepanels.cpp
     src/context_menu.cpp
     src/input.cpp
@@ -67,7 +68,7 @@ set(SOURCES
     src/mermaid_charts2.cpp
     src/mermaid_block.cpp
     src/mermaid_c4.cpp
-    src/document.cpp
+    src/document.cpp src/frontmatter.cpp
     src/inline_style.cpp
     src/print.cpp
     src/i18n.cpp
@@ -195,6 +196,16 @@ if(BUILD_TESTING)
         TINTA_SYNTAX_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     add_test(NAME syntax_highlighting COMMAND syntax_tests)
 
+    add_executable(frontmatter_tests tests/frontmatter_tests.cpp ${INPUT_TEST_SOURCES})
+    target_include_directories(frontmatter_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
+    target_link_libraries(frontmatter_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
+    target_compile_definitions(frontmatter_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
+        TINTA_FRONTMATTER_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    add_test(NAME frontmatter COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:frontmatter_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/frontmatter-test-$<CONFIG>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_portable_test.cmake)
+
     add_executable(footnote_tests tests/footnote_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(footnote_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(footnote_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
@@ -261,7 +272,7 @@ if(BUILD_TESTING)
 
     add_executable(document_tests
         tests/document_tests.cpp
-        src/document.cpp
+        src/document.cpp src/frontmatter.cpp
         src/markdown.cpp src/footnotes.cpp
     )
     target_include_directories(document_tests PRIVATE
