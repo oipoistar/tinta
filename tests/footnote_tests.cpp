@@ -98,6 +98,8 @@ int main() {
     auto zip=read(output/"footnotes.docx");
     check(zip.find("word/footnotes.xml")!=std::string::npos && zip.find("relationships/footnotes")!=std::string::npos,"Word footnote part and relationship exist");
     check(zip.find("<w:footnoteReference w:id=\"1\"/>")!=std::string::npos && zip.find("<w:footnote w:id=\"1\">")!=std::string::npos,"Word native reference targets real footnote");
+    check(zip.find("rIdrId")==std::string::npos && zip.find("<w:tblGrid><w:gridCol/>")!=std::string::npos,
+          "Word image IDs resolve and tables include required grids");
     check(zip.find("NOTEREF _tinta_fn_1")!=std::string::npos,"repeated Word references use a cross-reference field");
     DestroyWindow(app.hwnd);app.hwnd=nullptr;state.reset();CoUninitialize();
     std::cout<<"Footnotes: "<<failures<<" failures\n";return failures?1:0;

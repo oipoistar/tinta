@@ -242,6 +242,7 @@ struct Settings {
     // Editor markdown assists (list continuation, Tab indent, Ctrl+B/I)
     // master switch
     bool editorAssists = true;
+    fm::Settings frontmatter;
     // User-chosen pandoc executable ("" = auto-detect)
     std::string pandocPath;
 };
@@ -1173,6 +1174,7 @@ struct App {
     // Unified editor (design t11): one raw buffer, live render beside it;
     // the left tool rail slides in with edit mode carrying the controls
     bool editorAssists = true;
+    fm::Settings frontmatter;
     float editRailAnim = 0.0f;       // rail slide-in 0..1
     int editRailHover = 0;           // hit id under the mouse, 0 = none
     std::vector<std::pair<D2D1_RECT_F, int>> editRailHits;  // rebuilt each paint
@@ -1238,13 +1240,22 @@ struct App {
     // 2 replace field, 3 Replace button, 4 Replace-all button
     std::vector<std::pair<D2D1_RECT_F, int>> searchReplaceHits;
 
+    std::unordered_map<std::string, std::string> frontmatterFirstSeen;
+    float frontmatterScroll = 0, frontmatterUiScale = 1;
+    D2D1_RECT_F frontmatterListRect{}, frontmatterMenuRect{};
+    std::vector<D2D1_RECT_F> frontmatterRows;
+    int frontmatterDrag = -1, frontmatterDrop = -1, frontmatterMenu = -1;
+    struct PropertyOverflow { D2D1_RECT_F rect; std::wstring text; };
+    std::vector<PropertyOverflow> frontmatterOverflow;
+
     // Undo/redo
     struct EditAction {
-        enum Type { Insert, Delete };
+        enum Type { Insert, Delete, Replace };
         Type type;
         size_t position;
         std::wstring text;
         size_t cursorBefore, cursorAfter;
+        std::wstring replacement; // atomic automatic metadata change
     };
     std::vector<EditAction> undoStack;
     std::vector<EditAction> redoStack;
@@ -1274,6 +1285,7 @@ struct App {
         }
         layoutTextRuns.clear();
         layoutRects.clear();
+        frontmatterOverflow.clear();
         layoutLines.clear();
         layoutShapes.clear();
         layoutConnectors.clear();

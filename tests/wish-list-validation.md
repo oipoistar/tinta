@@ -50,3 +50,47 @@ contain paragraphs, a list, a table and a SQL block.
   native navigation and renderer checks above were used instead.
 
 Nested footnotes and inline `^[note]` syntax are outside this implementation.
+## Configurable frontmatter
+
+Validated on Windows, 2026-09-10. This extends the original timestamp-only scope
+with the maintainer's ordered property-table design. Per their clarification,
+showing created/updated enables maintenance and missing enabled fields are added
+on save. The default date rows remain unchecked.
+
+- Three runnable Markdown samples cover existing dates, missing dates and no
+  frontmatter. They mix the property strip with headings, tables, lists, quotes,
+  links, emphasis, highlights, fenced code, math and repeated/multiline footnotes.
+- All 20 CTests passed. The new isolated native test covers setting persistence,
+  field discovery, row dragging, format selection, clipped hit targets, both
+  themes and widths/scales, wrapping bounds, and the existing Markdown structures.
+- Save tests check actual files and editor state: existing created preservation,
+  first-observed creation time, insertion, every-save updates, disabled options,
+  one-step Undo/Redo, failed writes, comments, nested/ambiguous YAML, UTF-8 BOM and
+  CRLF. Opening and settings changes leave the source bytes unchanged.
+- Native PNG pages, HTML and DOCX were generated for all three samples and the
+  footnote sample in Paper and Midnight. Original fixture hashes are checked
+  before/after export. The normal-width strip and surrounding content were
+  visually inspected in the native print output.
+- Computer Use inspected the actual Frontmatter page in Paper at normal and
+  narrow widths. At 600 pixels, the document stacks its date fields below the
+  left group, while the settings navigation moves into a horizontal row. The
+  list format menu and changing chips to hashtags were exercised; both preview
+  and document updated. Other changes in the first test window were made by the
+  maintainer. Native tests additionally cover high-DPI geometry.
+
+The stricter OpenXML SDK validation uncovered run-property ordering and missing
+required table grids in the export path. These are corrected as part of testing
+footnotes in mixed documents. Nested/inline footnote syntax and a complete YAML
+processor remain outside this implementation. HTML/DOCX retain their established
+behavior of omitting the frontmatter strip.
+
+OpenXML SDK validation of the final footnote and mixed frontmatter DOCX samples
+reports zero errors, including tables, repeated references and embedded math.
+The final native drag check moved `created` below `updated` and verified the
+same order immediately in the preview. The miniature preview also follows the
+current document's narrow/wide layout. The list overflow popup was inspected
+and correctly showed the four hidden tags.
+
+Final regression exports retain byte-identical output for all 24 existing PNG
+pages and all 8 HTML files. DOCX changes are the schema-order/table-grid fixes.
+The final Release build passes all 20 CTests.

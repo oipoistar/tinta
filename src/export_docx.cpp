@@ -630,30 +630,26 @@ int addLinkRel(DocxCtx& ctx, const std::string& url) {
 }
 
 std::string runPropsXml(const DocxCtx& ctx, const RunProps& props) {
+    // CT_RPr has an ordered content model. Colour precedes size, highlighting,
+    // underlining and vertical alignment (including superscript footnotes).
     std::string xml;
-    if (props.code) {
-        xml += "<w:rFonts w:ascii=\"" + ctx.monoFont + "\" w:hAnsi=\"" +
+    if (props.code) xml += "<w:rFonts w:ascii=\"" + ctx.monoFont + "\" w:hAnsi=\"" +
                ctx.monoFont + "\" w:cs=\"" + ctx.monoFont + "\"/>";
-        xml += "<w:sz w:val=\"21\"/><w:szCs w:val=\"21\"/>";
-        if (!props.highlight || ctx.highlightBgHex.empty())
-            xml += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" +
-               ctx.codeBgHex + "\"/>";
-    }
     if (props.bold) xml += "<w:b/>";
     if (props.italic) xml += "<w:i/>";
     if (props.strike) xml += "<w:strike/>";
-    if (props.highlight) {
-        if (ctx.highlightBgHex.empty()) xml += "<w:highlight w:val=\"yellow\"/>";
-        else xml += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" + ctx.highlightBgHex + "\"/>";
-    }
-    if (props.superScript) xml += "<w:vertAlign w:val=\"superscript\"/>";
-    if (props.subScript) xml += "<w:vertAlign w:val=\"subscript\"/>";
-    if (props.code && !props.isLink && !ctx.inlineCodeHex.empty()) {
+    if (props.code && !props.isLink && !ctx.inlineCodeHex.empty())
         xml += "<w:color w:val=\"" + ctx.inlineCodeHex + "\"/>";
-    } else if (!props.color.empty()) {
-        xml += "<w:color w:val=\"" + props.color + "\"/>";
-    }
+    else if (!props.color.empty()) xml += "<w:color w:val=\"" + props.color + "\"/>";
+    if (props.code) xml += "<w:sz w:val=\"21\"/><w:szCs w:val=\"21\"/>";
+    if (props.highlight && ctx.highlightBgHex.empty()) xml += "<w:highlight w:val=\"yellow\"/>";
     if (props.underline) xml += "<w:u w:val=\"single\"/>";
+    if (props.highlight && !ctx.highlightBgHex.empty())
+        xml += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" + ctx.highlightBgHex + "\"/>";
+    else if (props.code)
+        xml += "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" + ctx.codeBgHex + "\"/>";
+    if (props.superScript) xml += "<w:vertAlign w:val=\"superscript\"/>";
+    else if (props.subScript) xml += "<w:vertAlign w:val=\"subscript\"/>";
     return xml.empty() ? "" : "<w:rPr>" + xml + "</w:rPr>";
 }
 
@@ -1180,6 +1176,12 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
                 "<w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"" +
                 ctx.borderHex + "\"/>"
                 "</w:tblBorders></w:tblPr>";
+            size_t columns = 0;
+            for (const auto& row : elem->children)
+                if (row->type == ElementType::TableRow) columns = std::max(columns, row->children.size());
+            ctx.body += "<w:tblGrid>";
+            for (size_t col = 0; col < columns; ++col) ctx.body += "<w:gridCol/>";
+            ctx.body += "</w:tblGrid>";
             for (size_t rowIndex = 0; rowIndex < elem->children.size();
                  rowIndex++) {
                 const auto& row = elem->children[rowIndex];
@@ -1262,8 +1264,8 @@ std::string stylesXml(const DocxCtx& ctx) {
         "<w:docDefaults><w:rPrDefault><w:rPr>"
         "<w:rFonts w:ascii=\"" + ctx.bodyFont + "\" w:hAnsi=\"" +
         ctx.bodyFont + "\" w:cs=\"" + ctx.bodyFont + "\"/>"
-        "<w:sz w:val=\"24\"/><w:szCs w:val=\"24\"/>"
         "<w:color w:val=\"" + ctx.textHex + "\"/>"
+        "<w:sz w:val=\"24\"/><w:szCs w:val=\"24\"/>"
         "</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>"
         "<w:spacing w:after=\"160\" w:line=\"312\" w:lineRule=\"auto\"/>"
         "</w:pPr></w:pPrDefault></w:docDefaults>"

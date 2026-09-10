@@ -1,3 +1,4 @@
+#include "frontmatter_ui.h"
 // Direct2D + DirectWrite renderer for Windows
 // Much faster startup than OpenGL
 
@@ -1022,6 +1023,8 @@ render_document:
         }
     }
 
+    renderFrontmatterOverflow(app);
+
     // Back to screen coordinates: notifications, stats, and overlays
     // (including the folder browser panel itself) are not shifted
     if (!app.editMode && documentViewportX(app) > 0.0f) {
@@ -1527,6 +1530,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_CAPTURECHANGED:
+            if (app && (HWND)lParam != hwnd && app->frontmatterDrag >= 0) {
+                app->frontmatterDrag = app->frontmatterDrop = -1;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
             if (app && (HWND)lParam != hwnd) cancelDocumentScrollbarDrag(*app, hwnd);
             if (app && (HWND)lParam != hwnd) sidePanelResizeEnd(*app, hwnd, true);
             // Losing capture mid tab-drag (Alt+Tab, a popup stealing the
@@ -1537,6 +1544,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_CANCELMODE:
+            if (app && app->frontmatterDrag >= 0) {
+                app->frontmatterDrag = app->frontmatterDrop = -1;
+                if (GetCapture() == hwnd) ReleaseCapture();
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
             if (app) cancelDocumentScrollbarDrag(*app, hwnd);
             if (app) sidePanelResizeEnd(*app, hwnd, true);
             break;
@@ -1882,6 +1894,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
     app.editorAssists = savedSettings.editorAssists;
+    app.frontmatter = savedSettings.frontmatter;
     app.pandocUserPath = toWide(savedSettings.pandocPath);
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
@@ -2133,6 +2146,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow
             app.parseTimeUs = result.parseTimeUs;
             // Review annotations derive from the raw source (#126)
             app.sourceText = content;
+            for (const auto& e : app.root->children)
+                if (e->type == ElementType::Properties) observeFrontmatter(app, e->properties);
             annotationsParseSource(app);
         }
         return result.success;

@@ -1,3 +1,4 @@
+#include "frontmatter_ui.h"
 #include "overlays.h"
 #include "sidepanels.h"
 #include "utils.h"
@@ -2684,8 +2685,8 @@ void settingsChip(App& app, float& x, float y, const wchar_t* label, bool active
 } // namespace
 
 D2D1_RECT_F settingsPanelRect(const App& app) {
-    float w = std::min(dpi(app, 760.0f), app.width - dpi(app, 80.0f));
-    float h = std::min(dpi(app, 540.0f), app.height - dpi(app, 64.0f));
+    float w = std::min(dpi(app, app.settingsSection == 3 ? 980.0f : 760.0f), app.width - dpi(app, app.settingsSection == 3 ? 32.0f : 80.0f));
+    float h = std::min(dpi(app, app.settingsSection == 3 ? 650.0f : 540.0f), app.height - dpi(app, 64.0f));
     float x = (app.width - w) / 2;
     float y = (app.height - h) / 2 + (1 - app.settingsAnimation) * dpi(app, 30.0f);
     return D2D1::RectF(x, y, x + w, y + h);
@@ -2779,14 +2780,19 @@ void renderSettingsOverlay(App& app) {
     // Section rail
     const wchar_t* sections[] = {tr(app, "settings.section.general"),
                                  tr(app, "settings.section.appearance"),
-                                 tr(app, "settings.section.editor")};
-    const int sectionActions[] = {SET_SECTION_GENERAL, SET_SECTION_APPEARANCE, SET_SECTION_EDITOR};
+                                 tr(app, "settings.section.editor"), tr(app, "fm.section")};
+    const int sectionActions[] = {SET_SECTION_GENERAL, SET_SECTION_APPEARANCE, SET_SECTION_EDITOR, SET_SECTION_FRONTMATTER};
     float railX = px + dpi(app, 24.0f);
     float railY = py + dpi(app, 68.0f);
-    float railW = dpi(app, 140.0f);
-    for (int i = 0; i < 3; i++) {
+    bool compactFrontmatter = app.settingsSection == 3 && panelW < dpi(app, 760.f);
+    float railW = dpi(app, 140.f);
+    for (int i = 0; i < 4; i++) {
         float rowY = railY + i * dpi(app, 38.0f);
         D2D1_RECT_F r = D2D1::RectF(railX, rowY, railX + railW, rowY + dpi(app, 30.0f));
+        if (compactFrontmatter) {
+            float cell = (panelW-dpi(app,48.f))/4;
+            r = D2D1::RectF(railX+i*cell,railY,railX+(i+1)*cell,railY+dpi(app,30.f));
+        }
         if (i == app.settingsSection) {
             // Active section: lifted pill plus an accent indicator bar
             app.brush->SetColor(settingsLift(app, 0.12f, 0.95f, anim));
@@ -2816,6 +2822,11 @@ void renderSettingsOverlay(App& app) {
     float cx = railX + railW + dpi(app, 24.0f);
     float cw = px + panelW - dpi(app, 24.0f) - cx;
     float cy = railY;
+    if (app.settingsSection == 3) {
+        if (compactFrontmatter) { cx=railX; cw=panelW-dpi(app,48.f); cy=railY+dpi(app,42.f); }
+        renderFrontmatterSettings(app, D2D1::RectF(cx, cy, cx+cw, py+panelH-dpi(app, 24.f)));
+        return;
+    }
     float cardPad = dpi(app, 14.0f);
     float cardGap = dpi(app, 10.0f);
     float rowCardH = dpi(app, 58.0f);

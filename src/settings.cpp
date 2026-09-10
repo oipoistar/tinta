@@ -74,6 +74,11 @@ void saveSettings(const Settings& settings) {
 
     // Remappable keys ("custom" profile), written with every save so the
     // section documents itself: change a value, restart Tinta
+    file << "frontmatterShown=" << settings.frontmatter.shown << "\n";
+    file << "frontmatterOther=" << settings.frontmatter.showOther << "\n";
+    for (const auto& rule : settings.frontmatter.rules)
+        file << "frontmatterRule=" << fm::encodeRule(rule) << "\n";
+
     file << "[Keys]\n";
     file << "; single letters/digits, Tab, Space, F1-F12, or one character\n";
     for (int i = 0; i < KEY_ACTION_COUNT; i++) {
@@ -221,7 +226,7 @@ Settings loadSettings() {
     std::ifstream file(path);
     if (!file) return settings;
 
-    bool sawKeyProfile = false;
+    bool sawKeyProfile = false, sawFrontmatterRules = false;
     std::string line;
     while (std::getline(file, line)) {
         if (line.empty() || line[0] == '[' || line[0] == ';') continue;
@@ -232,7 +237,18 @@ Settings loadSettings() {
         std::string key = line.substr(0, eq);
         std::string value = line.substr(eq + 1);
 
-        if (key == "themeIndex") {
+        if (key == "frontmatterShown") {
+            settings.frontmatter.shown = value == "1";
+        } else if (key == "frontmatterOther") {
+            settings.frontmatter.showOther = value == "1";
+        } else if (key == "frontmatterRule") {
+            fm::Rule rule;
+            if (fm::decodeRule(value, rule)) {
+                if (!sawFrontmatterRules) { settings.frontmatter.rules.clear(); sawFrontmatterRules = true; }
+                if (!fm::find(settings.frontmatter, rule.key) && settings.frontmatter.rules.size() < 256)
+                    settings.frontmatter.rules.push_back(std::move(rule));
+            }
+        } else if (key == "themeIndex") {
             int idx = std::stoi(value);
             if (idx >= 0) settings.themeIndex = idx;  // clamped at apply via themeCount()
         } else if (key == "zoomFactor") {
