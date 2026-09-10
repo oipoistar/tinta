@@ -401,9 +401,11 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
     float maxX = startX + maxWidth;
     float spaceWidth = getSpaceWidth(app, baseFormat);
 
+    std::string inlineAnchor;
     auto addLinkSegment = [&](float lineStartX, float lineEndX, float lineY,
                               const std::string& linkUrl, D2D1_COLOR_F color) {
         if (lineEndX <= lineStartX) return;
+        if (!inlineAnchor.empty()) app.footnoteAnchors.emplace(inlineAnchor, lineY);
         bool refLive = linkUrl.rfind("fileref-ok:", 0) == 0;
         bool refMissing = linkUrl.rfind("fileref-missing:", 0) == 0;
         float underlineY = lineY + mathTextOffset + normalLineHeight - 2;
@@ -421,7 +423,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                                            D2D1::Point2F(ex, underlineY),
                                            dashColor, 1.0f});
             }
-        } else {
+        } else if (inlineAnchor.empty()) {
             app.layoutLines.push_back({D2D1::Point2F(lineStartX, underlineY),
                                        D2D1::Point2F(lineEndX, underlineY),
                                        color, 1.0f});
@@ -476,6 +478,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         IDWriteTextFormat* format = run.style.format;
         D2D1_COLOR_F color = run.style.color;
         const std::string& linkUrl = run.style.linkUrl;
+        inlineAnchor = run.style.anchorId;
         bool isLink = run.style.isLink;
         bool hasBg = run.style.hasBg;
         bool hasStrike = run.style.hasStrike;
@@ -934,7 +937,8 @@ static void layoutParagraph(App& app, const ElementPtr& elem, float& y, float in
         layoutMathBlock(app, *math, y, indent, maxWidth);
         return;
     }
-    layoutInlineContent(app, elem->children, indent, y, maxWidth, app.textFormat, app.theme.text);
+    auto format = elem->language == "footnote-backlinks" && app.supSubFormat ? app.supSubFormat : app.textFormat;
+    layoutInlineContent(app, elem->children, indent, y, maxWidth, format, app.theme.text);
     app.docText += L"\n\n";
     float scale = app.contentScale * app.zoomFactor;
     y += 14 * scale;
@@ -3138,6 +3142,20 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
         case ElementType::Paragraph:
             layoutParagraph(app, elem, y, indent, maxWidth);
             break;
+        case ElementType::Footnotes:
+            layoutHorizontalRule(app, y, indent, maxWidth);
+            for (const auto& child : elem->children) layoutElement(app, child, y, indent, maxWidth);
+            break;
+        case ElementType::FootnoteDefinition: {
+            app.footnoteAnchors[elem->url] = y;
+            auto label = std::make_shared<Element>(ElementType::Text);
+            label->text = std::to_string(elem->level) + ".";
+            float labelY = y;
+            float inset = 32 * app.contentScale * app.zoomFactor;
+            layoutInlineContent(app, {label}, indent, labelY, inset, app.textFormat, app.theme.text);
+            for (const auto& child : elem->children) layoutElement(app, child, y, indent + inset, maxWidth - inset);
+            break;
+        }
         case ElementType::Heading:
             layoutHeading(app, elem, y, indent, maxWidth);
             break;
@@ -3308,7 +3326,10 @@ bool layoutStep(App& app, float targetY, int64_t budgetUs) {
         const auto& child = children[app.layoutNextBlock];
         // Record scroll anchor from source offset
         size_t offset = findFirstSourceOffset(child);
-        if (offset != SIZE_MAX) {
+        // Endnotes can move definitions ahead of their source order. Keep the
+        // editor/preview mapping ordered; note jumps use their explicit anchors.
+        if (offset != SIZE_MAX && child->type != ElementType::Footnotes &&
+            (app.scrollAnchors.empty() || app.scrollAnchors.back().sourceOffset < offset)) {
             app.scrollAnchors.push_back({offset, y});
         }
         layoutElement(app, child, y, app.layoutIndent, app.layoutMaxWidth);

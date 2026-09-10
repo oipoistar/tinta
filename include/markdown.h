@@ -38,6 +38,7 @@ enum class ElementType {
     RubyText,
     // Synthetic first block built from YAML frontmatter (title + tags)
     Properties,
+    Footnotes, FootnoteDefinition, FootnoteReference, FootnoteBacklink,
     // Obsidian/Typora inline extensions (parsed in a post-pass)
     Highlight,     // ==text==
     Superscript,   // ^text^

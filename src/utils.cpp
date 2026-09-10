@@ -177,6 +177,11 @@ bool scrollToHeadingId(App& app, const std::string& id) {
     // early click on an anchor into a not-yet-laid-out section would miss.
     // Finish the layout synchronously before declaring the target absent.
     for (int attempt = 0; attempt < 2; attempt++) {
+        auto note = app.footnoteAnchors.find(id);
+        if (note != app.footnoteAnchors.end()) {
+            scrollToHeadingY(app, note->second);
+            return true;
+        }
         for (const auto& h : app.headings) {
             if (h.id == id) {
                 scrollToHeadingY(app, h.y);

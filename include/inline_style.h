@@ -17,6 +17,7 @@ struct InlineStyle {
     IDWriteTextFormat* format = nullptr;
     D2D1_COLOR_F color{};
     std::string linkUrl;
+    std::string anchorId;
     bool isLink = false;
     bool hasBg = false;
     D2D1_COLOR_F bgColor{};

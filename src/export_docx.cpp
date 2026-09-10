@@ -5,6 +5,7 @@
 // same primitives the viewer draws, and land as embedded pictures.
 
 #include "export.h"
+#include <set>
 
 #include "editor.h"
 #include "math_render.h"
@@ -588,6 +589,8 @@ struct RunProps {
 struct DocxCtx {
     App& app;
     std::string body;
+    std::vector<ElementPtr> footnotes;
+    std::set<int> emittedFootnotes;
     std::vector<std::pair<std::string, std::string>> media;  // name, bytes
     std::vector<std::string> relationships;   // xml lines, rId4 onward
     int nextRelId = 4;  // 1 = styles, 2 = numbering, 3 = settings
@@ -762,6 +765,23 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
             bold.bold = true;
             for (const auto& child : elem->children) {
                 walkInline(ctx, child, bold, out);
+            }
+            break;
+        }
+        case ElementType::FootnoteBacklink:
+            break;
+        case ElementType::FootnoteReference: {
+            std::string number = std::to_string(elem->level);
+            std::string bookmark = "_tinta_fn_" + number;
+            RunProps ref = props; ref.superScript = true; ref.color = ctx.linkHex;
+            if (ctx.emittedFootnotes.insert(elem->level).second) {
+                out += "<w:bookmarkStart w:id=\"" + number + "\" w:name=\"" + bookmark + "\"/>";
+                out += "<w:r>" + runPropsXml(ctx, ref) + "<w:footnoteReference w:id=\"" + number + "\"/></w:r>";
+                out += "<w:bookmarkEnd w:id=\"" + number + "\"/>";
+            } else {
+                out += "<w:fldSimple w:instr=\" NOTEREF " + bookmark + " \\h \" >";
+                emitTextRun(ctx, number, ref, out);
+                out += "</w:fldSimple>";
             }
             break;
         }
@@ -1000,6 +1020,9 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
             for (const auto& child : elem->children) {
                 walkBlocks(ctx, child, props, listDepth);
             }
+            break;
+        case ElementType::Footnotes:
+            ctx.footnotes = elem->children;
             break;
         case ElementType::Properties:
             break;
@@ -1351,6 +1374,33 @@ bool exportDocxFile(App& app, const std::wstring& path) {
 
     ParaProps rootProps;
     walkBlocks(ctx, app.root, rootProps, 0);
+    std::string footnoteXml;
+    if (!ctx.footnotes.empty()) {
+        footnoteXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+            "<w:footnotes xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" "
+            "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" "
+            "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">"
+            "<w:footnote w:type=\"separator\" w:id=\"-1\"><w:p><w:r><w:separator/></w:r></w:p></w:footnote>"
+            "<w:footnote w:type=\"continuationSeparator\" w:id=\"0\"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>";
+        std::string body = std::move(ctx.body);
+        for (const auto& note : ctx.footnotes) {
+            ctx.body.clear();
+            for (const auto& child : note->children) {
+                bool backlink = std::any_of(child->children.begin(), child->children.end(),
+                    [](const ElementPtr& e) { return e->type == ElementType::FootnoteBacklink; });
+                if (!backlink) walkBlocks(ctx, child, rootProps, 0);
+            }
+            std::string mark = "<w:r><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr><w:footnoteRef/></w:r>";
+            // Put the reference mark at the start of the first paragraph.
+            if (ctx.body.rfind("<w:p>", 0) == 0) {
+                size_t position = ctx.body.compare(5, 7, "<w:pPr>") == 0 ? ctx.body.find("</w:pPr>") + 8 : 5;
+                ctx.body.insert(position, mark);
+            } else ctx.body = "<w:p>" + mark + "</w:p>" + ctx.body;
+            footnoteXml += "<w:footnote w:id=\"" + std::to_string(note->level) + "\">" + ctx.body + "</w:footnote>";
+        }
+        ctx.body = std::move(body);
+        footnoteXml += "</w:footnotes>";
+    }
 
     std::string document =
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
@@ -1393,6 +1443,9 @@ bool exportDocxFile(App& app, const std::wstring& path) {
         "wordprocessingml.settings+xml\"/>"
         "</Types>";
 
+    if (!footnoteXml.empty()) contentTypes.insert(contentTypes.find("</Types>"),
+        "<Override PartName=\"/word/footnotes.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml\"/>");
+
     std::string rootRels =
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
         "<Relationships "
@@ -1418,6 +1471,12 @@ bool exportDocxFile(App& app, const std::wstring& path) {
         "Type=\"http://schemas.openxmlformats.org/officeDocument/2006/"
         "relationships/settings\" Target=\"settings.xml\"/>";
     for (const auto& rel : ctx.relationships) documentRels += rel;
+    std::string footnoteRels = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+        "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">";
+    for (const auto& rel : ctx.relationships) footnoteRels += rel;
+    footnoteRels += "</Relationships>";
+    if (!footnoteXml.empty()) documentRels += "<Relationship Id=\"rId" + std::to_string(ctx.nextRelId++) +
+        "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes\" Target=\"footnotes.xml\"/>";
     documentRels += "</Relationships>";
 
     // Without a settings part Word opens the file in Compatibility Mode
@@ -1433,6 +1492,10 @@ bool exportDocxFile(App& app, const std::wstring& path) {
     zip.add("[Content_Types].xml", contentTypes);
     zip.add("_rels/.rels", rootRels);
     zip.add("word/document.xml", document);
+    if (!footnoteXml.empty()) {
+        zip.add("word/footnotes.xml", footnoteXml);
+        zip.add("word/_rels/footnotes.xml.rels", footnoteRels);
+    }
     zip.add("word/_rels/document.xml.rels", documentRels);
     zip.add("word/styles.xml", stylesXml(ctx));
     zip.add("word/numbering.xml", numberingXml(ctx));
