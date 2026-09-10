@@ -354,6 +354,7 @@ struct App {
     IDWriteFontFallback* fontFallback = nullptr;  // For emoji font fallback
     IDWriteTextAnalyzer* textAnalyzer = nullptr;  // UAX#14 line-break analysis
     IDWriteTextFormat* textFormat = nullptr;
+    IDWriteTextFormat* supSubFormat = nullptr;  // document font for ^sup^/~sub~
     IDWriteTextFormat* headingFormat = nullptr;
     IDWriteTextFormat* codeFormat = nullptr;
     IDWriteTextFormat* boldFormat = nullptr;
@@ -1210,7 +1211,6 @@ struct App {
     std::vector<EditAction> redoStack;
 
     // Editor text format (monospace)
-    IDWriteTextFormat* supSubFormat = nullptr;   // small size for ^sup^/~sub~
     IDWriteTextFormat* editorTextFormat = nullptr;
     float editorCharWidth = 0.0f; // Measured monospace char width
     // Slim in-editor line-number gutter (design t11)
@@ -1266,7 +1266,6 @@ struct App {
         if (tocFormat) { tocFormat->Release(); tocFormat = nullptr; }
         if (tocFormatBold) { tocFormatBold->Release(); tocFormatBold = nullptr; }
         if (statsFormat) { statsFormat->Release(); statsFormat = nullptr; }
-        if (supSubFormat) { supSubFormat->Release(); supSubFormat = nullptr; }
         if (editorTextFormat) { editorTextFormat->Release(); editorTextFormat = nullptr; }
         if (editorGutterFormat) { editorGutterFormat->Release(); editorGutterFormat = nullptr; }
         for (auto& fmt : themePreviewFormats) {
@@ -1314,6 +1313,7 @@ struct App {
         if (fontFallback) { fontFallback->Release(); fontFallback = nullptr; }
         if (textAnalyzer) { textAnalyzer->Release(); textAnalyzer = nullptr; }
         if (textFormat) { textFormat->Release(); textFormat = nullptr; }
+        if (supSubFormat) { supSubFormat->Release(); supSubFormat = nullptr; }
         if (headingFormat) { headingFormat->Release(); headingFormat = nullptr; }
         if (codeFormat) { codeFormat->Release(); codeFormat = nullptr; }
         if (boldFormat) { boldFormat->Release(); boldFormat = nullptr; }

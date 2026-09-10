@@ -36,7 +36,7 @@ static const char* kSampleDocument = R"(# Welcome to Tinta
 
 - 10 beautiful themes — press **T** to choose
 - Native Mermaid flowchart rendering for `.mmd` files
-- Edit mode with live preview — press **:**
+- Edit mode with live preview — press **{{EDIT_KEY}}** to edit an untitled copy
 - Search — press **F**
 - Table of contents — press **Tab**
 - Text selection and copy
@@ -74,7 +74,7 @@ Press **?** at any time to see all shortcuts.
 
 ### Editing
 
-- **:** - Enter edit mode
+- **{{EDIT_KEY}}** - Enter edit mode
 - **Ctrl+S** - Save (in edit mode)
 - **ESC ESC** - Exit edit mode
 
@@ -110,7 +110,7 @@ sequenceDiagram
     participant Tinta
     You->>Tinta: Save the file
     Tinta-->>You: Re-renders instantly
-    You->>Tinta: Press : to edit
+    You->>Tinta: Press {{EDIT_KEY_PLAIN}} to edit
     Tinta-->>You: Live preview beside the text
 ```
 
@@ -145,8 +145,9 @@ as a diagram — no fences needed.
 
 static const char* kMarkdownBasics = R"(# Markdown basics
 
-Everything Tinta renders, in two minutes. Press **:** to open this file
-in the editor and watch the preview follow your keystrokes.
+Everything Tinta renders, in two minutes. Press **{{EDIT_KEY}}** to edit an
+untitled copy and watch the preview follow your keystrokes. Save it with
+**Ctrl+S** to a file of your own; the built-in example stays unchanged.
 
 ## Emphasis
 
@@ -198,7 +199,25 @@ ones offer to create the file.
 Inline $E = mc^2$ and block math render natively.
 )";
 
-const char* startPageSampleDoc() { return kSampleDocument; }
+static std::string embeddedContent(const App& app, const char* source) {
+    std::string content = source;
+    const std::string key = keyIniName(app.keymap[KA_EDIT]);
+    std::string markdownKey = key;
+    if (key.size() == 1 && std::string("\\`*_[]<>").find(key[0]) != std::string::npos)
+        markdownKey.insert(0, "\\");
+    const auto replace = [&](const std::string& marker, const std::string& value) {
+        size_t pos = 0;
+        while ((pos = content.find(marker, pos)) != std::string::npos) {
+            content.replace(pos, marker.size(), value);
+            pos += value.size();
+        }
+    };
+    replace("{{EDIT_KEY}}", markdownKey);
+    replace("{{EDIT_KEY_PLAIN}}", key);
+    return content;
+}
+
+std::string startPageSampleDoc(const App& app) { return embeddedContent(app, kSampleDocument); }
 
 // --- Small drawing helpers ----------------------------------------------
 
@@ -369,9 +388,9 @@ int startPageHitAt(const App& app, float x, float y) {
 }
 
 void startPageOpenEmbedded(App& app, HWND hwnd, int card) {
-    const char* content = card == 1   ? kMermaidTour
-                          : card == 2 ? kMarkdownBasics
-                                      : kSampleDocument;
+    const std::string content = embeddedContent(app, card == 1 ? kMermaidTour
+                                                   : card == 2 ? kMarkdownBasics
+                                                               : kSampleDocument);
     const char* titleKey = card == 1   ? "start.learn_mermaid"
                            : card == 2 ? "start.learn_md"
                                        : "start.learn_sample";
