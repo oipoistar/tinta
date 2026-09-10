@@ -917,6 +917,12 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
 
+    if (app.showToc || app.showFolderBrowser) {
+        TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, hwnd, 0};
+        TrackMouseEvent(&tracking);
+        if (mouseMoved) InvalidateRect(hwnd, nullptr, FALSE);
+    }
+
     if (app.panelResize.panel != SidePanel::None) {
         sidePanelResizeMove(app, static_cast<float>(app.mouseX));
         SetCursor(cursorSizeWE);

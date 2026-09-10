@@ -798,6 +798,18 @@ render_document:
     bool needsHScroll = app.contentWidth > documentWidth;
     float scrollbarSize = dpi(app, 14.0f);
 
+    // In the panel layout, scrollbars appear on activity and quietly fade out.
+    const ULONGLONG scrollNow = GetTickCount64();
+    if (std::abs(app.scrollX - app.panelObservedScrollX) > 0.1f ||
+        std::abs(app.scrollY - app.panelObservedScrollY) > 0.1f) {
+        app.panelObservedScrollX = app.scrollX;
+        app.panelObservedScrollY = app.scrollY;
+        app.lastPanelScrollActivity = scrollNow;
+        if (!app.editMode && (app.showToc || app.showFolderBrowser))
+            SetTimer(app.hwnd, TIMER_SIDE_PANEL_SCROLLBARS, 33, nullptr);
+    }
+    const float scrollbarOpacity = sidePanelDocumentScrollbarOpacity(app, scrollNow);
+
     // Scrollbar color: dark on light themes, light on dark themes
     float sbColorValue = app.theme.isDark ? 1.0f : 0.0f;
 
@@ -815,6 +827,7 @@ render_document:
 
         float sbWidth = (app.scrollbarHovered || app.scrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f);
         float sbAlpha = (app.scrollbarHovered || app.scrollbarDragging) ? 0.5f : 0.3f;
+        sbAlpha *= scrollbarOpacity;
 
         app.brush->SetColor(D2D1::ColorF(sbColorValue, sbColorValue, sbColorValue, sbAlpha));
         app.renderTarget->FillRoundedRectangle(
@@ -880,6 +893,7 @@ render_document:
 
         float sbHeight = (app.hScrollbarHovered || app.hScrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f);
         float sbAlpha = (app.hScrollbarHovered || app.hScrollbarDragging) ? 0.5f : 0.3f;
+        sbAlpha *= scrollbarOpacity;
 
         app.brush->SetColor(D2D1::ColorF(sbColorValue, sbColorValue, sbColorValue, sbAlpha));
         app.renderTarget->FillRoundedRectangle(
@@ -1509,6 +1523,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) sidePanelResizeEnd(*app, hwnd, true);
             break;
 
+        case WM_MOUSELEAVE:
+            if (app && GetCapture() != hwnd) {
+                app->mouseX = app->mouseY = -1;
+                app->scrollbarHovered = app->hScrollbarHovered = false;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
+
         case WM_SETCURSOR:
             if (app && LOWORD(lParam) == HTCLIENT) {
                 // We handle cursor in WM_MOUSEMOVE
@@ -1561,6 +1583,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_TIMER:
+            if (wParam == TIMER_SIDE_PANEL_SCROLLBARS && app) {
+                InvalidateRect(hwnd, nullptr, FALSE);
+                if (GetTickCount64() - app->lastPanelScrollActivity >= 1100 ||
+                    app->editMode || (!app->showToc && !app->showFolderBrowser))
+                    KillTimer(hwnd, TIMER_SIDE_PANEL_SCROLLBARS);
+            }
             if (wParam == TIMER_LINK_PEEK && app) handleLinkPeekTimer(*app, hwnd);
             if (wParam == TIMER_FILE_WATCH && app) handleFileWatchTimer(*app, hwnd);
             if (wParam == 2 && app) editorReparse(*app); // TIMER_EDITOR_REPARSE

@@ -18,7 +18,7 @@ openInTabs=0
 checkUpdates=0
 language=en
 '@ | Set-Content -LiteralPath "$taskOutput/runner/settings.ini"
-foreach ($taskName in @('toc-browser-resize','toc-browser-companion-with-a-long-file-name','markdown-regression-control','superscript-subscript')) {
+foreach ($taskName in @('toc-browser-resize','toc-browser-companion-with-a-long-file-name','markdown-regression-control','superscript-subscript','sidebar-visual-prototype')) {
     $taskSource = Join-Path $PSScriptRoot "fixtures/$taskName.md"
     $taskBefore = (Get-FileHash -LiteralPath $taskSource).Hash
     $taskDest = Join-Path $taskOutput $taskName

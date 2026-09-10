@@ -293,17 +293,16 @@ void renderSearchOverlay(App& app) {
     }
 }
 
-// One source of truth for the floating browser card's geometry (t13):
+// One source of truth for the docked browser panel's geometry:
 // render, cursor, and click hit-tests all read from here.
 FolderBrowserMetrics folderBrowserMetrics(const App& app) {
     FolderBrowserMetrics g;
     g.panelWidth = folderBrowserPanelWidth(app);
     g.panelX = -g.panelWidth * (1.0f - app.folderBrowserAnimation);
-    float m = dpi(app, 10.0f);
-    g.cardLeft = g.panelX + m;
-    g.cardRight = g.panelX + g.panelWidth - m;
-    g.cardTop = chromeTopHeight(app) + dpi(app, 10.0f);
-    g.cardBottom = (float)app.height - dpi(app, 12.0f);
+    g.cardLeft = g.panelX;
+    g.cardRight = g.panelX + g.panelWidth;
+    g.cardTop = chromeTopHeight(app);
+    g.cardBottom = (float)app.height;
     g.headerY = g.cardTop + dpi(app, 8.0f);
     g.headerH = dpi(app, 28.0f);
     g.btnSize = dpi(app, 22.0f);
@@ -423,28 +422,15 @@ void renderFolderBrowser(App& app) {
     }
     float anim = app.folderBrowserAnimation;
 
-    // Floating card inside the slide envelope (t13 design 13b)
+    // A docked surface shares one divider with the neighbouring pane.
     FolderBrowserMetrics g = folderBrowserMetrics(app);
     float panelWidth = g.panelWidth;
     float panelX = g.panelX;
     D2D1_RECT_F card = D2D1::RectF(g.cardLeft, g.cardTop, g.cardRight, g.cardBottom);
-    float radius = dpi(app, 12.0f);
-    promptChipShadow(app, card, radius);
     D2D1_COLOR_F panelBg = promptChipSurface(app);
-    panelBg.a = 0.96f;
+    panelBg.a = 1;
     app.brush->SetColor(panelBg);
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(card, radius, radius), app.brush);
-    D2D1_COLOR_F hi = D2D1::ColorF(1, 1, 1, app.theme.isDark ? 0.06f : 0.5f);
-    app.brush->SetColor(hi);
-    app.renderTarget->DrawLine(
-        D2D1::Point2F(g.cardLeft + radius, g.cardTop + 1.0f),
-        D2D1::Point2F(g.cardRight - radius, g.cardTop + 1.0f), app.brush, 1.0f);
-    D2D1_COLOR_F borderColor = app.theme.text;
-    borderColor.a = 0.13f;
-    app.brush->SetColor(borderColor);
-    app.renderTarget->DrawRoundedRectangle(
-        D2D1::RoundedRect(card, radius, radius), app.brush, 1.0f);
+    app.renderTarget->FillRectangle(card, app.brush);
 
     app.folderCrumbHits.clear();
     app.folderPinRect = D2D1_RECT_F{};
@@ -944,12 +930,12 @@ void renderFolderBrowser(App& app) {
 D2D1_RECT_F tocListRect(const App& app) {
     const float width = tocPanelWidth(app);
     const float x = tocPanelX(app, width);
-    return D2D1::RectF(x + dpi(app, 24.0f), chromeTopHeight(app) + dpi(app, 53.0f),
-                       x + width - dpi(app, 18.0f), app.height - dpi(app, 38.0f));
+    return D2D1::RectF(x + dpi(app, 14.0f), chromeTopHeight(app) + dpi(app, 43.0f),
+                       x + width - dpi(app, 8.0f), app.height - dpi(app, 26.0f));
 }
 
 float tocHeadingIndent(const App& app, int level) {
-    const float available = std::max(0.0f, tocPanelWidth(app) - dpi(app, 72.0f));
+    const float available = std::max(0.0f, tocPanelWidth(app) - dpi(app, 52.0f));
     const float step = std::min(dpi(app, 13.0f), available * 0.35f / 5);
     return std::clamp(level - 1, 0, 5) * step;
 }
@@ -995,35 +981,19 @@ void renderToc(App& app) {
     }
     float anim = app.tocAnimation;
 
-    // Floating outline card (t13 design 13a): the panel leaves its
-    // full-height slab and floats inside the slab's slide envelope
+    // Dock the outline directly against the document, without a second border.
     float panelWidth = tocPanelWidth(app);
     float panelX = tocPanelX(app, panelWidth);  // slides from the chosen side
-    float m = dpi(app, 10.0f);
-    float cardLeft = panelX + m;
-    float cardRight = panelX + panelWidth - m;
-    float cardTop = chromeTopHeight(app) + dpi(app, 10.0f);
-    float cardBottom = (float)app.height - dpi(app, 12.0f);
+    float cardLeft = panelX;
+    float cardRight = panelX + panelWidth;
+    float cardTop = chromeTopHeight(app);
+    float cardBottom = (float)app.height;
     D2D1_RECT_F card = D2D1::RectF(cardLeft, cardTop, cardRight, cardBottom);
-    float radius = dpi(app, 12.0f);
 
-    promptChipShadow(app, card, radius);
     D2D1_COLOR_F surf = promptChipSurface(app);
-    surf.a = 0.96f;
+    surf.a = 1;
     app.brush->SetColor(surf);
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(card, radius, radius), app.brush);
-    // Inset top highlight, then the hairline border
-    D2D1_COLOR_F hi = D2D1::ColorF(1, 1, 1, app.theme.isDark ? 0.06f : 0.5f);
-    app.brush->SetColor(hi);
-    app.renderTarget->DrawLine(
-        D2D1::Point2F(cardLeft + radius, cardTop + 1.0f),
-        D2D1::Point2F(cardRight - radius, cardTop + 1.0f), app.brush, 1.0f);
-    D2D1_COLOR_F borderColor = app.theme.text;
-    borderColor.a = 0.13f;
-    app.brush->SetColor(borderColor);
-    app.renderTarget->DrawRoundedRectangle(
-        D2D1::RoundedRect(card, radius, radius), app.brush, 1.0f);
+    app.renderTarget->FillRectangle(card, app.brush);
 
     app.tocCloseRect = D2D1_RECT_F{};
     app.tocPinRect = D2D1_RECT_F{};
@@ -1120,36 +1090,10 @@ void renderToc(App& app) {
             app.brush);
 
         // Items list between header and footer
-        float listStartY = dividerY + dpi(app, 8.0f);
-        float listBottom = cardBottom - footerHeight;
+        const auto listRect = tocListRect(app);
+        float listStartY = listRect.top;
+        float listBottom = listRect.bottom;
         float listHeight = listBottom - listStartY;
-
-        // Scroll-thread on the card edge: the document's viewport mapped
-        // onto the panel span (design 13a)
-        if (app.contentHeight > (float)app.height) {
-            float tx = cardLeft + dpi(app, 6.0f);
-            D2D1_RECT_F track = D2D1::RectF(tx, listStartY + dpi(app, 4.0f),
-                                            tx + dpi(app, 3.0f),
-                                            listBottom - dpi(app, 4.0f));
-            D2D1_COLOR_F tc = app.theme.text; tc.a = 0.08f * anim;
-            app.brush->SetColor(tc);
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(track, dpi(app, 1.5f), dpi(app, 1.5f)),
-                app.brush);
-            float span = track.bottom - track.top;
-            float docSpan = std::max(1.0f, app.contentHeight);
-            float segTop = track.top + span * (app.scrollY / docSpan);
-            float segH = std::max(dpi(app, 18.0f),
-                                  span * ((float)app.height / docSpan));
-            segTop = std::min(segTop, track.bottom - segH);
-            D2D1_COLOR_F ac = app.theme.accent; ac.a = anim;
-            app.brush->SetColor(ac);
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(D2D1::RectF(track.left, segTop,
-                                              track.right, segTop + segH),
-                                  dpi(app, 1.5f), dpi(app, 1.5f)),
-                app.brush);
-        }
 
         if (app.headings.empty()) {
             // "No headings" message
@@ -1229,8 +1173,8 @@ void renderToc(App& app) {
                     app.brush);
             }
 
-            float rowLeft = cardLeft + dpi(app, 14.0f);
-            float rowRight = cardRight - dpi(app, 8.0f);
+            float rowLeft = listRect.left;
+            float rowRight = listRect.right;
             app.renderTarget->PushAxisAlignedClip(
                 D2D1::RectF(cardLeft, listStartY, cardRight, listBottom),
                 D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);

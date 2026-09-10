@@ -29,3 +29,39 @@ the panels so their widths cannot change the page layout.
   Physical multi-monitor DPI transitions have not been manually exercised.
 
 The original visuals are checkpointed before the separate visual prototype.
+
+## Visual prototype
+
+The original checkpoint is `3448a168182a94a83c108c1b37e896445318d9d2` on
+`toc-browser-resize-210`; its executable is saved in
+`out/issue-210/visual-before/tinta.exe`. The prototype lives separately on
+`toc-sidebar-visual-prototype-210`. Reverting its single visual commit restores
+the original appearance while retaining H1-H6 support and resizing. The saved
+executable also allows restoring the dev builds without waiting for a rebuild.
+
+- Dock the panels without floating card borders, shadows or outer gaps. Each
+  boundary has one hairline that highlights on hover; the existing resize hit
+  area stays 10 logical pixels wide. This recovers 20 logical pixels within each
+  panel for labels and controls at the same preferred width.
+- Remove the duplicate document-position rail in Contents, retaining the short
+  active-heading marker and a separate Contents scrollbar when its list overflows.
+- With a side panel open, document scrollbars appear during scrolling, dragging,
+  search or edge hover. After 800 ms of inactivity they fade over 300 ms. A timer
+  stops after the fade. The editor and viewer without side panels retain their
+  previous scrollbar appearance.
+- Added `sidebar-visual-prototype.md`, with H1-H6, a table, quotes, lists, links,
+  code, scripts and equations. It is included in the native export runner.
+- Release build and **17/17 CTests passed**, including new interaction checks
+  for scrollbar dragging beside the resize target, fade timing, divider hover
+  and preserved ordinary-viewer behavior. Existing geometry, theme, scale and
+  print checks also pass.
+- All **19 export artifacts** (nine native PNG pages, five HTML and five DOCX
+  files) match the original-visual checkpoint byte for byte across five fixtures.
+- Computer-use screenshots inspected Paper at 1180x900 with browser left and
+  Contents right, and Midnight at 700x900 with both panels left. The shared
+  dividers, single-line footers, deep labels, active heading and surrounding
+  mixed content fit the intended layout. Automated native input tests provide
+  the deterministic resize/scrollbar interaction coverage.
+
+Generated preview builds, settings and export comparisons are isolated under
+`out/issue-210/`; physical monitor DPI transitions remain untested manually.

@@ -93,11 +93,32 @@ void renderSidePanelResizeGrip(App& app, SidePanel panel) {
     const bool active = app.panelResize.panel == panel ||
         sidePanelResizeAt(app, static_cast<float>(app.mouseX), static_cast<float>(app.mouseY)) == panel;
     D2D1_COLOR_F color = active ? app.theme.accent : app.theme.text;
-    color.a = active ? 0.8f : 0.2f;
+    color.a = active ? 0.55f : 0.10f;
     app.brush->SetColor(color);
-    const float cy = (chromeTopHeight(app) + app.height) * 0.5f;
-    app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(
-        D2D1::RectF(x - dpi(app, 1.5f), cy - dpi(app, 18.0f),
-                   x + dpi(app, 1.5f), cy + dpi(app, 18.0f)),
-        dpi(app, 1.5f), dpi(app, 1.5f)), app.brush);
+    const float left = std::floor(x) - (panel == SidePanel::Browser || app.tocOnLeft ? 1.0f : 0.0f);
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(left, chromeTopHeight(app), left + 1, (float)app.height), app.brush);
+}
+
+bool documentScrollbarEdgeHovered(const App& app) {
+    if (app.mouseY < chromeTopHeight(app) || app.mouseY > app.height ||
+        app.panelResize.panel != SidePanel::None ||
+        sidePanelResizeAt(app, (float)app.mouseX, (float)app.mouseY) != SidePanel::None) return false;
+    const float left = documentViewportX(app);
+    const float width = documentViewportWidth(app);
+    const float right = left + width;
+    const bool vertical = app.verticalScrollbarVisible && app.mouseX >= right - dpi(app, 14) && app.mouseX < right;
+    const bool horizontal = app.contentWidth > width && app.mouseY >= app.height - dpi(app, 14) &&
+                            app.mouseX >= left && app.mouseX < right;
+    return vertical || horizontal;
+}
+
+float sidePanelDocumentScrollbarOpacity(const App& app, ULONGLONG now) {
+    if (app.editMode || (!app.showToc && !app.showFolderBrowser)) return 1;
+    if (app.panelResize.panel != SidePanel::None) return 0;
+    if (app.scrollbarDragging || app.hScrollbarDragging || documentScrollbarEdgeHovered(app) || app.showSearch) return 1;
+    if (!app.lastPanelScrollActivity) return 0;
+    const ULONGLONG age = now - app.lastPanelScrollActivity;
+    if (age <= 800) return 1;
+    return std::max(0.0f, 1.0f - (float)(age - 800) / 300.0f);
 }

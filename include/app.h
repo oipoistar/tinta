@@ -41,6 +41,7 @@ inline int64_t usElapsed(Clock::time_point start) {
 #define TIMER_SELECT_SCROLL 8
 #define TIMER_LINK_PEEK 9
 #define TIMER_UPDATE_CHECK 10
+#define TIMER_SIDE_PANEL_SCROLLBARS 12
 
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
@@ -804,6 +805,8 @@ struct App {
     float scrollbarContentHeight = 0.0f;
     float scrollbarDragStartY = 0;
     float scrollbarDragStartScroll = 0;
+    ULONGLONG lastPanelScrollActivity = 0;
+    float panelObservedScrollX = 0, panelObservedScrollY = 0;
 
     // Horizontal scrollbar
     bool hScrollbarHovered = false;

@@ -157,6 +157,48 @@ void widthLimits(App& app) {
     }
 }
 
+void quietPanelEdges(App& app) {
+    app.contentScale = 1;
+    app.width = 1200;
+    app.height = 900;
+    app.showToc = app.showFolderBrowser = true;
+    app.tocOnLeft = false;
+    app.tocPinned = app.browserPinned = true;
+    app.tocAnimation = app.folderBrowserAnimation = 1;
+    app.tocWidth = 280;
+    app.browserWidth = 300;
+    app.verticalScrollbarVisible = true;
+    app.contentHeight = 2000;
+    app.lastPanelScrollActivity = 0;
+    app.mouseX = 500;
+    app.mouseY = 400;
+    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 2000), 0), "idle side-panel layout hides document scrollbars");
+    app.lastPanelScrollActivity = 1000;
+    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 1700), 1) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 1950), 0.5f) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 2100), 0), "scroll activity holds then fades the document scrollbar");
+    const float edge = sidePanelResizeEdge(app, SidePanel::Contents);
+    handleMouseMove(app, app.hwnd, MAKELPARAM((int)edge - 10, 400));
+    check(documentScrollbarEdgeHovered(app) && closeEnough(sidePanelDocumentScrollbarOpacity(app, 3000), 1),
+          "hover reveals the document scrollbar beside the divider");
+    handleMouseDown(app, app.hwnd, 0, MAKELPARAM((int)edge - 10, 400));
+    check(app.scrollbarDragging && app.panelResize.panel == SidePanel::None,
+          "the document scrollbar remains draggable beside the invisible resize target");
+    handleMouseUp(app, app.hwnd, 0, MAKELPARAM((int)edge - 10, 400));
+    app.mouseX = (int)edge;
+    check(!documentScrollbarEdgeHovered(app) && sidePanelResizeAt(app, edge, 400) == SidePanel::Contents,
+          "hover at the shared divider targets resizing only");
+    check(sidePanelResizeBegin(app, app.hwnd, edge, 400) &&
+          closeEnough(sidePanelDocumentScrollbarOpacity(app, 1700), 0), "resizing does not display a second competing rail");
+    sidePanelResizeEnd(app, app.hwnd, true);
+    app.swallowNextMouseUp = false;
+    app.mouseX = app.mouseY = -1;
+    check(!documentScrollbarEdgeHovered(app), "leaving the window clears edge hover");
+    app.showToc = app.showFolderBrowser = false;
+    check(closeEnough(sidePanelDocumentScrollbarOpacity(app, 3000), 1), "ordinary viewer scrollbar appearance is preserved");
+    app.tocPinned = app.browserPinned = false;
+}
+
 void longContents(App& app) {
     app.contentScale = 1;
     updateTextFormats(app);
@@ -249,6 +291,7 @@ int runSidePanelTests() {
                 for (SidePanel panel : {SidePanel::Contents, SidePanel::Browser})
                     resizeGesture(app, panel, left, both, scale);
     widthLimits(app);
+    quietPanelEdges(app);
     longContents(app);
 
     app.contentScale = app.zoomFactor = 1;
