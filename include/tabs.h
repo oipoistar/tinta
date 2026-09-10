@@ -14,7 +14,11 @@ void tabsInit(App& app);                       // adopt the startup document
 void tabsSeedSession(App& app, const std::vector<std::string>& paths);
 void tabActivate(App& app, HWND hwnd, int index);
 void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
-                 bool activate = true);
+                 bool activate = true, int insertBefore = -1);
+// Cross-window drops use client-space tab midpoints; ordinary opens append.
+int tabDropInsertionIndex(const App& app, POINT clientPoint);
+bool tabReceiveCopyData(App& app, HWND hwnd, const COPYDATASTRUCT& data);
+bool tabSendDrop(HWND target, const std::string& utf8Path, POINT screenPoint);
 void tabCloseIndex(App& app, HWND hwnd, int index);
 void tabCycle(App& app, HWND hwnd, int direction);
 

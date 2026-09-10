@@ -1374,13 +1374,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) {
                 COPYDATASTRUCT* data =
                     reinterpret_cast<COPYDATASTRUCT*>(lParam);
-                if (data && data->dwData == 1 && data->lpData &&
-                    data->cbData > 0) {
-                    std::string path(static_cast<const char*>(data->lpData),
-                                     data->cbData - 1);
+                if (data && tabReceiveCopyData(*app, hwnd, *data)) {
                     if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
                     SetForegroundWindow(hwnd);
-                    tabOpenPath(*app, hwnd, path, true);
                     return TRUE;
                 }
             }
