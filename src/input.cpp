@@ -3293,7 +3293,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             } else if (const App::LayoutBitmap* img =
                            layoutBitmapAt(app, docX, docY)) {
                 // Inline image: view it full size
-                openLightbox(app, img->bitmap);
+                openLightbox(app, img->bitmap.Get());
                 app.hasSelection = false;
             } else {
                 app.hasSelection = false;
@@ -3320,7 +3320,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             annotationOpenEditor(app, annotHit);
         } else if (const App::LayoutBitmap* img =
                        layoutBitmapAt(app, docX, docY)) {
-            openLightbox(app, img->bitmap);
+            openLightbox(app, img->bitmap.Get());
         }
     }
 

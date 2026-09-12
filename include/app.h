@@ -11,6 +11,7 @@
 #include <dwrite.h>
 #include <dwrite_2.h>
 #include <wincodec.h>
+#include <wrl/client.h>
 
 #include <string>
 #include <vector>
@@ -294,7 +295,7 @@ struct App {
 
     // Image cache
     struct ImageEntry {
-        ID2D1Bitmap* bitmap = nullptr;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
         int width = 0;
         int height = 0;
         bool failed = false;
@@ -313,14 +314,12 @@ struct App {
     }
 
     void storeImageCacheEntry(const std::string& key, ImageEntry entry) {
-        entry.bytes = entry.bitmap && entry.width > 0 && entry.height > 0
-            ? (size_t)entry.width * (size_t)entry.height * 4
-            : 0;
+        const auto pixels = entry.bitmap ? entry.bitmap->GetPixelSize() : D2D1_SIZE_U{};
+        entry.bytes = static_cast<size_t>(pixels.width) * pixels.height * 4;
         touchImageCacheEntry(entry);
 
         auto it = imageCache.find(key);
         if (it != imageCache.end()) {
-            if (it->second.bitmap) it->second.bitmap->Release();
             imageCacheBytes -= it->second.bytes;
             it->second = std::move(entry);
             imageCacheBytes += it->second.bytes;
@@ -342,7 +341,6 @@ struct App {
                 }
             }
             if (victim == imageCache.end()) break;
-            if (victim->second.bitmap) victim->second.bitmap->Release();
             imageCacheBytes -= victim->second.bytes;
             imageCache.erase(victim);
         }
@@ -350,7 +348,9 @@ struct App {
 
     // Layout bitmaps (document coordinates)
     struct LayoutBitmap {
-        ID2D1Bitmap* bitmap = nullptr;
+        // Layout owns a reference independently of the LRU cache (#220).
+        // Copies, measurement rollback and relayout all release via RAII.
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
         D2D1_RECT_F destRect{};
     };
     std::vector<LayoutBitmap> layoutBitmaps;
@@ -1329,9 +1329,6 @@ struct App {
     }
 
     void releaseImageCache() {
-        for (auto& [key, entry] : imageCache) {
-            if (entry.bitmap) { entry.bitmap->Release(); entry.bitmap = nullptr; }
-        }
         imageCache.clear();
         imageCacheBytes = 0;
         imageCacheUseClock = 0;

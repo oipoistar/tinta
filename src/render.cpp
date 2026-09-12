@@ -7,6 +7,7 @@
 #include "mermaid.h"
 #include "mermaid_ext.h"
 #include "math_render.h"
+#include "image_loader.h"
 
 #include <algorithm>
 #include <cctype>
@@ -14,6 +15,8 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <memory>
+#include <exception>
 #include <string_view>
 #include <filesystem>
 #include <fstream>
@@ -2393,62 +2396,54 @@ static void layoutList(App& app, const ElementPtr& elem, float& y, float indent,
 // via WM_APP_IMAGE_READY. Pixels are premultiplied BGRA.
 struct AsyncImageResult {
     std::string src;
-    UINT width = 0;
-    UINT height = 0;
-    std::vector<uint8_t> pixels;
+    DecodedImage image;
     bool ok = false;
 };
 
-// Runs on a worker thread: blocking download + WIC decode never touch the
-// UI thread, so dead links can't stall layout (#44). The worker owns its own
-// COM apartment and WIC factory; only plain pixel bytes cross the thread
-// boundary.
-static void asyncImageWorker(HWND hwnd, std::string src) {
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    auto* result = new AsyncImageResult();
-    result->src = src;
+static bool createDecodedBitmap(App& app, const DecodedImage& image,
+                                App::ImageEntry& entry) {
+    if (!app.renderTarget || image.pixels.empty()) return false;
+    const auto props = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+        image.dpiX, image.dpiY);
+    if (FAILED(app.renderTarget->CreateBitmap(D2D1::SizeU(image.width, image.height),
+            image.pixels.data(), image.width * 4, props, entry.bitmap.GetAddressOf())))
+        return false;
+    const auto size = entry.bitmap->GetSize();
+    entry.width = std::max(1, static_cast<int>(size.width));
+    entry.height = std::max(1, static_cast<int>(size.height));
+    entry.failed = false;
+    return true;
+}
 
-    wchar_t tempPath[MAX_PATH] = {};
-    std::wstring wideSrc = toWide(src);
-    if (SUCCEEDED(URLDownloadToCacheFileW(nullptr, wideSrc.c_str(), tempPath, MAX_PATH, 0, nullptr))) {
-        IWICImagingFactory* wic = nullptr;
-        if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                       IID_PPV_ARGS(&wic))) && wic) {
-            IWICBitmapDecoder* decoder = nullptr;
-            if (SUCCEEDED(wic->CreateDecoderFromFilename(tempPath, nullptr, GENERIC_READ,
-                                                         WICDecodeMetadataCacheOnDemand, &decoder)) && decoder) {
-                IWICBitmapFrameDecode* frame = nullptr;
-                if (SUCCEEDED(decoder->GetFrame(0, &frame)) && frame) {
-                    IWICFormatConverter* converter = nullptr;
-                    if (SUCCEEDED(wic->CreateFormatConverter(&converter)) && converter) {
-                        if (SUCCEEDED(converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA,
-                                WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) {
-                            UINT w = 0, h = 0;
-                            converter->GetSize(&w, &h);
-                            if (w > 0 && h > 0 && w < 16384 && h < 16384) {
-                                result->pixels.resize((size_t)w * h * 4);
-                                if (SUCCEEDED(converter->CopyPixels(nullptr, w * 4,
-                                        (UINT)result->pixels.size(), result->pixels.data()))) {
-                                    result->width = w;
-                                    result->height = h;
-                                    result->ok = true;
-                                }
-                            }
-                        }
-                        converter->Release();
-                    }
-                    frame->Release();
+// Only pixel bytes cross the thread boundary. The UI allocates the result
+// before launching so even download/decode allocation failures can complete
+// the pending cache entry without an exception terminating the process.
+static void asyncImageWorker(HWND hwnd, UINT maxDimension,
+                             std::unique_ptr<AsyncImageResult> result) {
+    const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    try {
+        if (SUCCEEDED(apartment)) {
+            wchar_t tempPath[MAX_PATH] = {};
+            const std::wstring wideSrc = toWide(result->src);
+            if (SUCCEEDED(URLDownloadToCacheFileW(nullptr, wideSrc.c_str(), tempPath,
+                                                  MAX_PATH, 0, nullptr))) {
+                Microsoft::WRL::ComPtr<IWICImagingFactory> wic;
+                if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                        CLSCTX_INPROC_SERVER, IID_PPV_ARGS(wic.GetAddressOf())))) {
+                    result->ok = SUCCEEDED(decodeImageFile(wic.Get(), tempPath,
+                                                          maxDimension, result->image));
                 }
-                decoder->Release();
             }
-            wic->Release();
         }
+    } catch (const std::exception&) {
+        result->ok = false;
     }
-
-    if (!PostMessageW(hwnd, WM_APP_IMAGE_READY, 0, (LPARAM)result)) {
-        delete result;  // window already gone
-    }
-    CoUninitialize();
+    if (SUCCEEDED(apartment)) CoUninitialize();
+    // Transfer ownership before posting: the UI can consume immediately.
+    auto* delivered = result.release();
+    if (!PostMessageW(hwnd, WM_APP_IMAGE_READY, 0, reinterpret_cast<LPARAM>(delivered)))
+        delete delivered;
 }
 
 // SVG images rasterize at 2x through the Direct2D SVG renderer
@@ -2579,7 +2574,7 @@ static bool loadSvgBitmap(App& app, const std::wstring& path,
         if (SUCCEEDED(app.renderTarget->CreateBitmapFromWicBitmap(
                 wicBitmap, &bp, &bitmap)) &&
             bitmap) {
-            entry.bitmap = bitmap;
+            entry.bitmap.Attach(bitmap);
             entry.width = (int)svgW;
             entry.height = (int)svgH;
             entry.failed = false;
@@ -2613,7 +2608,16 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
         entry.failed = false;
         entry.pending = true;
         app.storeImageCacheEntry(src, std::move(entry));
-        std::thread(asyncImageWorker, app.hwnd, src).detach();
+        try {
+            auto result = std::make_unique<AsyncImageResult>();
+            result->src = src;
+            std::thread(asyncImageWorker, app.hwnd,
+                        app.renderTarget->GetMaximumBitmapSize(), std::move(result)).detach();
+        } catch (const std::exception&) {
+            auto& failed = app.imageCache.at(src);
+            failed.pending = false;
+            failed.failed = true;
+        }
         return app.imageCache[src];
     } else {
         // Resolve relative to the current file's directory. Both strings are
@@ -2641,55 +2645,10 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
         }
     }
 
-    // Load via WIC
-    IWICBitmapDecoder* decoder = nullptr;
-    HRESULT hr = app.wicFactory->CreateDecoderFromFilename(widePath.c_str(), nullptr,
-        GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder);
-    if (FAILED(hr) || !decoder) {
-        app.storeImageCacheEntry(src, std::move(entry));
-        return app.imageCache[src];
-    }
-
-    IWICBitmapFrameDecode* frame = nullptr;
-    hr = decoder->GetFrame(0, &frame);
-    if (FAILED(hr) || !frame) {
-        decoder->Release();
-        app.storeImageCacheEntry(src, std::move(entry));
-        return app.imageCache[src];
-    }
-
-    IWICFormatConverter* converter = nullptr;
-    hr = app.wicFactory->CreateFormatConverter(&converter);
-    if (FAILED(hr) || !converter) {
-        frame->Release();
-        decoder->Release();
-        app.storeImageCacheEntry(src, std::move(entry));
-        return app.imageCache[src];
-    }
-
-    hr = converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA,
-        WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
-    if (FAILED(hr)) {
-        converter->Release();
-        frame->Release();
-        decoder->Release();
-        app.storeImageCacheEntry(src, std::move(entry));
-        return app.imageCache[src];
-    }
-
-    ID2D1Bitmap* bitmap = nullptr;
-    hr = app.renderTarget->CreateBitmapFromWicBitmap(converter, nullptr, &bitmap);
-    converter->Release();
-    frame->Release();
-    decoder->Release();
-
-    if (SUCCEEDED(hr) && bitmap) {
-        D2D1_SIZE_F size = bitmap->GetSize();
-        entry.bitmap = bitmap;
-        entry.width = (int)size.width;
-        entry.height = (int)size.height;
-        entry.failed = false;
-    }
+    DecodedImage image;
+    if (SUCCEEDED(decodeImageFile(app.wicFactory, widePath.c_str(),
+                                 app.renderTarget->GetMaximumBitmapSize(), image)))
+        createDecodedBitmap(app, image, entry);
 
     app.storeImageCacheEntry(src, std::move(entry));
     return app.imageCache[src];
@@ -3351,32 +3310,23 @@ bool layoutDocumentContinue(App& app, int64_t budgetUs) {
     return done;
 }
 
+void discardAsyncImage(void* asyncResult) {
+    delete static_cast<AsyncImageResult*>(asyncResult);
+}
+
 void completeAsyncImage(App& app, void* asyncResult) {
-    auto* result = static_cast<AsyncImageResult*>(asyncResult);
+    std::unique_ptr<AsyncImageResult> result(static_cast<AsyncImageResult*>(asyncResult));
     if (!result) return;
+    // A document/cache reset can make an in-flight download irrelevant.
+    const auto pending = app.imageCache.find(result->src);
+    if (pending == app.imageCache.end() || !pending->second.pending) return;
 
     App::ImageEntry entry;
     entry.failed = true;
-    if (result->ok && app.renderTarget) {
-        D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
-        ID2D1Bitmap* bitmap = nullptr;
-        if (SUCCEEDED(app.renderTarget->CreateBitmap(
-                D2D1::SizeU(result->width, result->height),
-                result->pixels.data(), result->width * 4, props, &bitmap)) && bitmap) {
-            entry.bitmap = bitmap;
-            entry.width = (int)result->width;
-            entry.height = (int)result->height;
-            entry.failed = false;
-        }
-    }
-
+    if (result->ok) createDecodedBitmap(app, result->image, entry);
     app.storeImageCacheEntry(result->src, std::move(entry));
-    delete result;
 
-    // Reflow with the real image dimensions — but coalesced: several images
-    // finishing close together (the common case when a document loads) get
-    // one relayout on the timer instead of a full document layout each
+    // Coalesce several completions into one reflow.
     if (app.hwnd) SetTimer(app.hwnd, TIMER_IMAGE_REFLOW, 60, nullptr);
 }
 

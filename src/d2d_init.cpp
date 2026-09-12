@@ -494,6 +494,16 @@ void createTypography(App& app) {
 }
 
 bool createRenderTarget(App& app) {
+    // Layout and the lightbox now retain their own image references. Drop
+    // every old-target drawing before recreating device resources (#220).
+    app.clearLayoutCache();
+    app.layoutDirty = true;
+    if (app.lightboxBitmap) {
+        app.lightboxBitmap->Release();
+        app.lightboxBitmap = nullptr;
+    }
+    app.showLightbox = false;
+    app.lightboxDragging = false;
     if (app.renderTarget) {
         app.renderTarget->Release();
         app.renderTarget = nullptr;
@@ -511,7 +521,7 @@ bool createRenderTarget(App& app) {
     // on whatever target exists then.
     app.imageCacheBytes = 0;
     for (auto it = app.imageCache.begin(); it != app.imageCache.end();) {
-        if (it->second.bitmap) { it->second.bitmap->Release(); it->second.bitmap = nullptr; }
+        it->second.bitmap.Reset();
         it->second.bytes = 0;
         if (it->second.pending) { ++it; }
         else { it = app.imageCache.erase(it); }

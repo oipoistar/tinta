@@ -556,7 +556,7 @@ render_document:
             bmp.destRect.top > viewportBottom + cullMargin) continue;
         if (bmp.destRect.right < viewportLeft - cullMargin ||
             bmp.destRect.left > viewportRight + cullMargin) continue;
-        app.renderTarget->DrawBitmap(bmp.bitmap,
+        app.renderTarget->DrawBitmap(bmp.bitmap.Get(),
             D2D1::RectF(bmp.destRect.left - app.scrollX,
                          bmp.destRect.top - app.scrollY,
                          bmp.destRect.right - app.scrollX,
@@ -1673,6 +1673,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // A background image download finished: swap it into the cache
             // and reflow (handler takes ownership of the result)
             if (app) completeAsyncImage(*app, (void*)lParam);
+            else discardAsyncImage((void*)lParam);
             return 0;
 
         case WM_CONTEXTMENU:
