@@ -775,13 +775,13 @@ ParseResult parse(std::string_view source) {
                     std::string label = configName;
                     size_t labelKey = line.find("label");
                     if (labelKey != std::string_view::npos) {
-                        size_t quote = line.find('"', labelKey);
-                        size_t close = quote == std::string_view::npos
+                        size_t quoteStart = line.find('"', labelKey);
+                        size_t quoteEnd = quoteStart == std::string_view::npos
                             ? std::string_view::npos
-                            : line.find('"', quote + 1);
-                        if (close != std::string_view::npos) {
+                            : line.find('"', quoteStart + 1);
+                        if (quoteEnd != std::string_view::npos) {
                             label = decodeLabel(
-                                line.substr(quote + 1, close - quote - 1));
+                                line.substr(quoteStart + 1, quoteEnd - quoteStart - 1));
                         }
                     }
                     size_t nodesBefore = result.diagram.nodes.size();

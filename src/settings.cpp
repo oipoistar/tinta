@@ -93,8 +93,8 @@ void saveSettings(const Settings& settings) {
         // Open tabs from the last session, restored on the next plain launch
         file << "[Session]\n";
         file << "sessionActive=" << settings.sessionActive << "\n";
-        for (const auto& path : settings.sessionTabs) {
-            file << "tab=" << path << "\n";
+        for (const auto& tabPath : settings.sessionTabs) {
+            file << "tab=" << tabPath << "\n";
         }
     }
 
@@ -360,14 +360,14 @@ Settings loadSettings() {
                 try {
                     float y = std::stof(value.substr(0, sep));
                     float zoom = 0.0f;
-                    std::string path = value.substr(sep + 1);
-                    size_t sep2 = path.find('|');
-                    if (sep2 != std::string::npos && sep2 + 1 < path.size()) {
-                        zoom = std::stof(path.substr(0, sep2));
-                        path = path.substr(sep2 + 1);
+                    std::string documentPath = value.substr(sep + 1);
+                    size_t sep2 = documentPath.find('|');
+                    if (sep2 != std::string::npos && sep2 + 1 < documentPath.size()) {
+                        zoom = std::stof(documentPath.substr(0, sep2));
+                        documentPath = documentPath.substr(sep2 + 1);
                     }
-                    if (y >= 0.0f && !path.empty()) {
-                        settings.readingPositions.push_back({path, y, zoom});
+                    if (y >= 0.0f && !documentPath.empty()) {
+                        settings.readingPositions.push_back({documentPath, y, zoom});
                     }
                 } catch (...) {}
             }

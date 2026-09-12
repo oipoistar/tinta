@@ -774,7 +774,7 @@ static void settingsAction(App& app, HWND hwnd, int action) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
     // Lightbox: the wheel zooms the image
     if (app.showLightbox) {
         float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
@@ -926,7 +926,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
     // Horizontal scroll
     float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA * dpi(app, 60.0f);
     app.targetScrollX += delta;
@@ -1420,7 +1420,6 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     }
 
     // Check if over text
-    bool wasOverText = app.overText;
     app.overText = (findTextRectAt(app, (int)docX, (int)docY) != nullptr);
 
     // Check if hovering over any code block (show copy button on whole block)
@@ -1782,7 +1781,7 @@ static void toggleApplicationMenu(App& app, HWND hwnd, bool keyboard = false) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     // A fresh press is a new gesture, even if a cancelled drag released elsewhere.
     app.swallowNextMouseUp = false;
     // Settings owns the entire click, including the title strip behind it.
@@ -2665,7 +2664,7 @@ static void toggleFitBlock(App& app, HWND hwnd, unsigned key) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam) {
+void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     if (app.scrollbarDragging || app.hScrollbarDragging) {
         app.mouseX = GET_X_LPARAM(lParam);
         app.mouseY = GET_Y_LPARAM(lParam);

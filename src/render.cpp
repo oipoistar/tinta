@@ -3228,7 +3228,7 @@ bool layoutBegin(App& app) {
 
     if (!app.root) {
         app.contentHeight = 0;
-        app.contentWidth = app.width;
+        app.contentWidth = static_cast<float>(app.width);
         app.layoutComplete = true;
         return false;
     }

@@ -823,14 +823,14 @@ render_document:
     // Draw vertical scrollbar
     if (needsVScroll) {
         float scrollExtent = std::max((float)app.height, app.scrollbarContentHeight);
-        float maxScrollY = std::max(0.0f, scrollExtent - app.height);
+        float scrollbarMaxY = std::max(0.0f, scrollExtent - app.height);
         float trackTop = chromeTopHeight(app);
         float trackHeight =
             app.height - trackTop - (needsHScroll ? scrollbarSize : 0);
         float sbHeight = trackHeight / scrollExtent * trackHeight;
         sbHeight = std::max(sbHeight, dpi(app, 30.0f));
         float sbY = trackTop +
-            ((maxScrollY > 0) ? (app.scrollY / maxScrollY * (trackHeight - sbHeight)) : 0);
+            ((scrollbarMaxY > 0) ? (app.scrollY / scrollbarMaxY * (trackHeight - sbHeight)) : 0);
 
         float sbWidth = quietScrollbars ? dpi(app, 4.0f) :
             ((app.scrollbarHovered || app.scrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f));
@@ -898,11 +898,11 @@ render_document:
 
     // Draw horizontal scrollbar
     if (needsHScroll) {
-        float maxScrollX = std::max(0.0f, app.contentWidth - documentWidth);
+        float scrollbarMaxX = std::max(0.0f, app.contentWidth - documentWidth);
         float trackWidth = documentWidth - (needsVScroll ? scrollbarSize : 0);
         float sbWidth = trackWidth / app.contentWidth * trackWidth;
         sbWidth = std::max(sbWidth, dpi(app, 30.0f));
-        float sbX = (maxScrollX > 0) ? (app.scrollX / maxScrollX * (trackWidth - sbWidth)) : 0;
+        float sbX = (scrollbarMaxX > 0) ? (app.scrollX / scrollbarMaxX * (trackWidth - sbWidth)) : 0;
 
         float sbHeight = quietScrollbars ? dpi(app, 4.0f) :
             ((app.hScrollbarHovered || app.hScrollbarDragging) ? dpi(app, 10.0f) : dpi(app, 6.0f));
@@ -1865,7 +1865,7 @@ static LONG WINAPI writeCrashDump(EXCEPTION_POINTERS* exceptionInfo) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int nCmdShow) {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     SetUnhandledExceptionFilter(writeCrashDump);
     // Enable per-monitor DPI V2 awareness
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
