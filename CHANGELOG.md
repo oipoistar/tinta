@@ -1,5 +1,16 @@
 # Changelog
 
+## [v3.7.1] - 2026-09-12
+
+### Fixed
+- Large images no longer crash the viewer when cache eviction releases another image used by the document, a table, or the lightbox. Reported by @glance02 (#220, #221)
+- Local and downloaded raster images share bounded decoding, respect device size limits, and use alt-text placeholders for invalid or excessive inputs. Display size and aspect ratio are preserved; HTML and DOCX exports retain original image bytes (#220, #221)
+- Image cache memory accounting uses allocated pixels, including for high-DPI images (#220, #221)
+
+### Changed
+- Remove unused variables and parameters, rename shadowed locals, and make narrowing conversions explicit without suppressing compiler warnings (#221)
+- Refresh the documented portable executable size to about 2.4 MB (#219)
+
 ## [v3.7.0] - 2026-09-11
 
 ### Added
