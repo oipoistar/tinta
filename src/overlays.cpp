@@ -425,8 +425,6 @@ void renderFolderBrowser(App& app) {
 
     // A docked surface shares one divider with the neighbouring pane.
     FolderBrowserMetrics g = folderBrowserMetrics(app);
-    float panelWidth = g.panelWidth;
-    float panelX = g.panelX;
     D2D1_RECT_F card = D2D1::RectF(g.cardLeft, g.cardTop, g.cardRight, g.cardBottom);
     D2D1_COLOR_F panelBg = promptChipSurface(app);
     panelBg.a = 1;
@@ -4046,22 +4044,22 @@ void renderThemeEditor(App& app) {
             D2D1::RoundedRect(list, dpi(app, 6.0f), dpi(app, 6.0f)), app.brush, 1.0f);
         app.renderTarget->PushAxisAlignedClip(list, D2D1_ANTIALIAS_MODE_ALIASED);
 
-        float rowH = dpi(app, 26.0f);
+        float fontRowHeight = dpi(app, 26.0f);
         float maxScroll = std::max(0.0f,
-            (float)app.systemFontFamilies.size() * rowH - (list.bottom - list.top));
+            (float)app.systemFontFamilies.size() * fontRowHeight - (list.bottom - list.top));
         app.themeEditorFontScroll = std::max(0.0f, std::min(app.themeEditorFontScroll, maxScroll));
-        int first = (int)(app.themeEditorFontScroll / rowH);
-        int visible = (int)((list.bottom - list.top) / rowH) + 2;
+        int first = (int)(app.themeEditorFontScroll / fontRowHeight);
+        int visible = (int)((list.bottom - list.top) / fontRowHeight) + 2;
         for (int i = first; i < first + visible &&
                             i < (int)app.systemFontFamilies.size(); i++) {
-            float ry = list.top + i * rowH - app.themeEditorFontScroll;
+            float ry = list.top + i * fontRowHeight - app.themeEditorFontScroll;
             const std::wstring& fam = app.systemFontFamilies[i];
             bool selected = (_wcsicmp(fam.c_str(), app.themeEditorFont.c_str()) == 0);
             if (selected) {
                 D2D1_COLOR_F hl = base.accent; hl.a = 0.18f;
                 app.brush->SetColor(hl);
                 app.renderTarget->FillRectangle(
-                    D2D1::RectF(list.left + 1, ry, list.right - 1, ry + rowH), app.brush);
+                    D2D1::RectF(list.left + 1, ry, list.right - 1, ry + fontRowHeight), app.brush);
             }
             IDWriteTextFormat* ff = nullptr;
             app.dwriteFactory->CreateTextFormat(fam.c_str(), nullptr,
@@ -4072,13 +4070,13 @@ void renderThemeEditor(App& app) {
             if (ff) {
                 app.renderTarget->DrawText(fam.c_str(), (UINT32)fam.size(), ff,
                     D2D1::RectF(list.left + dpi(app, 12.0f), ry + dpi(app, 3.0f),
-                                list.right - dpi(app, 8.0f), ry + rowH), app.brush);
+                                list.right - dpi(app, 8.0f), ry + fontRowHeight), app.brush);
                 ff->Release();
             }
             // Clamp the hit rect to the visible list: rows drawn under the
             // clip must not steal clicks from the buttons below
             D2D1_RECT_F hr = D2D1::RectF(list.left, std::max(ry, list.top),
-                                         list.right, std::min(ry + rowH, list.bottom));
+                                         list.right, std::min(ry + fontRowHeight, list.bottom));
             if (hr.bottom > hr.top) {
                 app.themeEditorHits.push_back({hr, TE_FONT_BASE + i});
             }

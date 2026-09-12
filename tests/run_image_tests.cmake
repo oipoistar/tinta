@@ -1,0 +1,11 @@
+if(NOT DEFINED TEST_BINARY OR NOT DEFINED TEST_DIR)
+    message(FATAL_ERROR "TEST_BINARY and TEST_DIR are required")
+endif()
+file(MAKE_DIRECTORY "${TEST_DIR}")
+configure_file("${TEST_BINARY}" "${TEST_DIR}/input_tests.exe" COPYONLY)
+file(WRITE "${TEST_DIR}/settings.ini" "; Isolated image regression settings\n")
+execute_process(COMMAND "${TEST_DIR}/input_tests.exe" --image-tests
+    WORKING_DIRECTORY "${TEST_DIR}" RESULT_VARIABLE result TIMEOUT 90)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Native image tests failed: ${result}")
+endif()

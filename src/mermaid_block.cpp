@@ -312,9 +312,9 @@ struct BlockEmitCtx {
 
 void emitLeaf(BlockEmitCtx& ctx, BlockItem& item);
 
-// Lays out a container's children into the given content rect
+// Lays out a container's children from the top-left within the available width
 void emitContainer(BlockEmitCtx& ctx, BlockItem& container, float x1,
-                   float y1, float x2, float y2) {
+                   float y1, float x2) {
     BlockMeasureCtx& mctx = *ctx.measure;
     float scale = mctx.scale;
     ContainerMetrics metrics = measureContainer(mctx, container);
@@ -358,8 +358,7 @@ void emitContainer(BlockEmitCtx& ctx, BlockItem& container, float x1,
                 panel.strokeWidth = 1.2f * scale;
                 ctx.shapes->push_back(panel);
                 float pad = kBlockPad * scale;
-                emitContainer(ctx, child, cx1 + pad, cy1 + pad, cx2 - pad,
-                              cy2 - pad);
+                emitContainer(ctx, child, cx1 + pad, cy1 + pad, cx2 - pad);
             } else {
                 emitLeaf(ctx, child);
             }
@@ -662,8 +661,7 @@ Built buildBlock(std::string_view source, const Measure& measure,
     std::map<std::string, BlockItem*> index;
     BlockEmitCtx ectx{&mctx, &shapes, &texts, &index};
     float top = 4.0f * scale;
-    emitContainer(ectx, root, 0.0f, top, metrics.width(),
-                  top + metrics.height());
+    emitContainer(ectx, root, 0.0f, top, metrics.width());
 
     result.prims = std::move(shapes);
 

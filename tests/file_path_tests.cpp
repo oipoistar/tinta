@@ -41,7 +41,8 @@ void clickTabCopy(App& app) {
     // Copy file path follows the four close actions and their separator.
     int x = static_cast<int>(app.tabMenuX + 20);
     int y = static_cast<int>(app.tabMenuY + dpi(app, 6+4*30+9+15));
-    check(tabMenuItemAt(app, x, y) == 4, "tab Copy file path remains next to Reveal");
+    check(tabMenuItemAt(app, static_cast<float>(x), static_cast<float>(y)) == 4,
+          "tab Copy file path remains next to Reveal");
     check(tabMenuMouseDown(app, app.hwnd, x, y), "tab path action consumes its click");
     check(!app.showTabMenu, "tab Copy file path closes the menu");
 }
@@ -100,7 +101,7 @@ void titleMenuCases(bool testClipboard) {
                         }
                         app.tabs.resize(1);  // last companion closed
                         renderStrip(app);
-                        int x = (int)dpi(app, edit ? 60 : 48);
+                        int x = (int)dpi(app, edit ? 60.0f : 48.0f);
                         int y = (int)dpi(app, 20);
                         check(!tabStripVisible(app) && tabContextMenuIndexAt(app, (float)x, (float)y) == 0,
                               "the lone title has a tab context target after closing a companion");

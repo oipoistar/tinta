@@ -395,7 +395,7 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
         if (!bmp.bitmap) continue;
         if (!inRange(bmp.destRect.top, bmp.destRect.bottom)) continue;
         bool banded = applyBand(bmp.destRect.top, bmp.destRect.bottom);
-        dc->DrawBitmap(bmp.bitmap,
+        dc->DrawBitmap(bmp.bitmap.Get(),
             D2D1::RectF(bmp.destRect.left + dx, bmp.destRect.top + dy,
                         bmp.destRect.right + dx, bmp.destRect.bottom + dy),
             1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);

@@ -21,6 +21,7 @@ void ensureLayoutComplete(App& app);
 // UI-thread completion for WM_APP_IMAGE_READY: takes ownership of the
 // AsyncImageResult, updates the image cache, and triggers a reflow
 void completeAsyncImage(App& app, void* asyncResult);
+void discardAsyncImage(void* asyncResult);
 
 // Theme color for a diagram primitive's role (shared with the exporters)
 D2D1_COLOR_F resolveDiagramRole(const App& app, const mermaidext::Prim& prim,

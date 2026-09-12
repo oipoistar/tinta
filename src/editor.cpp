@@ -2700,7 +2700,7 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
-void handleEditorMouseUp(App& app, HWND hwnd, int x, int y) {
+void handleEditorMouseUp(App& app, HWND, int, int) {
     if (app.editorScrollbarDragging) {
         app.editorScrollbarDragging = false;
         ReleaseCapture();

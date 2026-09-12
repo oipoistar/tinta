@@ -96,7 +96,7 @@ void resizeGesture(App& app, SidePanel panel, bool onLeft, bool both, float scal
     const std::string path = app.currentFile;
     const float start = sidePanelResizeEdge(app, panel);
     const float y = dpi(app, 300);
-    const float direction = panel == SidePanel::Contents && !onLeft ? -1 : 1;
+    const float direction = panel == SidePanel::Contents && !onLeft ? -1.0f : 1.0f;
     const float target = start + direction * dpi(app, 100);
     handleMouseDown(app, app.hwnd, 0, MAKELPARAM((int)start, (int)y));
     check(app.panelResize.panel == panel && GetCapture() == app.hwnd, "panel edge captures the drag");
@@ -268,7 +268,7 @@ void scrollbarAcrossPanels(App& app) {
                     for (float x : {sidePanelResizeEdge(app, SidePanel::Contents), tocCenter,
                                     browserCenter, -dpi(app, 50), app.width + dpi(app, 50), dpi(app, 20)}) {
                         const float before = horizontal ? app.scrollX : app.scrollY;
-                        const int y = (int)dpi(app, 250 + 40 * step++);
+                        const int y = (int)dpi(app, static_cast<float>(250 + 40 * step++));
                         handleMouseMove(app, app.hwnd, MAKELPARAM((int)x, y));
                         const float after = horizontal ? app.scrollX : app.scrollY;
                         if (!horizontal || (x > previousX && before < app.contentWidth - viewport - 1))

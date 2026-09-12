@@ -750,7 +750,6 @@ Built buildJourney(std::string_view source, const Measure& measure,
 
     // Score lane: higher score = higher dot, 1..7
     float laneHeight = 110.0f * scale;
-    float laneTop = y;
     float laneBottom = y + laneHeight;
     auto scoreY = [&](float score) {
         float clamped = std::max(1.0f, std::min(7.0f, score));
