@@ -45,46 +45,26 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.** Custom frontmatter, footnotes, more syntax colors, and a calmer, resizable outline.
+            **Markdown, distilled.** Safer large-image loading and a compiler cleanup.
 
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Frontmatter and theme controls (#208)
-            - Settings has a new Frontmatter page with ordered properties, Show, left/right placement, optional labels, type-specific formats, list limits and a live preview
-            - Showing `created` or `updated` enables maintenance on explicit editor saves: missing fields are added to existing frontmatter, `created` is preserved once present, and `updated` records each save as a quoted UTC timestamp
-            - Date rows default off. Files without frontmatter remain unchanged; hiding the property strip also pauses maintenance
-            - Custom themes can set H1-H6 colors individually and choose highlight background/text colors, with existing colors as defaults
-            - Suggested by @Ra0EL, implemented in #215 and #217
-
-            ### Footnotes (#208)
-            - Named and numeric footnotes are numbered by first use, with repeated references, multiline rich bodies and small text return links
-            - HTML preserves jump/return navigation; DOCX exports contain real Word footnotes
-            - Suggested by @Ra0EL, implemented in #216
-
-            ### Nine more highlighted languages (#207)
-            - SQL, PowerShell, Java, PHP, HTML, XML, CSS, YAML and Markdown now have native syntax colors
-            - Common aliases and multiline constructs work with existing theme keys
-            - Suggested by @hochun836, implemented in #214
-
-            ### Resizable Contents and file browser (#210)
-            - Contents includes all six heading levels, with compact indentation and filtering
-            - Both panels have independently resizable widths that are remembered between sessions
-            - A quieter divider, shorter active-heading marker and slim fading scrollbars reduce visual clutter
-            - Reported by @125Q, implemented in #213
-
-            ### Everyday controls
-            - Close Settings with an outside click or its new top-right close button (#209)
-            - Drop transferred tabs between existing tabs; pull a tab about 50 logical pixels away from the bar to detach it on release (#211)
-            - Open built-in Learn examples as editable copies, with shortcuts matching the selected keymap, reported by @Ra0EL (#206, #212)
+            ### Large-image loading (#220)
+            - Fix a crash when large images appear alongside other images, including images in tables and quotes (#221)
+            - Large local and downloaded raster images use bounded decoding while retaining their displayed size and aspect ratio
+            - Invalid or excessive images fall back to alt-text placeholders; HTML and DOCX exports preserve the original image files
+            - Reported by @glance02
 
             ### Fixed
-            - Superscripts and subscripts retain the right font size and baseline through theme, zoom and DPI changes, reported by @Ra0EL (#206, #212)
-            - Scrollbar drags continue across side panels and window edges (#210, #213)
-            - Save As from Learn examples no longer leaks the shortcut into the document (#206, #212)
-            - Mixed DOCX exports have schema-valid run-property ordering and table grids (#208, #217)
+            - Cached images remain valid while the document or lightbox still needs them (#220, #221)
+            - Image memory accounting uses allocated pixels instead of DPI-adjusted display dimensions (#220, #221)
+            - Remove unused variables, shadowed names and implicit narrowing conversions without disabling compiler warnings (#221)
+
+            ### Changed
+            - Refresh the documented portable executable size to about 2.4 MB (#219)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats
