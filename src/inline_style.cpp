@@ -1,4 +1,5 @@
 #include "inline_style.h"
+#include "link_target.h"
 
 #include <cctype>
 #include <filesystem>
@@ -27,29 +28,11 @@ std::string refToUtf8(const std::wstring& wide) {
     return out;
 }
 
-// %20 and friends, for [text](my%20notes.md) targets
-std::string percentDecode(const std::string& value) {
-    std::string out;
-    out.reserve(value.size());
-    for (size_t i = 0; i < value.size(); i++) {
-        if (value[i] == '%' && i + 2 < value.size() &&
-            std::isxdigit(static_cast<unsigned char>(value[i + 1])) &&
-            std::isxdigit(static_cast<unsigned char>(value[i + 2]))) {
-            out += static_cast<char>(
-                std::stoi(value.substr(i + 1, 2), nullptr, 16));
-            i += 2;
-        } else {
-            out += value[i];
-        }
-    }
-    return out;
-}
-
 // A real [text](target) whose target is a local text-file path gets the
 // same live/broken treatment as a plain-text reference - any extension
 // the plain-path scanner recognizes, not just markdown (#162)
 bool isLocalFileRefUrl(const std::string& url) {
-    if (url.empty() || url[0] == '#') return false;
+    if (url.empty()) return false;
     if (url.find("://") != std::string::npos) return false;
     if (url.rfind("//", 0) == 0 || url.rfind("\\\\", 0) == 0) return false;
     for (size_t i = 0; i < url.size(); i++) {
@@ -66,7 +49,7 @@ bool isLocalFileRefUrl(const std::string& url) {
 bool resolveFileRef(App& app, const std::string& raw, std::string& absOut) {
     namespace fs = std::filesystem;
     std::error_code ec;
-    fs::path path(refToWide(percentDecode(raw)));
+    fs::path path(refToWide(raw));
     if (path.is_relative()) {
         if (app.currentFile.empty()) {
             absOut = raw;
@@ -155,21 +138,23 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                 st.color = app.theme.link;
                 st.linkUrl = elem->url;
                 st.isLink = true;
-                std::string target;
+                qmd::LinkTarget target;
                 if (elem->url.rfind("fileref:", 0) == 0) {
-                    target = elem->url.substr(8);
-                } else if (isLocalFileRefUrl(elem->url)) {
-                    target = elem->url;
-                }
-                if (!target.empty()) {
-                    std::string resolved;
-                    if (resolveFileRef(app, target, resolved)) {
-                        st.linkUrl = "fileref-ok:" + resolved;
-                    } else {
-                        // Missing target: a ghost of the link color, inert
-                        st.linkUrl = "fileref-missing:" + resolved;
-                        st.color.a *= 0.45f;
+                    target.path = qmd::decodeLinkComponent(elem->url.substr(8));
+                } else {
+                    auto parsed = qmd::splitLinkTarget(elem->url);
+                    if (isLocalFileRefUrl(parsed.path) &&
+                        (!parsed.hasFragment || qmd::fileRefIsMarkdown(parsed.path))) {
+                        target = std::move(parsed);
                     }
+                }
+                if (!target.path.empty()) {
+                    std::string resolved;
+                    bool exists = resolveFileRef(app, target.path, resolved);
+                    target.path = std::move(resolved);
+                    st.linkUrl = (exists ? "fileref-ok:" : "fileref-missing:") +
+                                 qmd::encodeLinkTarget(target);
+                    if (!exists) st.color.a *= 0.45f;
                 }
                 break;
             }

@@ -1,5 +1,6 @@
 #include "frontmatter_ui.h"
 #include "input.h"
+#include "link_target.h"
 #include "annotations.h"
 #include "drafts.h"
 #include "editrail.h"
@@ -2298,16 +2299,37 @@ static void navRecordJump(App& app, const std::string& fromPath,
 // A live reference: markdown joins the window as a tab (#127), other
 // text files open with their registered application (#162). Returns
 // true when the target opened inside Tinta.
-static bool openFileRefTarget(App& app, HWND hwnd, const std::string& path) {
+static bool openFileRefTarget(App& app, HWND hwnd, const std::string& url) {
+    const auto target = qmd::splitLinkTarget(url);
+    const auto& path = target.path;
     if (!qmd::fileRefIsMarkdown(path)) {
         ShellExecuteW(hwnd, L"open", toWide(path).c_str(), nullptr,
                       nullptr, SW_SHOWNORMAL);
         return false;
     }
-    if (_stricmp(app.currentFile.c_str(), path.c_str()) != 0) {
-        navRecordJump(app, app.currentFile, app.scrollY);
-    }
+    const auto fromPath = app.currentFile;
+    const float fromScroll = app.scrollY;
     tabOpenPath(app, hwnd, path, true);
+    if (_stricmp(app.currentFile.c_str(), path.c_str()) != 0) return false;
+    if (_stricmp(fromPath.c_str(), path.c_str()) != 0) {
+        navRecordJump(app, fromPath, fromScroll);
+    }
+    if (target.hasFragment) {
+        // An existing editor tab can contain headings that are not saved yet.
+        if (app.editMode) editorReparse(app, true);
+        if (scrollToHeadingId(app, target.fragment) && app.editMode) {
+            size_t offset = 0;
+            float headingY = 0;
+            for (const auto& h : app.headings) {
+                if (h.id == target.fragment) { headingY = h.y; break; }
+            }
+            for (const auto& anchor : app.scrollAnchors) {
+                if (anchor.renderedY > headingY) break;
+                offset = anchor.sourceOffset;
+            }
+            editorScrollToSourceOffset(app, offset);
+        }
+    }
     return true;
 }
 
@@ -2397,7 +2419,7 @@ static void createRefAction(App& app, HWND hwnd, int action) {
             app.fileRefCache.erase(app.createRefPath);
             // A markdown target opens in a tab ready to type; other text
             // files hand off to their registered application (#162)
-            if (openFileRefTarget(app, hwnd, app.createRefPath)) {
+            if (openFileRefTarget(app, hwnd, qmd::encodeLinkTarget({app.createRefPath, {}, false}))) {
                 enterEditMode(app);
             }
         }
@@ -3252,7 +3274,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
                 } else if (app.hoveredLink.rfind("fileref-missing:", 0) ==
                            0) {
                     // Ghost reference: offer to create the target
-                    app.createRefPath = app.hoveredLink.substr(16);
+                    app.createRefPath = qmd::splitLinkTarget(app.hoveredLink.substr(16)).path;
                     app.createRefPending = true;
                 } else {
                     handleLinkClick(app);
@@ -3277,7 +3299,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         if (app.hoveredLink.rfind("fileref-ok:", 0) == 0) {
             openFileRefTarget(app, hwnd, app.hoveredLink.substr(11));
         } else if (app.hoveredLink.rfind("fileref-missing:", 0) == 0) {
-            app.createRefPath = app.hoveredLink.substr(16);
+            app.createRefPath = qmd::splitLinkTarget(app.hoveredLink.substr(16)).path;
             app.createRefPending = true;
         } else {
             handleLinkClick(app);
@@ -4175,7 +4197,7 @@ void handleLinkPeekTimer(App& app, HWND hwnd) {
     std::error_code ec;
     fs::path target;
     if (app.linkPeekUrl.rfind("fileref-ok:", 0) == 0) {
-        target = toWide(app.linkPeekUrl.substr(11));
+        target = toWide(qmd::splitLinkTarget(app.linkPeekUrl.substr(11)).path);
     } else if (app.linkPeekUrl.rfind("wiki:", 0) == 0 &&
                !app.currentFile.empty()) {
         std::wstring t = toWide(app.linkPeekUrl.substr(5));

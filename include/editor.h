@@ -68,6 +68,8 @@ void editorReplaceCurrent(App& app, HWND hwnd);
 void editorReplaceAll(App& app, HWND hwnd);
 
 // Utility
+// Navigate without changing the source buffer, including when preview is hidden.
+void editorScrollToSourceOffset(App& app, size_t byteOffset);
 void rebuildLineStarts(App& app);
 size_t editorTopVisibleLine(App& app);
 std::string toUtf8(const std::wstring& wstr);

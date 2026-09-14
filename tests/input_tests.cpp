@@ -156,12 +156,14 @@ void settingsDismissal() {
 int runTabDropTests();
 int runSearchInputTests();
 int runWrappedCursorTests();
+int runFileFragmentTests();
 int runSuperscriptTests();
 int runSidePanelTests();
 int runImageTests(const char* remoteBase);
 int runTabDropLaunchProbe();
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--file-fragment-tests") return runFileFragmentTests();
     if (argc == 2 && std::string(argv[1]) == "--wrapped-cursor-tests") return runWrappedCursorTests();
     if (argc == 2 && std::string(argv[1]) == "--search-input-tests") return runSearchInputTests();
     if (argc >= 2 && std::string(argv[1]) == "--image-tests")

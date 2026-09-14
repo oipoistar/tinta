@@ -972,6 +972,27 @@ static void enterEditModeWithContent(App& app, const std::string& content) {
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
+void editorScrollToSourceOffset(App& app, size_t byteOffset) {
+    auto next = std::upper_bound(app.editorLineByteOffsets.begin(),
+                                app.editorLineByteOffsets.end(), byteOffset);
+    size_t line = next == app.editorLineByteOffsets.begin() ? 0 :
+                  static_cast<size_t>(next - app.editorLineByteOffsets.begin() - 1);
+    if (line >= app.editorLineStarts.size()) return;
+    app.editorCursorPos = app.editorLineStarts[line];
+    app.editorCaretUpstreamPos = std::wstring::npos;
+    app.editorDesiredCol = -1;
+    app.editorHasSelection = false;
+    float row = static_cast<float>(line);
+    if (editorWrapOn(app)) {
+        ensureEditorRowMetrics(app);
+        row = static_cast<float>(app.editorRowStarts[line]);
+    }
+    float lineHeight = app.editorTextFormat ? app.editorTextFormat->GetFontSize() * 1.5f : 20.0f;
+    app.editorScrollY = std::max(0.0f, row * lineHeight);
+    app.editorScrollX = 0;
+    InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
 void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
                        float scrollY, size_t cursor) {
     enterEditModeWithContent(app, toUtf8(text));

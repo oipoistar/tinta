@@ -157,7 +157,7 @@ if(BUILD_TESTING)
     # window, including layout-dependent character sequences (#195).
     set(INPUT_TEST_SOURCES ${SOURCES})
     list(REMOVE_ITEM INPUT_TEST_SOURCES src/main_d2d.cpp)
-    add_executable(input_tests tests/input_tests.cpp tests/tab_drop_tests.cpp tests/superscript_tests.cpp tests/sidepanel_tests.cpp tests/image_tests.cpp tests/search_input_tests.cpp tests/wrapped_cursor_tests.cpp ${INPUT_TEST_SOURCES})
+    add_executable(input_tests tests/input_tests.cpp tests/tab_drop_tests.cpp tests/superscript_tests.cpp tests/sidepanel_tests.cpp tests/image_tests.cpp tests/search_input_tests.cpp tests/wrapped_cursor_tests.cpp tests/file_fragment_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(input_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(input_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
     target_compile_definitions(input_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
@@ -167,7 +167,12 @@ if(BUILD_TESTING)
         TINTA_PANEL_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/toc-browser-resize.md"
         TINTA_IMAGE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/image-cache-large.md"
         TINTA_FIND_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/find-table-focus.md"
-        TINTA_WRAP_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/wrapped-cursor-selection.md")
+        TINTA_WRAP_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/wrapped-cursor-selection.md"
+        TINTA_FRAGMENT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/file-fragments/index.md")
+    add_test(NAME file_fragment_navigation COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:input_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/file-fragment-test-$<CONFIG>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_file_fragment_tests.cmake)
     add_test(NAME wrapped_cursor_navigation COMMAND ${CMAKE_COMMAND}
         -DTEST_BINARY=$<TARGET_FILE:input_tests>
         -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/wrapped-cursor-test-$<CONFIG>

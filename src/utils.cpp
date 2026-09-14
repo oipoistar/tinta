@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "link_target.h"
 #include "render.h"
 #include "i18n.h"
 #include "signals.h"
@@ -167,29 +168,30 @@ void scrollToHeadingY(App& app, float headingY) {
     float maxScroll = std::max(0.0f, app.contentHeight - app.height);
     app.scrollY = std::max(0.0f, std::min(targetY, maxScroll));
     app.targetScrollY = app.scrollY;
+    app.pendingScrollRestore = -1.0f;
     // Not every click path repaints afterwards (a bare link click outside a
     // selection doesn't) — internal jumps must show immediately
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 bool scrollToHeadingId(App& app, const std::string& id) {
-    // Headings populate during the viewport-first background layout; an
-    // early click on an anchor into a not-yet-laid-out section would miss.
-    // Finish the layout synchronously before declaring the target absent.
-    for (int attempt = 0; attempt < 2; attempt++) {
-        auto note = app.footnoteAnchors.find(id);
-        if (note != app.footnoteAnchors.end()) {
-            scrollToHeadingY(app, note->second);
+    // A newly opened document may still have the previous file's headings.
+    // Finish the destination layout before looking up even an existing id.
+    if (app.layoutDirty || !app.layoutComplete) ensureLayoutComplete(app);
+    if (id.empty()) {
+        scrollToHeadingY(app, 0.0f);
+        return true;
+    }
+    auto note = app.footnoteAnchors.find(id);
+    if (note != app.footnoteAnchors.end()) {
+        scrollToHeadingY(app, note->second);
+        return true;
+    }
+    for (const auto& h : app.headings) {
+        if (h.id == id) {
+            scrollToHeadingY(app, h.y);
             return true;
         }
-        for (const auto& h : app.headings) {
-            if (h.id == id) {
-                scrollToHeadingY(app, h.y);
-                return true;
-            }
-        }
-        if (app.layoutComplete && !app.layoutDirty) break;
-        ensureLayoutComplete(app);
     }
     return false;
 }
@@ -197,7 +199,7 @@ bool scrollToHeadingId(App& app, const std::string& id) {
 void handleLinkClick(App& app) {
     if (app.hoveredLink.empty()) return;
     if (app.hoveredLink[0] == '#') {
-        scrollToHeadingId(app, app.hoveredLink.substr(1));
+        scrollToHeadingId(app, qmd::decodeLinkComponent(app.hoveredLink.substr(1)));
     } else {
         openUrl(app.hoveredLink);
     }
