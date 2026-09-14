@@ -1010,12 +1010,7 @@ void exitEditMode(App& app) {
     app.editorSearchMatches.clear();
     app.editorSearchCurrentIndex = 0;
     // Close search if open
-    if (app.showSearch) {
-        app.showSearch = false;
-        app.searchActive = false;
-        app.searchQuery.clear();
-        app.searchAnimation = 0;
-    }
+    if (app.showSearch) closeSearchInput(app);
     KillTimer(app.hwnd, TIMER_EDITOR_REPARSE);
     updateBlinkTimer(app);
 
@@ -1468,41 +1463,8 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         if (wParam == VK_ESCAPE) return;
     }
 
-    // Search still works in edit mode via Ctrl+F
-    if (ctrl && wParam == 'F') {
-        if (!app.showSearch) {
-            app.showSearch = true;
-            app.searchActive = true;
-            app.searchAnimation = 0;
-            app.searchQuery.clear();
-            app.editorSearchMatches.clear();
-            app.editorSearchCurrentIndex = 0;
-            app.searchCurrentIndex = 0;
-            app.searchJustOpened = true;
-            updateBlinkTimer(app);
-        }
-        app.searchReplaceMode = false;
-        app.replaceFieldActive = false;
-        InvalidateRect(hwnd, nullptr, FALSE);
-        return;
-    }
-
-    // Ctrl+H: search with the replace row (#121)
-    if (ctrl && wParam == 'H') {
-        if (!app.showSearch) {
-            app.showSearch = true;
-            app.searchActive = true;
-            app.searchAnimation = 0;
-            app.searchQuery.clear();
-            app.editorSearchMatches.clear();
-            app.editorSearchCurrentIndex = 0;
-            app.searchCurrentIndex = 0;
-            app.searchJustOpened = true;
-            updateBlinkTimer(app);
-        }
-        app.searchReplaceMode = true;
-        app.replaceFieldActive = false;
-        InvalidateRect(hwnd, nullptr, FALSE);
+    if (ctrl && (wParam == 'F' || wParam == 'H')) {
+        openSearchInput(app, wParam == 'H');
         return;
     }
 
@@ -1513,76 +1475,10 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return;
     }
 
-    // If search is open, route to search handling
     if (app.showSearch && app.searchActive) {
-        // Ctrl+S still saves while the search bar is open
-        if (ctrl && wParam == 'S') {
-            saveEditorFile(app, hwnd);
-            return;
-        }
-        // Ctrl+H from an open search reveals the replace row (#121)
-        if (ctrl && wParam == 'H') {
-            app.searchReplaceMode = true;
-            app.replaceFieldActive = true;
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-        // Ctrl+Enter replaces every match at once
-        if (ctrl && wParam == VK_RETURN && app.searchReplaceMode) {
-            editorReplaceAll(app, hwnd);
-            return;
-        }
-        switch (wParam) {
-            case VK_ESCAPE:
-                app.showSearch = false;
-                app.searchActive = false;
-                app.searchQuery.clear();
-                app.searchReplaceMode = false;
-                app.replaceFieldActive = false;
-                app.editorSearchMatches.clear();
-                app.editorSearchCurrentIndex = 0;
-                app.searchAnimation = 0;
-                updateBlinkTimer(app);
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
-            case VK_TAB:
-                // Replace mode: Tab hops between the two fields
-                if (app.searchReplaceMode) {
-                    app.replaceFieldActive = !app.replaceFieldActive;
-                    InvalidateRect(hwnd, nullptr, FALSE);
-                }
-                return;
-            case VK_RETURN: {
-                if (app.searchReplaceMode && app.replaceFieldActive) {
-                    // Enter in the replace row: replace current, move on
-                    editorReplaceCurrent(app, hwnd);
-                    return;
-                }
-                if (!app.editorSearchMatches.empty()) {
-                    app.editorSearchCurrentIndex = (app.editorSearchCurrentIndex + 1) % (int)app.editorSearchMatches.size();
-                    app.searchCurrentIndex = app.editorSearchCurrentIndex;
-                    scrollEditorToMatch(app);
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
-            }
-            case VK_BACK: {
-                if (app.searchReplaceMode && app.replaceFieldActive) {
-                    if (!app.replaceText.empty()) app.replaceText.pop_back();
-                    InvalidateRect(hwnd, nullptr, FALSE);
-                    return;
-                }
-                if (!app.searchQuery.empty()) {
-                    app.searchQuery.pop_back();
-                    performEditorSearch(app);
-                    app.searchCurrentIndex = app.editorSearchCurrentIndex;
-                    if (!app.editorSearchMatches.empty()) scrollEditorToMatch(app);
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
-            }
-        }
-        return; // Let WM_CHAR handle text input for search
+        if (ctrl && wParam == 'S') saveEditorFile(app, hwnd);
+        else searchInputKeyDown(app, hwnd, wParam);
+        return;
     }
 
     // Unsaved-changes dialog. Only its own keys respond; other keys —
@@ -2292,48 +2188,8 @@ void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
 
     resetCursorBlink(app);
 
-    // If search is active, route characters there
     if (app.showSearch && app.searchActive) {
-        if (app.searchJustOpened) {
-            app.searchJustOpened = false;
-            return;
-        }
-        wchar_t ch = (wchar_t)wParam;
-        bool toReplace = app.searchReplaceMode && app.replaceFieldActive;
-        // Ctrl+V arrives here as the SYN control character (#121)
-        if (ch == 0x16) {
-            std::wstring pasted = clipboardLine(hwnd);
-            if (!pasted.empty()) {
-                if (toReplace) {
-                    app.replaceText += pasted;
-                } else {
-                    app.searchQuery += pasted;
-                    performEditorSearch(app);
-                    if (!app.editorSearchMatches.empty()) {
-                        app.editorSearchCurrentIndex = 0;
-                        app.searchCurrentIndex = 0;
-                        scrollEditorToMatch(app);
-                    }
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
-            }
-            return;
-        }
-        if (ch >= 32 && ch != 127) {
-            if (toReplace) {
-                app.replaceText += ch;
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
-            }
-            app.searchQuery += ch;
-            performEditorSearch(app);
-            if (!app.editorSearchMatches.empty()) {
-                app.editorSearchCurrentIndex = 0;
-                app.searchCurrentIndex = 0;
-                scrollEditorToMatch(app);
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
+        searchInputChar(app, hwnd, static_cast<wchar_t>(wParam));
         return;
     }
 
@@ -2492,9 +2348,23 @@ void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
 // Place the IME composition window at the caret so candidate lists for
 // CJK input appear where the user is typing instead of the window corner.
 void editorPositionImeWindow(App& app, HWND hwnd) {
-    if (!app.editMode || app.editorLineStarts.empty()) return;
+    D2D1_POINT_2F inputPoint{};
+    bool inputField = searchInputCaretPoint(app, inputPoint) || tableEditCaretPoint(app, inputPoint);
+    if (!inputField && (!app.editMode || app.editorLineStarts.empty())) return;
     HIMC himc = ImmGetContext(hwnd);
     if (!himc) return;
+    if (inputField) {
+        COMPOSITIONFORM composition{};
+        composition.dwStyle = CFS_POINT;
+        composition.ptCurrentPos = {static_cast<LONG>(inputPoint.x), static_cast<LONG>(inputPoint.y)};
+        ImmSetCompositionWindow(himc, &composition);
+        CANDIDATEFORM candidate{};
+        candidate.dwStyle = CFS_CANDIDATEPOS;
+        candidate.ptCurrentPos = composition.ptCurrentPos;
+        ImmSetCandidateWindow(himc, &candidate);
+        ImmReleaseContext(hwnd, himc);
+        return;
+    }
 
     size_t line = getLineFromPos(app, app.editorCursorPos);
     size_t lineStart = app.editorLineStarts[line];
@@ -2629,6 +2499,8 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
     // Only handle clicks in the editor pane (left side)
     if (x > editorWidth) return;
 
+    // Commit before hit testing: the cell may have changed source lengths.
+    focusSourceEditor(app);
     bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     size_t clickPos = editorPosFromClick(app, x, y);
 
@@ -2966,7 +2838,7 @@ static void renderEditorWrapped(App& app, float editorWidth) {
         }
 
         // Caret
-        if (app.cursorBlinkOn && i == curLine) {
+        if (app.cursorBlinkOn && sourceEditorHasFocus(app) && i == curLine) {
             float cx = 0, cy = 0;
             editorCaretXY(lineLayout, app.editorCursorPos - lineStart, cx, cy);
             app.brush->SetColor(app.theme.text);
@@ -3135,7 +3007,7 @@ void renderEditor(App& app, float editorWidth) {
     }
 
     // Cursor (blink state driven by TIMER_CURSOR_BLINK)
-    if (app.cursorBlinkOn) {
+    if (app.cursorBlinkOn && sourceEditorHasFocus(app)) {
         size_t curCol = getColFromPos(app, app.editorCursorPos);
         size_t curLineStart = app.editorLineStarts[curLine];
         size_t curLineLen = getLineLength(app, curLine);
@@ -3192,4 +3064,3 @@ void renderEditor(App& app, float editorWidth) {
 
     app.renderTarget->PopAxisAlignedClip();
 }
-

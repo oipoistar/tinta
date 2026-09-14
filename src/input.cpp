@@ -353,7 +353,10 @@ static void closeFolderBrowserInput(App& app) {
 
 // Single-line clipboard text: newlines and tabs become spaces
 std::wstring clipboardLine(HWND hwnd) {
-    if (!OpenClipboard(hwnd)) return {};
+    // Clipboard listeners can briefly own it just after a copy/cut.
+    bool opened = false;
+    for (int attempt = 0; attempt < 10 && !(opened = OpenClipboard(hwnd) != FALSE); ++attempt) Sleep(5);
+    if (!opened) return {};
     std::wstring text;
     if (HANDLE hData = GetClipboardData(CF_UNICODETEXT)) {
         if (wchar_t* ptr = (wchar_t*)GlobalLock(hData)) {
@@ -987,6 +990,8 @@ void cancelDocumentScrollbarDrag(App& app, HWND hwnd) {
 }
 
 void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
+    if (searchInputMouseMove(app, static_cast<float>(GET_X_LPARAM(lParam)),
+                            static_cast<float>(GET_Y_LPARAM(lParam)))) return;
     bool mouseMoved = app.mouseX != GET_X_LPARAM(lParam) || app.mouseY != GET_Y_LPARAM(lParam);
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
@@ -1545,20 +1550,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
 // --- Right-click context menu ---
 
 static void closeSearchIfOpen(App& app) {
-    if (!app.showSearch) {
-        std::wstring().swap(app.docTextLower);
-        return;
-    }
-    app.showSearch = false;
-    app.searchActive = false;
-    app.searchQuery.clear();
-    app.searchMatches.clear();
-    app.searchReplaceMode = false;
-    app.replaceFieldActive = false;
-    std::wstring().swap(app.docTextLower);
-    app.searchAnimation = 0;
-    clearFolderSearch(app);
-    updateBlinkTimer(app);
+    closeSearchInput(app);
 }
 
 static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
@@ -1622,15 +1614,7 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             enterEditMode(app);
             break;
         case CTX_SEARCH:
-            if (app.showSearch) { app.searchActive = true; break; }
-            app.showSearch = true;
-            app.searchActive = true;
-            app.searchAnimation = 0;
-            app.searchQuery.clear();
-            app.searchMatches.clear();
-            app.searchCurrentIndex = 0;
-            app.searchJustOpened = false;
-            updateBlinkTimer(app);
+            openSearchInput(app);
             break;
         case CTX_TOC:
             closeSearchIfOpen(app);
@@ -1947,6 +1931,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     // The chooser acts on release; do not place an editor caret under it.
     if (app.showThemeChooser) return;
 
+    if (searchInputMouseDown(app, hwnd, static_cast<float>(GET_X_LPARAM(lParam)),
+                             static_cast<float>(GET_Y_LPARAM(lParam)))) return;
+
     if (sidePanelResizeBegin(app, hwnd, static_cast<float>(GET_X_LPARAM(lParam)),
                             static_cast<float>(GET_Y_LPARAM(lParam)))) return;
 
@@ -1954,23 +1941,6 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     if (app.editMode) {
         int x = GET_X_LPARAM(lParam);
         int y = GET_Y_LPARAM(lParam);
-        // Find & replace bar: clicks focus a field or press a button (#121)
-        if (app.showSearch && app.searchReplaceMode) {
-            for (const auto& hit : app.searchReplaceHits) {
-                if ((float)x >= hit.first.left && (float)x <= hit.first.right &&
-                    (float)y >= hit.first.top && (float)y <= hit.first.bottom) {
-                    app.swallowNextMouseUp = true;
-                    switch (hit.second) {
-                        case 1: app.replaceFieldActive = false; break;
-                        case 2: app.replaceFieldActive = true; break;
-                        case 3: editorReplaceCurrent(app, hwnd); break;
-                        case 4: editorReplaceAll(app, hwnd); break;
-                    }
-                    InvalidateRect(hwnd, nullptr, FALSE);
-                    return;
-                }
-            }
-        }
         // Everything left of the preview edge — pane and seam — belongs
         // to the editor handler (the seam is the split handle)
         if ((float)x < documentViewportX(app)) {
@@ -2208,6 +2178,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             if (hit) startPageInvoke(app, hwnd, hit);
             return;
         }
+        releaseSearchInput(app);
         // Capture the mouse for the duration of a selection drag: without
         // it, mouse events stop at the window edge and the drag can neither
         // auto-scroll past the viewport nor finalize outside the window
@@ -2665,6 +2636,7 @@ static void toggleFitBlock(App& app, HWND hwnd, unsigned key) {
 }
 
 void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
+    if (app.searchSelectingField >= 0) { searchInputMouseUp(app); return; }
     if (app.scrollbarDragging || app.hScrollbarDragging) {
         app.mouseX = GET_X_LPARAM(lParam);
         app.mouseY = GET_Y_LPARAM(lParam);
@@ -3591,6 +3563,21 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return true;
     }
 
+    // Focus transitions precede cell keyboard capture, including Ctrl+H (#223).
+    if (ctrl && (wParam == 'F' || wParam == 'H') && !app.confirmExitPending) {
+        if (wParam == 'H' && !app.editMode) enterEditMode(app);
+        openSearchInput(app, wParam == 'H');
+        return true;
+    }
+    if (app.showSearch && app.searchActive) {
+        if (ctrl && wParam == 'S' && app.editMode) {
+            if (GetKeyState(VK_SHIFT) & 0x8000) saveEditorFileAs(app, hwnd);
+            else saveEditorFile(app, hwnd);
+            return true;
+        }
+        return searchInputKeyDown(app, hwnd, wParam);
+    }
+
     // Edit mode: Ctrl+C with preview pane selection should copy from preview
     if (app.editMode) {
         // An open table cell editor owns the keyboard (#148)
@@ -3655,44 +3642,6 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return false;
     }
 
-    // Handle search-specific keys when search is active
-    if (app.showSearch && app.searchActive) {
-        switch (wParam) {
-            case VK_ESCAPE:
-                // Close search
-                app.showSearch = false;
-                app.searchActive = false;
-                app.searchQuery.clear();
-                app.searchMatches.clear();
-                std::wstring().swap(app.docTextLower);
-                app.searchAnimation = 0;
-                clearFolderSearch(app);
-                updateBlinkTimer(app);
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return false;
-            case VK_RETURN:
-                // Cycle to next match
-                if (!app.searchMatches.empty()) {
-                    app.searchCurrentIndex = (app.searchCurrentIndex + 1) % (int)app.searchMatches.size();
-                    scrollToCurrentMatch(app);
-                    InvalidateRect(hwnd, nullptr, FALSE);
-                }
-                return false;
-            case VK_BACK:
-                // Delete last character
-                if (!app.searchQuery.empty()) {
-                    app.searchQuery.pop_back();
-                    resetCursorBlink(app);
-                    performSearch(app);
-                    if (!app.searchMatches.empty()) {
-                        scrollToCurrentMatch(app);
-                    }
-                    InvalidateRect(hwnd, nullptr, FALSE);
-                }
-                return false;
-        }
-    }
-
     if (ctrl) {
         switch (wParam) {
             case 'P':
@@ -3706,25 +3655,6 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 // viewer — there is nothing edited to save
                 if (GetKeyState(VK_SHIFT) & 0x8000) {
                     saveFileAs(app, hwnd);
-                }
-                break;
-            case 'H':
-                // Find & replace implies editing: from the viewer, hop
-                // into edit mode with the replace row already open (#121)
-                enterEditMode(app);
-                if (app.editMode) {
-                    app.showSearch = true;
-                    app.searchActive = true;
-                    app.searchAnimation = 0;
-                    app.searchQuery.clear();
-                    app.editorSearchMatches.clear();
-                    app.editorSearchCurrentIndex = 0;
-                    app.searchCurrentIndex = 0;
-                    app.searchJustOpened = true;
-                    app.searchReplaceMode = true;
-                    app.replaceFieldActive = false;
-                    updateBlinkTimer(app);
-                    InvalidateRect(hwnd, nullptr, FALSE);
                 }
                 break;
             case 'N':
@@ -3797,21 +3727,6 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.settingsAnimation = 0;
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
-                break;
-            case 'F':
-                // Ctrl+F to open search
-                if (!app.showSearch) {
-                    app.showSearch = true;
-                    app.searchActive = true;
-                    app.searchAnimation = 0;
-                    app.searchQuery.clear();
-                    app.searchMatches.clear();
-                    std::wstring().swap(app.docTextLower);
-                    app.searchCurrentIndex = 0;
-                    app.searchJustOpened = true;
-                    updateBlinkTimer(app);
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
                 break;
         }
     } else {
@@ -3897,13 +3812,7 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.showHelp = false;
                     app.helpAnimation = 0;
                 } else if (app.showSearch) {
-                    app.showSearch = false;
-                    app.searchActive = false;
-                    app.searchQuery.clear();
-                    app.searchMatches.clear();
-                    app.searchAnimation = 0;
-                    clearFolderSearch(app);
-                    updateBlinkTimer(app);
+                    closeSearchInput(app);
                 } else if (app.showFolderBrowser) {
                     app.showFolderBrowser = false;
                     app.folderBrowserAnimation = 0;
@@ -4028,17 +3937,9 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 break;
             case 'F':
-                // F to open search (when not in search mode)
-                if (!app.showSearch && !app.showThemeChooser) {
-                    app.showSearch = true;
-                    app.searchActive = true;
-                    app.searchAnimation = 0;
-                    app.searchQuery.clear();
-                    app.searchMatches.clear();
-                    app.searchCurrentIndex = 0;
-                    app.searchJustOpened = true;
-                    updateBlinkTimer(app);
-                    InvalidateRect(hwnd, nullptr, FALSE);
+                if (!app.showThemeChooser) {
+                    openSearchInput(app);
+                    return true;
                 }
                 break;
             case VK_UP:
@@ -4212,15 +4113,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
         }
         if (ch == L'F' && !app.showHelp && !app.editMode) {
             // A punctuation search binding (vim '/') resolved here
-            app.showSearch = true;
-            app.searchActive = true;
-            app.searchAnimation = 0;
-            app.searchQuery.clear();
-            app.searchMatches.clear();
-            app.searchCurrentIndex = 0;
-            app.searchJustOpened = false;
-            updateBlinkTimer(app);
-            InvalidateRect(app.hwnd, nullptr, FALSE);
+            openSearchInput(app);
             return;
         }
     }
@@ -4247,38 +4140,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
     }
 
     if (app.showSearch && app.searchActive) {
-        // Skip the character that opened search (F key)
-        if (app.searchJustOpened) {
-            app.searchJustOpened = false;
-            return;
-        }
-        wchar_t ch = (wchar_t)wParam;
-        // Ctrl+V arrives here as the SYN control character (#121)
-        if (ch == 0x16) {
-            std::wstring pasted = clipboardLine(hwnd);
-            if (!pasted.empty()) {
-                app.searchQuery += pasted;
-                resetCursorBlink(app);
-                performSearch(app);
-                if (!app.searchMatches.empty()) {
-                    app.searchCurrentIndex = 0;
-                    scrollToCurrentMatch(app);
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
-            }
-            return;
-        }
-        // Only handle printable characters (not control chars)
-        if (ch >= 32 && ch != 127) {
-            app.searchQuery += ch;
-            resetCursorBlink(app);
-            performSearch(app);
-            if (!app.searchMatches.empty()) {
-                app.searchCurrentIndex = 0;
-                scrollToCurrentMatch(app);
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-        }
+        searchInputChar(app, hwnd, static_cast<wchar_t>(wParam));
     }
 }
 

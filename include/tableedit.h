@@ -18,6 +18,7 @@ bool tableEditKeyDown(App& app, HWND hwnd, WPARAM key);
 bool tableEditChar(App& app, wchar_t ch);
 // Commit any open cell editor (mode exits, saves, clicks elsewhere)
 void tableEditCommit(App& app);
+bool tableEditCaretPoint(App& app, D2D1_POINT_2F& point);
 // Drop the editor without applying (document switch, exit edit mode)
 void tableEditCancel(App& app);
 // Cell input overlay plus the hover + affordances; screen coordinates

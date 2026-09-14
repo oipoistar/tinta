@@ -1301,6 +1301,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_KILLFOCUS:
+            if (app) searchInputMouseUp(*app);
             if (app) cancelDocumentScrollbarDrag(*app, hwnd);
             if (app) sidePanelResizeEnd(*app, hwnd, true);
             if (app && app->showContextMenu) {
@@ -1530,6 +1531,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_CAPTURECHANGED:
+            if (app && (HWND)lParam != hwnd) searchInputMouseUp(*app);
             if (app && (HWND)lParam != hwnd && app->frontmatterDrag >= 0) {
                 app->frontmatterDrag = app->frontmatterDrop = -1;
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -1544,6 +1546,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_CANCELMODE:
+            if (app) searchInputMouseUp(*app);
             if (app && app->frontmatterDrag >= 0) {
                 app->frontmatterDrag = app->frontmatterDrop = -1;
                 if (GetCapture() == hwnd) ReleaseCapture();
@@ -1605,7 +1608,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_IME_COMPOSITION:
             // Anchor the IME composition/candidate window at the caret in
             // edit mode, then let DefWindowProc run default IME handling
-            if (app && app->editMode) editorPositionImeWindow(*app, hwnd);
+            if (app) editorPositionImeWindow(*app, hwnd);
             break;
 
         case WM_DROPFILES:

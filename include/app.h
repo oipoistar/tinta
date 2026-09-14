@@ -1130,7 +1130,13 @@ struct App {
     std::wstring searchQuery;
     int searchCurrentIndex = 0;
     bool searchActive = false;
-    bool searchJustOpened = false;  // Skip WM_CHAR after opening with F key
+    struct SearchField {
+        size_t caret = 0, anchor = 0;
+        float scrollX = 0;
+        D2D1_RECT_F textRect{}, hitRect{};
+    };
+    SearchField searchFields[2];
+    int searchSelectingField = -1;
 
     // File watching (auto-reload)
     FILETIME lastFileWriteTime = {};

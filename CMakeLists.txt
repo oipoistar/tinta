@@ -47,6 +47,7 @@ set(SOURCES
     src/syntax_extended.cpp
     src/utils.cpp
     src/search.cpp
+    src/search_input.cpp
     src/render.cpp
     src/image_loader.cpp
     src/file_utils.cpp
@@ -156,7 +157,7 @@ if(BUILD_TESTING)
     # window, including layout-dependent character sequences (#195).
     set(INPUT_TEST_SOURCES ${SOURCES})
     list(REMOVE_ITEM INPUT_TEST_SOURCES src/main_d2d.cpp)
-    add_executable(input_tests tests/input_tests.cpp tests/tab_drop_tests.cpp tests/superscript_tests.cpp tests/sidepanel_tests.cpp tests/image_tests.cpp ${INPUT_TEST_SOURCES})
+    add_executable(input_tests tests/input_tests.cpp tests/tab_drop_tests.cpp tests/superscript_tests.cpp tests/sidepanel_tests.cpp tests/image_tests.cpp tests/search_input_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(input_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(input_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
     target_compile_definitions(input_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
@@ -164,7 +165,12 @@ if(BUILD_TESTING)
         TINTA_TAB_DROP_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/tab-drop-position.md"
         TINTA_SUPERSCRIPT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/superscript-subscript.md"
         TINTA_PANEL_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/toc-browser-resize.md"
-        TINTA_IMAGE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/image-cache-large.md")
+        TINTA_IMAGE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/image-cache-large.md"
+        TINTA_FIND_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/find-table-focus.md")
+    add_test(NAME search_input_focus COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:input_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/search-input-test-$<CONFIG>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_search_input_tests.cmake)
     add_test(NAME image_cache_and_decode COMMAND ${CMAKE_COMMAND}
         -DTEST_BINARY=$<TARGET_FILE:input_tests>
         -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/image-test-$<CONFIG>

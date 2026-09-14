@@ -4,6 +4,7 @@
 // a chevron opens the open-files switcher when the strip is crowded.
 
 #include "tabs.h"
+#include "search.h"
 #include "overlays.h"
 
 #include "document.h"
@@ -79,12 +80,7 @@ void parkActiveEditBuffer(App& app) {
     app.editorSearchCurrentIndex = 0;
     app.editorHasSelection = false;
     app.confirmExitPending = false;
-    if (app.showSearch) {
-        app.showSearch = false;
-        app.searchActive = false;
-        app.searchQuery.clear();
-        app.searchAnimation = 0;
-    }
+    if (app.showSearch) closeSearchInput(app);
     KillTimer(app.hwnd, TIMER_EDITOR_REPARSE_ID);
     updateBlinkTimer(app);
     SetTimer(app.hwnd, TIMER_FILE_WATCH_ID, 500, nullptr);

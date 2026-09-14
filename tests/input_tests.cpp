@@ -154,12 +154,14 @@ void settingsDismissal() {
 }
 
 int runTabDropTests();
+int runSearchInputTests();
 int runSuperscriptTests();
 int runSidePanelTests();
 int runImageTests(const char* remoteBase);
 int runTabDropLaunchProbe();
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--search-input-tests") return runSearchInputTests();
     if (argc >= 2 && std::string(argv[1]) == "--image-tests")
         return runImageTests(argc > 2 ? argv[2] : nullptr);
     if (argc == 2 && std::string(argv[1]) == "--sidepanel-tests") return runSidePanelTests();
@@ -213,7 +215,6 @@ int main(int argc, char** argv) {
     app.editMode = false;
     app.showSearch = true;
     app.searchActive = true;
-    app.searchJustOpened = false;
     stroke(app, 'E', 0x0443);
     check(!app.editMode && app.searchQuery == L"\x0443", "search receives non-Latin E text");
     stroke(app, VK_ESCAPE);

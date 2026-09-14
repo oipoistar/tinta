@@ -1,3 +1,4 @@
+#include "search.h"
 #include "tableedit.h"
 #include "editor.h"
 #include "utils.h"
@@ -202,6 +203,7 @@ bool openCellEditor(App& app, size_t tableSrc, int row, int col) {
     if (!currentTable(app, src, t)) return false;
     size_t s, e;
     if (!cellByteRange(src, t, row, col, s, e)) return false;
+    releaseSearchInput(app);
     app.tableEditActive = true;
     app.tableEditRow = row;
     app.tableEditCol = col;
@@ -505,6 +507,18 @@ void tableEditCommit(App& app) {
 
 void tableEditCancel(App& app) {
     closeCellEditor(app);
+}
+
+bool tableEditCaretPoint(App& app, D2D1_POINT_2F& point) {
+    if (!app.tableEditActive || !app.textFormat) return false;
+    const auto* cell = activeCellRect(app);
+    if (!cell) return false;
+    float pad = 8.0f * app.contentScale * app.zoomFactor;
+    float width = measureText(app, app.tableEditText.substr(0, app.tableEditCaret), app.textFormat);
+    point.x = documentViewportX(app) - app.scrollX +
+        std::min(cell->rect.right-pad, cell->rect.left+pad+width);
+    point.y = cell->rect.top-app.scrollY+pad+app.textFormat->GetFontSize()*1.4f;
+    return true;
 }
 
 void renderTableEditOverlay(App& app) {

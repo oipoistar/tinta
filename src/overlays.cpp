@@ -1,3 +1,4 @@
+#include "search.h"
 #include "frontmatter_ui.h"
 #include "overlays.h"
 #include "sidepanels.h"
@@ -55,13 +56,15 @@ void renderSearchOverlay(App& app) {
     float barWidth = std::min(dpi(app, 500.0f), app.width - dpi(app, 40.0f));
     float barHeight = dpi(app, 44.0f);
     float barCenterWidth = (float)app.width;
+    float barLeft = 0;
     if (app.editMode) {
         // Center over editor pane (left side)
-        float paneWidth = app.width * app.editorSplitRatio - 3;
-        barWidth = std::min(barWidth, paneWidth - dpi(app, 40.0f));
-        barCenterWidth = paneWidth;
+        float paneWidth = editorPaneWidth(app);
+        barLeft = dpi(app, 48); // The edit rail is painted above overlays.
+        barWidth = std::min(barWidth, paneWidth - barLeft - dpi(app, 24.0f));
+        barCenterWidth = paneWidth - barLeft;
     }
-    float barX = (barCenterWidth - barWidth) / 2;
+    float barX = barLeft + (barCenterWidth - barWidth) / 2;
     float barY = chromeTopHeight(app) + dpi(app, 20.0f) * anim -
                  barHeight * (1.0f - anim);  // Slide down from under the strip
 
@@ -108,65 +111,30 @@ void renderSearchOverlay(App& app) {
     IDWriteTextFormat* searchTextFormat = app.searchTextFormat;
     if (searchTextFormat) {
         float textX = barX + dpi(app, 42.0f);
-        float textWidth = barWidth - dpi(app, 120.0f);  // Leave room for count
-
-        if (app.searchQuery.empty()) {
-            // Placeholder text
-            D2D1_COLOR_F placeholderColor = app.theme.text;
-            placeholderColor.a = 0.4f * anim;
-            app.brush->SetColor(placeholderColor);
-            const wchar_t* ph = tr(app, "search.placeholder");
-            app.renderTarget->DrawText(ph, (UINT32)wcslen(ph), searchTextFormat,
-                D2D1::RectF(textX, barY + dpi(app, 12.0f), textX + textWidth, barY + barHeight), app.brush);
-        } else {
-            // Actual search query
-            D2D1_COLOR_F textColor = app.theme.text;
-            textColor.a = anim;
-            app.brush->SetColor(textColor);
-            app.renderTarget->DrawText(app.searchQuery.c_str(), (UINT32)app.searchQuery.length(),
-                searchTextFormat,
-                D2D1::RectF(textX, barY + dpi(app, 12.0f), textX + textWidth, barY + barHeight), app.brush);
-
-            // Blinking cursor (blink state driven by TIMER_CURSOR_BLINK).
-            // Query width is cached - it only changes when the query or the
-            // text format changes, not per frame.
-            if (app.searchActive && app.cursorBlinkOn &&
-                !(app.searchReplaceMode && app.replaceFieldActive)) {
-                static std::wstring cachedQuery;
-                static IDWriteTextFormat* cachedFormat = nullptr;
-                static float cachedQueryWidth = 0.0f;
-                if (cachedQuery != app.searchQuery || cachedFormat != searchTextFormat) {
-                    cachedQueryWidth = measureText(app, app.searchQuery, searchTextFormat);
-                    cachedQuery = app.searchQuery;
-                    cachedFormat = searchTextFormat;
-                }
-                float cursorX = textX + cachedQueryWidth + 2;
-                app.brush->SetColor(textColor);
-                app.renderTarget->DrawLine(
-                    D2D1::Point2F(cursorX, barY + dpi(app, 12.0f)),
-                    D2D1::Point2F(cursorX, barY + dpi(app, 32.0f)),
-                    app.brush, dpi(app, 1.5f));
+        size_t matchCount = app.editMode ? app.editorSearchMatches.size() : app.searchMatches.size();
+        std::wstring countText;
+        if (!app.searchQuery.empty()) {
+            int currentIdx = app.editMode ? app.editorSearchCurrentIndex : app.searchCurrentIndex;
+            if (matchCount == 0) countText = tr(app, "search.no_matches");
+            else {
+                wchar_t formatted[64];
+                swprintf_s(formatted, tr(app, "search.match_count"), currentIdx + 1, matchCount);
+                countText = formatted;
             }
         }
-
-        // Match count
-        if (!app.searchQuery.empty()) {
-            wchar_t countText[32];
-            size_t matchCount = app.editMode ? app.editorSearchMatches.size() : app.searchMatches.size();
-            int currentIdx = app.editMode ? app.editorSearchCurrentIndex : app.searchCurrentIndex;
-            if (matchCount == 0) {
-                wcscpy_s(countText, tr(app, "search.no_matches"));
-                // Red color for no matches
-                app.brush->SetColor(D2D1::ColorF(0.9f, 0.3f, 0.3f, anim));
-            } else {
-                swprintf_s(countText, tr(app, "search.match_count"), currentIdx + 1, matchCount);
-                D2D1_COLOR_F countColor = app.theme.text;
-                countColor.a = 0.7f * anim;
-                app.brush->SetColor(countColor);
-            }
-            float countTextWidth = measureText(app, countText, searchTextFormat);
-            float countX = barX + barWidth - countTextWidth - dpi(app, 14.0f);
-            app.renderTarget->DrawText(countText, (UINT32)wcslen(countText), searchTextFormat,
+        float countWidth = measureText(app, countText, searchTextFormat);
+        float countX = barX + barWidth - countWidth - dpi(app, 14);
+        // A localized count must not paint over a long, scrolling query.
+        bool showCount = !countText.empty() && countX-textX >= dpi(app, 70);
+        float textRight = showCount ? countX-dpi(app, 10) : barX+barWidth-dpi(app,14);
+        renderSearchField(app, 0,
+            D2D1::RectF(textX, barY+dpi(app,12), std::max(textX+dpi(app,20),textRight), barY+dpi(app,32)),
+            barRect.rect, tr(app, "search.placeholder"), anim);
+        if (showCount) {
+            auto countColor = matchCount ? app.theme.text : D2D1::ColorF(0.9f, 0.3f, 0.3f);
+            countColor.a = (matchCount ? 0.7f : 1.0f) * anim;
+            app.brush->SetColor(countColor);
+            app.renderTarget->DrawText(countText.data(), static_cast<UINT32>(countText.size()), searchTextFormat,
                 D2D1::RectF(countX, barY + dpi(app, 12.0f), barX + barWidth - dpi(app, 10.0f), barY + barHeight), app.brush);
         }
 
@@ -176,7 +144,8 @@ void renderSearchOverlay(App& app) {
     app.searchReplaceHits.clear();
     if (app.editMode && app.searchReplaceMode && searchTextFormat) {
         float rowY = barY + barHeight + dpi(app, 6.0f);
-        float rowH = dpi(app, 44.0f);
+        bool stacked = barWidth < dpi(app, 390);
+        float rowH = dpi(app, stacked ? 88.0f : 44.0f);
         D2D1_ROUNDED_RECT rowRect = D2D1::RoundedRect(
             D2D1::RectF(barX, rowY, barX + barWidth, rowY + rowH),
             dpi(app, 8.0f), dpi(app, 8.0f));
@@ -199,7 +168,7 @@ void renderSearchOverlay(App& app) {
         float repW = measureText(app, repLabel, searchTextFormat) + dpi(app, 24.0f);
         float allW = measureText(app, allLabel, searchTextFormat) + dpi(app, 24.0f);
         float chipH = dpi(app, 28.0f);
-        float chipY = rowY + (rowH - chipH) * 0.5f;
+        float chipY = rowY + dpi(app, stacked ? 50.0f : 8.0f);
         float allX = barX + barWidth - dpi(app, 10.0f) - allW;
         float repX = allX - dpi(app, 8.0f) - repW;
         auto chip = [&](float cx, float cw, const wchar_t* label, int id,
@@ -235,7 +204,7 @@ void renderSearchOverlay(App& app) {
         iconColor.a = 0.5f * anim;
         app.brush->SetColor(iconColor);
         float ix = barX + dpi(app, 20.0f);
-        float iy = rowY + rowH * 0.5f;
+        float iy = rowY + dpi(app, 22);
         app.renderTarget->DrawLine(
             D2D1::Point2F(ix, iy - dpi(app, 7.0f)),
             D2D1::Point2F(ix, iy + dpi(app, 3.0f)), app.brush, dpi(app, 2.0f));
@@ -246,44 +215,16 @@ void renderSearchOverlay(App& app) {
 
         // Replace text (or placeholder), left of the buttons
         float textX = barX + dpi(app, 42.0f);
-        float textRight = repX - dpi(app, 12.0f);
-        if (app.replaceText.empty()) {
-            D2D1_COLOR_F ph = app.theme.text;
-            ph.a = 0.4f * anim;
-            app.brush->SetColor(ph);
-            const wchar_t* p = tr(app, "search.replace_placeholder");
-            app.renderTarget->DrawText(p, (UINT32)wcslen(p), searchTextFormat,
-                D2D1::RectF(textX, rowY + dpi(app, 12.0f), textRight,
-                            rowY + rowH), app.brush);
-        } else {
-            D2D1_COLOR_F tc = app.theme.text;
-            tc.a = anim;
-            app.brush->SetColor(tc);
-            app.renderTarget->DrawText(app.replaceText.c_str(),
-                (UINT32)app.replaceText.size(), searchTextFormat,
-                D2D1::RectF(textX, rowY + dpi(app, 12.0f), textRight,
-                            rowY + rowH), app.brush);
-        }
+        float textRight = stacked ? barX+barWidth-dpi(app,14) : repX-dpi(app,12);
+        renderSearchField(app, 1,
+            D2D1::RectF(textX, rowY+dpi(app,12), textRight, rowY+dpi(app,32)),
+            rowRect.rect, tr(app, "search.replace_placeholder"), anim);
 
-        // The active field carries the accent focus ring and the caret
-        D2D1_COLOR_F focus = app.theme.accent;
-        focus.a = 0.9f * anim;
-        app.brush->SetColor(focus);
-        if (app.replaceFieldActive) {
-            app.renderTarget->DrawRoundedRectangle(rowRect, app.brush, 1.5f);
-            if (app.searchActive && app.cursorBlinkOn) {
-                float cw2 = measureText(app, app.replaceText, searchTextFormat);
-                float cx2 = textX + cw2 + 2;
-                D2D1_COLOR_F tc = app.theme.text;
-                tc.a = anim;
-                app.brush->SetColor(tc);
-                app.renderTarget->DrawLine(
-                    D2D1::Point2F(cx2, rowY + dpi(app, 12.0f)),
-                    D2D1::Point2F(cx2, rowY + dpi(app, 32.0f)), app.brush,
-                    dpi(app, 1.5f));
-            }
-        } else {
-            app.renderTarget->DrawRoundedRectangle(barRect, app.brush, 1.5f);
+        if (app.searchActive) {
+            auto focus = app.theme.accent;
+            focus.a = 0.9f * anim;
+            app.brush->SetColor(focus);
+            app.renderTarget->DrawRoundedRectangle(app.replaceFieldActive ? rowRect : barRect, app.brush, 1.5f);
         }
 
         // Field rects come after the buttons so button clicks win
