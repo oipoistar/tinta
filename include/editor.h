@@ -24,6 +24,8 @@ void handleEditorMouseWheel(App& app, HWND hwnd, float delta);
 
 // Editor rendering
 void renderEditor(App& app, float editorWidth);
+// Screen-space caret origin shared by rendering and IME anchoring.
+bool editorCaretPoint(App& app, D2D1_POINT_2F& point);
 
 // Re-enter edit mode from a parked tab buffer (tabs.cpp), restoring the
 // dirty flag, scroll, and caret the switch-away captured

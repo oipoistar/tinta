@@ -17,10 +17,11 @@ repo = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--binary', type=Path, default=repo/'build/Release/tinta.exe')
 parser.add_argument('--baseline', type=Path, default=repo.parent/'tinta-3.7.1.exe')
+parser.add_argument('--fixture', type=Path, default=repo/'tests/fixtures/find-table-focus.md')
 parser.add_argument('--output', type=Path, default=repo/'out/issue-223/exports')
 args = parser.parse_args()
 output = args.output.resolve()
-fixture = repo/'tests/fixtures/find-table-focus.md'
+fixture = args.fixture.resolve()
 before = hashlib.sha256(fixture.read_bytes()).hexdigest()
 ctypes.windll.kernel32.SetErrorMode(3)
 startup = subprocess.STARTUPINFO()

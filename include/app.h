@@ -1219,6 +1219,9 @@ struct App {
 
     // Editor cursor & selection
     size_t editorCursorPos = 0;
+    // A trailing hit at a soft wrap belongs to the preceding visual row.
+    // Store its insertion position so unrelated cursor moves default to leading.
+    size_t editorCaretUpstreamPos = std::wstring::npos;
     int editorDesiredCol = -1;
     float editorDesiredX = -1.0f;  // desired caret x for Up/Down in wrap mode
     bool editorSelecting = false;
