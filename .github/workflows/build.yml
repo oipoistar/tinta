@@ -45,26 +45,26 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.** Safer large-image loading and a compiler cleanup.
+            **Markdown, distilled.** Editor fixes and links between document headings.
 
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Large-image loading (#220)
-            - Fix a crash when large images appear alongside other images, including images in tables and quotes (#221)
-            - Large local and downloaded raster images use bounded decoding while retaining their displayed size and aspect ratio
-            - Invalid or excessive images fall back to alt-text placeholders; HTML and DOCX exports preserve the original image files
-            - Reported by @glance02
+            ### Cross-document heading links (#225)
+            - Links such as `file.md#heading` open the target Markdown document and jump to its heading (#229)
+            - Links also work when the target is already open in a tab, preserving unsaved edits
+            - Suggested by @vkstudio2015 in [Discussion #225](https://github.com/oipoistar/tinta/discussions/225)
+
+            ### Find, Replace and table focus (#223)
+            - Find and Replace fields support cursor movement, text selection and clipboard shortcuts, with the blinking caret in the active field (#227)
+            - Clicking the source editor after editing a table transfers keyboard focus, so typing goes where clicked (#227)
+            - Reported by @a86022
 
             ### Fixed
-            - Cached images remain valid while the document or lightbox still needs them (#220, #221)
-            - Image memory accounting uses allocated pixels instead of DPI-adjusted display dimensions (#220, #221)
-            - Remove unused variables, shadowed names and implicit narrowing conversions without disabling compiler warnings (#221)
-
-            ### Changed
-            - Refresh the documented portable executable size to about 2.4 MB (#219)
+            - Cursor movement and Shift+Arrow selection continue through wrapped lines without getting stuck at wrap boundaries. Reported by @a86022 (#224, #228)
+            - Right-clicking selected text preserves the selection and keeps Copy and Cut available, including after double-click selection and across wrapped lines. Reported by @a86022 (#230, #231)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats

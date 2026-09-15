@@ -1,5 +1,16 @@
 # Changelog
 
+## [v3.7.2] - 2026-09-15
+
+### Added
+- Links such as `file.md#heading` open the target Markdown document and jump to its heading, including when the document is already open in a tab. Suggested by @vkstudio2015 (#225, #229)
+
+### Fixed
+- Find and Replace fields support cursor movement, text selection and clipboard shortcuts, with the blinking caret in the active field. Reported by @a86022 (#223, #227)
+- Clicking the source editor after editing a table transfers keyboard focus, so subsequent typing goes where clicked. Reported by @a86022 (#223, #227)
+- Cursor movement and Shift+Arrow selection continue through wrapped lines without getting stuck at wrap boundaries. Reported by @a86022 (#224, #228)
+- Right-clicking selected text preserves the selection and keeps Copy and Cut available, including after double-click selection and across wrapped lines. Reported by @a86022 (#230, #231)
+
 ## [v3.7.1] - 2026-09-12
 
 ### Fixed
