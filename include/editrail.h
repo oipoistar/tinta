@@ -38,7 +38,8 @@ bool editCtxMouseDown(App& app, HWND hwnd, int x, int y);
 bool editCtxMouseMove(App& app, int x, int y);
 
 // Editor helpers the menu leans on (defined in editor.cpp)
-void editorMoveCaretToPoint(App& app, int x, int y);
+// Preserve a selection under the pointer; otherwise move the insertion point.
+void editorPrepareContextMenuAt(App& app, int x, int y);
 void editorInsertTableGrid(App& app, HWND hwnd, int cols, int rows);
 void editorInsertDiagramTemplate(App& app, HWND hwnd, int kind);
 void editorClipboardCut(App& app, HWND hwnd);

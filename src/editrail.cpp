@@ -398,7 +398,7 @@ static const EDiagItem kEDiag[] = {
 };
 
 void openEditCtxMenu(App& app, HWND hwnd, float x, float y) {
-    editorMoveCaretToPoint(app, (int)x, (int)y);
+    editorPrepareContextMenuAt(app, (int)x, (int)y);
     app.editCtxOpen = true;
     app.editCtxRailOnly = false;
     app.editCtxX = x;

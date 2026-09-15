@@ -2151,8 +2151,62 @@ static void editorInsertLink(App& app, HWND hwnd) {
 
 // --- Insert-menu helpers (design t9) ------------------------------------
 
-void editorMoveCaretToPoint(App& app, int x, int y) {
-    app.editorCursorPos = editorPosFromClick(app, x, y);
+static bool editorSelectionContainsPoint(App& app, size_t line, float x, float y) {
+    if (!app.editorHasSelection || !app.editorTextFormat) return false;
+    size_t start = app.editorLineStarts[line], len = getLineLength(app, line);
+    size_t low = editorSelMin(app), high = editorSelMax(app);
+    if (low == high || high <= start || low > start + len) return false;
+
+    // Match the painted selection, rather than the nearest insertion offset:
+    // blank space outside a line can otherwise look like its selected endpoint.
+    bool wrap = editorWrapOn(app);
+    float lineHeight = app.editorTextFormat->GetFontSize() * 1.5f;
+    float row = wrap ? (float)app.editorRowStarts[line] : (float)line;
+    x -= editorTextX(app) - (wrap ? 0.0f : app.editorScrollX);
+    y -= chromeTopHeight(app) + dpi(app, 8.0f) + row * lineHeight - app.editorScrollY;
+    auto contains = [&](float left, float top, float width, float height) {
+        return x >= left && x < left + width && y >= top && y < top + height;
+    };
+    auto* layout = cachedEditorLineLayout(app, start, len);
+    size_t from = low > start ? low - start : 0;
+    size_t to = std::min(high - start, len);
+    if (to > from && layout) {
+        if (!wrap) {
+            float left = editorColToX(app, layout, from);
+            if (contains(left, 0, editorColToX(app, layout, to) - left, lineHeight)) return true;
+        } else {
+            UINT32 count = 0;
+            layout->HitTestTextRange((UINT32)from, (UINT32)(to - from), 0, 0, nullptr, 0, &count);
+            std::vector<DWRITE_HIT_TEST_METRICS> hits(count);
+            if (count && SUCCEEDED(layout->HitTestTextRange((UINT32)from, (UINT32)(to - from),
+                    0, 0, hits.data(), count, &count))) {
+                for (const auto& hit : hits)
+                    if (contains(hit.left, hit.top, hit.width, hit.height)) return true;
+            }
+        }
+    }
+    // Both editor renderers paint a selected newline as one extra character cell.
+    if (high > start + len && low <= start + len) {
+        float ex = 0, ey = 0;
+        if (wrap) editorCaretXY(layout, len, ex, ey);
+        else ex = editorColToX(app, layout, len);
+        float width = app.editorCharWidth > 0 ? app.editorCharWidth : app.editorTextFormat->GetFontSize() * 0.6f;
+        return contains(ex, ey, width, lineHeight);
+    }
+    return false;
+}
+
+void editorPrepareContextMenuAt(App& app, int x, int y) {
+    focusSourceEditor(app);
+    size_t affinity = app.editorCaretUpstreamPos;
+    size_t position = editorPosFromClick(app, x, y);
+    if (!app.editorLineStarts.empty() &&
+        editorSelectionContainsPoint(app, getLineFromPos(app, position), (float)x, (float)y)) {
+        app.editorCaretUpstreamPos = affinity;
+        return;
+    }
+    app.editorCursorPos = position;
+    app.editorSelStart = app.editorSelEnd = position;
     app.editorHasSelection = false;
     app.editorDesiredCol = -1;
 }

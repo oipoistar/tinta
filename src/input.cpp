@@ -1699,8 +1699,8 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
         return;  // strip right-clicks never reach the document menu
     }
 
-    // Raw editor insert menu (design t9): the right-click moves the
-    // caret and the INSERT entries drop their markdown there
+    // Preserve the selection on an inside right-click (#230); otherwise
+    // move the caret so INSERT entries drop their Markdown at that point.
     if (app.editMode && !app.confirmExitPending &&
         !fromKeyboard && (float)pt.x >= editRailWidth(app) &&
         (float)pt.x < editorPaneWidth(app)) {
