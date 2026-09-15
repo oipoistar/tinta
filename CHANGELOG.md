@@ -13,6 +13,7 @@
 
 ### Changed
 - Remove a shadowed local variable from the context-menu regression tests (#230)
+- Refresh the documented portable executable size to about 2.5 MB
 
 ## [v3.7.1] - 2026-09-12
 
