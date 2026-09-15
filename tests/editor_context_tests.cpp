@@ -178,9 +178,9 @@ int runEditorContextTests() {
     app.editorText = L"selected\n\nnext"; rebuildLineStarts(app); select(app,0,10);
     auto blank = caretAt(app,9); blank.x += 3; blank.y += mid;
     preserve(app,blank);
-    select(app,0,8); auto end = caretAt(app,8); end.x += 40; end.y += mid;
-    outside(app,end,8);
-    select(app,0,app.editorText.size()); outside(app,{end.x,800},app.editorText.size());
+    select(app,0,8); auto outsidePoint = caretAt(app,8); outsidePoint.x += 40; outsidePoint.y += mid;
+    outside(app,outsidePoint,8);
+    select(app,0,app.editorText.size()); outside(app,{outsidePoint.x,800},app.editorText.size());
     // Clipboard actions use the selected source, and Cut remains undoable.
     Microsoft::WRL::ComPtr<IDataObject> clipboard;
     HRESULT saved = OleGetClipboard(clipboard.GetAddressOf());

@@ -66,6 +66,9 @@ jobs:
             - Cursor movement and Shift+Arrow selection continue through wrapped lines without getting stuck at wrap boundaries. Reported by @a86022 (#224, #228)
             - Right-clicking selected text preserves the selection and keeps Copy and Cut available, including after double-click selection and across wrapped lines. Reported by @a86022 (#230, #231)
 
+            ### Changed
+            - Remove a shadowed local variable from the context-menu regression tests (#230)
+
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats
             - 22 natively rendered Mermaid diagram families

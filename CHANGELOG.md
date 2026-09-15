@@ -11,6 +11,9 @@
 - Cursor movement and Shift+Arrow selection continue through wrapped lines without getting stuck at wrap boundaries. Reported by @a86022 (#224, #228)
 - Right-clicking selected text preserves the selection and keeps Copy and Cut available, including after double-click selection and across wrapped lines. Reported by @a86022 (#230, #231)
 
+### Changed
+- Remove a shadowed local variable from the context-menu regression tests (#230)
+
 ## [v3.7.1] - 2026-09-12
 
 ### Fixed
