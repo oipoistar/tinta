@@ -1,5 +1,19 @@
 # Changelog
 
+## [v3.7.3] - 2026-09-20
+
+### Added
+- The Read button and Ctrl+Shift+E preview unsaved edits at full width; returning to the editor preserves text, cursor position and undo history. Requested by @a86022 (#236)
+- Local PDF links open in the registered PDF viewer, including relative paths and Unicode filenames, with feedback for missing files or failed launches. Reported and contributed by @msaitov (#237)
+
+### Fixed
+- AltGr and Ctrl+Alt text input no longer trigger Ctrl shortcuts; unintended Ctrl+Shift combinations are ignored while explicit shortcuts keep working. Reported by @Fromville (#235)
+- Rendered table cells support accurate mouse caret placement, selection, copy, cut and paste, including empty cells, with cell undo and Unicode-aware deletion. Wrapped text and escaped pipes retain correct editing positions. Reported by @a86022 (#236)
+- Table regression fixtures handle Windows line endings consistently (#236)
+- Long inline code wraps inside table cells without overlapping neighboring columns, including wide tables with CJK content; cell heights grow with their contents. Reported by @haydenren (#239)
+- Clicking the top-left icon opens its menu on release, while dragging it moves the window. Crowded tab bars reserve space for window dragging and keep the active tab visible through the overflow control. Suggested by @ILCNa (#238)
+- Single-tab context-menu targets remain accessible in narrow windows at high DPI (#238)
+
 ## [v3.7.2] - 2026-09-15
 
 ### Added

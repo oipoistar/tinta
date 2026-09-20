@@ -45,29 +45,26 @@ jobs:
           body: |
             ## Tinta v${{ steps.version.outputs.VERSION }}
 
-            **Markdown, distilled.** Editor fixes and links between document headings.
-
             ### Installation
             - Easiest: `winget install "Tinta Markdown Viewer" -s msstore` (Store-signed, no security prompts, auto-updates), or the [Microsoft Store page](https://apps.microsoft.com/detail/9MZ5MZ3L9RKF)
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Cross-document heading links (#225)
-            - Links such as `file.md#heading` open the target Markdown document and jump to its heading (#229)
-            - Links also work when the target is already open in a tab, preserving unsaved edits
-            - Suggested by @vkstudio2015 in [Discussion #225](https://github.com/oipoistar/tinta/discussions/225)
+            ### Table editing and full-width preview (#236)
+            - Rendered table cells support accurate mouse caret placement, selection, copy, cut and paste, including empty cells, with cell undo and Unicode-aware deletion (#236)
+            - The Read button and Ctrl+Shift+E preview unsaved edits at full width; returning to the editor preserves text, cursor position and undo history (#236)
+            - Reported by @a86022 (#236)
 
-            ### Find, Replace and table focus (#223)
-            - Find and Replace fields support cursor movement, text selection and clipboard shortcuts, with the blinking caret in the active field (#227)
-            - Clicking the source editor after editing a table transfers keyboard focus, so typing goes where clicked (#227)
-            - Reported by @a86022
+            ### Local PDF links (#237)
+            - Open local PDF links in the registered PDF viewer, including relative paths and Unicode filenames, with feedback for missing files or failed launches (#237)
+            - Reported and contributed by @msaitov (#237)
 
             ### Fixed
-            - Cursor movement and Shift+Arrow selection continue through wrapped lines without getting stuck at wrap boundaries. Reported by @a86022 (#224, #228)
-            - Right-clicking selected text preserves the selection and keeps Copy and Cut available, including after double-click selection and across wrapped lines. Reported by @a86022 (#230, #231)
-
-            ### Changed
-            - Remove a shadowed local variable from the context-menu regression tests (#230)
+            - AltGr and Ctrl+Alt text input no longer trigger Ctrl shortcuts; unintended Ctrl+Shift combinations are ignored while explicit shortcuts keep working. Reported by @Fromville (#235)
+            - Long inline code wraps inside table cells without overlapping neighboring columns, including wide tables with CJK content. Reported by @haydenren (#239)
+            - Clicking the top-left icon opens its menu on release, while dragging it moves the window. Crowded tab bars reserve space for window dragging and keep the active tab visible through the overflow control. Suggested by @ILCNa (#238)
+            - Single-tab context-menu targets remain accessible in narrow windows at high DPI (#238)
+            - Table regression fixtures handle Windows line endings consistently (#236)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats
