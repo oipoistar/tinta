@@ -50,21 +50,11 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Table editing and full-width preview (#236)
-            - Rendered table cells support accurate mouse caret placement, selection, copy, cut and paste, including empty cells, with cell undo and Unicode-aware deletion (#236)
-            - The Read button and Ctrl+Shift+E preview unsaved edits at full width; returning to the editor preserves text, cursor position and undo history (#236)
-            - Reported by @a86022 (#236)
-
-            ### Local PDF links (#237)
-            - Open local PDF links in the registered PDF viewer, including relative paths and Unicode filenames, with feedback for missing files or failed launches (#237)
-            - Reported and contributed by @msaitov (#237)
-
-            ### Fixed
-            - AltGr and Ctrl+Alt text input no longer trigger Ctrl shortcuts; unintended Ctrl+Shift combinations are ignored while explicit shortcuts keep working. Reported by @Fromville (#235)
-            - Long inline code wraps inside table cells without overlapping neighboring columns, including wide tables with CJK content. Reported by @haydenren (#239)
-            - Clicking the top-left icon opens its menu on release, while dragging it moves the window. Crowded tab bars reserve space for window dragging and keep the active tab visible through the overflow control. Suggested by @ILCNa (#238)
-            - Single-tab context-menu targets remain accessible in narrow windows at high DPI (#238)
-            - Table regression fixtures handle Windows line endings consistently (#236)
+            ### Esc and the full-width preview (#242)
+            - Esc leaves edit mode again as it did before 3.7.3: press it twice when there are no unsaved changes, and unsaved changes open the save dialog (#242)
+            - The Read button and Ctrl+Shift+E still preview unsaved edits at full width, and Esc there returns to the editor. The Read button now names its Ctrl+Shift+E shortcut (#242)
+            - The preview keeps the tab strip, the normal window buttons, a draggable title bar and a page that starts below the strip (#242)
+            - Reported by @Fromville (#242)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats
