@@ -223,7 +223,10 @@ void render(App& app) {
     // surface, the render sheet floats above it (design 10a)
     if (app.editMode) {
         app.startPageShowing = false;  // recents reload on the way back
-        app.renderTarget->Clear(editDeskColor(app));
+        // The reading view (#236) is the reader's page: plain background,
+        // no desk or floating sheet, content clipped to the window (#242)
+        app.renderTarget->Clear(app.editorReadingPreview ? app.theme.background
+                                                         : editDeskColor(app));
 
         float editorWidth = editorPaneWidth(app);
         float previewX = documentViewportX(app);
@@ -236,7 +239,9 @@ void render(App& app) {
         // surface first, then the document clips into the sheet
         renderEditSheetChrome(app);
         {
-            D2D1_RECT_F sheet = editSheetRect(app);
+            D2D1_RECT_F sheet = app.editorReadingPreview
+                ? D2D1::RectF(0.0f, 0.0f, (float)app.width, (float)app.height)
+                : editSheetRect(app);
             app.renderTarget->PushAxisAlignedClip(
                 sheet, D2D1_ANTIALIAS_MODE_ALIASED);
         }
@@ -1266,7 +1271,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // The floating sheet rises past the strip (design 10a):
             // right of the source column the top band is desk gap and
             // page, both of which take normal clicks
-            if (editorPreviewVisible(*app) && x >= editorPaneWidth(*app)) {
+            if (editSheetLayout(*app) && x >= editorPaneWidth(*app)) {
                 return HTCLIENT;
             }
             for (const App::TabHit& hit : app->tabHits) {

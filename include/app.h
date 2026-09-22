@@ -1506,6 +1506,16 @@ inline bool editorPreviewVisible(const App& app) {
     return app.editMode && (app.editorShowPreview || app.editorReadingPreview);
 }
 
+// The floating render sheet (design 10a) is up: the split editor with the
+// preview beside the source. The full-width reading view (#236) is not
+// sheet layout. It wears the reader's chrome: the full tab strip, a
+// draggable title bar and the page below the strip (#242). Title-bar and
+// page geometry ask this; document rendering keeps asking
+// editorPreviewVisible, which is true in the reading view too.
+inline bool editSheetLayout(const App& app) {
+    return app.editMode && app.editorShowPreview && !app.editorReadingPreview;
+}
+
 // Floating render sheet (design 10a): the page lies on the editor's
 // desk and rises past the tab strip to the window's top edge — the
 // caption buttons float over it as an island. Shadow is the only
@@ -1543,7 +1553,7 @@ inline float documentViewportWidth(const App& app) {
     if (app.editMode) {
         width = static_cast<float>(app.width) - documentViewportX(app);
         // The floating sheet is inset from the window's right edge
-        if (editorPreviewVisible(app)) width -= dpi(app, 16.0f);
+        if (editSheetLayout(app)) width -= dpi(app, 16.0f);
     } else {
         width = static_cast<float>(app.width);
         // Snap to the panel's final width (not the animated position) so

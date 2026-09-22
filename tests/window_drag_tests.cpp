@@ -103,6 +103,10 @@ void stripLayout(App& app) {
     renderTabStrip(app);
     check(SUCCEEDED(app.renderTarget->EndDraw()), "native title strip renders");
     const auto drag = titleDragRect(app);
+    if (app.editMode && app.editorReadingPreview) {
+        check(drag.right >= captionIslandLeft(app),
+              "the reading view keeps the reader's drag area beside the window buttons (#242)");
+    }
     if (app.width >= dpi(app, 500)) {
         check(std::abs(drag.right - drag.left - dpi(app, 32)) < 0.1f, "32 logical pixels remain available for dragging");
     } else {
@@ -165,8 +169,11 @@ int runWindowDragTests() {
                 for (int width : {325, 500, 650, 1050}) {
                     app.width = (int)(width * scale);
                     app.height = (int)(700 * scale);
-                    for (bool edit : {false, true}) {
-                        app.editMode = edit;
+                    // Reader, split editor, and the full-width reading view
+                    // of unsaved edits, which keeps the reader's title bar (#242)
+                    for (int mode : {0, 1, 2}) {
+                        app.editMode = mode > 0;
+                        app.editorReadingPreview = mode == 2;
                         gestures(app);
                         check(app.editorText == toWide(source) && app.editorCursorPos == 6 && app.editorDirty,
                               "window gestures preserve unsaved source and cursor");
@@ -180,6 +187,7 @@ int runWindowDragTests() {
                             }
                         }
                         app.editMode = false;
+                        app.editorReadingPreview = false;
                         layoutDocument(app);
                         check(app.tableRects.size() == 1 && app.codeBlocks.size() == 1 &&
                               app.docText.find(L"Final heading") != std::wstring::npos,

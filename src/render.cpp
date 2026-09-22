@@ -3244,10 +3244,11 @@ bool layoutBegin(App& app) {
     app.layoutIndent = 40.0f * scale;
     app.layoutMaxWidth = layoutWidth - app.layoutIndent * 2;
     // Reading column (#82): a centered percentage of the window, with a
-    // separate preference for fullscreen (zen). Edit-mode panes are exempt.
+    // separate preference for fullscreen (zen). Edit-mode panes are exempt,
+    // except the full-width reading view, which reads like the reader (#242).
     {
         int pct = app.zenMode ? app.zenWidthPct : app.readingWidthPct;
-        if (pct < 100 && !app.editMode) {
+        if (pct < 100 && (!app.editMode || app.editorReadingPreview)) {
             float column = app.layoutMaxWidth * (float)pct / 100.0f;
             app.layoutIndent += (app.layoutMaxWidth - column) / 2.0f;
             app.layoutMaxWidth = column;
@@ -3257,7 +3258,7 @@ bool layoutBegin(App& app) {
     // anything that scrolls up under it. On the edit-mode floating sheet
     // (design 10a) content instead starts just inside the sheet's top
     // edge — the sheet rises past the strip, so the page top is its own.
-    app.layoutCursorY = editorPreviewVisible(app)
+    app.layoutCursorY = editSheetLayout(app)
                             ? editSheetRect(app).top + dpi(app, 18.0f)
                             : chromeTopHeight(app) + 20.0f * scale;
     app.layoutNextBlock = 0;

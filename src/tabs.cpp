@@ -415,7 +415,7 @@ int tabDropInsertionIndex(const App& app, POINT clientPoint) {
     const auto m = stripMetrics(app);
     if (!tabStripVisible(app) || clientPoint.y < 0 || clientPoint.y >= m.height ||
         clientPoint.x < 0 || clientPoint.x >= captionIslandLeft(app) ||
-        (editorPreviewVisible(app) && clientPoint.x >= editorPaneWidth(app))) {
+        (editSheetLayout(app) && clientPoint.x >= editorPaneWidth(app))) {
         return count;
     }
     const float step = m.tabWidth + dpi(app, 2.0f);
@@ -474,7 +474,7 @@ float captionIslandLeft(const App& app) {
 
 D2D1_RECT_F titleDragRect(const App& app) {
     float right = pinButtonRect(app).left;
-    if (editorPreviewVisible(app)) right = std::min(right, editorPaneWidth(app));
+    if (editSheetLayout(app)) right = std::min(right, editorPaneWidth(app));
     right = std::max(appMenuButtonRect(app).right, right);
     // A very narrow split pane still needs a title/tab context target and
     // room for its controls. Reduce the gap only after that space runs out.
@@ -582,7 +582,7 @@ void renderTabStrip(App& app) {
 
     // Strip background: with the floating sheet the strip only spans the
     // source side — the desk and the sheet own the top band to its right
-    bool sheetMode = editorPreviewVisible(app);
+    bool sheetMode = editSheetLayout(app);
     float stripRight = sheetMode ? editorPaneWidth(app) : (float)app.width;
     app.brush->SetColor(stripBackground(app));
     app.renderTarget->FillRectangle(
@@ -614,7 +614,7 @@ void renderTabStrip(App& app) {
             DestroyIcon(icon);
         }
     }
-    if (!app.editMode) renderAppMenuButtonBackground(app);
+    if (!app.editMode || app.editorReadingPreview) renderAppMenuButtonBackground(app);
     if (app.titleIconBitmap) {
         float iconSize = dpi(app, 16.0f);
         float ix = (iconCell - iconSize) * 0.5f;

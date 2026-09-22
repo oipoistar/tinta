@@ -1135,9 +1135,22 @@ void setEditorReadingPreview(App& app, bool reading) {
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
+// The pill names its shortcut, so it grows to fit its label: Read carries
+// Ctrl+Shift+E since Esc leaves edit mode again (#242)
 D2D1_RECT_F editorReadingButtonRect(const App& app) {
+    float width = dpi(app, 132);
+    if (app.dwriteFactory && app.codeFormat) {
+        const wchar_t* label = tr(app, app.editorReadingPreview ? "editor.resume" : "editor.read");
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        DWRITE_TEXT_METRICS metrics{};
+        if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(label, static_cast<UINT32>(wcslen(label)),
+                app.codeFormat, 4096.0f, 256.0f, layout.GetAddressOf())) &&
+            SUCCEEDED(layout->GetMetrics(&metrics))) {
+            width = std::max(width, metrics.widthIncludingTrailingWhitespace + dpi(app, 28));
+        }
+    }
     return {dpi(app, 56), static_cast<float>(app.height)-dpi(app, 42),
-            dpi(app, 188), static_cast<float>(app.height)-dpi(app, 12)};
+            dpi(app, 56) + width, static_cast<float>(app.height)-dpi(app, 12)};
 }
 void renderEditorReadingButton(App& app) {
     if (!app.editMode || !app.brush || !app.codeFormat) return;
@@ -1605,7 +1618,34 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     }
 
     if (wParam == VK_ESCAPE) {
-        setEditorReadingPreview(app, !app.editorReadingPreview);
+        // The reading view (#236) is a preview laid over the editor: Esc
+        // closes it and returns to the source. Everywhere else Esc keeps
+        // its documented meaning and leaves edit mode (#242).
+        if (app.editorReadingPreview) {
+            setEditorReadingPreview(app, false);
+            return;
+        }
+        // Dirty buffer: straight to the dialog, it is the guard (#106).
+        // Clean buffer: keep the documented double-Esc exit.
+        if (app.editorDirty) {
+            exitEditMode(app);
+            app.escPressedOnce = false;
+            return;
+        }
+        auto now = std::chrono::steady_clock::now();
+        if (app.escPressedOnce) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - app.lastEscTime).count();
+            if (elapsed < 500) {
+                exitEditMode(app);
+                app.escPressedOnce = false;
+                return;
+            }
+        }
+        app.escPressedOnce = true;
+        app.lastEscTime = now;
+        signalPushKey(app, SIG_INFO, SIGI_INFO, "toast.exit_confirm");
+        InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
     app.escPressedOnce = false;
@@ -2630,7 +2670,7 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
     }
 
     // The thread seam doubles as the split handle (design t11)
-    if (app.editorShowPreview) {
+    if (editSheetLayout(app)) {
         float paneW = editorPaneWidth(app);
         if ((float)x >= paneW && (float)x < paneW + editSeamWidth(app)) {
             app.draggingSeparator = true;
@@ -2798,7 +2838,7 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
     static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
     static HCURSOR cursorArrow = LoadCursor(nullptr, IDC_ARROW);
 
-    if (app.editorShowPreview && (float)x >= editorWidth &&
+    if (editSheetLayout(app) && (float)x >= editorWidth &&
         (float)x < editorWidth + editSeamWidth(app)) {
         SetCursor(cursorSizeWE);
         return;
