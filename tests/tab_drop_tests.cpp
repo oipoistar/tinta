@@ -115,8 +115,8 @@ int runTabDropTests() {
                           "active tab remains visible when the strip overflows");
                     for (const auto& hit : hits) {
                         const int middle = (int)((hit.rect.left + hit.rect.right) / 2);
-                        if (middle + 2 >= captionIslandLeft(app) ||
-                            (editorPreviewVisible(app) && middle + 2 >= editorPaneWidth(app))) continue;
+                        // The docked preview leaves the whole strip to the tabs (#245)
+                        if (middle + 2 >= captionIslandLeft(app)) continue;
                         check(tabDropInsertionIndex(app, {middle-2, (LONG)dpi(app, 20)}) == hit.index,
                               "left half inserts before the destination tab");
                         check(tabDropInsertionIndex(app, {middle+2, (LONG)dpi(app, 20)}) == hit.index+1,

@@ -187,6 +187,9 @@ struct Settings {
     bool hasAskedFileAssociation = false;
     bool editorShowPreview = true;
     bool editorWordWrap = false;
+    // Edit sessions that showed the new-user hints (#245): the first few
+    // teach Esc and the Read button, later sessions stay quiet
+    int editHintsShown = 0;
     // Auto theme: follow the Windows light/dark preference with a preferred
     // theme for each mode
     bool followSystemTheme = false;
@@ -1101,6 +1104,8 @@ struct App {
         int closeAction = 0;   // SignalClose run when X resolves state
         bool drains = true;    // false = stays until answered
         float remaining = 4.0f;   // drain seconds left
+        float lifetime = 4.0f;    // full drain span, the rail's scale
+        bool transient = false;   // hint: fades out, never parks (#245)
         bool pinned = false;
         float tuckT = -1.0f;      // >=0: parking animation progress
         bool anchored = false;    // mini pill at docAnchor (Copied)
@@ -1155,6 +1160,18 @@ struct App {
     float editorSplitRatio = 0.5f;
     // Full-width reading of the live buffer; editMode still owns its data.
     bool editorReadingPreview = false;
+    // New-user hints (#245): the persisted count of edit sessions that
+    // showed them, and whether the current session is one of those
+    int editHintsShown = 0;
+    bool editHintSession = false;
+    // The Read button fades in for a hint session's intro and while the
+    // pointer rests on it; otherwise it stays hidden over the text (#245)
+    float readButtonAlpha = 0.0f;
+    bool readButtonHover = false;
+    double readButtonIntroUntil = 0.0;  // steady-clock seconds
+    double readButtonLastTick = 0.0;
+    // The pointer is on the split seam: its hairline takes the accent
+    bool editSeamHover = false;
     bool draggingSeparator = false;
     float separatorDragStartX = 0;
     float separatorDragStartRatio = 0;
@@ -1506,24 +1523,25 @@ inline bool editorPreviewVisible(const App& app) {
     return app.editMode && (app.editorShowPreview || app.editorReadingPreview);
 }
 
-// The floating render sheet (design 10a) is up: the split editor with the
-// preview beside the source. The full-width reading view (#236) is not
-// sheet layout. It wears the reader's chrome: the full tab strip, a
-// draggable title bar and the page below the strip (#242). Title-bar and
-// page geometry ask this; document rendering keeps asking
-// editorPreviewVisible, which is true in the reading view too.
-inline bool editSheetLayout(const App& app) {
+// The split editor is up: the source with the preview docked beside it,
+// a flat pane below the full-width tab strip that runs from the seam to
+// the window's right and bottom edges, like the side panels (#213, #245).
+// The full-width reading view (#236) is no split and wears the reader's
+// chrome (#242). The seam and the pane chrome ask this; document
+// rendering keeps asking editorPreviewVisible, which is true in both.
+inline bool editSplitPreview(const App& app) {
     return app.editMode && app.editorShowPreview && !app.editorReadingPreview;
 }
 
-// Floating render sheet (design 10a): the page lies on the editor's
-// desk and rises past the tab strip to the window's top edge — the
-// caption buttons float over it as an island. Shadow is the only
-// separator.
-inline D2D1_RECT_F editSheetRect(const App& app) {
-    return D2D1::RectF(documentViewportX(app), dpi(app, 10.0f),
-                       (float)app.width - dpi(app, 16.0f),
-                       (float)app.height - dpi(app, 14.0f));
+// The hairline between source and preview sits at the seam's center
+inline float editSplitDividerX(const App& app) {
+    return std::floor(app.width * app.editorSplitRatio);
+}
+
+// The page's first line sits below the tab strip, in the reader, the
+// reading view and the docked preview alike
+inline float documentContentTop(const App& app) {
+    return chromeTopHeight(app) + 20.0f * (app.contentScale * app.zoomFactor);
 }
 
 inline D2D1_COLOR_F editSurfaceMix(D2D1_COLOR_F c, float to, float t) {
@@ -1534,26 +1552,20 @@ inline D2D1_COLOR_F editSurfaceMix(D2D1_COLOR_F c, float to, float t) {
     return c;
 }
 
-// The desk both panes sit on: lifted a shade off the window in the dark,
-// dimmed a touch in the light so the sheet reads as paper on top
+// The desk the source sits on: lifted a shade off the window in the dark,
+// dimmed a touch in the light, so the docked preview on the reader's own
+// background reads as the page (#245)
 inline D2D1_COLOR_F editDeskColor(const App& app) {
     return app.theme.isDark
                ? editSurfaceMix(app.theme.background, 1.0f, 0.03f)
                : editSurfaceMix(app.theme.background, 0.0f, 0.045f);
 }
 
-inline D2D1_COLOR_F editSheetColor(const App& app) {
-    return app.theme.isDark
-               ? editSurfaceMix(app.theme.background, 1.0f, 0.065f)
-               : editSurfaceMix(app.theme.background, 1.0f, 0.35f);
-}
-
 inline float documentViewportWidth(const App& app) {
     float width;
     if (app.editMode) {
+        // The docked preview runs to the window's right edge (#245)
         width = static_cast<float>(app.width) - documentViewportX(app);
-        // The floating sheet is inset from the window's right edge
-        if (editSheetLayout(app)) width -= dpi(app, 16.0f);
     } else {
         width = static_cast<float>(app.width);
         // Snap to the panel's final width (not the animated position) so
