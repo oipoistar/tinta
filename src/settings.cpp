@@ -62,6 +62,7 @@ void saveSettings(const Settings& settings) {
     file << "browserPinned=" << (settings.browserPinned ? 1 : 0) << "\n";
     file << "tocWidth=" << settings.tocWidth << "\n";
     file << "browserWidth=" << settings.browserWidth << "\n";
+    file << "searchResultsWidth=" << settings.searchResultsWidth << "\n";
     file << "language=" << settings.language << "\n";
     file << "keyProfile=" << settings.keyProfile << "\n";
     file << "checkUpdates=" << (settings.checkUpdates ? 1 : 0) << "\n";
@@ -278,14 +279,18 @@ Settings loadSettings() {
             settings.tocPinned = (value == "1");
         } else if (key == "browserPinned") {
             settings.browserPinned = (value == "1");
-        } else if (key == "tocWidth" || key == "browserWidth") {
+        } else if (key == "tocWidth" || key == "browserWidth" ||
+                   key == "searchResultsWidth") {
             try {
                 size_t consumed = 0;
                 const float width = std::stof(value, &consumed);
+                const float minWidth =
+                    key == "tocWidth" ? 180.0f : 200.0f;  // search+browser
                 if (consumed == value.size() && std::isfinite(width) &&
-                    width >= (key == "tocWidth" ? 180.0f : 200.0f) && width <= 4000.0f) {
+                    width >= minWidth && width <= 4000.0f) {
                     if (key == "tocWidth") settings.tocWidth = width;
-                    else settings.browserWidth = width;
+                    else if (key == "browserWidth") settings.browserWidth = width;
+                    else settings.searchResultsWidth = width;
                 }
             } catch (const std::exception&) { /* Keep the default for malformed widths. */ }
         } else if (key == "language") {

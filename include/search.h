@@ -6,6 +6,18 @@
 void performSearch(App& app);
 void mapSearchMatchesToLayout(App& app);
 void scrollToCurrentMatch(App& app);
+// Rebuild the search-results-panel rows (source line + match column) from
+// the just-computed searchMatches; called by performSearch.
+void buildSearchResultItems(App& app);
+// Editor-mode twin: rows index-aligned with the editor's match list, called
+// by performEditorSearch so the panel follows the source text live.
+void buildEditorSearchResultItems(App& app);
+
+// Search-results side panel (Ctrl+Shift+F): every match in document order,
+// clicking a row jumps the document to it via scrollToCurrentMatch.
+void openSearchResultsPanel(App& app);
+void closeSearchResultsPanel(App& app);
+bool toggleSearchResultsPanel(App& app);
 
 // Find/Replace share real single-line editing and exclusive typing focus (#223).
 void openSearchInput(App& app, bool replace = false);

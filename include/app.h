@@ -43,6 +43,7 @@ inline int64_t usElapsed(Clock::time_point start) {
 #define TIMER_LINK_PEEK 9
 #define TIMER_UPDATE_CHECK 10
 #define TIMER_SIDE_PANEL_SCROLLBARS 12
+#define TIMER_TAB_TOOLTIP 13
 
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
@@ -174,7 +175,7 @@ int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
                     const std::wstring& headingFontFamily = L"");
 
 // Persistent settings
-enum class SidePanel { None, Contents, Browser };
+enum class SidePanel { None, Contents, Browser, Search };
 
 struct Settings {
     int themeIndex = 5;          // Default to Midnight
@@ -192,8 +193,8 @@ struct Settings {
     bool followSystemTheme = false;
     int lightThemeIndex = 0;   // Paper
     int darkThemeIndex = 5;    // Midnight
-    // Search results from sibling markdown files in the search overlay
-    bool folderSearchEnabled = true;
+    // Search across sibling markdown files in the search overlay
+    bool folderSearchEnabled = false;
     // B opens the folder browser with the path box focused (#81)
     bool browserFocusPath = false;
     // Plain file launches join the existing window as a new tab (Win11
@@ -225,6 +226,7 @@ struct Settings {
     bool browserPinned = false;
     float tocWidth = 280.0f;      // preferred logical pixels, independent of zoom
     float browserWidth = 300.0f;
+    float searchResultsWidth = 280.0f;
     // UI language id ("auto" follows the Windows display language; else a
     // registry id like "en"/"zh"/"de" — see i18n.h). Persisted as a string
     // because languages.ini languages have no stable numeric index.
@@ -477,6 +479,10 @@ struct App {
     bool showTabSwitcher = false;      // chevron dropdown (open-files list)
     int tabSwitcherHover = -1;
     int hoveredTab = -1;               // strip hover for close-button reveal
+    // Full file name on dwell: the strip ellipsizes long titles, so after
+    // TIMER_TAB_TOOLTIP the hovered tab's whole name floats on a card below
+    int tabTooltipTab = -1;            // dwell-approved tab; -1 while hidden
+    D2D1_RECT_F tabTooltipRect{};      // card in client coords, zero while hidden
     int captionButtonHover = 0;        // 0 none, 1 min, 2 max, 3 close
     int captionButtonPressed = 0;
     bool tabNewTabIntent = false;      // Ctrl+T: next browser pick -> new tab
@@ -792,7 +798,7 @@ struct App {
     struct PanelResize {
         SidePanel panel = SidePanel::None;
         float startX = 0, startWidth = 0;
-        float oldTocWidth = 0, oldBrowserWidth = 0;
+        float oldTocWidth = 0, oldBrowserWidth = 0, oldSearchResultsWidth = 0;
     } panelResize;
     float tocAnimation = 0.0f;  // 0 to 1 slide-in from the chosen side
     // A clicked heading stays the active row even when the scroll cannot
@@ -812,6 +818,41 @@ struct App {
     float tocScroll = 0.0f;
     // Typed while the panel is open: case-insensitive substring filter
     std::wstring tocFilter;
+
+    // Search-results side panel (Ctrl+Shift+F): lists every document match
+    // in the current search in document order; clicking a row jumps to it.
+    // Right-docked like the Contents panel, so the two are exclusive.
+    bool showSearchResults = false;
+    float searchResultsAnimation = 0.0f;  // 0 to 1 slide-in from the right
+    float searchResultsScroll = 0.0f;
+    int searchResultsHover = -1;          // hovered row index this paint
+    D2D1_RECT_F searchResultsCloseRect{};
+    // The two "search wider" checkboxes at the top of the panel (viewer
+    // only): scan all open documents and scan the current folder
+    D2D1_RECT_F searchOpenFilesToggleRect{};
+    D2D1_RECT_F searchFolderToggleRect{};
+    float searchResultsWidth = 280.0f;    // logical px, not persisted
+    // Row i in searchResultItems refers to the editor's match list in edit
+    // mode (Ctrl+Shift+F splits the source pane) and the document's match
+    // list in the viewer; a click hands the index to the matching jump.
+    bool searchResultsUseEditor = false;
+    // The panel also lists folder-wide matches (sibling .md files) after the
+    // document rows; this row model is rebuilt every paint so render, hover,
+    // click and wheel share one geometry. Folder rows only appear in the
+    // viewer - edit mode keeps the source pane for the document's matches.
+    struct SearchPanelRow {
+        enum class Type { Document, Section, File, Snippet, More };
+        Type type = Type::Document;
+        int index = -1;    // Document: searchResultItems row; others: folderResults
+        int match = -1;    // Snippet: matches[] row
+        float top = 0.0f;  // content-relative top
+        float height = 0.0f;
+        // FolderFile rows carry the file to open so a click opens exactly what
+        // the paint showed, even if folderResults changed since (#foldersearch)
+        std::wstring path;
+    };
+    std::vector<SearchPanelRow> searchPanelRows;   // rebuilt each paint
+    int searchFolderHover = -1;   // hovered folderResults index this paint
 
     // Mouse
     bool mouseDown = false;
@@ -932,11 +973,22 @@ struct App {
         D2D1_RECT_F highlightRect;  // Computed highlight bounds
     };
     std::vector<SearchMatch> searchMatches;
+    // One row of the search-results side panel (Ctrl+Shift+F): the source
+    // line the match sits on plus where the match starts within it
+    struct SearchResultItem {
+        std::wstring line;
+        size_t col = 0;      // column of the match inside line
+        size_t len = 0;      // match length clamped to the line
+        int lineNumber = 0;  // 1-based source line number
+    };
+    std::vector<SearchResultItem> searchResultItems;
     bool overText = false;
 
     // Folder-wide search: sibling .md files matching the current query,
-    // filled by a worker thread and shown beside the search bar
-    bool folderSearchEnabled = true;
+    // filled by a worker thread and listed in the search-results side panel
+    bool folderSearchEnabled = false;
+    // Include every open document (other tabs) in the search results too
+    bool searchAllOpenFiles = false;
     // B opens the folder browser with the path box focused (#81)
     bool browserFocusPath = false;
     // Plain file launches join this window as tabs (settings toggle)
@@ -946,6 +998,7 @@ struct App {
         std::wstring snippet;
         size_t matchStart = 0;
         size_t matchLen = 0;
+        int lineNumber = 0;  // 1-based line of the match in its file
     };
     struct FolderFileResult {
         std::wstring fileName;
@@ -953,6 +1006,8 @@ struct App {
         std::vector<FolderMatch> matches;  // first few only
         int totalMatches = 0;
     };
+    // Extra-file search results (open documents and/or folder siblings),
+    // filled by a worker thread and rendered in the search-results panel.
     std::vector<FolderFileResult> folderResults;
     struct FolderResultHit {
         D2D1_RECT_F rect{};
@@ -1412,13 +1467,6 @@ inline float editSeamWidth(const App& app) {
     return dpi(app, 16.0f);
 }
 
-inline float editorPaneWidth(const App& app) {
-    if (app.editorReadingPreview) return 0;
-    return app.editorShowPreview
-        ? app.width * app.editorSplitRatio - editSeamWidth(app) * 0.5f
-        : static_cast<float>(app.width);
-}
-
 // Left tool rail (design t8/t11): slides in with edit mode, carries the
 // formatting controls
 inline float editRailWidth(const App& app) {
@@ -1449,27 +1497,30 @@ inline float sidePanelBudget(const App& app) {
     return width - std::min(dpi(app, 240.0f), width * 0.4f);
 }
 
-struct SidePanelWidths { float toc = 0, browser = 0; };
+struct SidePanelWidths { float toc = 0, browser = 0, search = 0; };
 
 // Clamp the displayed widths together, without changing saved preferences
 // when a window shrinks. Keep room for the document even with both panels open.
 inline SidePanelWidths sidePanelWidths(const App& app) {
     const float minToc = app.showToc ? dpi(app, 180.0f) : 0;
     const float minBrowser = app.showFolderBrowser ? dpi(app, 200.0f) : 0;
+    const float minSearch = app.showSearchResults ? dpi(app, 200.0f) : 0;
     SidePanelWidths widths{
         app.showToc ? dpi(app, std::clamp(std::isfinite(app.tocWidth) ? app.tocWidth : 280.0f, 180.0f, 4000.0f)) : 0,
-        app.showFolderBrowser ? dpi(app, std::clamp(std::isfinite(app.browserWidth) ? app.browserWidth : 300.0f, 200.0f, 4000.0f)) : 0};
+        app.showFolderBrowser ? dpi(app, std::clamp(std::isfinite(app.browserWidth) ? app.browserWidth : 300.0f, 200.0f, 4000.0f)) : 0,
+        app.showSearchResults ? dpi(app, std::clamp(std::isfinite(app.searchResultsWidth) ? app.searchResultsWidth : 280.0f, 200.0f, 4000.0f)) : 0};
     const float budget = sidePanelBudget(app);
-    if (widths.toc + widths.browser > budget) {
-        const float minimum = minToc + minBrowser;
+    if (widths.toc + widths.browser + widths.search > budget) {
+        const float minimum = minToc + minBrowser + minSearch;
         if (budget <= minimum) {
             const float ratio = minimum > 0 ? budget / minimum : 0;
-            widths = {minToc * ratio, minBrowser * ratio};
+            widths = {minToc * ratio, minBrowser * ratio, minSearch * ratio};
         } else {
-            const float extra = widths.toc + widths.browser - minimum;
+            const float extra = widths.toc + widths.browser + widths.search - minimum;
             const float ratio = (budget - minimum) / extra;
             widths = {minToc + (widths.toc - minToc) * ratio,
-                      minBrowser + (widths.browser - minBrowser) * ratio};
+                      minBrowser + (widths.browser - minBrowser) * ratio,
+                      minSearch + (widths.search - minSearch) * ratio};
         }
     }
     return widths;
@@ -1477,6 +1528,22 @@ inline SidePanelWidths sidePanelWidths(const App& app) {
 
 inline float folderBrowserPanelWidth(const App& app) { return sidePanelWidths(app).browser; }
 inline float tocPanelWidth(const App& app) { return sidePanelWidths(app).toc; }
+inline float searchResultsPanelWidth(const App& app) { return sidePanelWidths(app).search; }
+
+// Space the search-results side panel reserves on the right in edit mode.
+// Like the viewer path, it snaps to the panel's final width so the editor
+// and preview reflow once per toggle, not per animation frame.
+inline float searchResultsInset(const App& app) {
+    return app.showSearchResults ? searchResultsPanelWidth(app) : 0.0f;
+}
+
+inline float editorPaneWidth(const App& app) {
+    const float rightInset = searchResultsInset(app);
+    if (app.editorReadingPreview) return 0;
+    return app.editorShowPreview
+        ? (app.width - rightInset) * app.editorSplitRatio - editSeamWidth(app) * 0.5f
+        : static_cast<float>(app.width) - rightInset;
+}
 
 inline float documentViewportX(const App& app) {
     if (app.editMode && app.editorReadingPreview) return 0;
@@ -1497,23 +1564,14 @@ inline float documentViewportX(const App& app) {
     // Preview hidden: zero-width viewport at the right edge — document
     // rendering flows through unchanged and clips to nothing
     if (!app.editorShowPreview) {
-        return static_cast<float>(app.width);
+        return static_cast<float>(app.width) - searchResultsInset(app);
     }
-    return app.width * app.editorSplitRatio + editSeamWidth(app) * 0.5f;
+    const float available = static_cast<float>(app.width) - searchResultsInset(app);
+    return available * app.editorSplitRatio + editSeamWidth(app) * 0.5f;
 }
 
 inline bool editorPreviewVisible(const App& app) {
     return app.editMode && (app.editorShowPreview || app.editorReadingPreview);
-}
-
-// The floating render sheet (design 10a) is up: the split editor with the
-// preview beside the source. The full-width reading view (#236) is not
-// sheet layout. It wears the reader's chrome: the full tab strip, a
-// draggable title bar and the page below the strip (#242). Title-bar and
-// page geometry ask this; document rendering keeps asking
-// editorPreviewVisible, which is true in the reading view too.
-inline bool editSheetLayout(const App& app) {
-    return app.editMode && app.editorShowPreview && !app.editorReadingPreview;
 }
 
 // Floating render sheet (design 10a): the page lies on the editor's
@@ -1522,7 +1580,7 @@ inline bool editSheetLayout(const App& app) {
 // separator.
 inline D2D1_RECT_F editSheetRect(const App& app) {
     return D2D1::RectF(documentViewportX(app), dpi(app, 10.0f),
-                       (float)app.width - dpi(app, 16.0f),
+                       (float)app.width - dpi(app, 16.0f) - searchResultsInset(app),
                        (float)app.height - dpi(app, 14.0f));
 }
 
@@ -1551,9 +1609,13 @@ inline D2D1_COLOR_F editSheetColor(const App& app) {
 inline float documentViewportWidth(const App& app) {
     float width;
     if (app.editMode) {
-        width = static_cast<float>(app.width) - documentViewportX(app);
+        // The search-results panel caps the desk's right edge; the preview
+        // shrinks with the source pane so it never slides under the panel.
+        const float rightEdge =
+            static_cast<float>(app.width) - searchResultsInset(app);
+        width = rightEdge - documentViewportX(app);
         // The floating sheet is inset from the window's right edge
-        if (editSheetLayout(app)) width -= dpi(app, 16.0f);
+        if (editorPreviewVisible(app)) width -= dpi(app, 16.0f);
     } else {
         width = static_cast<float>(app.width);
         // Snap to the panel's final width (not the animated position) so
@@ -1561,6 +1623,7 @@ inline float documentViewportWidth(const App& app) {
         // Both panels can be up together (#156).
         if (app.showFolderBrowser) width -= folderBrowserPanelWidth(app);
         if (app.showToc) width -= tocPanelWidth(app);
+        if (app.showSearchResults) width -= searchResultsPanelWidth(app);
     }
     return width > 0.0f ? width : 0.0f;
 }

@@ -42,6 +42,62 @@ static void panelFooterText(App& app, const wchar_t* text, const D2D1_RECT_F& re
     layout->Release();
 }
 
+// --- Search-panel row model (shared geometry) ---
+// The search-results side panel lists the current document's matches and, in
+// the viewer, the folder-wide matches (sibling .md files) beneath them. Row
+// tops and heights are built from the same code everywhere - render, hover,
+// clicks and wheel scrolling - so the mixed rows cannot drift.
+
+namespace {
+
+using PRow = App::SearchPanelRow;
+
+std::vector<PRow> buildSearchPanelRows(const App& app) {
+    std::vector<PRow> rows;
+    const float itemH = dpi(app, 26.0f);
+    const float sectionH = dpi(app, 22.0f);
+    const float fileH = dpi(app, 24.0f);
+    const float lineH = dpi(app, 20.0f);
+    const float moreH = dpi(app, 16.0f);
+    float top = 0.0f;
+    for (int i = 0; i < (int)app.searchResultItems.size(); i++) {
+        rows.push_back({PRow::Type::Document, i, -1, top, itemH});
+        top += itemH;
+    }
+    if (!app.editMode && (app.folderSearchEnabled || app.searchAllOpenFiles) &&
+        !app.folderResults.empty()) {
+        rows.push_back({PRow::Type::Section, -1, -1, top, sectionH});
+        top += sectionH;
+        for (int f = 0; f < (int)app.folderResults.size(); f++) {
+            const auto& fr = app.folderResults[f];
+            PRow fileRow{PRow::Type::File, f, -1, top, fileH};
+            fileRow.path = fr.fullPath;
+            rows.push_back(std::move(fileRow));
+            top += fileH;
+            for (int m = 0; m < (int)fr.matches.size(); m++) {
+                PRow snippetRow{PRow::Type::Snippet, f, m, top, lineH};
+                snippetRow.path = fr.fullPath;
+                rows.push_back(std::move(snippetRow));
+                top += lineH;
+            }
+            if ((size_t)fr.totalMatches > fr.matches.size()) {
+                PRow moreRow{PRow::Type::More, f, -1, top, moreH};
+                moreRow.path = fr.fullPath;
+                rows.push_back(std::move(moreRow));
+                top += moreH;
+            }
+        }
+    }
+    return rows;
+}
+
+float searchPanelContentHeight(const App& app) {
+    const auto rows = buildSearchPanelRows(app);
+    return rows.empty() ? 0.0f : rows.back().top + rows.back().height;
+}
+
+}  // namespace
+
 void renderSearchOverlay(App& app) {
     // Animate in (only invalidate if animation is still progressing)
     if (app.searchAnimation < 1.0f) {
@@ -1238,6 +1294,562 @@ void renderToc(App& app) {
     renderSidePanelResizeGrip(app, SidePanel::Contents);
 }
 
+// --- Search-results side panel (Ctrl+Shift+F) ---
+// Right-docked like the Contents panel and exclusive with it: every match of
+// the current search in document order; clicking a row jumps the document
+// there (scrollToCurrentMatch). All hit-testing shares the geometry here.
+
+D2D1_RECT_F searchResultsListRect(const App& app) {
+    const float width = searchResultsPanelWidth(app);
+    const float x = app.width - width * app.searchResultsAnimation;
+    // The two "search wider" checkboxes sit between the header and the list
+    // (viewer only; edit mode keeps the list at the top)
+    const float toggleBand = app.editMode ? 0.0f : dpi(app, 48.0f);
+    return D2D1::RectF(x + dpi(app, 14.0f),
+                       chromeTopHeight(app) + dpi(app, 43.0f) + toggleBand,
+                       x + width - dpi(app, 8.0f), app.height - dpi(app, 26.0f));
+}
+
+float searchResultsMaxScroll(const App& app) {
+    const auto rect = searchResultsListRect(app);
+    const float total = searchPanelContentHeight(app);
+    return std::max(0.0f, total - std::max(0.0f, rect.bottom - rect.top));
+}
+
+SearchPanelHit searchPanelHitAt(const App& app, float x, float y) {
+    const auto rect = searchResultsListRect(app);
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom)
+        return {};
+    // Hit-test the row model the last paint built (app.searchPanelRows) so the
+    // click always resolves to the row the user actually saw, even when a
+    // background scan replaced folderResults since that frame.
+    const auto& rows = app.searchPanelRows;
+    const float yContent = y - rect.top + app.searchResultsScroll;
+    for (int i = 0; i < (int)rows.size(); i++) {
+        const auto& r = rows[i];
+        if (yContent >= r.top && yContent < r.top + r.height) {
+            if (r.type == PRow::Type::Document)
+                return {SearchPanelHitType::Document, r.index, -1, i};
+            if (r.type == PRow::Type::File || r.type == PRow::Type::Snippet ||
+                r.type == PRow::Type::More)
+                return {SearchPanelHitType::FolderFile, r.index, r.match, i};
+            return {SearchPanelHitType::Section, -1, -1, i};
+        }
+    }
+    return {};
+}
+
+void renderSearchResultsPanel(App& app) {
+    if (!app.showSearchResults) return;
+    if (app.searchResultsAnimation < 1.0f) {
+        float prev = app.searchResultsAnimation;
+        app.searchResultsAnimation =
+            std::min(1.0f, app.searchResultsAnimation + 0.15f);
+        if (app.searchResultsAnimation != prev)
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+    const float anim = app.searchResultsAnimation;
+
+    float panelWidth = searchResultsPanelWidth(app);
+    float panelX = app.width - panelWidth * anim;  // slides in from the right
+    float cardLeft = panelX;
+    float cardRight = panelX + panelWidth;
+    float cardTop = chromeTopHeight(app);
+    float cardBottom = (float)app.height;
+    D2D1_RECT_F card = D2D1::RectF(cardLeft, cardTop, cardRight, cardBottom);
+
+    D2D1_COLOR_F surf = promptChipSurface(app);
+    surf.a = 1;
+    app.brush->SetColor(surf);
+    app.renderTarget->FillRectangle(card, app.brush);
+
+    app.searchResultsCloseRect = D2D1_RECT_F{};
+    IDWriteTextFormat* itemFmt = app.folderBrowserFormat;
+    IDWriteTextFormat* titleFmt = app.tocFormatBold;
+    if (!itemFmt || !titleFmt) return;
+
+    float padding = dpi(app, 12.0f);
+    float headerHeight = dpi(app, 34.0f);
+
+    // Header: title + count badge (mirrors the Contents header layout)
+    float headerY = cardTop + dpi(app, 9.0f);
+    D2D1_COLOR_F headerColor = app.theme.heading;
+    headerColor.a = anim;
+    app.brush->SetColor(headerColor);
+    const wchar_t* title = tr(app, "search.results.title");
+    const float titleRight = cardRight - padding - dpi(app, 40.0f);
+    app.renderTarget->DrawText(title, (UINT32)wcslen(title), titleFmt,
+        D2D1::RectF(cardLeft + padding, headerY, titleRight, headerY + headerHeight),
+        app.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    float titleW = measureText(app, title, titleFmt);
+
+    if (app.signalSmallFormat) {
+        wchar_t count[8];
+        swprintf_s(count, L"%d", (int)app.searchResultItems.size());
+        float cw = measureText(app, count, app.signalSmallFormat);
+        D2D1_RECT_F badge = D2D1::RectF(
+            cardLeft + padding + titleW + dpi(app, 8.0f),
+            headerY + dpi(app, 2.0f),
+            cardLeft + padding + titleW + dpi(app, 8.0f) + cw + dpi(app, 11.0f),
+            headerY + dpi(app, 17.0f));
+        if (badge.right <= titleRight) {
+            D2D1_COLOR_F bb = app.theme.text; bb.a = 0.07f * anim;
+            app.brush->SetColor(bb);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(badge, dpi(app, 7.0f), dpi(app, 7.0f)),
+                app.brush);
+            D2D1_COLOR_F bi = app.theme.text; bi.a = 0.6f * anim;
+            app.brush->SetColor(bi);
+            app.renderTarget->DrawText(count, (UINT32)wcslen(count),
+                app.signalSmallFormat,
+                D2D1::RectF(badge.left + dpi(app, 5.5f), badge.top + dpi(app, 1.5f),
+                            badge.right, badge.bottom),
+                app.brush);
+        }
+    }
+
+    // Close cross at the right edge of the header
+    {
+        float ccx = cardRight - padding - dpi(app, 4.0f);
+        float ccy = headerY + dpi(app, 9.0f);
+        D2D1_COLOR_F c = app.theme.text; c.a = 0.45f * anim;
+        app.brush->SetColor(c);
+        float s = dpi(app, 3.6f);
+        app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy - s),
+                                   D2D1::Point2F(ccx + s, ccy + s), app.brush, 1.3f);
+        app.renderTarget->DrawLine(D2D1::Point2F(ccx - s, ccy + s),
+                                   D2D1::Point2F(ccx + s, ccy - s), app.brush, 1.3f);
+        app.searchResultsCloseRect = D2D1::RectF(ccx - dpi(app, 10.0f), cardTop,
+                                                 cardRight, headerY + dpi(app, 20.0f));
+    }
+
+    // Divider
+    float dividerY = headerY + headerHeight - dpi(app, 8.0f);
+    D2D1_COLOR_F div = app.theme.text; div.a = 0.1f;
+    app.brush->SetColor(div);
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(cardLeft + padding, dividerY, cardRight - padding,
+                    dividerY + 1.0f),
+        app.brush);
+
+    // List between header and footer
+    const auto listRect = searchResultsListRect(app);
+    float listStartY = listRect.top;
+    float listBottom = listRect.bottom;
+    float listHeight = listBottom - listStartY;
+
+    // "Search wider" checkboxes: open documents / current folder. Both off
+    // (the default) means this panel lists only the current document.
+    if (!app.editMode) {
+        const float bandTop = chromeTopHeight(app) + dpi(app, 43.0f);
+        const float rowH = dpi(app, 24.0f);
+        const float rowX = cardLeft + padding + dpi(app, 4.0f);
+        const float rowW = cardRight - padding - dpi(app, 4.0f) - rowX;
+        const float boxS = dpi(app, 15.0f);
+        IDWriteTextFormat* smallFmt = app.signalSmallFormat ? app.signalSmallFormat : itemFmt;
+        app.searchOpenFilesToggleRect = D2D1::RectF(rowX, bandTop, rowX + rowW, bandTop + rowH);
+        app.searchFolderToggleRect = D2D1::RectF(rowX, bandTop + rowH, rowX + rowW, bandTop + rowH * 2);
+        auto drawCheck = [&](D2D1_RECT_F row, bool on, const wchar_t* label) {
+            D2D1_COLOR_F boxC = on ? app.theme.accent
+                : (app.theme.isDark ? hexColor(0x5A5A62, anim) : hexColor(0xB0B0B6, anim));
+            boxC.a = anim;
+            app.brush->SetColor(boxC);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(row.left, row.top + (rowH - boxS) / 2,
+                                              row.left + boxS, row.top + (rowH - boxS) / 2 + boxS),
+                                  dpi(app, 3.0f), dpi(app, 3.0f)),
+                app.brush);
+            if (on) {
+                D2D1_COLOR_F tick = app.theme.isDark ? hexColor(0xFFFFFF, anim)
+                                                     : hexColor(0x18181C, anim);
+                app.brush->SetColor(tick);
+                float cx = row.left + boxS * 0.5f;
+                float cy = row.top + rowH * 0.5f;
+                app.renderTarget->DrawLine(
+                    D2D1::Point2F(cx - boxS * 0.3f, cy),
+                    D2D1::Point2F(cx, cy + boxS * 0.3f), app.brush, 1.6f);
+                app.renderTarget->DrawLine(
+                    D2D1::Point2F(cx, cy + boxS * 0.3f),
+                    D2D1::Point2F(cx + boxS * 0.38f, cy - boxS * 0.28f), app.brush, 1.6f);
+            }
+            D2D1_COLOR_F lc = app.theme.text; lc.a = 0.85f * anim;
+            app.brush->SetColor(lc);
+            app.renderTarget->DrawText(
+                label, (UINT32)wcslen(label), smallFmt,
+                D2D1::RectF(row.left + dpi(app, 22.0f), row.top + dpi(app, 4.0f),
+                            row.right, row.top + rowH),
+                app.brush);
+        };
+        drawCheck(app.searchOpenFilesToggleRect, app.searchAllOpenFiles,
+                  tr(app, "search.open_files"));
+        drawCheck(app.searchFolderToggleRect, app.folderSearchEnabled,
+                  tr(app, "search.current_folder"));
+    } else {
+        app.searchOpenFilesToggleRect = D2D1_RECT_F{};
+        app.searchFolderToggleRect = D2D1_RECT_F{};
+    }
+
+    // Row model: the document's matches, then the folder-wide matches from
+    // sibling .md files. Built here so the paint and the hit-testing never
+    // drift, and stashed on the app for hover/cursor lookups.
+    const std::vector<PRow> rows = buildSearchPanelRows(app);
+    const float contentHeight = searchPanelContentHeight(app);
+
+    if (rows.empty()) {
+        D2D1_COLOR_F dimColor = app.theme.text;
+        dimColor.a = 0.5f * anim;
+        app.brush->SetColor(dimColor);
+        const wchar_t* emptyMsg = tr(app, "search.results.empty");
+        app.renderTarget->DrawText(emptyMsg, (UINT32)wcslen(emptyMsg), itemFmt,
+            D2D1::RectF(cardLeft + padding + dpi(app, 6.0f),
+                        listStartY + dpi(app, 8.0f), cardRight - padding,
+                        listStartY + dpi(app, 40.0f)),
+            app.brush);
+        app.searchPanelRows.clear();
+    } else {
+        const int currentRow =
+            app.searchResultsUseEditor ? app.editorSearchCurrentIndex
+                                       : app.searchCurrentIndex;
+        // Keep the current match row on screen as the user cycles matches
+        static int lastViewerCurrentRow = -1;
+        static int lastEditorCurrentRow = -1;
+        int& lastCurrentRow =
+            app.searchResultsUseEditor ? lastEditorCurrentRow
+                                       : lastViewerCurrentRow;
+        if (currentRow != lastCurrentRow) {
+            lastCurrentRow = currentRow;
+            if (currentRow >= 0) {
+                for (const auto& r : rows) {
+                    if (r.type == PRow::Type::Document && r.index == currentRow) {
+                        if (r.top < app.searchResultsScroll ||
+                            r.top + r.height >
+                                app.searchResultsScroll + listHeight) {
+                            app.searchResultsScroll = r.top - listHeight * 0.4f;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        float maxScroll = std::max(0.0f, contentHeight - listHeight);
+        app.searchResultsScroll =
+            std::clamp(app.searchResultsScroll, 0.0f, maxScroll);
+
+        app.searchPanelRows = rows;
+        app.searchResultsHover = -1;
+        app.searchFolderHover = -1;
+        float rowLeft = listRect.left;
+        float rowRight = listRect.right;
+        IDWriteTextFormat* smallFmt = app.signalSmallFormat ? app.signalSmallFormat : itemFmt;
+        app.renderTarget->PushAxisAlignedClip(
+            D2D1::RectF(cardLeft, listStartY, cardRight, listBottom),
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        for (const auto& r : rows) {
+            float itemY = listStartY + r.top - app.searchResultsScroll;
+            if (itemY + r.height < listStartY || itemY > listBottom) continue;
+            float itemH = r.height;
+
+            switch (r.type) {
+            case PRow::Type::Document: {
+                const auto& item = app.searchResultItems[r.index];
+                bool isCurrent = r.index == currentRow;
+                bool isHovered =
+                    app.mouseX >= rowLeft && app.mouseX <= rowRight &&
+                    app.mouseY >= itemY && app.mouseY <= itemY + itemH &&
+                    app.mouseY >= listStartY && app.mouseY <= listBottom;
+                if (isHovered) app.searchResultsHover = r.index;
+
+                D2D1_RECT_F rowRect = D2D1::RectF(
+                    rowLeft, itemY + 1.0f, rowRight, itemY + itemH - 1.0f);
+                if (isHovered) {
+                    D2D1_COLOR_F hoverColor = app.theme.text;
+                    hoverColor.a = 0.06f * anim;
+                    app.brush->SetColor(hoverColor);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
+                        app.brush);
+                } else if (isCurrent) {
+                    D2D1_COLOR_F spyColor = app.theme.accent;
+                    spyColor.a = 0.13f * anim;
+                    app.brush->SetColor(spyColor);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
+                        app.brush);
+                }
+                if (isCurrent || isHovered) {
+                    D2D1_COLOR_F barColor = app.theme.accent;
+                    barColor.a = anim;
+                    app.brush->SetColor(barColor);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(
+                            D2D1::RectF(rowLeft + dpi(app, 3.0f),
+                                        itemY + dpi(app, 6.0f),
+                                        rowLeft + dpi(app, 5.5f),
+                                        itemY + itemH - dpi(app, 6.0f)),
+                            1.5f, 1.5f),
+                        app.brush);
+                }
+
+                // Match highlight: keep the matched substring visible at
+                // narrow widths by dropping the head of the line prefix
+                float textX = rowLeft + dpi(app, 9.0f);
+                float numW = 0.0f;
+                if (item.lineNumber > 0) {
+                    wchar_t num[16];
+                    swprintf_s(num, L"%d:", item.lineNumber);
+                    numW = measureText(app, num, smallFmt) + dpi(app, 6.0f);
+                    D2D1_COLOR_F nc = app.theme.text;
+                    nc.a = 0.4f * anim;
+                    app.brush->SetColor(nc);
+                    app.renderTarget->DrawText(
+                        num, (UINT32)wcslen(num), smallFmt,
+                        D2D1::RectF(textX, itemY + dpi(app, 4.0f),
+                                    textX + numW, itemY + itemH),
+                        app.brush);
+                }
+                float textStart = textX + numW;
+                float availW = std::max(1.0f, rowRight - dpi(app, 8.0f) - textStart);
+                std::wstring prefix = item.line.substr(0, item.col);
+                float prefixW = prefix.empty() ? 0.0f : measureText(app, prefix, itemFmt);
+                float matchW = measureText(
+                    app, item.line.substr(item.col, item.len).c_str(), itemFmt);
+                size_t showOffset = 0;
+                while (!prefix.empty() && prefixW + matchW > availW * 0.85f) {
+                    size_t drop = std::min<size_t>(8, prefix.size());
+                    prefix.erase(0, drop);
+                    showOffset = item.col - prefix.size();
+                    prefixW = prefix.empty() ? 0.0f : measureText(app, prefix, itemFmt);
+                }
+                D2D1_COLOR_F hl = app.theme.accent;
+                hl.a = 0.3f * anim;
+                app.brush->SetColor(hl);
+                app.renderTarget->FillRectangle(
+                    D2D1::RectF(textStart + prefixW, itemY + dpi(app, 1.0f),
+                                textStart + prefixW + matchW, itemY + itemH - dpi(app, 1.0f)),
+                    app.brush);
+
+                D2D1_COLOR_F textColor =
+                    isCurrent ? app.theme.heading : app.theme.text;
+                textColor.a = anim;
+                app.brush->SetColor(textColor);
+                const wchar_t* lineText = item.line.c_str() + showOffset;
+                app.renderTarget->DrawText(
+                    lineText, (UINT32)(item.line.size() - showOffset), itemFmt,
+                    D2D1::RectF(textStart, itemY + dpi(app, 4.0f),
+                                rowRight - dpi(app, 8.0f), itemY + itemH),
+                    app.brush);
+
+                if (isHovered) {
+                    D2D1_COLOR_F arr = app.theme.text; arr.a = 0.45f * anim;
+                    app.brush->SetColor(arr);
+                    app.renderTarget->DrawText(L"\u2192", 1, itemFmt,
+                        D2D1::RectF(rowRight - dpi(app, 15.0f),
+                                    itemY + dpi(app, 4.0f), rowRight,
+                                    itemY + itemH),
+                        app.brush);
+                }
+                break;
+            }
+
+            case PRow::Type::Section: {
+                const wchar_t* label = tr(app, "search.results.other");
+                D2D1_COLOR_F sc = app.theme.text; sc.a = 0.5f * anim;
+                app.brush->SetColor(sc);
+                app.renderTarget->DrawText(
+                    label, (UINT32)wcslen(label), smallFmt,
+                    D2D1::RectF(rowLeft + dpi(app, 9.0f), itemY + dpi(app, 4.0f),
+                                rowRight - dpi(app, 8.0f), itemY + itemH),
+                    app.brush);
+                D2D1_COLOR_F sd = app.theme.text; sd.a = 0.1f;
+                app.brush->SetColor(sd);
+                app.renderTarget->FillRectangle(
+                    D2D1::RectF(rowLeft + dpi(app, 9.0f),
+                                itemY + itemH - dpi(app, 3.0f),
+                                rowRight - dpi(app, 8.0f),
+                                itemY + itemH - dpi(app, 2.0f)),
+                    app.brush);
+                break;
+            }
+
+            case PRow::Type::File: {
+                const auto& fr = app.folderResults[r.index];
+                bool isHovered =
+                    app.mouseX >= rowLeft && app.mouseX <= rowRight &&
+                    app.mouseY >= itemY && app.mouseY <= itemY + itemH &&
+                    app.mouseY >= listStartY && app.mouseY <= listBottom;
+                if (isHovered) app.searchFolderHover = r.index;
+                if (isHovered) {
+                    D2D1_COLOR_F hoverColor = app.theme.text;
+                    hoverColor.a = 0.05f * anim;
+                    app.brush->SetColor(hoverColor);
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(D2D1::RectF(rowLeft, itemY + 1.0f,
+                                                      rowRight, itemY + itemH - 1.0f),
+                                          dpi(app, 6.0f), dpi(app, 6.0f)),
+                        app.brush);
+                }
+                D2D1_COLOR_F nameColor = app.theme.accent;
+                nameColor.a = anim;
+                app.brush->SetColor(nameColor);
+                app.renderTarget->DrawText(
+                    fr.fileName.c_str(), (UINT32)fr.fileName.length(), itemFmt,
+                    D2D1::RectF(rowLeft + dpi(app, 9.0f), itemY + dpi(app, 3.0f),
+                                rowRight - dpi(app, 34.0f), itemY + itemH),
+                    app.brush);
+                wchar_t hits[24];
+                swprintf_s(hits, L"%d", fr.totalMatches);
+                D2D1_COLOR_F sc = app.theme.text; sc.a = 0.45f * anim;
+                app.brush->SetColor(sc);
+                app.renderTarget->DrawText(
+                    hits, (UINT32)wcslen(hits), smallFmt,
+                    D2D1::RectF(rowRight - dpi(app, 30.0f), itemY + dpi(app, 5.0f),
+                                rowRight - dpi(app, 12.0f), itemY + itemH),
+                    app.brush);
+                if (isHovered) {
+                    D2D1_COLOR_F arr = app.theme.text; arr.a = 0.45f * anim;
+                    app.brush->SetColor(arr);
+                    app.renderTarget->DrawText(L"\u2192", 1, itemFmt,
+                        D2D1::RectF(rowRight - dpi(app, 15.0f),
+                                    itemY + dpi(app, 3.0f), rowRight,
+                                    itemY + itemH),
+                        app.brush);
+                }
+                break;
+            }
+
+            case PRow::Type::Snippet: {
+                const auto& fr = app.folderResults[r.index];
+                const auto& m = fr.matches[r.match];
+                bool isHovered =
+                    app.mouseX >= rowLeft && app.mouseX <= rowRight &&
+                    app.mouseY >= itemY && app.mouseY <= itemY + itemH &&
+                    app.mouseY >= listStartY && app.mouseY <= listBottom;
+                if (isHovered) app.searchFolderHover = r.index;
+
+                float textX = rowLeft + dpi(app, 9.0f);
+                float numW = 0.0f;
+                if (m.lineNumber > 0) {
+                    wchar_t num[16];
+                    swprintf_s(num, L"%d:", m.lineNumber);
+                    numW = measureText(app, num, smallFmt) + dpi(app, 6.0f);
+                    D2D1_COLOR_F nc = app.theme.text;
+                    nc.a = 0.4f * anim;
+                    app.brush->SetColor(nc);
+                    app.renderTarget->DrawText(
+                        num, (UINT32)wcslen(num), smallFmt,
+                        D2D1::RectF(textX, itemY + dpi(app, 1.0f),
+                                    textX + numW, itemY + itemH),
+                        app.brush);
+                }
+                float textStart = textX + numW;
+                float availW = std::max(1.0f, rowRight - dpi(app, 8.0f) - textStart);
+                std::wstring prefix = m.snippet.substr(0, m.matchStart);
+                float prefixW = prefix.empty() ? 0.0f : measureText(app, prefix, itemFmt);
+                float matchW = m.snippet.empty() ? 0.0f
+                    : measureText(app, m.snippet.substr(m.matchStart, m.matchLen).c_str(), itemFmt);
+                if (prefixW + matchW > availW) {
+                    while (!prefix.empty() && prefixW + matchW > availW * 0.7f) {
+                        prefix.erase(0, 8);
+                        prefixW = prefix.empty() ? 0.0f : measureText(app, prefix, itemFmt);
+                    }
+                }
+                D2D1_COLOR_F hl = app.theme.accent;
+                hl.a = 0.24f * anim;
+                app.brush->SetColor(hl);
+                app.renderTarget->FillRectangle(
+                    D2D1::RectF(textStart + prefixW, itemY + dpi(app, 1.0f),
+                                textStart + prefixW + matchW, itemY + itemH - dpi(app, 1.0f)),
+                    app.brush);
+
+                std::wstring shown = prefix + m.snippet.substr(m.matchStart);
+                D2D1_COLOR_F sc = app.theme.text; sc.a = 0.85f * anim;
+                app.brush->SetColor(sc);
+                app.renderTarget->DrawText(
+                    shown.c_str(), (UINT32)shown.length(), itemFmt,
+                    D2D1::RectF(textStart, itemY + dpi(app, 1.0f),
+                                rowRight - dpi(app, 8.0f), itemY + itemH),
+                    app.brush);
+                break;
+            }
+
+            case PRow::Type::More: {
+                const auto& fr = app.folderResults[r.index];
+                bool isHovered =
+                    app.mouseX >= rowLeft && app.mouseX <= rowRight &&
+                    app.mouseY >= itemY && app.mouseY <= itemY + itemH &&
+                    app.mouseY >= listStartY && app.mouseY <= listBottom;
+                if (isHovered) app.searchFolderHover = r.index;
+                wchar_t more[32];
+                swprintf_s(more, L"+%d more",
+                           fr.totalMatches - (int)fr.matches.size());
+                D2D1_COLOR_F sc = app.theme.text; sc.a = 0.4f * anim;
+                app.brush->SetColor(sc);
+                app.renderTarget->DrawText(
+                    more, (UINT32)wcslen(more), smallFmt,
+                    D2D1::RectF(rowLeft + dpi(app, 9.0f), itemY + dpi(app, 2.0f),
+                                rowRight - dpi(app, 8.0f), itemY + itemH),
+                    app.brush);
+                break;
+            }
+            }
+
+            // Divider under each folder file's rows
+            bool lastSnippet = r.type == PRow::Type::Snippet &&
+                               r.match ==
+                                   (int)app.folderResults[r.index].matches.size() - 1;
+            if (lastSnippet || r.type == PRow::Type::More) {
+                D2D1_COLOR_F dd = app.theme.text; dd.a = 0.08f;
+                app.brush->SetColor(dd);
+                app.renderTarget->FillRectangle(
+                    D2D1::RectF(rowLeft + dpi(app, 9.0f), itemY + itemH,
+                                rowRight - dpi(app, 8.0f), itemY + itemH + 1.0f),
+                    app.brush);
+            }
+        }
+        app.renderTarget->PopAxisAlignedClip();
+
+        if (maxScroll > 0 && contentHeight > 0.0f) {
+            float sbHeight = listHeight / contentHeight * listHeight;
+            sbHeight = std::max(sbHeight, dpi(app, 20.0f));
+            float sbY = listStartY +
+                (app.searchResultsScroll / maxScroll * (listHeight - sbHeight));
+            D2D1_COLOR_F sbColor = app.theme.text;
+            sbColor.a = 0.25f * anim;
+            app.brush->SetColor(sbColor);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(cardRight - dpi(app, 6.0f), sbY,
+                                              cardRight - dpi(app, 3.0f),
+                                              sbY + sbHeight),
+                                  1.5f, 1.5f),
+                app.brush);
+        }
+    }
+
+    // Footer hint (the list rect's bottom margin is reserved for it)
+    {
+        float footTop = listBottom;
+        app.brush->SetColor(div);
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(cardLeft + padding, footTop, cardRight - padding,
+                        footTop + 1.0f),
+            app.brush);
+        if (app.signalSmallFormat) {
+            const wchar_t* hint = tr(app, "search.results.hint");
+            D2D1_COLOR_F hc = app.theme.text; hc.a = 0.48f * anim;
+            app.brush->SetColor(hc);
+            app.renderTarget->DrawText(
+                hint, (UINT32)wcslen(hint), app.signalSmallFormat,
+                D2D1::RectF(cardLeft + padding, footTop + dpi(app, 7.0f),
+                            cardRight - padding, cardBottom),
+                app.brush);
+        }
+    }
+
+    // Resizable left edge splits the window between the results and the
+    // source text, in the viewer and in edit mode alike.
+    renderSidePanelResizeGrip(app, SidePanel::Search);
+}
+
 // --- Link peek ---
 
 void renderLinkPeek(App& app) {
@@ -1313,7 +1925,7 @@ D2D1_RECT_F lightboxImageRect(const App& app) {
     D2D1_SIZE_F size = app.lightboxBitmap->GetSize();
     float availW = (float)app.width * 0.94f;
     float availH = (float)app.height - chromeTopHeight(app) - dpi(app, 24.0f);
-    // Fit large images to the view, keep small ones at natural size
+    // Fit large images to the view, keep smallFmt ones at natural size
     float fit = std::min(1.0f, std::min(availW / std::max(1.0f, size.width),
                                         availH / std::max(1.0f, size.height)));
     float scale = fit * app.lightboxZoom;
@@ -2211,185 +2823,14 @@ void renderContextMenu(App& app) {
     }
 }
 
-// --- Folder-wide search results ---
+// --- Extra-file search results ---
 //
-// Sibling markdown files matching the search query, shown as a panel under
-// the right end of the search bar: filename, a few highlighted snippet
-// lines each, and a +N counter. Clicking a file opens it at the match.
-
-namespace {
-
-// The toggle button hangs off the right edge of the search bar
-void folderToggleGeometry(const App& app, float& btnX, float& btnY, float& btnSize) {
-    float barWidth = std::min(dpi(app, 500.0f), app.width - dpi(app, 40.0f));
-    float barHeight = dpi(app, 44.0f);
-    float barX = ((float)app.width - barWidth) / 2;
-    float barY = dpi(app, 20.0f);
-    btnSize = dpi(app, 30.0f);
-    btnX = barX + barWidth + dpi(app, 8.0f);
-    btnY = barY + (barHeight - btnSize) / 2;
-}
-
-} // namespace
-
-bool folderSearchToggleAt(const App& app, float x, float y) {
-    if (!app.showSearch || app.editMode) return false;
-    float btnX, btnY, btnSize;
-    folderToggleGeometry(app, btnX, btnY, btnSize);
-    return x >= btnX && x <= btnX + btnSize && y >= btnY && y <= btnY + btnSize;
-}
-
-void renderFolderSearchResults(App& app) {
-    float anim = app.searchAnimation;
-    IDWriteTextFormat* fmt = app.folderBrowserFormat;
-
-    // Toggle button (always drawn with the bar so the feature is discoverable)
-    {
-        float btnX, btnY, btnSize;
-        folderToggleGeometry(app, btnX, btnY, btnSize);
-        D2D1_COLOR_F btnBg = app.theme.isDark ? hexColor(0x1E1E22, 0.95f * anim)
-                                              : hexColor(0xFFFFFF, 0.95f * anim);
-        app.brush->SetColor(btnBg);
-        app.renderTarget->FillRoundedRectangle(
-            D2D1::RoundedRect(D2D1::RectF(btnX, btnY, btnX + btnSize, btnY + btnSize),
-                              dpi(app, 6.0f), dpi(app, 6.0f)), app.brush);
-        D2D1_COLOR_F folderColor = app.folderSearchEnabled
-            ? app.theme.accent
-            : (app.theme.isDark ? hexColor(0x5A5A62) : hexColor(0xB0B0B6));
-        folderColor.a = anim;
-        app.brush->SetColor(folderColor);
-        float gx = btnX + dpi(app, 7.0f);
-        float gy = btnY + dpi(app, 9.0f);
-        app.renderTarget->FillRoundedRectangle(
-            D2D1::RoundedRect(D2D1::RectF(gx, gy + dpi(app, 3.0f), gx + dpi(app, 16.0f), gy + dpi(app, 13.0f)), 2, 2),
-            app.brush);
-        app.renderTarget->FillRectangle(
-            D2D1::RectF(gx, gy, gx + dpi(app, 7.0f), gy + dpi(app, 4.0f)), app.brush);
-        if (!app.folderSearchEnabled) {
-            // Slash = disabled
-            D2D1_COLOR_F slash = app.theme.isDark ? hexColor(0xF85149, anim) : hexColor(0xCF222E, anim);
-            app.brush->SetColor(slash);
-            app.renderTarget->DrawLine(
-                D2D1::Point2F(btnX + dpi(app, 6.0f), btnY + btnSize - dpi(app, 6.0f)),
-                D2D1::Point2F(btnX + btnSize - dpi(app, 6.0f), btnY + dpi(app, 6.0f)),
-                app.brush, 2.0f);
-        }
-    }
-
-    app.folderResultHits.clear();
-    if (!app.folderSearchEnabled || app.folderResults.empty() ||
-        app.searchQuery.empty() || !fmt) {
-        return;
-    }
-
-    float panelW = std::min(dpi(app, 460.0f), app.width * 0.35f);
-    float panelX = app.width - panelW - dpi(app, 16.0f);
-    float panelY = dpi(app, 20.0f) + dpi(app, 44.0f) + dpi(app, 12.0f);
-    float pad = dpi(app, 12.0f);
-    float headerH = dpi(app, 24.0f);
-    float lineH = dpi(app, 20.0f);
-    float moreH = dpi(app, 16.0f);
-    float sectionGap = dpi(app, 10.0f);
-    float maxBottom = app.height - dpi(app, 20.0f);
-
-    // Height first, so the panel can be drawn before its content
-    float contentH = pad;
-    size_t shownFiles = 0;
-    for (const auto& file : app.folderResults) {
-        float sectionH = headerH + file.matches.size() * lineH +
-            ((size_t)file.totalMatches > file.matches.size() ? moreH : 0.0f) + sectionGap;
-        if (panelY + contentH + sectionH + pad > maxBottom) break;
-        contentH += sectionH;
-        shownFiles++;
-    }
-    if (shownFiles == 0) return;
-    contentH += pad - sectionGap;
-
-    D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(
-        D2D1::RectF(panelX, panelY, panelX + panelW, panelY + contentH),
-        dpi(app, 8.0f), dpi(app, 8.0f));
-    D2D1_COLOR_F panelBg = app.theme.isDark ? hexColor(0x18181C, 0.96f * anim)
-                                            : hexColor(0xFCFCFC, 0.97f * anim);
-    app.brush->SetColor(panelBg);
-    app.renderTarget->FillRoundedRectangle(panel, app.brush);
-    D2D1_COLOR_F borderColor = app.theme.isDark ? hexColor(0x3A3A40, 0.8f * anim)
-                                                : hexColor(0xC8C8C8, 0.8f * anim);
-    app.brush->SetColor(borderColor);
-    app.renderTarget->DrawRoundedRectangle(panel, app.brush, 1.0f);
-
-    float rowY = panelY + pad;
-    for (size_t i = 0; i < shownFiles; i++) {
-        const auto& file = app.folderResults[i];
-        float sectionTop = rowY;
-
-        D2D1_COLOR_F nameColor = app.theme.accent;
-        nameColor.a = anim;
-        app.brush->SetColor(nameColor);
-        app.renderTarget->DrawText(
-            file.fileName.c_str(), (UINT32)file.fileName.length(), fmt,
-            D2D1::RectF(panelX + pad, rowY, panelX + panelW - pad, rowY + headerH),
-            app.brush);
-        rowY += headerH;
-
-        for (const auto& match : file.matches) {
-            // Highlight behind the matched substring
-            std::wstring prefix = match.snippet.substr(0, match.matchStart);
-            std::wstring matched = match.snippet.substr(match.matchStart, match.matchLen);
-            float prefixW = prefix.empty() ? 0.0f : measureText(app, prefix, fmt);
-            float matchW = matched.empty() ? 0.0f : measureText(app, matched, fmt);
-            float textX = panelX + pad;
-            float availW = panelW - pad * 2;
-            if (prefixW + matchW > availW) {
-                // Keep the match visible: drop the head of the prefix
-                while (!prefix.empty() && prefixW + matchW > availW * 0.7f) {
-                    prefix.erase(0, 8);
-                    prefixW = prefix.empty() ? 0.0f : measureText(app, prefix, fmt);
-                }
-            }
-            D2D1_COLOR_F hl = app.theme.accent;
-            hl.a = 0.28f * anim;
-            app.brush->SetColor(hl);
-            app.renderTarget->FillRectangle(
-                D2D1::RectF(textX + prefixW, rowY + dpi(app, 1.0f),
-                            textX + prefixW + matchW, rowY + lineH - dpi(app, 1.0f)),
-                app.brush);
-
-            std::wstring shown = prefix + match.snippet.substr(match.matchStart);
-            D2D1_COLOR_F snippetColor = app.theme.text;
-            snippetColor.a = 0.85f * anim;
-            app.brush->SetColor(snippetColor);
-            app.renderTarget->DrawText(
-                shown.c_str(), (UINT32)shown.length(), fmt,
-                D2D1::RectF(textX, rowY + dpi(app, 1.0f), textX + availW, rowY + lineH),
-                app.brush);
-            rowY += lineH;
-        }
-
-        if ((size_t)file.totalMatches > file.matches.size()) {
-            wchar_t more[32];
-            swprintf_s(more, L"+%d more", file.totalMatches - (int)file.matches.size());
-            D2D1_COLOR_F moreColor = app.theme.text;
-            moreColor.a = 0.45f * anim;
-            app.brush->SetColor(moreColor);
-            app.renderTarget->DrawText(more, (UINT32)wcslen(more), fmt,
-                D2D1::RectF(panelX + pad, rowY, panelX + panelW - pad, rowY + moreH),
-                app.brush);
-            rowY += moreH;
-        }
-
-        app.folderResultHits.push_back({
-            D2D1::RectF(panelX, sectionTop, panelX + panelW, rowY), (int)i});
-
-        if (i + 1 < shownFiles) {
-            app.brush->SetColor(borderColor);
-            app.renderTarget->DrawLine(
-                D2D1::Point2F(panelX + pad, rowY + sectionGap / 2),
-                D2D1::Point2F(panelX + panelW - pad, rowY + sectionGap / 2),
-                app.brush, 1.0f);
-        }
-        rowY += sectionGap;
-    }
-}
+// Open documents and sibling markdown files matched by the query render in
+// the search-results side panel (Ctrl+Shift+F) under the document's own
+// matches. The two checkboxes at the top of that panel toggle the sources.
+// (The old floating popup that listed sibling files above the document was
+// removed together with its toggle button; the results now only ever live
+// in the side panel, so a click can no longer swap the open document.)
 
 
 // --- Print preview ---
@@ -2558,7 +2999,7 @@ void renderPrintPreview(App& app) {
 namespace {
 
 // Surface elevation (design 2e): panels and cards lift from the theme
-// background toward white - a small step in dark themes, a larger one in
+// background toward white - a smallFmt step in dark themes, a larger one in
 // light themes where the cards read as near-white paper
 D2D1_COLOR_F settingsLift(const App& app, float darkT, float lightT,
                           float alpha) {

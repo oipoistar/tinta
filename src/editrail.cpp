@@ -905,7 +905,7 @@ static int seamCaretAnchor(const App& app) {
 // Desk fill, sheet shadow, sheet surface and edge - drawn before the
 // document content clips into the sheet
 void renderEditSheetChrome(App& app) {
-    if (!editSheetLayout(app) || !app.renderTarget || !app.brush) {
+    if (!editorPreviewVisible(app) || !app.renderTarget || !app.brush) {
         return;
     }
     float W = (float)app.width;

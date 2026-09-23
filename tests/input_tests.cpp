@@ -156,6 +156,7 @@ void settingsDismissal() {
 int runTabDropTests();
 int runTableInputTests();
 int runTableLayoutTests();
+int runTableSelectWordTests();
 int runWindowDragTests();
 int runSearchInputTests();
 int runWrappedCursorTests();
@@ -169,6 +170,7 @@ int runTabDropLaunchProbe();
 int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--window-drag-tests") return runWindowDragTests();
     if (argc == 2 && std::string(argv[1]) == "--table-layout-tests") return runTableLayoutTests();
+    if (argc == 2 && std::string(argv[1]) == "--table-select-word-tests") return runTableSelectWordTests();
     if (argc == 2 && std::string(argv[1]) == "--table-input-tests") return runTableInputTests();
     if (argc == 2 && std::string(argv[1]) == "--editor-context-tests") return runEditorContextTests();
     if (argc == 2 && std::string(argv[1]) == "--file-fragment-tests") return runFileFragmentTests();

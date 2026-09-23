@@ -415,7 +415,7 @@ int tabDropInsertionIndex(const App& app, POINT clientPoint) {
     const auto m = stripMetrics(app);
     if (!tabStripVisible(app) || clientPoint.y < 0 || clientPoint.y >= m.height ||
         clientPoint.x < 0 || clientPoint.x >= captionIslandLeft(app) ||
-        (editSheetLayout(app) && clientPoint.x >= editorPaneWidth(app))) {
+        (editorPreviewVisible(app) && clientPoint.x >= editorPaneWidth(app))) {
         return count;
     }
     const float step = m.tabWidth + dpi(app, 2.0f);
@@ -474,7 +474,7 @@ float captionIslandLeft(const App& app) {
 
 D2D1_RECT_F titleDragRect(const App& app) {
     float right = pinButtonRect(app).left;
-    if (editSheetLayout(app)) right = std::min(right, editorPaneWidth(app));
+    if (editorPreviewVisible(app)) right = std::min(right, editorPaneWidth(app));
     right = std::max(appMenuButtonRect(app).right, right);
     // A very narrow split pane still needs a title/tab context target and
     // room for its controls. Reduce the gap only after that space runs out.
@@ -568,6 +568,112 @@ void drawPlusButton(App& app, float plusX, float stripH,
 
 }  // namespace
 
+// Full file name on dwell: the strip ellipsizes long titles, so hovering a
+// tab after the dwell fires draws a floating card below the tab with the
+// whole name; only drawn when the title genuinely doesn't fit the label.
+static void renderTabTitleTooltip(App& app, float stripH, float stripRight) {
+    const int index = app.hoveredTab;
+    const std::wstring& title = app.tabs[index].title;
+
+    // Label span the tab actually paints (mirrors the label calc in the
+    // multi-tab and single-tab branches of renderTabStrip)
+    float labelLeft = 0.0f;
+    float labelRight = 0.0f;
+    float anchorLeft = 0.0f;
+    bool single = !tabStripVisible(app);
+    if (single) {
+        float textLeft = std::max(dpi(app, 40.0f),
+                                  editRailWidth(app) + dpi(app, 8.0f));
+        float maxRight = titleDragRect(app).left;
+        labelLeft = textLeft;
+        labelRight = std::max(textLeft, maxRight - dpi(app, 74.0f));
+        anchorLeft = labelLeft;
+    } else {
+        StripMetrics m = stripMetrics(app);
+        if (index < m.firstVisible || index >= m.firstVisible + m.visibleCount)
+            return;
+        const float gap = dpi(app, 2.0f);
+        const float x = m.tabsLeft + (m.tabWidth + gap) *
+                                    (float)(index - m.firstVisible);
+        const bool active = index == app.activeTab;
+        const bool showClose = (active || index == app.hoveredTab) &&
+                               m.tabWidth >= dpi(app, 48.0f);
+        labelLeft = x + dpi(app, 12.0f);
+        labelRight = x + m.tabWidth - dpi(app, showClose ? 30.0f : 20.0f);
+        anchorLeft = x;
+    }
+    if (labelRight <= labelLeft) return;
+    // Pointer parked over the close/dot zone: suppress the card
+    if ((float)app.mouseX > labelRight || (float)app.mouseY >= stripH)
+        return;
+
+    // Measure the title's natural width; the card only appears when the
+    // strip would have ellipsized it
+    IDWriteTextLayout* layout = nullptr;
+    if (FAILED(app.dwriteFactory->CreateTextLayout(
+            title.c_str(), (UINT32)title.size(), app.folderBrowserFormat,
+            100000.0f, stripH, &layout)) || !layout)
+        return;
+    DWRITE_TEXT_METRICS tm{};
+    layout->GetMetrics(&tm);
+    if (tm.width <= labelRight - labelLeft) { layout->Release(); return; }
+
+    // Card under the tab
+    float padX = dpi(app, 12.0f);
+    float padY = dpi(app, 7.0f);
+    float textH = dpi(app, 17.0f);
+    float innerW = std::min(dpi(app, 460.0f), tm.width);
+    float cardW = innerW + padX * 2.0f;
+    float cardH = textH + padY * 2.0f;
+    float top = stripH + dpi(app, 8.0f);
+    float left = anchorLeft + dpi(app, 4.0f);
+    if (left + cardW > stripRight - dpi(app, 4.0f))
+        left = std::max(dpi(app, 4.0f),
+                        stripRight - dpi(app, 4.0f) - cardW);
+
+    D2D1_RECT_F card = D2D1::RectF(left, top, left + cardW, top + cardH);
+
+    // Shadow
+    D2D1_COLOR_F shadow = D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.25f);
+    app.brush->SetColor(shadow);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(D2D1::RectF(card.left + 3, card.top + 4,
+                                       card.right + 3, card.bottom + 4),
+                          dpi(app, 5), dpi(app, 5)),
+        app.brush);
+    // Body
+    D2D1_COLOR_F bg = app.theme.isDark ? hexColor(0x1E1E1E)
+                                       : hexColor(0xFCFCFA);
+    app.brush->SetColor(bg);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(card, dpi(app, 5), dpi(app, 5)), app.brush);
+    // Ellipsized text
+    layout->SetMaxWidth(innerW);
+    layout->SetMaxHeight(cardH);
+    layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    DWRITE_TRIMMING trim{};
+    trim.granularity = DWRITE_TRIMMING_GRANULARITY_CHARACTER;
+    trim.delimiter = 0;
+    trim.delimiterCount = 1;
+    IDWriteInlineObject* ellipsis = nullptr;
+    app.dwriteFactory->CreateEllipsisTrimmingSign(
+        app.folderBrowserFormat, &ellipsis);
+    layout->SetTrimming(&trim, ellipsis);
+    app.brush->SetColor(app.theme.text);
+    app.renderTarget->DrawTextLayout(
+        D2D1::Point2F(card.left + padX, card.top + padY), layout, app.brush);
+    if (ellipsis) ellipsis->Release();
+    layout->Release();
+    // Accent border
+    D2D1_COLOR_F border = app.theme.accent;
+    border.a = 0.5f;
+    app.brush->SetColor(border);
+    app.renderTarget->DrawRoundedRectangle(
+        D2D1::RoundedRect(card, dpi(app, 5), dpi(app, 5)), app.brush, 1.0f);
+
+    app.tabTooltipRect = card;
+}
+
 void renderTabStrip(App& app) {
     float stripH = chromeTopHeight(app);
     if (stripH <= 0.0f) return;
@@ -582,7 +688,7 @@ void renderTabStrip(App& app) {
 
     // Strip background: with the floating sheet the strip only spans the
     // source side — the desk and the sheet own the top band to its right
-    bool sheetMode = editSheetLayout(app);
+    bool sheetMode = editorPreviewVisible(app);
     float stripRight = sheetMode ? editorPaneWidth(app) : (float)app.width;
     app.brush->SetColor(stripBackground(app));
     app.renderTarget->FillRectangle(
@@ -614,7 +720,7 @@ void renderTabStrip(App& app) {
             DestroyIcon(icon);
         }
     }
-    if (!app.editMode || app.editorReadingPreview) renderAppMenuButtonBackground(app);
+    if (!app.editMode) renderAppMenuButtonBackground(app);
     if (app.titleIconBitmap) {
         float iconSize = dpi(app, 16.0f);
         float ix = (iconCell - iconSize) * 0.5f;
@@ -991,6 +1097,15 @@ void renderTabStrip(App& app) {
         pinHit.rect = r;
         pinHit.index = -4;
         app.tabHits.push_back(pinHit);
+    }
+
+    // Full file name on dwell: the strip ellipsizes long titles, so hovering
+    // a tab after the dwell fires floats the whole name just below it
+    app.tabTooltipRect = {};
+    if (app.tabTooltipTab >= 0 && app.tabTooltipTab == app.hoveredTab &&
+        !app.tabDragging && app.folderBrowserFormat &&
+        app.hoveredTab >= 0 && (size_t)app.hoveredTab < app.tabs.size()) {
+        renderTabTitleTooltip(app, stripH, stripRight);
     }
 }
 

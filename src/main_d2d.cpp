@@ -223,10 +223,7 @@ void render(App& app) {
     // surface, the render sheet floats above it (design 10a)
     if (app.editMode) {
         app.startPageShowing = false;  // recents reload on the way back
-        // The reading view (#236) is the reader's page: plain background,
-        // no desk or floating sheet, content clipped to the window (#242)
-        app.renderTarget->Clear(app.editorReadingPreview ? app.theme.background
-                                                         : editDeskColor(app));
+        app.renderTarget->Clear(editDeskColor(app));
 
         float editorWidth = editorPaneWidth(app);
         float previewX = documentViewportX(app);
@@ -239,9 +236,7 @@ void render(App& app) {
         // surface first, then the document clips into the sheet
         renderEditSheetChrome(app);
         {
-            D2D1_RECT_F sheet = app.editorReadingPreview
-                ? D2D1::RectF(0.0f, 0.0f, (float)app.width, (float)app.height)
-                : editSheetRect(app);
+            D2D1_RECT_F sheet = editSheetRect(app);
             app.renderTarget->PushAxisAlignedClip(
                 sheet, D2D1_ANTIALIAS_MODE_ALIASED);
         }
@@ -820,7 +815,8 @@ render_document:
         KillTimer(app.hwnd, TIMER_SIDE_PANEL_SCROLLBARS);
         app.panelScrollbarTimerActive = false;
     }
-    const bool quietScrollbars = !app.editMode && (app.showToc || app.showFolderBrowser);
+    const bool quietScrollbars = !app.editMode &&
+        (app.showToc || app.showFolderBrowser || app.showSearchResults);
 
     // Scrollbar color: dark on light themes, light on dark themes
     float sbColorValue = app.theme.isDark ? 1.0f : 0.0f;
@@ -1080,7 +1076,6 @@ render_document:
     // Render overlays (search overlay handled separately for edit mode)
     if (app.showSearch && !app.editMode) {
         renderSearchOverlay(app);
-        renderFolderSearchResults(app);
     }
     if (app.showFolderBrowser) renderFolderBrowser(app);
     if (app.showToc) renderToc(app);
@@ -1101,6 +1096,10 @@ render_document:
         // Render search overlay in screen coordinates (over editor pane)
         if (app.showSearch) renderSearchOverlay(app);
     }
+
+    // Search-results panel docks past the edit-mode clip so the source
+    // pane's inset stays open in both modes (Ctrl+Shift+F).
+    if (app.showSearchResults) renderSearchResultsPanel(app);
 
     // Signal chips: every notification, one bottom-right system (t13).
     // Drawn after the edit-mode clip pops and above the side panels, so
@@ -1271,7 +1270,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // The floating sheet rises past the strip (design 10a):
             // right of the source column the top band is desk gap and
             // page, both of which take normal clicks
-            if (editSheetLayout(*app) && x >= editorPaneWidth(*app)) {
+            if (editorPreviewVisible(*app) && x >= editorPaneWidth(*app)) {
                 return HTCLIENT;
             }
             for (const App::TabHit& hit : app->tabHits) {
@@ -1636,6 +1635,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
             }
             if (wParam == TIMER_LINK_PEEK && app) handleLinkPeekTimer(*app, hwnd);
+            if (wParam == TIMER_TAB_TOOLTIP && app) handleTabTooltipTimer(*app, hwnd);
             if (wParam == TIMER_FILE_WATCH && app) handleFileWatchTimer(*app, hwnd);
             if (wParam == 2 && app) editorReparse(*app); // TIMER_EDITOR_REPARSE
             if (wParam == TIMER_CURSOR_BLINK && app) {
@@ -1930,6 +1930,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.browserPinned = savedSettings.browserPinned;
     app.tocWidth = savedSettings.tocWidth;
     app.browserWidth = savedSettings.browserWidth;
+    app.searchResultsWidth = savedSettings.searchResultsWidth;
     app.languageSetting = savedSettings.language == "auto"
         ? -1 : languageIndexById(savedSettings.language);
     app.currentLanguageIndex = app.languageSetting >= 0

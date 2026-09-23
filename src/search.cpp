@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <set>
 #include <thread>
 
 namespace {
@@ -35,7 +36,9 @@ void clearFolderSearch(App& app) {
 }
 
 void startFolderSearchScan(App& app) {
-    if (app.editMode || !app.folderSearchEnabled || !app.showSearch ||
+    if (app.editMode ||
+        !(app.folderSearchEnabled || app.searchAllOpenFiles) ||
+        !app.showSearch ||
         app.searchQuery.empty() || app.currentFile.empty()) {
         return;
     }
@@ -44,24 +47,37 @@ void startFolderSearchScan(App& app) {
     std::filesystem::path current(toWide(app.currentFile));
     std::filesystem::path dir = current.parent_path();
     std::wstring currentName = current.filename().wstring();
+    // Open documents to include: every tab but the current one (#foldersearch)
+    std::vector<std::wstring> openPaths;
+    if (app.searchAllOpenFiles) {
+        for (size_t i = 0; i < app.tabs.size(); i++) {
+            const std::string& p = (int)i == app.activeTab
+                                       ? app.currentFile
+                                       : app.tabs[i].path;
+            if (p.empty()) continue;
+            openPaths.push_back(toWide(p));
+        }
+    }
     HWND hwnd = app.hwnd;
+    bool folderEnabled = app.folderSearchEnabled;
 
-    std::thread([generation, queryLower, dir, currentName, hwnd] {
+    std::thread([generation, queryLower, dir, currentName, openPaths,
+                 folderEnabled, hwnd] {
         auto* msg = new FolderScanMsg{generation, {}};
         std::error_code ec;
-        int scanned = 0;
-        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-            if (msg->files.size() >= 12 || scanned >= 200) break;
-            if (!entry.is_regular_file(ec)) continue;
-            std::wstring ext = entry.path().extension().wstring();
-            for (auto& c : ext) c = (wchar_t)std::towlower(c);
-            if (ext != L".md" && ext != L".markdown") continue;
-            if (_wcsicmp(entry.path().filename().c_str(), currentName.c_str()) == 0) continue;
-            if (entry.file_size(ec) > 1024 * 1024) continue;
-            scanned++;
 
-            std::ifstream file(entry.path(), std::ios::binary);
-            if (!file) continue;
+        // One file's matches become a FolderFileResult entry
+        auto scanFile = [&](const std::filesystem::path& path) {
+            if (msg->files.size() >= 12) return;
+            std::wstring ext = path.extension().wstring();
+            for (auto& c : ext) c = (wchar_t)std::towlower(c);
+            if (ext != L".md" && ext != L".markdown") return;
+            if (_wcsicmp(path.filename().c_str(), currentName.c_str()) == 0) return;
+            if (!std::filesystem::is_regular_file(path, ec)) return;
+            if (std::filesystem::file_size(path, ec) > 1024 * 1024) return;
+
+            std::ifstream file(path, std::ios::binary);
+            if (!file) return;
             std::string bytes((std::istreambuf_iterator<char>(file)),
                               std::istreambuf_iterator<char>());
             std::wstring content = utf8ToWideString(bytes);
@@ -70,7 +86,13 @@ void startFolderSearchScan(App& app) {
 
             App::FolderFileResult result;
             size_t pos = 0;
+            size_t scannedTo = 0;
+            int lineNo = 1;
             while ((pos = lower.find(queryLower, pos)) != std::wstring::npos) {
+                for (size_t p = scannedTo; p < pos; p++) {
+                    if (content[p] == L'\n') lineNo++;
+                }
+                scannedTo = pos;
                 result.totalMatches++;
                 if (result.matches.size() < 3) {
                     size_t lineStart = content.rfind(L'\n', pos);
@@ -86,14 +108,38 @@ void startFolderSearchScan(App& app) {
                     }
                     m.matchStart = pos - snipStart;
                     m.matchLen = queryLower.size();
+                    m.lineNumber = lineNo;
                     result.matches.push_back(std::move(m));
                 }
                 pos += queryLower.size();
             }
             if (result.totalMatches > 0) {
-                result.fileName = entry.path().filename().wstring();
-                result.fullPath = entry.path().wstring();
+                result.fileName = path.filename().wstring();
+                result.fullPath = path.wstring();
                 msg->files.push_back(std::move(result));
+            }
+        };
+
+        // Open documents first so their hits lead the list; then sibling
+        // .md files in the current folder. A file that is both skips twice.
+        for (const auto& p : openPaths) scanFile(std::filesystem::path(p));
+
+        std::set<std::wstring> seen;
+        for (const auto& f : msg->files) {
+            std::wstring key = toLower(f.fullPath);
+            seen.insert(std::move(key));
+        }
+
+        if (folderEnabled) {
+            int scanned = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+                if (msg->files.size() >= 12 || scanned >= 200) break;
+                if (!entry.is_regular_file(ec)) continue;
+                std::wstring key = toLower(entry.path().wstring());
+                if (seen.count(key)) continue;
+                scanned++;
+                if (msg->files.size() >= 12) break;
+                scanFile(entry.path());
             }
         }
         if (!PostMessageW(hwnd, WM_APP_FOLDER_SEARCH, 0, (LPARAM)msg)) delete msg;
@@ -104,7 +150,8 @@ void completeFolderSearch(App& app, void* results) {
     auto* msg = static_cast<FolderScanMsg*>(results);
     if (!msg) return;
     if (msg->generation != app.folderSearchGeneration ||
-        !app.showSearch || app.editMode || !app.folderSearchEnabled) {
+        !app.showSearch || app.editMode ||
+        !(app.folderSearchEnabled || app.searchAllOpenFiles)) {
         delete msg;
         return;
     }
@@ -119,17 +166,25 @@ void performSearch(App& app) {
     app.searchCurrentIndex = 0;
     app.searchMatchCursor = 0;
 
-    // Folder-wide results follow the query, debounced on a timer so fast
-    // typing doesn't spawn a scan per keystroke
-    if (!app.editMode && app.folderSearchEnabled && app.hwnd) {
-        if (app.searchQuery.empty()) {
-            clearFolderSearch(app);
-        } else if (!app.currentFile.empty()) {
+    // Extra-file results follow the query, debounced on a timer so fast
+    // typing doesn't spawn a scan per keystroke. They render in the
+    // search-results side panel (Ctrl+Shift+F) under the document's own
+    // matches, enabled by the two "search wider" checkboxes there.
+    if (!app.editMode && (app.folderSearchEnabled || app.searchAllOpenFiles) &&
+        app.hwnd) {
+        // Drop the previous query's hits immediately: the debounced rescan
+        // below would otherwise leave them on screen, and clicking one opens
+        // a file that no longer matches the current query.
+        clearFolderSearch(app);
+        if (!app.searchQuery.empty() && !app.currentFile.empty()) {
             SetTimer(app.hwnd, TIMER_FOLDER_SEARCH, 250, nullptr);
         }
     }
 
-    if (app.searchQuery.empty() || !app.root) return;
+    if (app.searchQuery.empty() || !app.root) {
+        app.searchResultItems.clear();
+        return;
+    }
 
     // docText and textRects must cover the whole document before searching
     ensureLayoutComplete(app);
@@ -161,6 +216,113 @@ void performSearch(App& app) {
     }
 
     mapSearchMatchesToLayout(app);
+    buildSearchResultItems(app);
+}
+
+static void buildResultItemsFrom(const std::wstring& text,
+                                 const std::vector<size_t>& starts,
+                                 const std::vector<size_t>& lengths,
+                                 std::vector<App::SearchResultItem>& out) {
+    out.clear();
+    out.reserve(starts.size());
+    int lineNo = 1;
+    size_t scanned = 0;
+    for (size_t i = 0; i < starts.size(); i++) {
+        App::SearchResultItem item;
+        if (starts[i] < text.size()) {
+            if (starts[i] < scanned) {  // out-of-order: recount from the top
+                lineNo = 1;
+                scanned = 0;
+            }
+            for (size_t p = scanned; p < starts[i]; p++) {
+                if (text[p] == L'\n') lineNo++;
+            }
+            scanned = starts[i];
+            size_t lineStart = 0;
+            if (starts[i]) {
+                size_t p = text.rfind(L'\n', starts[i] - 1);
+                lineStart = (p == std::wstring::npos) ? 0 : p + 1;
+            }
+            size_t lineEnd = text.find(L'\n', lineStart);
+            if (lineEnd == std::wstring::npos) lineEnd = text.size();
+            std::wstring line = text.substr(lineStart, lineEnd - lineStart);
+            if (!line.empty() && line.back() == L'\r') line.pop_back();
+            size_t col = starts[i] - lineStart;
+            if (col <= line.size()) {
+                item.line = std::move(line);
+                item.col = col;
+                item.len = std::max<size_t>(1, std::min(lengths[i], item.line.size() - col));
+                item.lineNumber = lineNo;
+            }
+        }
+        out.push_back(std::move(item));
+    }
+}
+
+void buildSearchResultItems(App& app) {
+    app.searchResultsUseEditor = false;
+    std::vector<size_t> starts, lens;
+    starts.reserve(app.searchMatches.size());
+    lens.reserve(app.searchMatches.size());
+    for (const auto& m : app.searchMatches) {
+        starts.push_back(m.startPos);
+        lens.push_back(m.length);
+    }
+    buildResultItemsFrom(app.docText, starts, lens, app.searchResultItems);
+}
+
+// Editor-mode twin: rows are index-aligned with editorSearchMatches so a
+// click can hand the row index straight to scrollEditorToMatch. Kept 1:1
+// even when text changed since the last search (rows then show stale lines,
+// but indexes still match and re-search fixes them on the next keystroke).
+void buildEditorSearchResultItems(App& app) {
+    app.searchResultsUseEditor = true;
+    std::vector<size_t> starts, lens;
+    starts.reserve(app.editorSearchMatches.size());
+    lens.reserve(app.editorSearchMatches.size());
+    for (const auto& m : app.editorSearchMatches) {
+        starts.push_back(m.startPos);
+        lens.push_back(m.length);
+    }
+    buildResultItemsFrom(app.editorText, starts, lens, app.searchResultItems);
+}
+
+void openSearchResultsPanel(App& app) {
+    // Works in the viewer and in edit mode; the latter lists the editor's
+    // own matches (buildEditorSearchResultItems) and references the same
+    // dock so Ctrl+Shift+F never covers the source text.
+    if (!app.showSearchResults) {
+        app.showSearchResults = true;
+        app.searchResultsAnimation = 0;
+    }
+    // Opening the panel shows the folder-wide results too (viewer only), so
+    // refresh the scan now instead of waiting for the next keystroke.
+    if (!app.editMode &&
+        (app.folderSearchEnabled || app.searchAllOpenFiles) && app.hwnd &&
+        !app.searchQuery.empty() && !app.currentFile.empty()) {
+        SetTimer(app.hwnd, TIMER_FOLDER_SEARCH, 1, nullptr);
+    }
+    // The Contents panel shares the right dock; the two never overlap
+    app.showToc = false;
+    app.tocAnimation = 0;
+    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
+void closeSearchResultsPanel(App& app) {
+    if (!app.showSearchResults) return;
+    app.showSearchResults = false;
+    app.searchResultsAnimation = 0;
+    clearFolderSearch(app);
+    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
+bool toggleSearchResultsPanel(App& app) {
+    if (app.showSearchResults) {
+        closeSearchResultsPanel(app);
+        return false;
+    }
+    openSearchResultsPanel(app);
+    return true;
 }
 
 void mapSearchMatchesToLayout(App& app) {

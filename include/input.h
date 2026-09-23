@@ -28,5 +28,7 @@ void handleFileWatchTimer(App& app, HWND hwnd);
 void handleSelectScrollTimer(App& app, HWND hwnd);
 // Dwell timer fired over a local .md link: load the peek preview
 void handleLinkPeekTimer(App& app, HWND hwnd);
+// Dwell timer fired over a tab: reveal its full file name below the strip
+void handleTabTooltipTimer(App& app, HWND hwnd);
 
 #endif // TINTA_INPUT_H

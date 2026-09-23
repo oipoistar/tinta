@@ -200,6 +200,8 @@ void closeSearchInput(App& app) {
     app.searchReplaceHits.clear();
     app.searchAnimation = 0;
     std::wstring().swap(app.docTextLower);
+    app.searchResultItems.clear();
+    closeSearchResultsPanel(app);
     clearFolderSearch(app);
     updateBlinkTimer(app);
     InvalidateRect(app.hwnd, nullptr, FALSE);

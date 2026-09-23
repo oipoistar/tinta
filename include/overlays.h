@@ -53,6 +53,26 @@ D2D1_RECT_F tocListRect(const App& app);
 float tocHeadingIndent(const App& app, int level);
 float tocMaxScroll(const App& app);
 
+// Search-results side panel (Ctrl+Shift+F): the document's matches, then the
+// extra-file matches (open documents and/or sibling .md files, per the two
+// checkboxes at the panel's top). Clicking a document row jumps there
+// (scrollToCurrentMatch); clicking an extra-file row opens that file at its
+// first match.
+void renderSearchResultsPanel(App& app);
+// Result of hit-testing a point in the panel. Shares the renderer's row
+// model, so click handling never trusts stale hover state (#114 pattern).
+enum class SearchPanelHitType { None, Document, Section, FolderFile };
+struct SearchPanelHit {
+    SearchPanelHitType type = SearchPanelHitType::None;
+    int index = -1;        // Document: result row; FolderFile: folderResults index
+    int matchIndex = -1;   // FolderFile: snippet row index (snippet hits only)
+    int row = -1;          // index into app.searchPanelRows (the painted model)
+};
+SearchPanelHit searchPanelHitAt(const App& app, float x, float y);
+// The scrolled list viewport, shared with wheel input and cursor logic
+D2D1_RECT_F searchResultsListRect(const App& app);
+float searchResultsMaxScroll(const App& app);
+
 // Shared geometry for the floating file-browser card (t13 design 13b):
 // one source of truth for render, cursor, and click hit-tests
 struct FolderBrowserMetrics {
@@ -150,10 +170,8 @@ void renderLightbox(App& app);
 // Where the image currently draws, in screen coordinates
 D2D1_RECT_F lightboxImageRect(const App& app);
 
-// Folder-wide search results beside the search bar; the toggle button sits
-// at the bar's right edge (geometry shared with input hit-testing)
-void renderFolderSearchResults(App& app);
-bool folderSearchToggleAt(const App& app, float x, float y);
+// Folder-wide search currently lives in the search-results panel's two
+// "search wider" checkboxes (open documents / current folder).
 // Opens at (x, y) client coordinates, clamped so the menu stays on screen
 void openContextMenu(App& app, float x, float y, bool application = false);
 // Item index under the point, or -1 (separators and gaps count as none)

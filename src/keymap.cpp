@@ -7,6 +7,7 @@ bool shortcutModifiersAllowed(unsigned key) {
     if (!(GetKeyState(VK_CONTROL) & 0x8000) || !(GetKeyState(VK_SHIFT) & 0x8000)) return true;
     switch (key) {
         case 'S': case 'N': case 'V': case 'E':
+        case 'F':  // Ctrl+Shift+F: the search-results side dock
         case VK_TAB: case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
         case VK_HOME: case VK_END: case VK_PRIOR: case VK_NEXT:
             return true;

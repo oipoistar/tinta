@@ -144,6 +144,17 @@ static void setTocCursor(App& app, float x, float y) {
     SetCursor(cursorArrow);
 }
 
+static void setSearchResultsCursor(const App& app, float x, float y) {
+    if (cursorPointInRect(x, y, app.searchResultsCloseRect) ||
+        cursorPointInRect(x, y, app.searchOpenFilesToggleRect) ||
+        cursorPointInRect(x, y, app.searchFolderToggleRect) ||
+        searchPanelHitAt(app, x, y).type != SearchPanelHitType::None) {
+        SetCursor(cursorHand);
+        return;
+    }
+    SetCursor(cursorArrow);
+}
+
 static void setFolderBrowserCursor(const App& app, float x, float y) {
     FolderBrowserMetrics g = folderBrowserMetrics(app);
     if (x < g.panelX || x > g.panelX + g.panelWidth) {
@@ -836,6 +847,21 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
 
+    // Search-results panel scroll (exclusive with the Contents panel, so the
+    // enclosure check never races a TOC block). Checked before the edit-mode
+    // wheel routing so the panel eats its own wheel in both modes.
+    if (app.showSearchResults && !ctrl) {
+        float panelWidth = searchResultsPanelWidth(app);
+        float panelX = app.width - panelWidth * app.searchResultsAnimation;
+        if (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth) {
+            app.searchResultsScroll -= delta * dpi(app, 60.0f);
+            app.searchResultsScroll = std::clamp(
+                app.searchResultsScroll, 0.0f, searchResultsMaxScroll(app));
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+    }
+
     // Help overlay scroll
     if (app.showHelp) {
         app.helpScroll -= delta * dpi(app, 60.0f);
@@ -1099,6 +1125,15 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         }
         if (newHover != app.hoveredTab) {
             app.hoveredTab = newHover;
+            // Full name on dwell: hovering a tab arms the tooltip timer;
+            // a different tab or leaving the strip cancels it
+            if (newHover >= 0) {
+                app.tabTooltipTab = -1;
+                SetTimer(hwnd, TIMER_TAB_TOOLTIP, 600, nullptr);
+            } else {
+                KillTimer(hwnd, TIMER_TAB_TOOLTIP);
+                app.tabTooltipTab = -1;
+            }
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         if (app.captionButtonHover) {
@@ -1225,18 +1260,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     }
 
     if (app.showSearch) {
-        bool overResult = false;
-        for (const auto& hit : app.folderResultHits) {
-            if (cursorPointInRect((float)app.mouseX, (float)app.mouseY, hit.rect)) {
-                overResult = true;
-                break;
-            }
-        }
-        if (folderSearchToggleAt(app, (float)app.mouseX, (float)app.mouseY) || overResult) {
-            SetCursor(cursorHand);
-        } else {
-            setSearchCursor(app, (float)app.mouseX, (float)app.mouseY);
-        }
+        setSearchCursor(app, (float)app.mouseX, (float)app.mouseY);
         return;
     }
 
@@ -1256,6 +1280,16 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             return;
         }
         // Pinned (#156): the document beside the panel keeps its hover
+    }
+    if (app.showSearchResults) {
+        float sw = searchResultsPanelWidth(app);
+        float sx = app.width - sw * app.searchResultsAnimation;
+        bool inside = app.mouseX >= sx && app.mouseX <= sx + sw;
+        if (inside) {
+            setSearchResultsCursor(app, (float)app.mouseX, (float)app.mouseY);
+            InvalidateRect(hwnd, nullptr, FALSE);  // row hover
+            return;
+        }
     }
     if (app.showToc) {
         float tocW = tocPanelWidth(app);
@@ -1511,6 +1545,21 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         // Only invalidate when mouse is over the panel (hover tracking needed)
         if (inPanel)
             InvalidateRect(hwnd, nullptr, FALSE);
+    } else if (app.showSearchResults) {
+        float panelWidth = searchResultsPanelWidth(app);
+        float panelX = app.width - panelWidth * app.searchResultsAnimation;
+        bool inPanel = (app.mouseX >= panelX && app.mouseX <= panelX + panelWidth);
+        if (inPanel && (app.searchResultsHover >= 0 ||
+                        cursorPointInRect((float)app.mouseX, (float)app.mouseY,
+                                          app.searchOpenFilesToggleRect) ||
+                        cursorPointInRect((float)app.mouseX, (float)app.mouseY,
+                                          app.searchFolderToggleRect))) {
+            SetCursor(cursorHand);
+        } else {
+            SetCursor(cursorArrow);
+        }
+        if (inPanel)
+            InvalidateRect(hwnd, nullptr, FALSE);
     } else if (app.showToc) {
         float panelWidth = tocPanelWidth(app);
         float panelX = tocPanelX(app, panelWidth);
@@ -1755,11 +1804,12 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
     // beside a PINNED panel opens the menu there, and beside an unpinned
     // one it dismisses the panel like any outside click first. Over the
     // panel itself there is no document to act on.
-    if (app.showToc || app.showFolderBrowser) {
+    if (app.showToc || app.showFolderBrowser || app.showSearchResults) {
         float docLeft = documentViewportX(app);
         bool overDocument = (float)pt.x >= docLeft &&
                             (float)pt.x < docLeft + documentViewportWidth(app);
         if (!overDocument) return;
+        if (app.showSearchResults) closeSearchResultsPanel(app);
         if (app.showToc && !app.tocPinned) {
             app.showToc = false;
             app.tocAnimation = 0;
@@ -1861,7 +1911,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         // With the floating sheet the top band right of the source column
         // belongs to the desk gap and the page, not the strip — except
         // the caption island (pin + window buttons) floating on it
-        bool overSheetBand = editSheetLayout(app) &&
+        bool overSheetBand = editorPreviewVisible(app) &&
                              (float)mx >= editorPaneWidth(app) &&
                              (float)mx < captionIslandLeft(app);
         if ((float)my < chromeTopHeight(app) && !overSheetBand &&
@@ -2060,40 +2110,8 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         }
     }
 
-    // Folder search: the bar's toggle button and result-panel clicks
-    if (app.showSearch && !app.editMode) {
-        float clickX = (float)GET_X_LPARAM(lParam);
-        float clickY = (float)GET_Y_LPARAM(lParam);
-        if (folderSearchToggleAt(app, clickX, clickY)) {
-            app.folderSearchEnabled = !app.folderSearchEnabled;
-            if (!app.folderSearchEnabled) {
-                clearFolderSearch(app);
-            } else {
-                performSearch(app);  // re-arms the scan timer
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-        for (const auto& hit : app.folderResultHits) {
-            if (clickX >= hit.rect.left && clickX <= hit.rect.right &&
-                clickY >= hit.rect.top && clickY <= hit.rect.bottom &&
-                hit.fileIndex >= 0 && hit.fileIndex < (int)app.folderResults.size()) {
-                // Open the file and land on the first match of the same query
-                if (openDocumentInViewer(app, app.folderResults[hit.fileIndex].fullPath)) {
-                    app.folderResults.clear();
-                    app.folderResultHits.clear();
-                    ensureLayoutComplete(app);
-                    performSearch(app);
-                    if (!app.searchMatches.empty()) {
-                        app.searchCurrentIndex = 0;
-                        scrollToCurrentMatch(app);
-                    }
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
-            }
-        }
-    }
+    // Folder-wide search no longer has a bar button or floating results; the
+    // two checkboxes in the search-results panel control the extra sources.
     // Pinned side panels only claim presses inside their own envelope.
     {
         bool browserClaims = false;
@@ -2111,7 +2129,14 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
                         ((float)app.mouseX >= tocX &&
                          (float)app.mouseX <= tocX + tocW);
         }
-        if (app.showThemeChooser || browserClaims || tocClaims) {
+        bool searchClaims = false;
+        if (app.showSearchResults) {
+            float sw = searchResultsPanelWidth(app);
+            float sx = app.width - sw * app.searchResultsAnimation;
+            searchClaims = (float)app.mouseX >= sx &&
+                           (float)app.mouseX <= sx + sw;
+        }
+        if (app.showThemeChooser || browserClaims || tocClaims || searchClaims) {
             // The content scrollbar stays usable beside a side panel: a
             // click on it dismisses an unpinned folder browser ("back to
             // the document") and simply works alongside the TOC.
@@ -3049,6 +3074,83 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
 
     ReleaseCapture();
 
+    // Search-results panel click handling (Ctrl+Shift+F). The panel is
+    // right-docked, exclusive with the Contents panel; clicking a row jumps
+    // the document to that match and keeps the panel open for more. The two
+    // checkboxes above the list toggle the extra-file search sources.
+    if (app.showSearchResults) {
+        int clickX = GET_X_LPARAM(lParam);
+        int clickY = GET_Y_LPARAM(lParam);
+        float panelWidth = searchResultsPanelWidth(app);
+        float panelX = app.width - panelWidth * app.searchResultsAnimation;
+
+        if (clickX >= panelX && (float)clickX <= panelX + panelWidth) {
+            if (cursorPointInRect((float)clickX, (float)clickY,
+                                  app.searchResultsCloseRect)) {
+                closeSearchResultsPanel(app);
+            } else if (!app.editMode &&
+                       cursorPointInRect((float)clickX, (float)clickY,
+                                         app.searchOpenFilesToggleRect)) {
+                app.searchAllOpenFiles = !app.searchAllOpenFiles;
+                clearFolderSearch(app);
+                performSearch(app);
+            } else if (!app.editMode &&
+                       cursorPointInRect((float)clickX, (float)clickY,
+                                         app.searchFolderToggleRect)) {
+                app.folderSearchEnabled = !app.folderSearchEnabled;
+                clearFolderSearch(app);
+                performSearch(app);
+            } else {
+                // Hit-test the click's own coordinates (#114 pattern) - the
+                // render-time hover can be a frame stale on fast move+click
+                SearchPanelHit hit = searchPanelHitAt(app, (float)clickX,
+                                                      (float)clickY);
+                if (hit.type == SearchPanelHitType::Document) {
+                    int count = app.searchResultsUseEditor
+                                    ? (int)app.editorSearchMatches.size()
+                                    : (int)app.searchResultItems.size();
+                    if (hit.index >= 0 && hit.index < count) {
+                        if (app.searchResultsUseEditor) {
+                            app.editorSearchCurrentIndex = hit.index;
+                            scrollEditorToMatch(app);
+                        } else {
+                            app.searchCurrentIndex = hit.index;
+                            scrollToCurrentMatch(app);
+                        }
+                    }
+                } else if (hit.type == SearchPanelHitType::FolderFile) {
+                    // Open the extra file in its own tab so the current
+                    // document stays open, then search the newly active one.
+                    // The painted row carries the file: the click opens the
+                    // row the user saw even if a rescan replaced folderResults
+                    // since that frame (#foldersearch).
+                    std::wstring path;
+                    if (hit.row >= 0 && hit.row < (int)app.searchPanelRows.size())
+                        path = app.searchPanelRows[hit.row].path;
+                    if (path.empty() && hit.index >= 0 &&
+                        hit.index < (int)app.folderResults.size())
+                        path = app.folderResults[hit.index].fullPath;
+                    if (!path.empty()) {
+                        clearFolderSearch(app);
+                        tabOpenPath(app, app.hwnd, toUtf8(path));
+                        ensureLayoutComplete(app);
+                        performSearch(app);
+                        if (!app.searchMatches.empty()) {
+                            app.searchCurrentIndex = 0;
+                            scrollToCurrentMatch(app);
+                        }
+                    }
+                }
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+        // Click outside the panel dismisses it; search stays open
+        closeSearchResultsPanel(app);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // TOC click handling
     if (app.showToc) {
         int clickX = GET_X_LPARAM(lParam);
@@ -3671,6 +3773,18 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return true;
     }
 
+    // Ctrl+Shift+F is its own shortcut: it toggles the search-results dock
+    // without mentioning Find. In the viewer the bar follows the toggle so
+    // the dock always has matches to list and keeps Find's focus after an
+    // outside click; in edit mode the dock shows the editor's matches and
+    // Ctrl+F semantics stay untouched.
+    if (ctrl && wParam == 'F' && (GetKeyState(VK_SHIFT) & 0x8000) &&
+        !app.confirmExitPending) {
+        if (!app.editMode) openSearchInput(app, false);
+        toggleSearchResultsPanel(app);
+        return true;
+    }
+
     // Focus transitions precede cell keyboard capture, including Ctrl+H (#223).
     if (ctrl && (wParam == 'F' || wParam == 'H') && !app.confirmExitPending) {
         if (wParam == 'H' && !app.editMode) enterEditMode(app);
@@ -3925,6 +4039,8 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 } else if (app.showFolderBrowser) {
                     app.showFolderBrowser = false;
                     app.folderBrowserAnimation = 0;
+                } else if (app.showSearchResults) {
+                    closeSearchResultsPanel(app);
                 } else if (app.showToc) {
                     if (!app.tocFilter.empty()) {
                         app.tocFilter.clear();  // first Esc clears the filter
@@ -4005,6 +4121,8 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     app.showToc = !app.showToc;
                     app.tocFilter.clear();
                     if (app.showToc) {
+                        // The search-results panel shares the right dock
+                        closeSearchResultsPanel(app);
                         ensureLayoutComplete(app);  // headings list is built during layout
                         app.tocAnimation = 0;
                         app.tocScroll = 0;
@@ -4341,6 +4459,17 @@ void handleLinkPeekTimer(App& app, HWND hwnd) {
     app.linkPeekBitmap = bitmap;
     app.linkPeekTitle = target.filename().wstring();
     app.linkPeekActive = true;
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void handleTabTooltipTimer(App& app, HWND hwnd) {
+    KillTimer(hwnd, TIMER_TAB_TOOLTIP);
+    // Empty titles never float a card; the render pass decides whether the
+    // title actually overflows the tab, so this only grants the dwell
+    if (app.hoveredTab < 0 || (size_t)app.hoveredTab >= app.tabs.size() ||
+        app.tabs[app.hoveredTab].title.empty())
+        return;
+    app.tabTooltipTab = app.hoveredTab;
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 

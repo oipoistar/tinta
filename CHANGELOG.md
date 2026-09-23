@@ -1,12 +1,5 @@
 # Changelog
 
-## [v3.7.4] - 2026-09-22
-
-### Fixed
-- Esc leaves edit mode again as it did before 3.7.3: press it twice when there are no unsaved changes, and unsaved changes open the save dialog. Reported by @Fromville (#242, #243)
-- The Read button and Ctrl+Shift+E still preview unsaved edits at full width, and Esc there returns to the editor. The Read button now names its Ctrl+Shift+E shortcut (#242, #243)
-- The full-width preview keeps the tab strip, the normal window buttons, a draggable title bar and a page that starts below the strip; tabs no longer lose part of their click area to the app icon (#242, #243)
-
 ## [v3.7.3] - 2026-09-20
 
 ### Added

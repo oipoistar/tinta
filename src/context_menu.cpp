@@ -140,8 +140,7 @@ void openContextMenu(App& app, float x, float y, bool application) {
 }
 
 D2D1_RECT_F appMenuButtonRect(const App& app) {
-    const bool railShown = app.editMode && !app.editorReadingPreview;
-    return D2D1::RectF(0, 0, dpi(app, railShown ? 48.0f : 40.0f), chromeTopHeight(app));
+    return D2D1::RectF(0, 0, dpi(app, app.editMode ? 48.0f : 40.0f), chromeTopHeight(app));
 }
 
 bool appMenuButtonAt(const App& app, float x, float y) {

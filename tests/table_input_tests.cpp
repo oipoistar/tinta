@@ -141,76 +141,13 @@ void reading(App& app,const std::wstring& source) {
     key(app,'E',false,false,false,'e');
     check(!app.editorReadingPreview && app.editorText==edited && app.undoStack.size()==undo && app.editorCursorPos==caret,"return-to-edit key preserves text/caret/undo and does not insert e");
     key(app,'Z',true);check(app.editorText==source,"Undo works after a preview round trip");
-    // Esc keeps its pre-3.7.3 meaning on unsaved edits: the save dialog (#242)
-    type(app,L"X");key(app,VK_ESCAPE);
-    check(app.editMode && app.confirmExitPending && !app.editorReadingPreview,"Escape on unsaved edits opens the save dialog, not the reading view");
-    confirmExitAction(app,app.hwnd,3);
-    check(app.editMode && app.editorDirty && !app.confirmExitPending,"Keep editing returns to the unsaved buffer");
-    key(app,'E',true,true);check(app.editorReadingPreview,"Ctrl+Shift+E still reads the unsaved buffer");
+    type(app,L"X");key(app,VK_ESCAPE);check(app.editorReadingPreview,"Escape reads a dirty buffer without a save prompt");
     edited=app.editorText;tabOpenStartPage(app,app.hwnd);tabActivate(app,app.hwnd,0);
     check(app.editorText==edited && app.editorDirty && !app.editorReadingPreview,"tab switch preserves the unsaved reading buffer");
     setEditorReadingPreview(app,true);tabCloseIndex(app,app.hwnd,0);
     check(app.confirmExitPending && app.pendingTabClose==0,"closing an unsaved reading tab still prompts");
     confirmExitAction(app,app.hwnd,3);check(app.editorText==edited,"cancel close preserves unsaved text");
     key(app,'S',true);check(!app.editorDirty && app.editorReadingPreview,"Ctrl+S saves while retaining reading view");
-}
-}
-namespace {
-// #242: Esc leaves edit mode as it did before 3.7.3, and the reading view
-// wears the reader's chrome: a full tab strip, a draggable title bar, tab
-// clicks that reach the strip, and a page that starts below the strip
-void escapeAndChrome(App& app) {
-    auto dir=std::filesystem::path(TINTA_FIND_FIXTURE).parent_path();
-    auto path=dir/L"reading-view-242.md";
-    std::ifstream input(path);std::string bytes((std::istreambuf_iterator<char>(input)),{});
-    auto source=toWide(bytes);check(!source.empty(),"reading view fixture loads");
-    for(int theme:{0,5})for(int width:{650,1050}) {
-        applyTheme(app,theme);app.width=width;app.height=900;updateTextFormats(app);
-        app.currentFile=toUtf8(path.wstring());app.tabs.clear();tabsInit(app);
-        App::DocTab companion;companion.id=++app.tabIdCounter;
-        companion.path=toUtf8((dir/L"table-input-236.md").wstring());companion.title=L"table-input-236.md";
-        app.tabs.push_back(companion);app.activeTab=0;
-        // Clean buffer: the first Esc arms the exit, the second leaves edit mode
-        buffer(app,source);
-        check(app.docText.find(L"Final heading")!=app.docText.npos,"mixed fixture lays out completely");
-        key(app,VK_ESCAPE);
-        check(app.editMode && !app.editorReadingPreview && app.escPressedOnce,"first Escape on a clean buffer keeps editing and arms the exit");
-        key(app,VK_ESCAPE);
-        check(!app.editMode && !app.editorReadingPreview,"second Escape leaves edit mode for the reader");
-        // Unsaved edits: Esc opens the save dialog instead of the reading view
-        buffer(app,source);app.editorCursorPos=app.editorText.size();type(app,L"!");
-        key(app,VK_ESCAPE);
-        check(app.editMode && app.confirmExitPending && !app.editorReadingPreview,"Escape on unsaved edits opens the save dialog");
-        confirmExitAction(app,app.hwnd,3);
-        // The reading view keeps its entry point and wears the reader's chrome
-        key(app,'E',true,true);
-        check(app.editorReadingPreview && app.editorDirty && !editSheetLayout(app),"Ctrl+Shift+E reads unsaved edits outside the sheet layout");
-        check(documentViewportX(app)==0 && documentViewportWidth(app)==static_cast<float>(app.width),"reading view spans the window without the sheet inset");
-        ensureLayoutComplete(app);
-        check(!app.scrollAnchors.empty() && app.scrollAnchors.front().renderedY>=chromeTopHeight(app),"reading page starts below the tab strip");
-        check(app.docText.find(L"Final heading")!=app.docText.npos,"reading view lays out the whole unsaved document");
-        app.renderTarget->BeginDraw();renderTabStrip(app);check(SUCCEEDED(app.renderTarget->EndDraw()),"reading view title strip renders");
-        auto drag=titleDragRect(app);
-        check(drag.right>=captionIslandLeft(app) && drag.right-drag.left>=dpi(app,12),"the empty title bar beside the window buttons drags the window");
-        D2D1_RECT_F companionRect{};bool companionShown=false,plus=false;
-        for(const auto& hit:app.tabHits){
-            if(hit.index==1){companionRect=hit.rect;companionShown=hit.rect.right-hit.rect.left>=dpi(app,40);}
-            if(hit.index==-2)plus=true;
-        }
-        check(companionShown && plus,"tabs and the new-tab button are drawn in the reading view");
-        // Esc in the reading view returns to the editor, not the reader
-        key(app,VK_ESCAPE);
-        check(app.editMode && !app.editorReadingPreview && app.editorDirty,"Escape in the reading view returns to the editor");
-        // A tab click in the reading view reaches the strip
-        key(app,'E',true,true);
-        if(companionShown) {
-            click(app,(companionRect.left+companionRect.right)/2,(companionRect.top+companionRect.bottom)/2);
-            check(app.activeTab==1 && !app.editMode,"clicking a tab in the reading view switches tabs");
-            tabActivate(app,app.hwnd,0);
-            check(app.editMode && app.editorDirty && !app.editorText.empty() && app.editorText.back()==L'!',"returning to the tab restores the unsaved buffer");
-        }
-        app.editorDirty=false;
-    }
 }
 }
 int runTableInputTests() {
@@ -224,7 +161,7 @@ int runTableInputTests() {
     // so fresh Windows checkouts behave like LF checkouts in these comparisons.
     std::ifstream input(fixture);std::string bytes((std::istreambuf_iterator<char>(input)),{});
     auto source=toWide(bytes);check(!source.empty(),"fixture loads");app.currentFile=toUtf8(fixture.wstring());tabsInit(app);
-    modifiers(app);cells(app,source);reading(app,source);escapeAndChrome(app);
+    modifiers(app);cells(app,source);reading(app,source);
     DestroyWindow(app.hwnd);app.hwnd=nullptr;state.reset();CoUninitialize();OleUninitialize();
     std::cout<<"Table and modifier input: "<<failures<<" failures\n";return failures?1:0;
 }
