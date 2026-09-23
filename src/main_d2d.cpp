@@ -195,16 +195,15 @@ void render(App& app) {
             }
         }
 
-        // The page clips at the sheet's bottom edge, so its scroll range
-        // extends past the plain window-height clamp — the last blocks
-        // must clear the sheet bottom with a little breathing room
+        // The docked pane runs to the window's bottom edge (#245), so the
+        // preview scrolls exactly as far as the reader does
         float previewMaxScroll =
-            std::max(0.0f, app.contentHeight + dpi(app, 18.0f) -
-                               editSheetRect(app).bottom);
-        // renderedY includes the sheet's top padding; subtract it so an
-        // editor at its top means a sheet at its top, and snap the last
-        // half-line so the page top is always reachable (t11 feedback)
-        float alignY = targetY - editSheetRect(app).top - dpi(app, 18.0f);
+            std::max(0.0f, app.contentHeight - (float)app.height);
+        // renderedY includes the page's top padding below the strip;
+        // subtract it so an editor at its top means a page at its top, and
+        // snap the last half-line so the page top is always reachable
+        // (t11 feedback)
+        float alignY = targetY - documentContentTop(app);
         float synced = std::max(0.0f, std::min(alignY, previewMaxScroll));
         if (app.editorScrollY <= 0.5f) synced = 0.0f;
         float editorMax = std::max(0.0f, app.editorContentHeight - (float)app.height);
@@ -219,12 +218,12 @@ void render(App& app) {
         app.targetScrollY = app.scrollY;
     }
 
-    // Edit mode: split view rendering — everything sits on the desk
-    // surface, the render sheet floats above it (design 10a)
+    // Edit mode: split view rendering — the source on the desk surface,
+    // the preview docked beside it on the reader's page (#245)
     if (app.editMode) {
         app.startPageShowing = false;  // recents reload on the way back
         // The reading view (#236) is the reader's page: plain background,
-        // no desk or floating sheet, content clipped to the window (#242)
+        // content clipped to the window (#242)
         app.renderTarget->Clear(app.editorReadingPreview ? app.theme.background
                                                          : editDeskColor(app));
 
@@ -235,15 +234,18 @@ void render(App& app) {
         // Render editor (left pane; full width when the preview is hidden)
         if (!app.editorReadingPreview) renderEditor(app, editorWidth);
 
-        // The floating sheet (design 10a): desk, shadow, and sheet
-        // surface first, then the document clips into the sheet
-        renderEditSheetChrome(app);
+        // The docked pane's page and the seam hairline first, then the
+        // document clips into its pane: the whole window in the reading
+        // view, right of the hairline beside the source, nothing while
+        // the preview is hidden
+        renderEditPaneChrome(app);
         {
-            D2D1_RECT_F sheet = app.editorReadingPreview
-                ? D2D1::RectF(0.0f, 0.0f, (float)app.width, (float)app.height)
-                : editSheetRect(app);
+            float paneLeft = app.editorReadingPreview ? 0.0f
+                             : app.editorShowPreview ? editSplitDividerX(app) + 1.0f
+                                                     : (float)app.width;
             app.renderTarget->PushAxisAlignedClip(
-                sheet, D2D1_ANTIALIAS_MODE_ALIASED);
+                D2D1::RectF(paneLeft, 0.0f, (float)app.width, (float)app.height),
+                D2D1_ANTIALIAS_MODE_ALIASED);
         }
 
         D2D1_MATRIX_3X2_F originalTransform;
@@ -1268,12 +1270,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (button == 3) return HTCLOSE;
             // The settings backdrop also owns clicks on empty caption space.
             if (app->showSettings) return HTCLIENT;
-            // The floating sheet rises past the strip (design 10a):
-            // right of the source column the top band is desk gap and
-            // page, both of which take normal clicks
-            if (editSheetLayout(*app) && x >= editorPaneWidth(*app)) {
-                return HTCLIENT;
-            }
             for (const App::TabHit& hit : app->tabHits) {
                 if (x >= hit.rect.left && x <= hit.rect.right &&
                     y >= hit.rect.top && y <= hit.rect.bottom) {
@@ -1571,6 +1567,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app && GetCapture() != hwnd) {
                 app->mouseX = app->mouseY = -1;
                 app->scrollbarHovered = app->hScrollbarHovered = false;
+                // The Read button fades out and the seam hairline dims (#245)
+                editorReadingButtonHover(*app, -1.0f, -1.0f);
+                app->editSeamHover = false;
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -1643,9 +1642,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             if (wParam == TIMER_NOTIFICATION && app) {
-                // Only draining chips need repaints; prompts are static
-                // until answered
-                bool fading = signalsNeedTicks(*app);
+                // Only draining chips and the Read button's fade need
+                // repaints; prompts are static until answered
+                bool fading = signalsNeedTicks(*app) ||
+                              editorReadingButtonNeedsTicks(*app);
                 if (fading) {
                     InvalidateRect(hwnd, nullptr, FALSE);
                 } else {
@@ -1782,6 +1782,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.zoomFactor = app->zoomFactor;
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
+                // Hint sessions only count up: another window may have
+                // used some since this one started (#245)
+                settings.editHintsShown =
+                    std::max(settings.editHintsShown, app->editHintsShown);
                 settings.editorAssists = app->editorAssists;
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
@@ -1922,6 +1926,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.zoomFactor = savedSettings.zoomFactor;
     app.editorShowPreview = savedSettings.editorShowPreview;
     app.editorWordWrap = savedSettings.editorWordWrap;
+    app.editHintsShown = savedSettings.editHintsShown;
     app.readingWidthPct = savedSettings.readingWidthPct;
     app.zenWidthPct = savedSettings.zenWidthPct;
     app.headingRules = savedSettings.headingRules;

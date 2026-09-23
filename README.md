@@ -85,7 +85,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Tabs** - Win11 Notepad-style tabs in the title bar: files opened from Explorer join the window as tabs, Ctrl+Tab cycles, Ctrl+W or Ctrl+F4 closes (Ctrl+F4 also while editing, where Ctrl+W is word wrap), middle-click closes, Ctrl+T opens the file browser into a new tab, unsaved buffers show a dot, and dragging reorders tabs. Right-click a tab for close operations (close, close all but this, close all to the left/right) plus copy path and reveal in Explorer. Pulling a tab out of the strip floats it as a card: drop it on open space for a new window (which keeps the tab row), or onto another Tinta window to move it there — and dropping a single-file window onto a tab strip merges it back. Single-file windows stay tabless; turn the Explorer behavior off with the "Open files in tabs" setting
 - **Folder browser** - Press B to browse and open Markdown or Mermaid files (Ctrl+click a file to open it in a new tab)
 - **Table of contents** - Press Tab to see document headings, click to jump; the panel follows your reading position, and typing filters the headings
-- **Unified editor** - Press `:` to edit: your raw Markdown on the left with the rendered page floating beside it as a sheet on the editor's desk. A slim line-number gutter, a soft accent wash on the caret's line and its rendered block, a tool rail with formatting controls plus table-size and diagram-template pickers, and Markdown assists (lists continue on Enter, Tab indents, Ctrl+B/I wrap). Search and find-replace work in the editor too
+- **Unified editor** - Press `:` to edit: your raw Markdown on the left with the rendered page docked beside it. A slim line-number gutter, a soft accent wash on the caret's line and its rendered block, a tool rail with formatting controls plus table-size and diagram-template pickers, and Markdown assists (lists continue on Enter, Tab indents, Ctrl+B/I wrap). Search and find-replace work in the editor too
 - **Emoji shortcodes** - `:rocket:` and friends render as real emoji
 - **Fit to width** - Wide tables and diagrams grow a Fit button that shrinks them to the reading column
 - **Draft recovery** - Unsaved quick notes are stashed continuously and offered back on the next launch
@@ -128,6 +128,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Ctrl+H` | Find and replace (in edit mode): Tab switches fields, Enter replaces, Ctrl+Enter replaces all |
 | `Ctrl+P` | Print / export to PDF |
 | `Ctrl+E` | Show/hide preview pane (in edit mode) |
+| `Ctrl+Shift+E` | Read the unsaved edits at full width; `Esc` returns to the source (in edit mode) |
 | `Ctrl+W` | Toggle word wrap (in edit mode) |
 | `Ctrl+F4` | Close the current tab (viewer and edit mode) |
 | `Q` | Quit |

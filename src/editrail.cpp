@@ -863,12 +863,13 @@ bool editCtxMouseMove(App& app, int x, int y) {
     return true;
 }
 
-// --- Floating sheet (design 10a) -----------------------------------------
+// --- Docked preview (#245) -----------------------------------------------
 //
-// The render is a sheet of paper lying on the editor's desk: both panes
-// share the desk surface, the sheet floats inset from the chrome with a
-// soft shadow thrown below it, and the caret's block keeps its wash on
-// the page. The desk gap left of the sheet is the split drag handle.
+// The source sits on the editor's desk and the preview is docked beside
+// it on the reader's own page, below the tab strip and flush with the
+// window's edges, like the side panels (#213). One hairline marks the
+// seam, which is the split handle; the caret's block keeps its wash on
+// the page.
 
 // Index of the scroll anchor (top-level block) containing the caret,
 // or -1 when the tables aren't ready
@@ -902,52 +903,25 @@ static int seamCaretAnchor(const App& app) {
     return (int)alo;
 }
 
-// Desk fill, sheet shadow, sheet surface and edge - drawn before the
-// document content clips into the sheet
-void renderEditSheetChrome(App& app) {
-    if (!editSheetLayout(app) || !app.renderTarget || !app.brush) {
+// The preview pane's page and the seam hairline - drawn before the
+// document content clips into the pane
+void renderEditPaneChrome(App& app) {
+    if (!editSplitPreview(app) || !app.renderTarget || !app.brush) {
         return;
     }
-    float W = (float)app.width;
-    float H = (float)app.height;
-    D2D1_RECT_F sheet = editSheetRect(app);
-    float radius = dpi(app, 10.0f);
-
-    // Desk right of the source column (the editor fills its own side)
-    app.brush->SetColor(editDeskColor(app));
+    float x = editSplitDividerX(app);
+    app.brush->SetColor(app.theme.background);
     app.renderTarget->FillRectangle(
-        D2D1::RectF(editorPaneWidth(app), 0, W, H), app.brush);
-    // The tab strip's band continues across the top behind the sheet so
-    // the chrome reads as one surface - without this the strip stops
-    // dead at the source column's edge, which on dark themes (strip far
-    // darker than desk) looks cut off
-    app.brush->SetColor(tabStripBackground(app));
+        D2D1::RectF(x, 0, (float)app.width, (float)app.height), app.brush);
+    // One hairline below the strip, lit while the pointer is on the seam
+    // or drags it (the side panels' divider, #213)
+    bool active = app.draggingSeparator || app.editSeamHover;
+    D2D1_COLOR_F line = active ? app.theme.accent : app.theme.text;
+    line.a = active ? 0.55f : 0.10f;
+    app.brush->SetColor(line);
     app.renderTarget->FillRectangle(
-        D2D1::RectF(editorPaneWidth(app), 0, W, chromeTopHeight(app)),
+        D2D1::RectF(x, chromeTopHeight(app), x + 1.0f, (float)app.height),
         app.brush);
-
-    // Shadow: stacked translucent fills growing outward and sliding down,
-    // so the sheet throws its shade below itself
-    float grow = dpi(app, 2.2f);
-    float drop = dpi(app, 1.1f);
-    float ringAlpha = app.theme.isDark ? 0.07f : 0.035f;
-    for (int i = 8; i >= 1; i--) {
-        D2D1_RECT_F halo = D2D1::RectF(
-            sheet.left - grow * i, sheet.top - grow * i * 0.3f + drop * i,
-            sheet.right + grow * i, sheet.bottom + grow * i + drop * i);
-        app.brush->SetColor(D2D1::ColorF(0, 0, 0, ringAlpha));
-        app.renderTarget->FillRoundedRectangle(
-            D2D1::RoundedRect(halo, radius + grow * i, radius + grow * i),
-            app.brush);
-    }
-
-    // The sheet itself, closed by a hairline edge
-    app.brush->SetColor(editSheetColor(app));
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(sheet, radius, radius), app.brush);
-    app.brush->SetColor(railA(app.theme.text, 0.08f));
-    app.renderTarget->DrawRoundedRectangle(
-        D2D1::RoundedRect(sheet, radius, radius), app.brush, 1.0f);
 }
 
 // Soft accent wash behind the caret block's rendered output; drawn inside
@@ -965,12 +939,12 @@ void renderPreviewCaretBlock(App& app, float previewWidth) {
                       : app.contentHeight;
     float blockBottom = nextY - app.scrollY - dpi(app, 8.0f);
     if (blockBottom <= blockTop + dpi(app, 4.0f)) return;
-    if (blockBottom < editSheetRect(app).top || blockTop > app.height) return;
+    if (blockBottom < chromeTopHeight(app) || blockTop > app.height) return;
     D2D1_COLOR_F c = app.theme.accent;
     c.a = 0.08f;
     app.brush->SetColor(c);
     // Hug the content column with a small overhang (design t11's wash)
-    // rather than spanning the sheet - a full-width band makes indented
+    // rather than spanning the pane - a full-width band makes indented
     // blocks beside plain ones read as misaligned
     float inset = std::max(dpi(app, 10.0f),
                            app.layoutIndent - dpi(app, 12.0f));

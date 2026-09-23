@@ -861,11 +861,10 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
             if (delta < 0 && app.editorScrollY >= editorMax - 1.0f) {
                 // Editor is at its end: scroll the page's remaining tail
                 // directly (#85); the sync allows this overshoot. Same
-                // sheet-aware clamp as the sync, or the overshoot dies in
-                // the gap between the two formulas.
+                // clamp as the sync, or the overshoot dies in the gap
+                // between the two formulas.
                 float maxScroll =
-                    std::max(0.0f, app.contentHeight + dpi(app, 18.0f) -
-                                       editSheetRect(app).bottom);
+                    std::max(0.0f, app.contentHeight - (float)app.height);
                 app.scrollY = std::min(app.scrollY - delta * dpi(app, 60.0f), maxScroll);
                 app.targetScrollY = app.scrollY;
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -1307,6 +1306,8 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // Edit mode: handle separator drag, editor selection, cursor shape
     if (app.editMode) {
         handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
+        // The Read button owns the pointer while it shows (#245)
+        if (app.readButtonHover) return;
         // Replace-bar controls override the pane cursor: hand over the
         // buttons, text beam over the two input fields (#119 feedback)
         if (app.showSearch && app.searchReplaceMode &&
@@ -1858,14 +1859,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             app.swallowNextMouseUp = true;
             return;
         }
-        // With the floating sheet the top band right of the source column
-        // belongs to the desk gap and the page, not the strip — except
-        // the caption island (pin + window buttons) floating on it
-        bool overSheetBand = editSheetLayout(app) &&
-                             (float)mx >= editorPaneWidth(app) &&
-                             (float)mx < captionIslandLeft(app);
-        if ((float)my < chromeTopHeight(app) && !overSheetBand &&
-            !app.confirmExitPending) {
+        if ((float)my < chromeTopHeight(app) && !app.confirmExitPending) {
             tabStripMouseDown(app, hwnd, mx, my, false);
             app.swallowNextMouseUp = true;
             return;
@@ -1982,8 +1976,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     if (app.editMode) {
         int x = GET_X_LPARAM(lParam);
         int y = GET_Y_LPARAM(lParam);
+        // The Read button only takes clicks while it shows (#245)
         auto readButton=editorReadingButtonRect(app);
-        if (x>=readButton.left && x<=readButton.right && y>=readButton.top && y<=readButton.bottom) {
+        if (editorReadingButtonShown(app) && x>=readButton.left && x<=readButton.right && y>=readButton.top && y<=readButton.bottom) {
             setEditorReadingPreview(app,!app.editorReadingPreview);
             app.swallowNextMouseUp=true;
             return;

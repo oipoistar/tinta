@@ -865,7 +865,36 @@ void editorReparse(App& app, bool force) {
 
 // --- Mode transitions ---
 
-static void enterEditModeWithContent(App& app, const std::string& content) {
+// New-user hints (#245): the first few edit sessions show the Esc hint
+// and fade the Read button in; later sessions keep both quiet
+constexpr int kEditHintSessions = 3;
+constexpr double kReadButtonIntroSeconds = 1.6;
+constexpr float kReadButtonFadeIn = 0.15f;
+constexpr float kReadButtonFadeOut = 0.4f;
+
+static double hintClockSeconds() {
+    using namespace std::chrono;
+    return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+
+static void editorReadingButtonIntro(App& app) {
+    app.readButtonIntroUntil = hintClockSeconds() + kReadButtonIntroSeconds;
+    app.readButtonLastTick = hintClockSeconds();
+    startNotificationTimer(app);
+}
+
+static void editHintSessionBegin(App& app) {
+    app.editHintSession = app.editHintsShown < kEditHintSessions;
+    if (!app.editHintSession) return;
+    app.editHintsShown++;
+    signalHintKey(app, SIGI_INFO, "toast.exit_edit_hint");
+    editorReadingButtonIntro(app);
+}
+
+// intro = false when a parked edit buffer comes back on a tab switch: the
+// session goes on, it does not start over
+static void enterEditModeWithContent(App& app, const std::string& content,
+                                     bool intro = true) {
     app.editorReadingPreview = false;
     // The unified editor owns the whole layout: side panels close on
     // entry, pinned or not (#156) - the pin survives for the next open
@@ -957,8 +986,13 @@ static void enterEditModeWithContent(App& app, const std::string& content) {
     // The file-watch tick keeps running: its reload path guards editMode
     // itself, and the per-tab deleted-file sweep needs the heartbeat
 
-    // Show notification
-    signalPushKey(app, SIG_INFO, SIGI_INFO, "toast.exit_edit_hint");
+    // The Read button starts hidden; the first few sessions teach the
+    // exits, then stay quiet (#245)
+    app.readButtonAlpha = 0.0f;
+    app.readButtonHover = false;
+    app.readButtonIntroUntil = 0.0;
+    app.editSeamHover = false;
+    if (intro) editHintSessionBegin(app);
     updateBlinkTimer(app);
 
     // Force layout at new width
@@ -990,7 +1024,7 @@ void editorScrollToSourceOffset(App& app, size_t byteOffset) {
 
 void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
                        float scrollY, size_t cursor) {
-    enterEditModeWithContent(app, toUtf8(text));
+    enterEditModeWithContent(app, toUtf8(text), false);
     app.editorDirty = dirty;
     app.editorCursorPos = std::min(cursor, app.editorText.size());
     app.editorScrollY = std::max(0.0f, scrollY);
@@ -1071,6 +1105,7 @@ void exitEditMode(App& app) {
 
     app.editMode = false;
     app.editorReadingPreview = false;
+    signalFadeHints(app);  // the mode's hints go with it (#245)
     app.clearEditorLineLayoutCache();
     app.editorText.clear();
     app.editorLineStarts.clear();
@@ -1129,6 +1164,8 @@ void setEditorReadingPreview(App& app, bool reading) {
     app.editorReadingPreview = reading;
     app.editorSelecting = app.selecting = app.hasSelection = false;
     app.escPressedOnce = false;
+    // A hint session shows the button that leads back (#245)
+    if (app.editHintSession) editorReadingButtonIntro(app);
     editorReparse(app, true);
     app.layoutDirty = true;
     updateBlinkTimer(app);
@@ -1136,7 +1173,8 @@ void setEditorReadingPreview(App& app, bool reading) {
 }
 
 // The pill names its shortcut, so it grows to fit its label: Read carries
-// Ctrl+Shift+E since Esc leaves edit mode again (#242)
+// Ctrl+Shift+E since Esc leaves edit mode again (#242). It never sits over
+// the text for good (#245): see editorReadingButtonShown.
 D2D1_RECT_F editorReadingButtonRect(const App& app) {
     float width = dpi(app, 132);
     if (app.dwriteFactory && app.codeFormat) {
@@ -1152,12 +1190,70 @@ D2D1_RECT_F editorReadingButtonRect(const App& app) {
     return {dpi(app, 56), static_cast<float>(app.height)-dpi(app, 42),
             dpi(app, 56) + width, static_cast<float>(app.height)-dpi(app, 12)};
 }
+
+// The insert menu may open over the button's corner: the menu wins
+static bool readButtonWanted(const App& app, double now) {
+    return !app.editCtxOpen &&
+           (app.readButtonHover || now < app.readButtonIntroUntil);
+}
+
+bool editorReadingButtonShown(const App& app) {
+    return app.editMode && !app.editCtxOpen &&
+           (app.readButtonHover || app.readButtonAlpha >= 0.5f);
+}
+
+bool editorReadingButtonNeedsTicks(const App& app) {
+    if (!app.editMode) return false;
+    double now = hintClockSeconds();
+    // The intro's end needs a tick too, to start the fade-out
+    if (now < app.readButtonIntroUntil) return true;
+    return readButtonWanted(app, now) ? app.readButtonAlpha < 1.0f
+                                      : app.readButtonAlpha > 0.0f;
+}
+
+void editorReadingButtonHover(App& app, float x, float y) {
+    D2D1_RECT_F r = editorReadingButtonRect(app);
+    bool over = app.editMode && !app.editorSelecting && !app.draggingSeparator &&
+                !app.editCtxOpen &&
+                x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    if (over == app.readButtonHover) return;
+    app.readButtonHover = over;
+    app.readButtonLastTick = hintClockSeconds();
+    startNotificationTimer(app);
+    if (app.hwnd) {
+        if (over) {
+            // The fade-out needs to hear the pointer leave the window
+            TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, app.hwnd, 0};
+            TrackMouseEvent(&track);
+        }
+        InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+}
+
 void renderEditorReadingButton(App& app) {
     if (!app.editMode || !app.brush || !app.codeFormat) return;
+    // Fade toward the wanted state at a pace set by the clock, not the
+    // frame rate
+    double now = hintClockSeconds();
+    float dt = app.readButtonLastTick > 0.0
+                   ? (float)std::min(0.25, std::max(0.0, now - app.readButtonLastTick))
+                   : 0.0f;
+    app.readButtonLastTick = now;
+    if (readButtonWanted(app, now)) {
+        app.readButtonAlpha = std::min(1.0f, app.readButtonAlpha + dt / kReadButtonFadeIn);
+    } else {
+        app.readButtonAlpha = std::max(0.0f, app.readButtonAlpha - dt / kReadButtonFadeOut);
+    }
+    float alpha = app.readButtonAlpha;
+    if (alpha <= 0.01f) return;
     auto r=editorReadingButtonRect(app);
-    app.brush->SetColor(app.theme.codeBackground);
+    D2D1_COLOR_F fill = app.theme.codeBackground;
+    fill.a *= alpha;
+    app.brush->SetColor(fill);
     app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(r,dpi(app,5),dpi(app,5)),app.brush);
-    app.brush->SetColor(app.theme.accent);
+    D2D1_COLOR_F ink = app.theme.accent;
+    ink.a *= alpha;
+    app.brush->SetColor(ink);
     auto label=tr(app,app.editorReadingPreview ? "editor.resume" : "editor.read");
     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
     if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(label,static_cast<UINT32>(wcslen(label)),app.codeFormat,r.right-r.left,r.bottom-r.top,layout.GetAddressOf()))) {
@@ -1644,7 +1740,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         }
         app.escPressedOnce = true;
         app.lastEscTime = now;
-        signalPushKey(app, SIG_INFO, SIGI_INFO, "toast.exit_confirm");
+        signalHintKey(app, SIGI_INFO, "toast.exit_confirm");
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
@@ -1812,7 +1908,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     editorReparse(app);
                 }
                 app.editorRowMetricsWidth = -1.0f;  // pane width changed
-                signalPushKey(app, SIG_INFO, SIGI_EYE,
+                signalHintKey(app, SIGI_EYE,
                               app.editorShowPreview ? "toast.preview_shown"
                                                     : "toast.preview_hidden");
                 app.layoutDirty = app.editorShowPreview;
@@ -1836,7 +1932,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 app.editorDesiredX = -1.0f;
                 rebuildEditorRowMetrics(app);
                 editorEnsureCursorVisible(app);
-                signalPushKey(app, SIG_INFO, SIGI_INFO,
+                signalHintKey(app, SIGI_INFO,
                               editorWrapOn(app) ? "toast.wrap_on"
                                                 : "toast.wrap_off");
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -2670,7 +2766,7 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
     }
 
     // The thread seam doubles as the split handle (design t11)
-    if (editSheetLayout(app)) {
+    if (editSplitPreview(app)) {
         float paneW = editorPaneWidth(app);
         if ((float)x >= paneW && (float)x < paneW + editSeamWidth(app)) {
             app.draggingSeparator = true;
@@ -2782,6 +2878,19 @@ void handleEditorMouseUp(App& app, HWND, int, int) {
 void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
     float editorWidth = editorPaneWidth(app);
 
+    // Hover state for the Read button's fade and the seam's hairline (#245)
+    editorReadingButtonHover(app, (float)x, (float)y);
+    bool seam = editSplitPreview(app) && (float)y >= chromeTopHeight(app) &&
+                (float)x >= editorWidth && (float)x < editorWidth + editSeamWidth(app);
+    if (seam != app.editSeamHover) {
+        app.editSeamHover = seam;
+        if (seam) {
+            TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0};
+            TrackMouseEvent(&track);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+
     // Insert-menu hover: rows highlight, parents open their submenu
     if (editCtxMouseMove(app, x, y)) {
         SetCursor(LoadCursor(nullptr, IDC_ARROW));
@@ -2838,7 +2947,11 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
     static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
     static HCURSOR cursorArrow = LoadCursor(nullptr, IDC_ARROW);
 
-    if (editSheetLayout(app) && (float)x >= editorWidth &&
+    if (app.readButtonHover) {
+        SetCursor(LoadCursor(nullptr, IDC_HAND));
+        return;
+    }
+    if (editSplitPreview(app) && (float)x >= editorWidth &&
         (float)x < editorWidth + editSeamWidth(app)) {
         SetCursor(cursorSizeWE);
         return;
@@ -2934,7 +3047,7 @@ static void renderEditorWrapped(App& app, float editorWidth) {
     float padding = dpi(app, 8.0f);
     float textX = editorTextX(app);
 
-    // The source sits directly on the desk (design 10a) — no pane box
+    // The source sits directly on the desk — no pane box
     app.brush->SetColor(editDeskColor(app));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, editorWidth, (float)app.height), app.brush);
@@ -3073,7 +3186,7 @@ void renderEditor(App& app, float editorWidth) {
     float padding = dpi(app, 8.0f);
     float charWidth = app.editorCharWidth > 0 ? app.editorCharWidth : app.editorTextFormat->GetFontSize() * 0.6f;
 
-    // Editor background: the desk surface (design 10a)
+    // Editor background: the desk surface
     app.brush->SetColor(editDeskColor(app));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, editorWidth, (float)app.height), app.brush);
