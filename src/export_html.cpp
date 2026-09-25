@@ -14,6 +14,15 @@
 #include "mermaid_ext.h"
 #include "render.h"
 #include "utils.h"
+#include "plantuml.h"
+#include "plantuml_app.h"
+#include "plantuml_queue.h"
+
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <cstdio>
+#include <filesystem>
 
 #include <commdlg.h>
 #include <cmath>
@@ -25,6 +34,13 @@ using namespace qmd;
 namespace {
 
 constexpr float kDiagramFontSize = 14.0f;
+
+// HTML export PlantUML budget: a fence may hold the export at most
+// kPlantumlFenceTimeoutMs; once kPlantumlExportBudgetMs are spent the
+// export stops calling the tool and the remaining fences fall back to
+// source code (no unbounded UI freeze).
+constexpr int kPlantumlFenceTimeoutMs = 20000;
+constexpr int kPlantumlExportBudgetMs = 60000;
 
 // --- small emit helpers ---
 
@@ -1019,12 +1035,111 @@ struct ExportCtx {
     std::string bodyFontCss;
     std::string monoFontCss;
     std::string textColorCss;
+    // Cumulative PlantUML render time left in this export; shared across
+    // all fences through the recursion (see plantumlFenceSvg).
+    int plantumlBudgetMsLeft = kPlantumlExportBudgetMs;
 };
 
 void walk(ExportCtx& ctx, const ElementPtr& elem);
 
 void walkChildren(ExportCtx& ctx, const ElementPtr& elem) {
     for (const auto& child : elem->children) walk(ctx, child);
+}
+
+// --- PlantUML fences -> inline SVG ---
+
+std::string wideToUtf8Str(const std::wstring& s) {
+    if (s.empty()) return {};
+    const int len = WideCharToMultiByte(CP_UTF8, 0, s.c_str(), (int)s.size(),
+                                        nullptr, 0, nullptr, nullptr);
+    std::string out(len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, s.c_str(), (int)s.size(), &out[0], len,
+                        nullptr, nullptr);
+    return out;
+}
+
+std::string colorHexNoHash(D2D1_COLOR_F c) {
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02X%02X%02X", (int)(c.r * 255.0f + 0.5f),
+             (int)(c.g * 255.0f + 0.5f), (int)(c.b * 255.0f + 0.5f));
+    return buf;
+}
+
+// Render one PlantUML fence synchronously through the configured tool and
+// return its SVG text. The preamble mirrors the preview's: live theme font
+// family + kDiagramFontSize + the Role::Text hex, plus the Fill and Stroke
+// hexes on dark palettes so exported SVGs stay legible there too. An empty
+// return means no inline diagram: missing tool, source without @startuml,
+// render failure/timeout or exhausted budget; the caller then emits the
+// source-code block unchanged.
+//
+// Documented asymmetry: the queue cache holds PNGs for the preview, this
+// path renders SVGs for the page, so it deliberately does not reuse it.
+std::string plantumlFenceSvg(ExportCtx& ctx, const std::string& code) {
+    plantumlResolve(ctx.app);
+    if (!ctx.app.plantumlTool.available) return {};
+    if (ctx.plantumlBudgetMsLeft <= 0) return {};
+
+    const std::wstring toolPath = ctx.app.plantumlTool.isJar
+                                      ? ctx.app.plantumlTool.jar
+                                      : ctx.app.plantumlTool.program;
+    mermaidext::Prim colorPrim{};
+    const std::string preambleText = plantuml::preamble(
+        wideToUtf8Str(ctx.app.theme.fontFamily), kDiagramFontSize,
+        colorHexNoHash(
+            resolveDiagramRole(ctx.app, colorPrim, mermaidext::Role::Text)),
+        ctx.app.theme.isDark,
+        colorHexNoHash(
+            resolveDiagramRole(ctx.app, colorPrim, mermaidext::Role::Fill)),
+        colorHexNoHash(
+            resolveDiagramRole(ctx.app, colorPrim, mermaidext::Role::Stroke)));
+
+    std::string sourceWithPreamble = code;
+    if (!plantuml::injectPreamble(sourceWithPreamble, preambleText)) return {};
+
+    const uint64_t key =
+        plantuml::cacheKey(code, preambleText, toolPath,
+                           plantuml::toolStampFor(toolPath), 1 /*svg*/);
+    // A private export-html subtree under the same tinta-plantuml-pid
+    // temp-root convention as the queue: the queue's worker may be
+    // mid-render on another thread for the same key, so never share a
+    // directory with it.
+    std::wstring workRoot = ctx.app.plantumlWorkRoot;
+    if (workRoot.empty()) {
+        wchar_t temp[MAX_PATH] = {};
+        if (GetTempPathW(MAX_PATH, temp) == 0) {
+            temp[0] = L'.';
+            temp[1] = L'\0';  // no temp path: fall back to the cwd
+        }
+        workRoot = std::wstring(temp) + L"tinta-plantuml-" +
+                   std::to_wstring(GetCurrentProcessId());
+    }
+    const std::wstring workDir =
+        workRoot + L"\\export-html\\" + plantuml::keyHex(key);
+
+    std::wstring outFile;
+    std::wstring error;
+    const DWORD perFenceMs =
+        (DWORD)std::min(kPlantumlFenceTimeoutMs, ctx.plantumlBudgetMsLeft);
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool rendered =
+        plantuml::renderSync(ctx.app.plantumlTool, sourceWithPreamble,
+                             1 /*svg*/, workDir, outFile, perFenceMs, error);
+    const long long spentMs = (long long)std::chrono::duration_cast
+                                  <std::chrono::milliseconds>(
+                                  std::chrono::steady_clock::now() - t0)
+                                  .count();
+    ctx.plantumlBudgetMsLeft -=
+        (int)std::min<long long>(spentMs, ctx.plantumlBudgetMsLeft);
+
+    std::string svg;
+    if (rendered) readBinary(outFile, svg);
+
+    // The export leaves nothing behind: delete the per-fence work dir
+    // whether the render succeeded, failed or timed out.
+    std::error_code ec;
+    std::filesystem::remove_all(std::filesystem::path(workDir), ec);
+    return svg;
 }
 
 void emitImage(ExportCtx& ctx, const ElementPtr& elem) {
@@ -1123,6 +1238,27 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
                 if (!svg.empty()) {
                     ctx.out += "<div class=\"diagram\">" + svg + "</div>\n";
                     break;
+                }
+            }
+            // PlantUML fence: inline the tool's own SVG while the export
+            // budget lasts. A missing tool, a source without @startuml,
+            // a render failure/timeout or an exhausted budget falls
+            // through to the source-code rendering below, unchanged.
+            {
+                std::string fenceLang = elem->language;
+                for (char& c : fenceLang) c = (char)tolower((unsigned char)c);
+                if (plantuml::isFenceLanguage(fenceLang)) {
+                    std::string source;
+                    for (const auto& child : elem->children) {
+                        if (child->type == ElementType::Text) {
+                            source += child->text;
+                        }
+                    }
+                    std::string svg = plantumlFenceSvg(ctx, source);
+                    if (!svg.empty()) {
+                        ctx.out += "<div class=\"diagram\">" + svg + "</div>\n";
+                        break;
+                    }
                 }
             }
             ctx.out += "<pre><code";

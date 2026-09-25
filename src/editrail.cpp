@@ -395,6 +395,9 @@ static const EDiagItem kEDiag[] = {
     {L"\u25A4", "ectx.d.gantt", L"gantt"},
     {L"\u25D4", "ectx.d.pie", L"pie"},
     {L"\u270E", "ectx.d.empty", L"```mermaid"},
+    {L"\u21C5", "ectx.d.puml_seq", L"puml seq"},
+    {L"\u25A3", "ectx.d.puml_class", L"puml class"},
+    {L"\u21AA", "ectx.d.puml_act", L"puml activity"},
 };
 
 void openEditCtxMenu(App& app, HWND hwnd, float x, float y) {
@@ -585,7 +588,7 @@ void renderEditCtxMenu(App& app) {
     if (app.editCtxSub == 2) {
         float sw = dpi(app, 240.0f);
         float srowH = dpi(app, 34.0f);
-        float sh = dpi(app, 30.0f) + 7 * (srowH + dpi(app, 2.0f)) +
+        float sh = dpi(app, 30.0f) + 10 * (srowH + dpi(app, 2.0f)) +
                    dpi(app, 8.0f);
         float sx = std::min(mx + w + dpi(app, 4.0f),
                             (float)app.width - sw - dpi(app, 8.0f));
@@ -609,7 +612,7 @@ void renderEditCtxMenu(App& app) {
             hl->Release();
         }
         float ry = sy + dpi(app, 30.0f);
-        for (int i = 0; i < 7; i++) {
+        for (int i = 0; i < 10; i++) {
             D2D1_RECT_F r = D2D1::RectF(sx + dpi(app, 4.0f), ry,
                                         sx + sw - dpi(app, 4.0f),
                                         ry + srowH);

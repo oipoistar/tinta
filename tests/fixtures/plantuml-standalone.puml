@@ -1,0 +1,6 @@
+@startuml
+participant Editor
+participant Preview
+Editor -> Preview: render()
+Preview --> Editor: painted
+@enduml

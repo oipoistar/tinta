@@ -517,8 +517,19 @@ int renderPages(App& app, const PageGeometry& geo, EmitFn emitPage) {
 
     SavedView saved{};
     enterPrintLayout(app, saved);
+    // Print/PDF run synchronously and have no message pump: the async
+    // PlantUML queue can never deliver here, so the print layout is the
+    // single place allowed to render a missing diagram inline, bounded by
+    // one shared millisecond budget. The print preview and the link peek
+    // share layoutAtPrintWidth but stay async (they run with a pump).
+    app.plantumlPrintLayout = true;
+    app.plantumlPrintBudgetMsLeft = 30000;
     layoutAtPrintWidth(app, geo.contentW);
-
+    // Cleared right after the layout: the post-print relayout at screen
+    // width is interactive again (message pump available), so it schedules
+    // through the async queue instead of blocking the UI thread.
+    app.plantumlPrintLayout = false;
+    app.plantumlPrintBudgetMsLeft = 0;
     std::vector<float> breaks = computePageBreaks(app, geo.contentH);
     breaks.push_back(app.contentHeight + 1.0f);  // final page sentinel
 

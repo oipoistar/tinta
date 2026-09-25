@@ -86,6 +86,9 @@ set(SOURCES
     src/startpage.cpp
     src/editrail.cpp
     src/pandoc.cpp
+    src/plantuml.cpp
+    src/plantuml_queue.cpp
+    src/plantuml_app.cpp
 )
 
 set(HEADERS
@@ -112,6 +115,9 @@ set(HEADERS
     include/i18n.h
     include/selection.h
     include/math_render.h
+    include/plantuml.h
+    include/plantuml_queue.h
+    include/plantuml_app.h
 )
 
 # Windows resource file (icon)
@@ -271,7 +277,8 @@ if(BUILD_TESTING)
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_portable_test.cmake)
 
     add_executable(context_menu_tests tests/context_menu_tests.cpp src/context_menu.cpp
-        src/markdown.cpp src/footnotes.cpp src/themes.cpp src/config_dir.cpp)
+        src/markdown.cpp src/footnotes.cpp src/themes.cpp src/config_dir.cpp
+        src/plantuml.cpp src/plantuml_queue.cpp)
     target_include_directories(context_menu_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(context_menu_tests PRIVATE md4c shell32)
     target_compile_definitions(context_menu_tests PRIVATE UNICODE _UNICODE)
@@ -282,7 +289,8 @@ if(BUILD_TESTING)
     add_test(NAME math_parser COMMAND math_parser_tests)
 
     add_executable(math_layout_tests tests/math_layout_tests.cpp
-        src/math_parser.cpp src/math_macros.cpp src/math_render.cpp src/markdown.cpp src/footnotes.cpp src/themes.cpp src/config_dir.cpp)
+        src/math_parser.cpp src/math_macros.cpp src/math_render.cpp src/markdown.cpp src/footnotes.cpp src/themes.cpp src/config_dir.cpp
+        src/plantuml.cpp src/plantuml_queue.cpp)
     target_include_directories(math_layout_tests PRIVATE include src ${md4c_SOURCE_DIR}/src)
     target_link_libraries(math_layout_tests PRIVATE md4c d2d1 dwrite windowscodecs shell32 ole32)
     target_compile_definitions(math_layout_tests PRIVATE UNICODE _UNICODE
@@ -310,6 +318,36 @@ if(BUILD_TESTING)
     )
     add_test(NAME mermaid_parser COMMAND mermaid_tests)
 
+    # PlantUML CLI test double (used by the plantuml suites; no Java needed).
+    add_executable(fake_plantuml tests/fake_plantuml.cpp)
+
+    # PlantUML core module unit suite: language gate, tool model, preamble
+    # injection, cache key, command line and sync render, all driven against
+    # the fake CLI double (no Java needed), plus the tool-discovery
+    # precedence and the plantumlPath settings round-trip. Both tests run
+    # through a portable driver: the suite exercises saveSettings/loadSettings
+    # on a temp settings.ini and must never touch %APPDATA%\Tinta.
+    add_executable(plantuml_tests tests/plantuml_tests.cpp src/plantuml.cpp
+        src/settings.cpp src/i18n.cpp src/config_dir.cpp
+        src/frontmatter.cpp src/keymap.cpp
+        src/plantuml_queue.cpp)
+    target_include_directories(plantuml_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(plantuml_tests PRIVATE shell32)
+    target_compile_definitions(plantuml_tests PRIVATE UNICODE _UNICODE
+        TINTA_FAKE_PLANTUML="$<TARGET_FILE:fake_plantuml>"
+        TINTA_PLANTUML_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/plantuml.cpp")
+    add_dependencies(plantuml_tests fake_plantuml)
+    add_test(NAME plantuml_parser COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:plantuml_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/plantuml-test-$<CONFIG>
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_plantuml_tests.cmake)
+    add_test(NAME plantuml_parser_selfcheck COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:plantuml_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/plantuml-selfcheck-test-$<CONFIG>
+        -DTEST_ARGS=--expect-failure
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_plantuml_tests.cmake)
+    set_tests_properties(plantuml_parser_selfcheck PROPERTIES WILL_FAIL TRUE)
+
     add_executable(document_tests
         tests/document_tests.cpp
         src/document.cpp src/frontmatter.cpp
@@ -328,6 +366,7 @@ if(BUILD_TESTING)
         src/markdown.cpp src/footnotes.cpp
         src/themes.cpp
         src/config_dir.cpp
+        src/plantuml.cpp src/plantuml_queue.cpp
     )
     target_include_directories(inline_style_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include

@@ -48,6 +48,9 @@ void saveSettings(const Settings& settings) {
     if (!settings.pandocPath.empty()) {
         file << "pandocPath=" << settings.pandocPath << "\n";
     }
+    if (!settings.plantumlPath.empty()) {
+        file << "plantumlPath=" << settings.plantumlPath << "\n";
+    }
     file << "followSystemTheme=" << (settings.followSystemTheme ? 1 : 0) << "\n";
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
@@ -332,6 +335,8 @@ Settings loadSettings() {
             settings.editorAssists = (value == "1");
         } else if (key == "pandocPath") {
             settings.pandocPath = value;
+        } else if (key == "plantumlPath") {
+            settings.plantumlPath = value;
         } else if (key == "sessionActive") {
             int idx = std::stoi(value);
             if (idx >= 0) settings.sessionActive = idx;
@@ -548,11 +553,13 @@ void askAndRegisterFileAssociation(Settings& settings) {
     }
     if (settings.hasAskedFileAssociation) {
         if (hasRegisteredFileAssociation(L".md") &&
-            !hasRegisteredFileAssociation(L".mmd") &&
+            (!hasRegisteredFileAssociation(L".mmd") ||
+             !hasRegisteredFileAssociation(L".puml") ||
+             !hasRegisteredFileAssociation(L".plantuml")) &&
             !registerFileAssociation()) {
             MessageBoxW(
                 nullptr,
-                tr(lang, "fileassoc.add_mmd_failed_body"),
+                tr(lang, "fileassoc.add_new_failed_body"),
                 tr(lang, "fileassoc.title"),
                 MB_OK | MB_ICONWARNING);
         }

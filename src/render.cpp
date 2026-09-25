@@ -8,10 +8,13 @@
 #include "mermaid_ext.h"
 #include "math_render.h"
 #include "image_loader.h"
+#include "plantuml_app.h"
+#include "plantuml_queue.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <functional>
 #include <limits>
 #include <map>
@@ -2060,6 +2063,32 @@ static bool layoutMermaidExtDiagram(App& app, mermaidext::Kind kind,
     return true;
 }
 
+static App::ImageEntry& getOrLoadImage(App& app, const std::string& src);
+
+// UTF-8 form of a wide string (the PlantUML preamble and the image cache
+// key are narrow; render.cpp has no toUtf8 dependency)
+static std::string wideToUtf8(const std::wstring& s) {
+    if (s.empty()) return {};
+    const int len = WideCharToMultiByte(CP_UTF8, 0, s.c_str(),
+                                        (int)s.size(), nullptr, 0, nullptr,
+                                        nullptr);
+    std::string out(len > 0 ? (size_t)len : 0, '\0');
+    if (len > 0) {
+        WideCharToMultiByte(CP_UTF8, 0, s.c_str(), (int)s.size(),
+                            out.data(), len, nullptr, nullptr);
+    }
+    return out;
+}
+
+// "RRGGBB" (no '#') for skinparam defaultFontColor
+static std::string colorHexNoHash(const D2D1_COLOR_F& c) {
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02X%02X%02X",
+             (int)(c.r * 255.0f + 0.5f), (int)(c.g * 255.0f + 0.5f),
+             (int)(c.b * 255.0f + 0.5f));
+    return buf;
+}
+
 static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     std::string code;
     for (const auto& child : elem->children) {
@@ -2121,6 +2150,152 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
         }
         rollbackTo(app, preSnap);
         y = preY;
+    }
+
+    // PlantUML fence: render through the configured tool. The interactive
+    // path schedules off the UI thread; the print/PDF layout (which has no
+    // message pump) is the single synchronous exception, bounded below.
+    if (plantuml::isFenceLanguage(languageName)) {
+        plantumlResolve(app);
+        if (app.plantumlTool.available) {
+            const std::wstring toolPath = app.plantumlTool.isJar
+                                              ? app.plantumlTool.jar
+                                              : app.plantumlTool.program;
+            // Preamble from the live theme: family/size follow the mermaid
+            // diagram conventions, the text color comes from the shared
+            // role resolver so both renderers agree on the active theme.
+            // Dark palettes additionally theme shape fills and strokes from
+            // the same resolver (Fill = code surface, Stroke = accent);
+            // light palettes keep their byte-identical five-line preamble.
+            // The print layout swaps app.theme for the light Paper palette
+            // before reaching here, so printed diagrams stay on that light
+            // path by design.
+            mermaidext::Prim colorPrim{};
+            const std::string preambleText = plantuml::preamble(
+                wideToUtf8(app.theme.fontFamily), 14.0f,
+                colorHexNoHash(resolveDiagramRoleImpl(
+                    app, colorPrim, mermaidext::Role::Text)),
+                app.theme.isDark,
+                colorHexNoHash(resolveDiagramRoleImpl(
+                    app, colorPrim, mermaidext::Role::Fill)),
+                colorHexNoHash(resolveDiagramRoleImpl(
+                    app, colorPrim, mermaidext::Role::Stroke)));
+            std::string sourceWithPreamble = code;
+            // No @startuml anchor: nothing to render, fall through to the
+            // existing source-code rendering unchanged.
+            if (plantuml::injectPreamble(sourceWithPreamble,
+                                        preambleText)) {
+                const uint64_t key = plantuml::cacheKey(
+                    code, preambleText, toolPath,
+                    plantuml::toolStampFor(toolPath), 0 /*png*/);
+                // Adopt finished renders on this (owner) thread before
+                // deciding: a relayout may run before the posted
+                // WM_APP_PLANTUML_READY is dispatched, and drainFinished()
+                // is the ONLY cache mutation point - without it an
+                // identical key misses and gets spawned again.
+                if (app.plantumlQueue) app.plantumlQueue->drainFinished();
+                auto hit = app.plantumlQueue
+                               ? app.plantumlQueue->lookup(key)
+                               : nullptr;
+
+                // Lays the rendered PNG out as a diagram block: natural
+                // size is the PNG's pixel size (PlantUML renders 1x, not
+                // the mermaid 2x convention); scaling is exact math, so a
+                // fit computes one scale instead of the 4-pass loop.
+                auto layOutPng = [&](const std::wstring& pngPath) -> bool {
+                    auto& image = getOrLoadImage(app, wideToUtf8(pngPath));
+                    if (image.failed || !image.bitmap) return false;
+                    const float scale = app.contentScale * app.zoomFactor;
+                    const unsigned fitKey =
+                        0x80000000u | app.layoutDiagramSeq++;
+                    const bool fitActive = fitBlockEnabled(app, fitKey);
+                    const float renderedW = (float)image.width * scale;
+                    const float renderedH = (float)image.height * scale;
+                    const bool fitCandidate = renderedW > maxWidth;
+                    float fitScale = 1.0f;
+                    if (fitActive && fitCandidate && renderedW > 0.0f) {
+                        fitScale = maxWidth / renderedW;
+                    }
+                    const D2D1_RECT_F bounds = D2D1::RectF(
+                        indent, y, indent + renderedW * fitScale,
+                        y + renderedH * fitScale);
+                    app.layoutBitmaps.push_back({image.bitmap, bounds});
+                    app.contentWidth = std::max(
+                        app.contentWidth, bounds.right + 40.0f * scale);
+                    y = bounds.bottom + 24.0f * scale;
+                    App::CodeBlockInfo info;
+                    info.bounds = bounds;
+                    info.codeText = toWide(code);
+                    info.isDiagram = true;
+                    info.fitKey = fitKey;
+                    info.fitCandidate = fitCandidate || fitActive;
+                    info.fitActive = fitActive;
+                    info.isPlantuml = true;
+                    info.plantumlKey = key;
+                    info.plantumlFormat = 0;
+                    app.codeBlocks.push_back(std::move(info));
+                    return true;
+                };
+
+                if (hit && hit->ok) {
+                    if (layOutPng(hit->filePath)) return;
+                } else if (!hit && app.plantumlPrintLayout &&
+                           app.plantumlPrintBudgetMsLeft > 0) {
+                    // Deliberate SYNC exception: the print/PDF layout runs
+                    // under the light Paper palette (print.cpp swaps
+                    // app.theme in), so this branch always renders the
+                    // light, byte-stable preamble built above.
+                    // without a message pump, so the async queue can never
+                    // deliver there. Bounded per diagram by the shared
+                    // budget; the interactive path never renders inline.
+                    //
+                    // A private print-sync subtree keeps these files away
+                    // from the queue's own <workRoot>\<key> directories,
+                    // where the worker may be mid-render for the same key
+                    // on another thread (renderSync truncates its output).
+                    // A pumpless flow (--printpages, --exportpdf) can reach
+                    // this branch before the interactive path ever ran,
+                    // but plantumlWorkRoot is computed by
+                    // plantumlEnsureQueue(). Without it the root would be
+                    // empty and the work dir would degenerate to a drive-
+                    // relative \print-sync\<key>. Idempotent.
+                    plantumlEnsureQueue(app);
+                    const std::wstring workDir = app.plantumlWorkRoot +
+                        L"\\print-sync\\" + plantuml::keyHex(key);
+                    // The post-print relayout at screen width reuses this
+                    // file instead of spawning the tool again; the tool
+                    // stamp is part of the key, so an upgrade invalidates.
+                    const std::wstring cachedPng = workDir + L"\\input.png";
+                    if (GetFileAttributesW(cachedPng.c_str()) !=
+                            INVALID_FILE_ATTRIBUTES &&
+                        layOutPng(cachedPng)) {
+                        return;
+                    }
+                    std::wstring outFile;
+                    std::wstring error;
+                    const DWORD budgetMs = (DWORD)std::min(
+                        15000, app.plantumlPrintBudgetMsLeft);
+                    const auto t0 = Clock::now();
+                    const bool rendered = plantuml::renderSync(
+                        app.plantumlTool, sourceWithPreamble, 0, workDir,
+                        outFile, budgetMs, error, nullptr);
+                    app.plantumlPrintBudgetMsLeft -=
+                        (int)(usElapsed(t0) / 1000);
+                    if (rendered && layOutPng(outFile)) return;
+                } else if (!app.plantumlPrintLayout) {
+                    // Interactive path: schedule off the UI thread.
+                    // request() no-ops on a cache hit or a still-pending
+                    // key, so a relayout pass never enqueues twice.
+                    plantumlEnsureQueue(app);
+                    if (app.plantumlQueue) {
+                        app.plantumlQueue->request(elem->sourceOffset, key,
+                                                   sourceWithPreamble, 0,
+                                                   app.plantumlTool,
+                                                   app.plantumlWorkRoot);
+                    }
+                }
+            }
+        }
     }
 
     std::wstring langHint = toWide(elem->language);

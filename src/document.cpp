@@ -40,6 +40,30 @@ bool isMermaidPath(std::basic_string_view<Character> path) {
     return hasExtension(path, std::basic_string_view<Character>(extension, 4));
 }
 
+template <typename Character>
+bool isPlantUmlPath(std::basic_string_view<Character> path) {
+    const Character puml[] = {
+        static_cast<Character>('.'),
+        static_cast<Character>('p'),
+        static_cast<Character>('u'),
+        static_cast<Character>('m'),
+        static_cast<Character>('l'),
+    };
+    const Character plantuml[] = {
+        static_cast<Character>('.'),
+        static_cast<Character>('p'),
+        static_cast<Character>('l'),
+        static_cast<Character>('a'),
+        static_cast<Character>('n'),
+        static_cast<Character>('t'),
+        static_cast<Character>('u'),
+        static_cast<Character>('m'),
+        static_cast<Character>('l'),
+    };
+    return hasExtension(path, std::basic_string_view<Character>(puml, 5)) ||
+           hasExtension(path, std::basic_string_view<Character>(plantuml, 9));
+}
+
 // Lowercased ASCII extension incl. the dot; empty for none or non-ASCII
 template <typename Character>
 std::string extensionLower(std::basic_string_view<Character> path) {
@@ -95,7 +119,7 @@ bool isSupportedPath(std::basic_string_view<Character> path) {
     };
     return hasExtension(path, std::basic_string_view<Character>(md, 3)) ||
         hasExtension(path, std::basic_string_view<Character>(markdown, 9)) ||
-        isMermaidPath(path) || isPlainTextPath(path);
+        isMermaidPath(path) || isPlantUmlPath(path) || isPlainTextPath(path);
 }
 
 // A plain-text file becomes one highlighted code block: peek, tabs, and
@@ -123,6 +147,12 @@ qmd::ParseResult createPlainTextDocument(const std::string& content,
     return result;
 }
 
+// A standalone .puml/.plantuml file becomes one PlantUML code block: the
+// fence render paths (preview, HTML, DOCX) already handle that language
+qmd::ParseResult createPlantUmlDocument(const std::string& content) {
+    return createPlainTextDocument(content, "plantuml");
+}
+
 qmd::ParseResult createMermaidDocument(const std::string& content) {
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -148,6 +178,14 @@ bool isMermaidDocumentPath(std::string_view path) {
 
 bool isMermaidDocumentPath(std::wstring_view path) {
     return isMermaidPath(path);
+}
+
+bool isPlantUmlDocumentPath(std::string_view path) {
+    return isPlantUmlPath(path);
+}
+
+bool isPlantUmlDocumentPath(std::wstring_view path) {
+    return isPlantUmlPath(path);
 }
 
 bool isPlainTextDocumentPath(std::string_view path) {
@@ -199,6 +237,7 @@ qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
                                const std::string& content,
                                std::string_view path) {
     if (isMermaidDocumentPath(path)) return createMermaidDocument(content);
+    if (isPlantUmlDocumentPath(path)) return createPlantUmlDocument(content);
     if (isPlainTextDocumentPath(path)) {
         return createPlainTextDocument(content, plainTextLanguage(path));
     }
@@ -215,6 +254,7 @@ qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
                                const std::string& content,
                                std::wstring_view path) {
     if (isMermaidDocumentPath(path)) return createMermaidDocument(content);
+    if (isPlantUmlDocumentPath(path)) return createPlantUmlDocument(content);
     if (isPlainTextDocumentPath(path)) {
         return createPlainTextDocument(content, plainTextLanguage(path));
     }

@@ -141,6 +141,9 @@ gantt
 Class, state, ER, gitGraph, mindmap, timeline, journey, quadrant and XY
 charts all render the same way. A file ending in `.mmd` opens straight
 as a diagram — no fences needed.
+
+A `.puml` or `.plantuml` file opens straight as a diagram too — it
+renders through the PlantUML tool configured in Settings.
 )";
 
 static const char* kMarkdownBasics = R"(# Markdown basics

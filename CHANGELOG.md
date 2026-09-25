@@ -12,6 +12,7 @@
 ### Added
 - The Read button and Ctrl+Shift+E preview unsaved edits at full width; returning to the editor preserves text, cursor position and undo history. Requested by @a86022 (#236)
 - Local PDF links open in the registered PDF viewer, including relative paths and Unicode filenames, with feedback for missing files or failed launches. Reported and contributed by @msaitov (#237)
+- PlantUML diagram rendering through an external tool you point at in Settings (a native `plantuml.exe`, or a `plantuml.jar` with `java` on PATH; nothing bundled, no network access): `plantuml`/`puml`/`pu` fences and standalone `.puml`/`.plantuml` files in preview, print/PDF, HTML (inline SVG), DOCX (embedded PNG) and copy-as-image, themed with the active colors, with readable source as fallback for unanchored or unrenderable diagrams. See [PlantUML support](docs/plantuml-support.md)
 
 ### Fixed
 - AltGr and Ctrl+Alt text input no longer trigger Ctrl shortcuts; unintended Ctrl+Shift combinations are ignored while explicit shortcuts keep working. Reported by @Fromville (#235)

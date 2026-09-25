@@ -7,14 +7,18 @@
 #include <string>
 #include <string_view>
 
-inline constexpr std::array<std::wstring_view, 3> DOCUMENT_FILE_EXTENSIONS = {
+inline constexpr std::array<std::wstring_view, 5> DOCUMENT_FILE_EXTENSIONS = {
     L".md",
     L".markdown",
     L".mmd",
+    L".puml",
+    L".plantuml",
 };
 
 bool isMermaidDocumentPath(std::string_view path);
 bool isMermaidDocumentPath(std::wstring_view path);
+bool isPlantUmlDocumentPath(std::string_view path);
+bool isPlantUmlDocumentPath(std::wstring_view path);
 // Plain-text sidecars (.txt/.json/.yaml/...) render as one highlighted
 // code block instead of being parsed as markdown
 bool isPlainTextDocumentPath(std::string_view path);

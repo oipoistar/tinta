@@ -7,6 +7,7 @@
 #include "editor.h"
 #include "markdown.h"
 #include "pandoc.h"
+#include "plantuml_app.h"
 #include "print.h"
 #include "settings.h"
 #include "signals.h"
@@ -3071,6 +3072,22 @@ void renderSettingsOverlay(App& app) {
             float chipY = cy + (rowCardH - dpi(app, 24.0f)) * 0.5f;
             settingsChip(app, bx, chipY, tr(app, "settings.browse"), false,
                          SET_LOCATE_PANDOC, anim, fmt);
+        }
+        cy += rowCardH + cardGap;
+        // PlantUML bridge: hint shows the resolved tool when found
+        card(rowCardH);
+        plantumlResolve(app);
+        cardLabel(tr(app, "settings.plantuml"),
+                  app.plantumlTool.available
+                      ? app.plantumlTool.describe().c_str()
+                      : tr(app, "settings.plantuml.hint"),
+                  dpi(app, 110.0f));
+        {
+            float chipW = chipsWidth({tr(app, "settings.browse")});
+            float bx = cx + cw - cardPad - chipW;
+            float chipY = cy + (rowCardH - dpi(app, 24.0f)) * 0.5f;
+            settingsChip(app, bx, chipY, tr(app, "settings.browse"), false,
+                         SET_LOCATE_PLANTUML, anim, fmt);
         }
     }
 

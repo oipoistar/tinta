@@ -19,6 +19,7 @@
 #include "signals.h"
 #include "tableedit.h"
 #include "pandoc.h"
+#include "plantuml_app.h"
 #include "print.h"
 #include "export.h"
 #include "i18n.h"
@@ -290,7 +291,8 @@ bool openDocumentInViewer(App& app, const std::wstring& fullPath) {
             updateTextFormats(app);
         }
     }
-    app.focusMermaidOnNextLayout = isMermaidDocumentPath(fullPath);
+    app.focusMermaidOnNextLayout = isMermaidDocumentPath(fullPath) ||
+                                   isPlantUmlDocumentPath(fullPath);
     app.contentHeight = 0;
     app.verticalScrollbarVisible = false;
     app.scrollbarContentHeight = 0.0f;
@@ -721,6 +723,25 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
             if (GetOpenFileNameW(&ofn)) {
                 pandocSetUserPath(app, path);
+            }
+            break;
+        }
+        case SET_LOCATE_PLANTUML: {
+            // The picker accepts a plantuml.exe or a plantuml.jar; a jar
+            // resolves java.exe from PATH (no second java setting).
+            wchar_t path[MAX_PATH]{};
+            OPENFILENAMEW ofn{};
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner = hwnd;
+            ofn.lpstrFilter =
+                L"PlantUML or Java (*.exe;*.jar)\0*.exe;*.jar\0"
+                L"Executables (*.exe)\0*.exe\0"
+                L"Java archives (*.jar)\0*.jar\0\0";
+            ofn.lpstrFile = path;
+            ofn.nMaxFile = MAX_PATH;
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+            if (GetOpenFileNameW(&ofn)) {
+                plantumlSetUserPath(app, path);
             }
             break;
         }
@@ -3286,11 +3307,25 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
                        app.codeBlocks[app.hoveredCodeBlock].fitKey);
         app.selecting = false;
     } else if (diagramPngButtonAt(app, app.mouseX, app.mouseY)) {
-        // Diagram image button: 2x raster to the clipboard
-        if (copyDiagramImage(
-                app, hwnd,
-                toUtf8(app.codeBlocks[app.hoveredCodeBlock].codeText))) {
-            D2D1_RECT_F anchor = app.codeBlocks[app.hoveredCodeBlock].bounds;
+        // Diagram image button: 2x raster to the clipboard. A rendered
+        // PlantUML diagram already has a cached PNG - copy that instead of
+        // rebuilding mermaid prims; success shows the same toast as
+        // mermaid, a miss or failure stays silent.
+        const App::CodeBlockInfo& block =
+            app.codeBlocks[app.hoveredCodeBlock];
+        if (block.isPlantuml) {
+            auto hit = app.plantumlQueue
+                           ? app.plantumlQueue->lookup(block.plantumlKey)
+                           : nullptr;
+            if (hit && hit->ok &&
+                copyPlantumlImageToClipboard(app, hit->filePath)) {
+                D2D1_RECT_F anchor = block.bounds;
+                signalPush(app, SIG_SUCCESS, SIGI_CHECK,
+                           tr(app, "diagram.copied"), L"", L"", SIGA_NONE,
+                           SIGC_NONE, true, &anchor);
+            }
+        } else if (copyDiagramImage(app, hwnd, toUtf8(block.codeText))) {
+            D2D1_RECT_F anchor = block.bounds;
             signalPush(app, SIG_SUCCESS, SIGI_CHECK,
                        tr(app, "diagram.copied"), L"", L"", SIGA_NONE,
                        SIGC_NONE, true, &anchor);

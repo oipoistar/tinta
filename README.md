@@ -208,7 +208,7 @@ tinta.exe -s document.md
 tinta.exe /register
 ```
 
-Or simply drag and drop a `.md` or `.mmd` file onto the window.
+Or simply drag and drop a `.md`, `.mmd` or `.puml` file onto the window (`.plantuml` works too).
 
 To copy a document's full path, right-click the document or its tab (the filename
 in the title bar when only one file is open) and choose
@@ -217,14 +217,14 @@ tab's path, even if another tab is active. Untitled notes have no path until sav
 
 ## File Association
 
-On first launch, Tinta will ask if you want to set it as the default viewer for Markdown and Mermaid files. If you choose "No", you won't be asked again.
+On first launch, Tinta will ask if you want to set it as the default viewer for Markdown, Mermaid and PlantUML files. If you choose "No", you won't be asked again.
 
 To register Tinta as the default viewer later, run:
 ```bash
 tinta.exe /register
 ```
 
-This registers `.md`, `.markdown`, and `.mmd` so you can select Tinta as their default app in Windows Settings.
+This registers `.md`, `.markdown`, `.mmd`, `.puml` and `.plantuml` so you can select Tinta as their default app in Windows Settings.
 
 ## Mermaid Support
 
@@ -246,6 +246,18 @@ Tinta natively renders twenty-two Mermaid diagram families in `.mmd` files and f
 - **Pie charts**, **git graphs**, **gantt charts** (including the numeric `dateFormat X` axis), **mindmaps**, **timelines**, **user journeys**, **quadrant charts**, and **XY charts** (`xychart-beta`)
 
 Diagrams follow the active theme, print through Ctrl+P, export as SVG in HTML and as crisp images in DOCX, and their text is selectable and searchable like any other content. Anything a native renderer does not cover yet (composite states, zenuml) falls back to readable source code.
+
+## PlantUML Support
+
+PlantUML diagrams render through the real PlantUML tool. Tinta never bundles PlantUML, never downloads anything, and makes no network calls - you point it at a tool you already have: either a native `plantuml.exe`, or a `plantuml.jar` run through the `java` found on your PATH.
+
+- **Configuration** - the Settings dialog has a **PlantUML diagrams** row. Press **Browse** and pick the exe or the jar; the row then shows the exact command Tinta resolved (for a jar, the `java` executable plus the jar path). A `plantuml.exe` on PATH is auto-detected without touching any setting. The choice persists as `plantumlPath` in `settings.ini`.
+- **What renders** - fenced `plantuml`, `puml` and `pu` blocks inside Markdown, and standalone `.puml` or `.plantuml` files, which open straight as a diagram and join the open/save dialogs, drag-and-drop and file-association registration.
+- **Diagram families** - every family the real tool draws from an `@startuml` block: sequence, use case, class, activity, component, state, object, deployment, timing, gantt and the rest. Detection is anchored on `@startuml` (named blocks such as `@startuml Flow` and `@startuml(Flow)` included); non-UML PlantUML start tags such as `@startjson`, `@startyaml` or `@startmindmap` are not detected and fall back to readable source.
+- **Where it works** - the preview, print and PDF export, HTML export (the SVG PlantUML produced is inlined), DOCX export (a PNG is embedded), and the copy-diagram-as-image button (a 2x PNG). The editor's diagram-template picker offers three PlantUML starters: sequence, class and activity.
+- **Fallback** - no tool configured, no `@startuml` anchor, or a failed or timed-out render leaves readable source code on the page - never a broken image.
+
+PlantUML ships several license flavors, and some of them (the `plantuml-mit` jar, for example) omit a few non-UML extras such as ditaa while still generating every UML diagram; Tinta works with any flavor. Setup and troubleshooting: [PlantUML support](docs/plantuml-support.md).
 
 ## Themes
 
