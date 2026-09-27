@@ -1,0 +1,77 @@
+name: SignPath test signing
+
+# Builds tinta.exe and signs it with the SignPath test certificate. That
+# certificate is self-signed and not trusted by Windows, so the signed exe
+# only lands in this run's artifacts, never in a release.
+on:
+  push:
+    branches:
+      - signpath-test-sign
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  test-sign:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check the SignPath settings
+        shell: pwsh
+        run: |
+          if (-not $env:SIGNPATH_API_TOKEN) { throw "Add the SignPath CI user's API token as the repository secret SIGNPATH_API_TOKEN." }
+          if (-not $env:SIGNPATH_ORGANIZATION_ID) { throw "Add the SignPath organization ID as the repository variable SIGNPATH_ORGANIZATION_ID." }
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --target tinta --parallel
+
+      - name: Upload unsigned exe
+        id: upload-unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: tinta-unsigned
+          path: build/Release/tinta.exe
+          if-no-files-found: error
+
+      - name: Sign with the SignPath test certificate
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: tinta
+          signing-policy-slug: test-signing
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Verify the signature
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature signed/tinta.exe
+          if (-not $sig.SignerCertificate) { throw "signed/tinta.exe carries no Authenticode signature" }
+          # The test certificate is self-signed, so Windows reports an
+          # untrusted root here; the release certificate will validate
+          "Status:      $($sig.Status) ($($sig.StatusMessage))"
+          "Signer:      $($sig.SignerCertificate.Subject)"
+          "Issuer:      $($sig.SignerCertificate.Issuer)"
+          "Valid until: $($sig.SignerCertificate.NotAfter)"
+          "Timestamped: $([bool]$sig.TimeStamperCertificate)"
+          "SHA256:      $((Get-FileHash signed/tinta.exe -Algorithm SHA256).Hash)"
+
+      - name: Upload test-signed exe
+        uses: actions/upload-artifact@v7
+        with:
+          name: tinta-test-signed
+          path: signed/tinta.exe
+          if-no-files-found: error

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Default artifact configuration of the SignPath project "tinta".
+     GitHub Actions hands artifacts to SignPath as a ZIP, so the root is a
+     zip-file that holds exactly one tinta.exe to Authenticode-sign. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="tinta.exe">
+      <authenticode-sign/>
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
