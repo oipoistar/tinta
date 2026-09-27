@@ -18,14 +18,12 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Check the SignPath settings
+      - name: Check the SignPath token
         shell: pwsh
         run: |
           if (-not $env:SIGNPATH_API_TOKEN) { throw "Add the SignPath CI user's API token as the repository secret SIGNPATH_API_TOKEN." }
-          if (-not $env:SIGNPATH_ORGANIZATION_ID) { throw "Add the SignPath organization ID as the repository variable SIGNPATH_ORGANIZATION_ID." }
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,7 +46,9 @@ jobs:
         uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          # The organization ID is not secret: SignPath prints it in its own
+          # CI integration example
+          organization-id: 43905de7-36fd-4c82-8bca-2863dd18f36e
           project-slug: tinta
           signing-policy-slug: test-signing
           github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
