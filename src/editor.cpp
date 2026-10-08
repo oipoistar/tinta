@@ -1191,7 +1191,7 @@ static bool promptSaveAsPath(App& app, HWND hwnd) {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = L"md";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (!GetSaveFileNameW(&ofn)) return false;
+    if (!runSaveFileDialog(ofn)) return false;
     app.currentFile = toUtf8(path);
     return true;
 }
@@ -1222,7 +1222,7 @@ void openFileDialog(App& app, HWND hwnd) {
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
                 OFN_HIDEREADONLY;
-    if (!GetOpenFileNameW(&ofn)) return;
+    if (!runOpenFileDialog(ofn)) return;
 
     // Only an empty launcher/note is replaced. A document or unsaved
     // buffer stays in its tab, including when the picked path is open.

@@ -1,5 +1,6 @@
 #include "frontmatter_ui.h"
 #include "render.h"
+#include "file_utils.h"
 #include "inline_style.h"
 #include "utils.h"
 #include "syntax.h"
@@ -2655,7 +2656,10 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
             std::filesystem::path imgPath = basePath.parent_path() / wsrc;
             widePath = imgPath.wstring();
         } else {
-            widePath = wsrc;
+            // An untitled note has no folder of its own: relative images
+            // resolve against the launch folder, as they did while the
+            // process still worked there (#253)
+            widePath = (std::filesystem::path(launchDirectory()) / wsrc).wstring();
         }
     }
 

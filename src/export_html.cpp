@@ -7,6 +7,7 @@
 #include "export.h"
 
 #include "editor.h"
+#include "file_utils.h"
 #include "i18n.h"
 #include "signals.h"
 #include "math_render.h"
@@ -1475,7 +1476,7 @@ void exportDocumentAs(App& app, HWND hwnd) {
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (!GetSaveFileNameW(&ofn)) return;
+    if (!runSaveFileDialog(ofn)) return;
 
     // The chosen filter decides the format; a typed extension wins
     std::wstring chosen = path;

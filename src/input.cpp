@@ -323,10 +323,7 @@ static void startNewFileFlow(App& app, HWND hwnd) {
         if (!app.currentFile.empty()) {
             app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
         } else {
-            wchar_t cwd[MAX_PATH];
-            if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                app.folderBrowserPath = cwd;
-            }
+            app.folderBrowserPath = launchDirectory();
         }
         populateFolderItems(app);
     }
@@ -719,7 +716,7 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             ofn.lpstrFile = path;
             ofn.nMaxFile = MAX_PATH;
             ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-            if (GetOpenFileNameW(&ofn)) {
+            if (runOpenFileDialog(ofn)) {
                 pandocSetUserPath(app, path);
             }
             break;
@@ -1669,10 +1666,7 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             if (!app.currentFile.empty()) {
                 app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
             } else {
-                wchar_t cwd[MAX_PATH];
-                if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                    app.folderBrowserPath = cwd;
-                }
+                app.folderBrowserPath = launchDirectory();
             }
             populateFolderItems(app);
             break;
@@ -2429,10 +2423,7 @@ static void startPageInvoke(App& app, HWND hwnd, int id) {
             closeSearchIfOpen(app);
             app.showFolderBrowser = true;
             app.folderBrowserAnimation = 0;
-            wchar_t cwd[MAX_PATH];
-            if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                app.folderBrowserPath = cwd;
-            }
+            app.folderBrowserPath = launchDirectory();
             populateFolderItems(app);
         }
     } else if (id == 4) {
@@ -3976,14 +3967,11 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     closeFolderBrowserInput(app);
                     if (app.showFolderBrowser) {
                         app.folderBrowserAnimation = 0;
-                        // Initialize to directory of current file, or working directory
+                        // Initialize to directory of current file, or the launch folder
                         if (!app.currentFile.empty()) {
                             app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
                         } else {
-                            wchar_t cwd[MAX_PATH];
-                            if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                                app.folderBrowserPath = cwd;
-                            }
+                            app.folderBrowserPath = launchDirectory();
                         }
                         populateFolderItems(app);
                         if (app.browserFocusPath) {

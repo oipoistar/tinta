@@ -1992,6 +1992,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
     LocalFree(argv);
 
+    // Relative paths resolve against the launch folder, then the process
+    // leaves it: Explorer starts Tinta inside the document's folder, and
+    // Windows will not delete or rename a folder that a running process
+    // works in (#253)
+    auto resolveArgument = [](const std::wstring& path) {
+        std::wstring full = path.empty() ? std::wstring() : absoluteFilePath(toUtf8(path));
+        return full.empty() ? path : full;
+    };
+    inputFile = toUtf8(resolveArgument(toWide(inputFile)));
+    printPagesDir = resolveArgument(printPagesDir);
+    exportHtmlPath = resolveArgument(exportHtmlPath);
+    exportDocxPath = resolveArgument(exportDocxPath);
+    exportPdfPath = resolveArgument(exportPdfPath);
+    const std::string tutorialFile = toUtf8(resolveArgument(L"syntax.md"));
+    parkWorkingDirectory();
+
     // Single instance: a plain file launch joins the existing window as a
     // new tab (Win11 Notepad model). --new/--cascade windows and the
     // openInTabs=false setting keep the one-window-per-document behavior.
@@ -2001,25 +2017,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         savedSettings.openInTabs) {
         HWND existing = FindWindowW(L"Tinta", nullptr);
         if (existing) {
-            // Resolve to an absolute path: the receiving window has its own
-            // working directory
-            std::wstring wide = toWide(inputFile);
-            wchar_t full[MAX_PATH];
-            if (GetFullPathNameW(wide.c_str(), MAX_PATH, full, nullptr)) {
-                int len = WideCharToMultiByte(CP_UTF8, 0, full, -1, nullptr, 0,
-                                              nullptr, nullptr);
-                std::string absolute(len - 1, '\0');
-                WideCharToMultiByte(CP_UTF8, 0, full, -1, &absolute[0], len,
-                                    nullptr, nullptr);
-                COPYDATASTRUCT data;
-                data.dwData = 1;
-                data.cbData = (DWORD)absolute.size() + 1;
-                data.lpData = (void*)absolute.c_str();
-                SendMessageW(existing, WM_COPYDATA, 0, (LPARAM)&data);
-                if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
-                SetForegroundWindow(existing);
-                return 0;
-            }
+            // inputFile is absolute by now: the receiving window has its
+            // own working directory
+            COPYDATASTRUCT data;
+            data.dwData = 1;
+            data.cbData = (DWORD)inputFile.size() + 1;
+            data.lpData = (void*)inputFile.c_str();
+            SendMessageW(existing, WM_COPYDATA, 0, (LPARAM)&data);
+            if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
+            SetForegroundWindow(existing);
+            return 0;
         }
     }
 
@@ -2229,9 +2236,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             showStartPage();
         }
     } else {
-        // Try syntax.md
-        if (loadFile("syntax.md")) {
-            app.currentFile = "syntax.md";
+        // Try syntax.md in the launch folder
+        if (loadFile(tutorialFile)) {
+            app.currentFile = tutorialFile;
         } else {
             showStartPage();
         }
