@@ -1239,6 +1239,22 @@ struct App {
     size_t editorSelEnd = 0;
     bool editorHasSelection = false;
 
+    // Extra carets (#251) beside the primary one above. Alt+click,
+    // Ctrl+Alt+Up/Down and Ctrl+D add them; typing, deleting and moving act
+    // on every caret, and Esc or a plain click returns to one.
+    struct EditorCaret {
+        size_t pos = 0;
+        size_t anchor = 0;
+        bool hasSelection = false;
+        int desiredCol = -1;
+        float desiredX = -1.0f;
+        size_t upstream = std::wstring::npos;
+    };
+    std::vector<EditorCaret> editorExtraCarets;
+    // An Alt+click happened during this Alt press: its release must not
+    // put the window into system-menu mode
+    bool altClickGuard = false;
+
     // Editor scroll
     float editorScrollY = 0;
     float editorContentHeight = 0;
@@ -1275,9 +1291,14 @@ struct App {
         std::wstring text;
         size_t cursorBefore, cursorAfter;
         std::wstring replacement; // atomic automatic metadata change
+        // Actions sharing a nonzero group undo and redo as one step: an
+        // edit at several carets, a line move (#251)
+        unsigned group = 0;
     };
     std::vector<EditAction> undoStack;
     std::vector<EditAction> redoStack;
+    unsigned editorUndoGroup = 0;        // group of the edit in progress
+    unsigned editorUndoGroupSerial = 0;
 
     // Editor text format (monospace)
     IDWriteTextFormat* editorTextFormat = nullptr;

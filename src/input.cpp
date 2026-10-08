@@ -3425,6 +3425,8 @@ static void toggleZenMode(App& app, HWND hwnd) {
 }
 
 bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
+    // Ctrl+Alt+Up/Down add editor carets (#251) before the AltGr guard
+    if (editorAltArrowKey(app, hwnd, wParam)) return true;
     if (!shortcutModifiersAllowed(static_cast<unsigned>(wParam))) return false;
     if (app.appMenuPressed) {
         if (wParam == VK_ESCAPE) cancelAppMenuPress(app, hwnd);
