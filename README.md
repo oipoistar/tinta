@@ -88,7 +88,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Unified editor** - Press `:` to edit: your raw Markdown on the left with the rendered page floating beside it as a sheet on the editor's desk. A slim line-number gutter, a soft accent wash on the caret's line and its rendered block, a tool rail with formatting controls plus table-size and diagram-template pickers, and Markdown assists (lists continue on Enter, Tab indents, Ctrl+B/I wrap, and a quote, bracket or `* ~ ^ = :` typed over a selection wraps it). Alt+↑/↓ moves lines, and several carets (Alt+click, Ctrl+Alt+↑/↓, Ctrl+D) type, delete and move together, handy for lining up tables. A word and character count sits beside the Read button, for the whole document or the selection. Search and find-replace work in the editor too
 - **Emoji shortcodes** - `:rocket:` and friends render as real emoji
 - **Fit to width** - Wide tables and diagrams grow a Fit button that shrinks them to the reading column
-- **Draft recovery** - Unsaved quick notes are stashed continuously and offered back on the next launch
+- **Draft recovery** - Unsaved quick notes are stashed continuously and offered back on the next launch. With **Close without asking** (Settings → Editor), closing Tinta skips the save prompt and keeps unsaved edits as drafts for the next launch
 - **Create on click** - Clicking a missing file reference offers to create the file and opens it ready to type
 - **Text-file references** - `.txt`, `.json`, `.yaml` and friends link like Markdown files and open as highlighted documents
 - **Update check** - Portable builds check GitHub once a day and offer a new release as a quiet, dismissible chip

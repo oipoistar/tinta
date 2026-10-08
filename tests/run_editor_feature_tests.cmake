@@ -1,4 +1,5 @@
 file(MAKE_DIRECTORY "${TEST_DIR}")
+file(REMOVE_RECURSE "${TEST_DIR}/drafts")
 file(COPY "${TEST_BINARY}" DESTINATION "${TEST_DIR}")
 file(WRITE "${TEST_DIR}/settings.ini" "[Settings]\nhasAskedFileAssociation=1\ncheckUpdates=0\n")
 get_filename_component(TEST_NAME "${TEST_BINARY}" NAME)

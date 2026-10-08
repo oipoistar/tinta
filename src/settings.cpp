@@ -46,6 +46,7 @@ void saveSettings(const Settings& settings) {
     file << "editorWordWrap=" << (settings.editorWordWrap ? 1 : 0) << "\n";
     file << "editorAssists=" << (settings.editorAssists ? 1 : 0) << "\n";
     file << "showWordCount=" << (settings.showWordCount ? 1 : 0) << "\n";
+    file << "closeKeepsDrafts=" << (settings.closeKeepsDrafts ? 1 : 0) << "\n";
     if (!settings.pandocPath.empty()) {
         file << "pandocPath=" << settings.pandocPath << "\n";
     }
@@ -154,12 +155,19 @@ void persistEditorMode(const App& app) {
     saveSettings(settings);
 }
 
-// The word count switch (#240) persists on its own the moment it changes,
-// and the exit save leaves it as on disk: an older window must not write
-// back a value another window changed since
+// The word count (#240) and "Close without asking" (#252) switches
+// persist on their own the moment they change, and the exit save leaves
+// them as on disk: an older window must not write back a value another
+// window changed since
 void persistWordCount(const App& app) {
     Settings settings = loadSettings();
     settings.showWordCount = app.showWordCount;
+    saveSettings(settings);
+}
+
+void persistCloseKeepsDrafts(const App& app) {
+    Settings settings = loadSettings();
+    settings.closeKeepsDrafts = app.closeKeepsDrafts;
     saveSettings(settings);
 }
 
@@ -342,6 +350,8 @@ Settings loadSettings() {
             settings.editorAssists = (value == "1");
         } else if (key == "showWordCount") {
             settings.showWordCount = (value == "1");
+        } else if (key == "closeKeepsDrafts") {
+            settings.closeKeepsDrafts = (value == "1");
         } else if (key == "pandocPath") {
             settings.pandocPath = value;
         } else if (key == "sessionActive") {

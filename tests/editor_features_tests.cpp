@@ -1,19 +1,23 @@
 #include "d2d_init.h"
+#include "drafts.h"
 #include "editor.h"
 #include "input.h"
 #include "render.h"
 #include "settings.h"
+#include "tabs.h"
 #include "utils.h"
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <vector>
 
-// Editor conveniences (#251) and the word count (#240), driven through
-// the real handlers
+// Editor conveniences (#251), the word count (#240) and draft recovery
+// after a close without asking (#252), driven through the real handlers
 namespace {
 int failures = 0, checks = 0;
 void check(bool ok, const char* message) {
@@ -314,6 +318,80 @@ void wordCount(App& app) {
           "the switch hides the chip");
     app.showWordCount = true;
 }
+
+// #252: what the window keeps on a close without asking, and the next
+// launch handing it back
+void draftRecovery() {
+    namespace fs = std::filesystem;
+    const std::string a = fs::absolute("draft-a.md").u8string();
+    const std::string b = fs::absolute("draft-b.md").u8string();
+    std::ofstream(a, std::ios::binary) << "saved A\n";
+    std::ofstream(b, std::ios::binary) << "saved B\n";
+
+    auto first = std::make_unique<App>();
+    first->hwnd = CreateWindowExW(0, L"STATIC", L"Draft tests", WS_POPUP, 0, 0, 1050, 900,
+                                  nullptr, nullptr, nullptr, nullptr);
+    check(first->hwnd && initD2D(*first) && createRenderTarget(*first), "draft test editor starts");
+    first->width = 1050;
+    first->height = 900;
+    updateTextFormats(*first);
+    first->currentFile = a;
+    tabsInit(*first);
+    tabOpenPath(*first, first->hwnd, b, false);
+    enterRecoveredDraft(*first, first->hwnd, "draft of A", a);
+    check(first->tabs.size() == 2 && first->currentFile == a && first->editMode &&
+          first->editorDirty && first->editorText == L"draft of A",
+          "a draft takes over the clean tab of its own file");
+    enterRecoveredDraft(*first, first->hwnd, "draft of B", b);
+    check(first->tabs.size() == 2 && first->currentFile == b && first->editorText == L"draft of B",
+          "an inactive clean tab of the file is reused too");
+    enterRecoveredDraft(*first, first->hwnd, "second draft of B", b);
+    check(first->tabs.size() == 3 && first->editorText == L"second draft of B",
+          "a tab with unsaved edits keeps them; the draft opens beside it");
+
+    // Closing without asking writes every unsaved buffer as a draft
+    draftsSweep(*first);
+    std::vector<std::wstring> drafts;
+    const std::wstring prefix = L"draft-" + std::to_wstring(GetCurrentProcessId()) + L"-";
+    for (const auto& entry : fs::directory_iterator(fs::path(tintaConfigDir()) / L"drafts")) {
+        const std::wstring name = entry.path().filename().wstring();
+        if (name.rfind(prefix, 0) == 0) drafts.push_back(entry.path().wstring());
+    }
+    check(drafts.size() == 3, "every unsaved tab leaves a draft behind");
+
+    // The next launch: the session restored A clean, the drafts come back
+    auto next = std::make_unique<App>();
+    next->hwnd = CreateWindowExW(0, L"STATIC", L"Draft tests 2", WS_POPUP, 0, 0, 1050, 900,
+                                 nullptr, nullptr, nullptr, nullptr);
+    check(next->hwnd && initD2D(*next) && createRenderTarget(*next), "next launch starts");
+    next->width = 1050;
+    next->height = 900;
+    updateTextFormats(*next);
+    next->currentFile = a;
+    tabsInit(*next);
+    next->recoveredDrafts = drafts;
+    draftsRecoverAll(*next, next->hwnd);
+    size_t dirtyTabs = 0;
+    bool sawA = false;
+    for (size_t i = 0; i < next->tabs.size(); ++i) {
+        const bool active = (int)i == next->activeTab;
+        const bool dirty = active ? next->editorDirty : next->tabs[i].editorDirty;
+        const std::wstring text = active ? next->editorText : next->tabs[i].editorText;
+        dirtyTabs += dirty ? 1 : 0;
+        sawA = sawA || text == L"draft of A";
+    }
+    check(next->tabs.size() == 3 && dirtyTabs == 3 && sawA,
+          "the next launch restores every draft as an unsaved tab, A in its own tab");
+    bool leftover = false;
+    for (const auto& path : drafts) leftover = leftover || fs::exists(path);
+    check(!leftover, "restored drafts are removed from disk");
+
+    for (App* app : {first.get(), next.get()}) {
+        draftsDeleteAll(*app);
+        DestroyWindow(app->hwnd);
+        app->hwnd = nullptr;
+    }
+}
 }  // namespace
 
 int runEditorFeatureTests() {
@@ -346,6 +424,7 @@ int runEditorFeatureTests() {
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;
     state.reset();
+    draftRecovery();
     CoUninitialize();
     std::cout << "Editor features: " << checks << " checks, " << failures << " failures\n";
     return failures ? 1 : 0;

@@ -246,6 +246,9 @@ struct Settings {
     bool editorAssists = true;
     // Word and character count beside the editor's Read button (#240)
     bool showWordCount = true;
+    // Closing a window with unsaved edits skips the dialog and leaves them
+    // as drafts, offered back on the next launch (#252)
+    bool closeKeepsDrafts = false;
     fm::Settings frontmatter;
     // User-chosen pandoc executable ("" = auto-detect)
     std::string pandocPath;
@@ -1194,6 +1197,7 @@ struct App {
     // the left tool rail slides in with edit mode carrying the controls
     bool editorAssists = true;
     bool showWordCount = true;       // #240
+    bool closeKeepsDrafts = false;   // #252
     fm::Settings frontmatter;
     float editRailAnim = 0.0f;       // rail slide-in 0..1
     int editRailHover = 0;           // hit id under the mouse, 0 = none

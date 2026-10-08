@@ -1388,6 +1388,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_CLOSE:
             if (app) tableEditCommit(*app);
+            // "Close without asking" (#252): unsaved buffers stay behind as
+            // drafts, offered back on the next launch, and the window closes
+            if (app && app->closeKeepsDrafts) {
+                draftsSweep(*app);
+                app->confirmExitPending = false;
+                app->pendingWindowClose = false;
+                break;
+            }
             // Unsaved buffers (active or parked in tabs) get the dialog
             // before the window may close; tabs stay open so the session
             // save still remembers them
@@ -1788,8 +1796,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             KillTimer(hwnd, TIMER_DRAFT_SAVE);
             // A graceful close resolved every dirty buffer through the
             // unsaved-changes flow; leftover drafts would resurrect
-            // content the user already decided about
-            if (app) draftsDeleteAll(*app);
+            // content the user already decided about. With "Close without
+            // asking" the drafts are the decision (#252): they stay.
+            if (app && !app->closeKeepsDrafts) draftsDeleteAll(*app);
             {
                 // Load existing settings to preserve values like hasAskedFileAssociation
                 Settings settings = loadSettings();
@@ -1798,8 +1807,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
                 settings.editorAssists = app->editorAssists;
-                // showWordCount persists at toggle time and stays as on
-                // disk here, like openInTabs below
+                // showWordCount and closeKeepsDrafts persist at toggle time
+                // and stay as on disk here, like openInTabs below
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
@@ -1928,6 +1937,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.openInTabs = savedSettings.openInTabs;
     app.editorAssists = savedSettings.editorAssists;
     app.showWordCount = savedSettings.showWordCount;
+    app.closeKeepsDrafts = savedSettings.closeKeepsDrafts;
     app.frontmatter = savedSettings.frontmatter;
     app.pandocUserPath = toWide(savedSettings.pandocPath);
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)

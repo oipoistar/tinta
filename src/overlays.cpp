@@ -3068,6 +3068,13 @@ void renderSettingsOverlay(App& app) {
                        cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.showWordCount, SET_TOGGLE_WORDCOUNT, anim);
         cy += rowCardH + cardGap;
+        card(rowCardH);
+        cardLabel(tr(app, "settings.close_drafts"),
+                  tr(app, "settings.close_drafts.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
+                       app.closeKeepsDrafts, SET_TOGGLE_CLOSE_DRAFTS, anim);
+        cy += rowCardH + cardGap;
         // Pandoc bridge: hint shows the resolved executable when found
         card(rowCardH);
         pandocResolve(app);

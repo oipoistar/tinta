@@ -705,6 +705,10 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.editorDocCountsStale = true;
             persistWordCount(app);
             break;
+        case SET_TOGGLE_CLOSE_DRAFTS:
+            app.closeKeepsDrafts = !app.closeKeepsDrafts;
+            persistCloseKeepsDrafts(app);
+            break;
         case SET_TOGGLE_HEADRULES:
             app.headingRules = !app.headingRules;
             // Layout shifts (the rule adds height), so a repaint alone
@@ -3951,7 +3955,9 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 } else if (app.zenMode) {
                     toggleZenMode(app, hwnd);
                 } else {
-                    PostQuitMessage(0);
+                    // Through WM_CLOSE: unsaved tabs ask or become drafts
+                    // (#252), and the session is saved
+                    PostMessageW(hwnd, WM_CLOSE, 0, 0);
                 }
                 break;
             case VK_F11:
@@ -3964,7 +3970,7 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 if (!app.showThemeChooser && !app.showSearch &&
                     (!app.showFolderBrowser || app.browserPinned) &&
                     (!app.showToc || app.tocPinned)) {
-                    PostQuitMessage(0);
+                    PostMessageW(hwnd, WM_CLOSE, 0, 0);  // like Esc above (#252)
                 }
                 break;
             case 'N':

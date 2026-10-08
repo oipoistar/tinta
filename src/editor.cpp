@@ -1480,6 +1480,23 @@ void enterQuickNoteMode(App& app) {
 // back at its original file when it had one
 void enterRecoveredDraft(App& app, HWND hwnd, const std::string& content,
                          const std::string& origPath) {
+    // The draft of a file that is open already, as a restored session tab
+    // usually is (#252), takes over that tab while it has no unsaved edits
+    // of its own, instead of opening a second tab for the same file
+    if (!origPath.empty()) {
+        for (size_t i = 0; i < app.tabs.size(); i++) {
+            const bool active = (int)i == app.activeTab;
+            const std::string& path = active ? app.currentFile : app.tabs[i].path;
+            const bool dirty = active ? (app.editMode && app.editorDirty)
+                                      : (app.tabs[i].editMode && app.tabs[i].editorDirty);
+            if (dirty || _stricmp(path.c_str(), origPath.c_str()) != 0) continue;
+            tabActivate(app, hwnd, (int)i);
+            enterEditModeWithContent(app, content);
+            app.editorDirty = true;
+            updateWindowTitle(app);
+            return;
+        }
+    }
     tabOpenQuickNote(app, hwnd);
     app.currentFile = origPath;
     enterEditModeWithContent(app, content);
