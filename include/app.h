@@ -378,6 +378,11 @@ struct App {
     // DirectWrite
     IDWriteFactory* dwriteFactory = nullptr;
     IDWriteFontFallback* fontFallback = nullptr;  // For emoji font fallback
+    // Interface text in a Chinese, Japanese or Korean interface: that
+    // language's fonts first (#254). Null for other languages, which keep
+    // the system fallback; uiFontFallbackOrder is the order it was built for
+    IDWriteFontFallback* uiFontFallback = nullptr;
+    int uiFontFallbackOrder = -1;
     IDWriteTextAnalyzer* textAnalyzer = nullptr;  // UAX#14 line-break analysis
     IDWriteTextFormat* textFormat = nullptr;
     IDWriteTextFormat* supSubFormat = nullptr;  // document font for ^sup^/~sub~
@@ -1416,6 +1421,7 @@ struct App {
         if (deviceContext) { deviceContext->Release(); deviceContext = nullptr; }
         if (renderTarget) { renderTarget->Release(); renderTarget = nullptr; }
         if (fontFallback) { fontFallback->Release(); fontFallback = nullptr; }
+        if (uiFontFallback) { uiFontFallback->Release(); uiFontFallback = nullptr; }
         if (textAnalyzer) { textAnalyzer->Release(); textAnalyzer = nullptr; }
         if (textFormat) { textFormat->Release(); textFormat = nullptr; }
         if (supSubFormat) { supSubFormat->Release(); supSubFormat = nullptr; }

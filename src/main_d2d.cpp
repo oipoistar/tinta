@@ -638,6 +638,7 @@ render_document:
             app.dwriteFactory->CreateTextLayout(copyLabel, (UINT32)wcslen(copyLabel), app.codeFormat,
                 btnW, btnH, &btnLayout);
             if (btnLayout) {
+                useUiFontFallback(app, btnLayout);
                 btnLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 btnLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 app.renderTarget->DrawTextLayout(
@@ -706,6 +707,7 @@ render_document:
                     pngLabel, (UINT32)wcslen(pngLabel), app.codeFormat, pngW,
                     btnH, &pngLayout);
                 if (pngLayout) {
+                    useUiFontFallback(app, pngLayout);
                     pngLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                     pngLayout->SetParagraphAlignment(
                         DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -753,6 +755,7 @@ render_document:
                 copyLabel, (UINT32)wcslen(copyLabel), app.codeFormat, btnW,
                 btnH, &btnLayout);
             if (btnLayout) {
+                useUiFontFallback(app, btnLayout);
                 btnLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 btnLayout->SetParagraphAlignment(
                     DWRITE_PARAGRAPH_ALIGNMENT_CENTER);

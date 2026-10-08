@@ -4,6 +4,7 @@
 // thread seam (also here) ties source blocks to their render.
 
 #include "editrail.h"
+#include "d2d_init.h"
 #include "overlays.h"
 #include "editor.h"
 #include "i18n.h"
@@ -42,6 +43,7 @@ static IDWriteTextLayout* railLayout(App& app, const std::wstring& text,
         dpi(app, sizeDip), L"en-us", &fmt);
     if (!fmt) return nullptr;
     fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    useUiFontFallback(app, fmt);
     IDWriteTextLayout* layout = nullptr;
     app.dwriteFactory->CreateTextLayout(text.c_str(), (UINT32)text.size(),
                                         fmt, 4096.0f, 200.0f, &layout);

@@ -670,6 +670,8 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.languageSetting = pick - 1;
             app.currentLanguageIndex = pick - 1;
         }
+        // The interface formats pick up the new language's CJK fonts
+        if (app.dwriteFactory) updateOverlayFormats(app);
         app.settingsLangOpen = false;
         InvalidateRect(hwnd, nullptr, FALSE);
         return;

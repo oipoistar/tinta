@@ -1601,9 +1601,10 @@ D2D1_RECT_F editorReadingButtonRect(const App& app) {
         Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
         DWRITE_TEXT_METRICS metrics{};
         if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(label, static_cast<UINT32>(wcslen(label)),
-                app.codeFormat, 4096.0f, 256.0f, layout.GetAddressOf())) &&
-            SUCCEEDED(layout->GetMetrics(&metrics))) {
-            width = std::max(width, metrics.widthIncludingTrailingWhitespace + dpi(app, 28));
+                app.codeFormat, 4096.0f, 256.0f, layout.GetAddressOf()))) {
+            useUiFontFallback(app, layout.Get());
+            if (SUCCEEDED(layout->GetMetrics(&metrics)))
+                width = std::max(width, metrics.widthIncludingTrailingWhitespace + dpi(app, 28));
         }
     }
     return {dpi(app, 56), static_cast<float>(app.height)-dpi(app, kReadPillLift + kReadPillHeight),
@@ -1618,6 +1619,7 @@ void renderEditorReadingButton(App& app) {
     auto label=tr(app,app.editorReadingPreview ? "editor.resume" : "editor.read");
     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
     if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(label,static_cast<UINT32>(wcslen(label)),app.codeFormat,r.right-r.left,r.bottom-r.top,layout.GetAddressOf()))) {
+        useUiFontFallback(app, layout.Get());
         layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         app.renderTarget->DrawTextLayout({r.left,r.top},layout.Get(),app.brush);
@@ -2148,10 +2150,11 @@ void renderEditorWordCount(App& app) {
         layout.Reset();
         DWRITE_TEXT_METRICS metrics{};
         if (FAILED(app.dwriteFactory->CreateTextLayout(label.c_str(), (UINT32)label.size(),
-                app.codeFormat, 4096.0f, pill.bottom - pill.top, layout.GetAddressOf())) ||
-            FAILED(layout->GetMetrics(&metrics))) {
+                app.codeFormat, 4096.0f, pill.bottom - pill.top, layout.GetAddressOf()))) {
             return;
         }
+        useUiFontFallback(app, layout.Get());
+        if (FAILED(layout->GetMetrics(&metrics))) return;
         width = metrics.widthIncludingTrailingWhitespace + dpi(app, 28.0f);
         if (left + width <= limit) break;
         layout.Reset();

@@ -2451,6 +2451,8 @@ void renderPrintPreview(App& app) {
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
         DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         13.0f * ui, L"en-us", &btnFmt);
+    useUiFontFallback(app, uiFmt);
+    useUiFontFallback(app, btnFmt);
 
     int pageCount = (int)app.printPreviewBounds.size() - 1;
     if (uiFmt) {

@@ -2,11 +2,14 @@
 #include "tabs.h"
 #include "math_render.h"
 #include "utils.h"
+#include "i18n.h"
 
 #include <objbase.h>
 #include <dwmapi.h>
 
 #include <algorithm>
+#include <cstring>
+#include <string>
 
 // Older SDK headers may lack these
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
@@ -106,6 +109,179 @@ void applyTheme(App& app, int themeIndex) {
     // Force a redraw
     if (app.hwnd) {
         InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+}
+
+namespace {
+
+// Han unification shares code points across languages but the glyph shapes
+// differ, so whichever family sits first decides the variant every
+// ideograph renders with
+enum CjkOrder { CJK_SIMPLIFIED, CJK_TRADITIONAL, CJK_JAPANESE, CJK_KOREAN };
+
+// Document text follows the Windows UI language. The default keeps
+// Microsoft YaHei UI first (Chinese variants and a consistent Regular
+// weight instead of Yu Gothic UI's visually-heavier strokes); Japanese and
+// Korean systems reorder so kanji/hanja match the kana or hangul around
+// them instead of coming out Simplified-Chinese (#155).
+CjkOrder windowsCjkOrder() {
+    WORD uiLang = PRIMARYLANGID(GetUserDefaultUILanguage());
+    return uiLang == LANG_JAPANESE ? CJK_JAPANESE
+         : uiLang == LANG_KOREAN   ? CJK_KOREAN
+                                   : CJK_SIMPLIFIED;
+}
+
+// A Chinese, Japanese or Korean interface puts its own fonts first: left to
+// the system fallback, an en-us format drew Simplified Chinese menus in a mix
+// of Microsoft JhengHei UI and Yu Gothic UI (#254). -1 for other languages,
+// whose interface text keeps the system fallback.
+int interfaceCjkOrder(const App& app) {
+    const std::string id = languageIdAt(app.currentLanguageIndex);
+    auto is = [&](const char* tag) {
+        size_t n = strlen(tag);
+        return id.compare(0, n, tag) == 0 && (id.size() == n || id[n] == '-');
+    };
+    if (is("zh-tw") || is("zh-hk") || is("zh-mo") || is("zh-hant")) return CJK_TRADITIONAL;
+    if (is("zh")) return CJK_SIMPLIFIED;
+    if (is("ja")) return CJK_JAPANESE;
+    if (is("ko")) return CJK_KOREAN;
+    return -1;
+}
+
+// Kana, hangul and ideographs go to CJK families in the given order. Only
+// the document chain adds the emoji fonts; interface text leaves every
+// other character to the system fallback, as it did before.
+IDWriteFontFallback* createFontFallback(IDWriteFactory* factory, CjkOrder order,
+                                        bool emoji) {
+    IDWriteFontFallback* fallback = nullptr;
+    IDWriteFactory2* factory2 = nullptr;
+    if (SUCCEEDED(factory->QueryInterface(__uuidof(IDWriteFactory2),
+            reinterpret_cast<void**>(&factory2)))) {
+        IDWriteFontFallbackBuilder* builder = nullptr;
+        if (SUCCEEDED(factory2->CreateFontFallbackBuilder(&builder))) {
+            // --- Japanese kana: Japanese fonts first ---
+            const wchar_t* jpFamilies[] = {
+                L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI"
+            };
+            DWRITE_UNICODE_RANGE jpRanges[] = {
+                { 0x3040, 0x309F },    // Hiragana
+                { 0x30A0, 0x30FF },    // Katakana
+                { 0x3190, 0x319F },    // Kanbun annotation marks
+                { 0x31F0, 0x31FF },    // Katakana phonetic extensions
+                { 0x32D0, 0x32FF },    // Circled katakana + era names (㋐ ㋿)
+                { 0x3300, 0x3357 },    // Squared katakana words (㌔ ㌘)
+                { 0xFF65, 0xFF9F },    // Halfwidth katakana
+            };
+            builder->AddMapping(jpRanges, 7, jpFamilies, 3);
+
+            // --- Korean: Korean font first ---
+            const wchar_t* krFamilies[] = {
+                L"Malgun Gothic", L"Microsoft YaHei UI", L"Yu Gothic UI"
+            };
+            DWRITE_UNICODE_RANGE krRanges[] = {
+                { 0x1100, 0x11FF },    // Hangul Jamo
+                { 0x3130, 0x318F },    // Hangul compatibility Jamo
+                { 0x3200, 0x321E },    // Parenthesized Hangul (㈀ ㈜)
+                { 0x3260, 0x327F },    // Circled Hangul (㉠ ㉻)
+                { 0xAC00, 0xD7AF },    // Hangul syllables
+            };
+            builder->AddMapping(krRanges, 5, krFamilies, 3);
+
+            // --- CJK ideographs: in the requested order ---
+            const wchar_t* cjkZh[] = {
+                L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo", L"Malgun Gothic"
+            };
+            const wchar_t* cjkTw[] = {
+                L"Microsoft JhengHei UI", L"Microsoft YaHei UI", L"Yu Gothic UI", L"Malgun Gothic"
+            };
+            const wchar_t* cjkJa[] = {
+                L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI", L"Malgun Gothic"
+            };
+            const wchar_t* cjkKo[] = {
+                L"Malgun Gothic", L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo"
+            };
+            const wchar_t** cjkFamilies =
+                order == CJK_JAPANESE      ? cjkJa
+                : order == CJK_KOREAN      ? cjkKo
+                : order == CJK_TRADITIONAL ? cjkTw
+                                           : cjkZh;
+            DWRITE_UNICODE_RANGE cjkRanges[] = {
+                { 0x2E80, 0x303F },    // CJK radicals, Kangxi, CJK symbols & punctuation
+                { 0x3100, 0x312F },    // Bopomofo
+                { 0x31A0, 0x31EF },    // Bopomofo extended + CJK strokes
+                { 0x3220, 0x325F },    // Parenthesized/circled ideographs (㈠ ㊿)
+                { 0x3280, 0x32CF },    // Circled ideographs + months (㊀ ㋀)
+                { 0x3358, 0x33FF },    // CJK compatibility: units (㎜ ㎡ ㏄)
+                { 0x3400, 0x4DBF },    // CJK extension A
+                { 0x4DC0, 0x4DFF },    // Yijing hexagrams
+                { 0x4E00, 0x9FFF },    // CJK unified ideographs
+                { 0xF900, 0xFAFF },    // CJK compatibility ideographs
+                { 0xFE10, 0xFE1F },    // Vertical forms (CJK punctuation)
+                { 0xFE30, 0xFE4F },    // CJK compatibility forms
+                { 0xFF00, 0xFF64 },    // Fullwidth forms (Latin, punctuation, etc.)
+                { 0xFFA0, 0xFFEF },    // Halfwidth/fullwidth forms (Hangul + rest)
+                { 0x20000, 0x2FA1F },  // CJK extensions B-F
+            };
+            builder->AddMapping(cjkRanges, 15, cjkFamilies, 4);
+
+            // Emoji/symbol fallback for everything else
+            if (emoji) {
+                const wchar_t* emojiFamilies[] = {
+                    L"Segoe UI Emoji", L"Segoe UI Symbol"
+                };
+                DWRITE_UNICODE_RANGE fullRange = { 0x0000, 0x10FFFF };
+                builder->AddMapping(&fullRange, 1, emojiFamilies, 2);
+            }
+
+            // Chain the system fallback so scripts not covered above
+            // (Arabic, Thai, ...) still resolve instead of rendering tofu
+            IDWriteFontFallback* systemFallback = nullptr;
+            if (SUCCEEDED(factory2->GetSystemFontFallback(&systemFallback))) {
+                builder->AddMappings(systemFallback);
+                systemFallback->Release();
+            }
+
+            builder->CreateFontFallback(&fallback);
+            builder->Release();
+        }
+        factory2->Release();
+    }
+    return fallback;
+}
+
+// Rebuilt only when the interface language moves to another CJK order
+void updateUiFontFallback(App& app) {
+    int order = interfaceCjkOrder(app);
+    if (order == app.uiFontFallbackOrder && (app.uiFontFallback || order < 0)) return;
+    if (app.uiFontFallback) {
+        app.uiFontFallback->Release();
+        app.uiFontFallback = nullptr;
+    }
+    if (order >= 0) {
+        app.uiFontFallback = createFontFallback(app.dwriteFactory, (CjkOrder)order, false);
+    }
+    app.uiFontFallbackOrder = order;
+}
+
+} // namespace
+
+void useUiFontFallback(const App& app, IDWriteTextFormat* format) {
+    if (!format || !app.uiFontFallback) return;
+    IDWriteTextFormat1* format1 = nullptr;
+    if (SUCCEEDED(format->QueryInterface(__uuidof(IDWriteTextFormat1),
+            reinterpret_cast<void**>(&format1)))) {
+        format1->SetFontFallback(app.uiFontFallback);
+        format1->Release();
+    }
+}
+
+void useUiFontFallback(const App& app, IDWriteTextLayout* layout) {
+    if (!layout || !app.uiFontFallback) return;
+    IDWriteTextLayout2* layout2 = nullptr;
+    if (SUCCEEDED(layout->QueryInterface(__uuidof(IDWriteTextLayout2),
+            reinterpret_cast<void**>(&layout2)))) {
+        layout2->SetFontFallback(app.uiFontFallback);
+        layout2->Release();
     }
 }
 
@@ -215,101 +391,7 @@ void updateTextFormats(App& app) {
 
     // Build font fallback chain for emoji and CJK support
     if (!app.fontFallback) {
-        IDWriteFactory2* factory2 = nullptr;
-        if (SUCCEEDED(app.dwriteFactory->QueryInterface(__uuidof(IDWriteFactory2),
-                reinterpret_cast<void**>(&factory2)))) {
-            IDWriteFontFallbackBuilder* builder = nullptr;
-            if (SUCCEEDED(factory2->CreateFontFallbackBuilder(&builder))) {
-                // --- Japanese kana: Japanese fonts first ---
-                const wchar_t* jpFamilies[] = {
-                    L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI"
-                };
-                DWRITE_UNICODE_RANGE jpRanges[] = {
-                    { 0x3040, 0x309F },    // Hiragana
-                    { 0x30A0, 0x30FF },    // Katakana
-                    { 0x3190, 0x319F },    // Kanbun annotation marks
-                    { 0x31F0, 0x31FF },    // Katakana phonetic extensions
-                    { 0x32D0, 0x32FF },    // Circled katakana + era names (㋐ ㋿)
-                    { 0x3300, 0x3357 },    // Squared katakana words (㌔ ㌘)
-                    { 0xFF65, 0xFF9F },    // Halfwidth katakana
-                };
-                builder->AddMapping(jpRanges, 7, jpFamilies, 3);
-
-                // --- Korean: Korean font first ---
-                const wchar_t* krFamilies[] = {
-                    L"Malgun Gothic", L"Microsoft YaHei UI", L"Yu Gothic UI"
-                };
-                DWRITE_UNICODE_RANGE krRanges[] = {
-                    { 0x1100, 0x11FF },    // Hangul Jamo
-                    { 0x3130, 0x318F },    // Hangul compatibility Jamo
-                    { 0x3200, 0x321E },    // Parenthesized Hangul (㈀ ㈜)
-                    { 0x3260, 0x327F },    // Circled Hangul (㉠ ㉻)
-                    { 0xAC00, 0xD7AF },    // Hangul syllables
-                };
-                builder->AddMapping(krRanges, 5, krFamilies, 3);
-
-                // --- CJK ideographs: ordered by the Windows UI language ---
-                // Han unification shares code points across languages but
-                // the glyph shapes differ, so whichever family sits first
-                // decides the variant every ideograph renders with. The
-                // default keeps Microsoft YaHei UI first (Chinese variants
-                // and a consistent Regular weight instead of Yu Gothic UI's
-                // visually-heavier strokes); Japanese and Korean systems
-                // reorder so kanji/hanja match the kana or hangul around
-                // them instead of coming out Simplified-Chinese (#155).
-                const wchar_t* cjkZh[] = {
-                    L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo", L"Malgun Gothic"
-                };
-                const wchar_t* cjkJa[] = {
-                    L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI", L"Malgun Gothic"
-                };
-                const wchar_t* cjkKo[] = {
-                    L"Malgun Gothic", L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo"
-                };
-                WORD uiLang = PRIMARYLANGID(GetUserDefaultUILanguage());
-                const wchar_t** cjkFamilies =
-                    uiLang == LANG_JAPANESE ? cjkJa
-                    : uiLang == LANG_KOREAN ? cjkKo
-                                            : cjkZh;
-                DWRITE_UNICODE_RANGE cjkRanges[] = {
-                    { 0x2E80, 0x303F },    // CJK radicals, Kangxi, CJK symbols & punctuation
-                    { 0x3100, 0x312F },    // Bopomofo
-                    { 0x31A0, 0x31EF },    // Bopomofo extended + CJK strokes
-                    { 0x3220, 0x325F },    // Parenthesized/circled ideographs (㈠ ㊿)
-                    { 0x3280, 0x32CF },    // Circled ideographs + months (㊀ ㋀)
-                    { 0x3358, 0x33FF },    // CJK compatibility: units (㎜ ㎡ ㏄)
-                    { 0x3400, 0x4DBF },    // CJK extension A
-                    { 0x4DC0, 0x4DFF },    // Yijing hexagrams
-                    { 0x4E00, 0x9FFF },    // CJK unified ideographs
-                    { 0xF900, 0xFAFF },    // CJK compatibility ideographs
-                    { 0xFE10, 0xFE1F },    // Vertical forms (CJK punctuation)
-                    { 0xFE30, 0xFE4F },    // CJK compatibility forms
-                    { 0xFF00, 0xFF64 },    // Fullwidth forms (Latin, punctuation, etc.)
-                    { 0xFFA0, 0xFFEF },    // Halfwidth/fullwidth forms (Hangul + rest)
-                    { 0x20000, 0x2FA1F },  // CJK extensions B-F
-                };
-                builder->AddMapping(cjkRanges, 15, cjkFamilies, 4);
-
-                // Emoji/symbol fallback for everything else
-                const wchar_t* emojiFamilies[] = {
-                    L"Segoe UI Emoji", L"Segoe UI Symbol"
-                };
-                DWRITE_UNICODE_RANGE fullRange = { 0x0000, 0x10FFFF };
-                builder->AddMapping(&fullRange, 1, emojiFamilies, 2);
-
-                // Chain the system fallback so scripts not covered above
-                // (Arabic, Thai, ...) still resolve instead of rendering tofu
-                IDWriteFontFallback* systemFallback = nullptr;
-                if (SUCCEEDED(factory2->GetSystemFontFallback(&systemFallback))) {
-                    builder->AddMappings(systemFallback);
-                    systemFallback->Release();
-                }
-
-                builder->CreateFontFallback(&app.fontFallback);
-                builder->Release();
-            }
-            factory2->Release();
-        }
+        app.fontFallback = createFontFallback(app.dwriteFactory, windowsCjkOrder(), true);
     }
 
     updateOverlayFormats(app);
@@ -319,6 +401,7 @@ void updateTextFormats(App& app) {
 
 void updateOverlayFormats(App& app) {
     app.releaseOverlayFormats();
+    updateUiFontFallback(app);
 
     float scale = app.contentScale;
 
@@ -396,6 +479,13 @@ void updateOverlayFormats(App& app) {
     configureTocFormat(app.tocFormatBold);
     configureTocFormat(app.tocFormat);
 
+    // Interface text; the editor formats below hold the document's text
+    for (IDWriteTextFormat* format : {app.searchTextFormat, app.signalSmallFormat,
+            app.themeTitleFormat, app.themeHeaderFormat, app.statsFormat,
+            app.folderBrowserFormat, app.tocFormatBold, app.tocFormat}) {
+        useUiFontFallback(app, format);
+    }
+
     // Editor text format (monospace, same size as body)
     float editorScale = app.contentScale * app.zoomFactor;
     float editorFontSize = 14.0f * editorScale;
@@ -469,6 +559,9 @@ void ensureThemePreviewFormats(App& app) {
         app.dwriteFactory->CreateTextFormat(t.codeFontFamily, nullptr,
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             10.0f * scale, L"en-us", &app.themePreviewFormats[i].code);
+        useUiFontFallback(app, app.themePreviewFormats[i].name);
+        useUiFontFallback(app, app.themePreviewFormats[i].preview);
+        useUiFontFallback(app, app.themePreviewFormats[i].code);
     }
 }
 

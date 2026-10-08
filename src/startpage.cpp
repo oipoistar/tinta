@@ -6,6 +6,7 @@
 
 #include "startpage.h"
 #include "annotations.h"
+#include "d2d_init.h"
 #include "document.h"
 #include "i18n.h"
 #include "settings.h"
@@ -248,6 +249,7 @@ static IDWriteTextLayout* spLayout(App& app, const std::wstring& text,
         L"Segoe UI", nullptr, weight, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, dpi(app, sizeDip), L"en-us", &fmt);
     if (!fmt) return nullptr;
+    useUiFontFallback(app, fmt);
     if (!wrap) fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     if (ellipsis) {
         IDWriteInlineObject* sign = nullptr;
