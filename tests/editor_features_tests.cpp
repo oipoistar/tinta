@@ -12,7 +12,8 @@
 #include <memory>
 #include <vector>
 
-// Editor conveniences (#251), driven through the real handlers
+// Editor conveniences (#251) and the word count (#240), driven through
+// the real handlers
 namespace {
 int failures = 0, checks = 0;
 void check(bool ok, const char* message) {
@@ -281,6 +282,38 @@ void caretClipboardText(App& app) {
     key(app, 'Z', {true});
     check(app.editorText == L"ax by cz", "a paste at every caret is one undo step");
 }
+
+void wordCount(App& app) {
+    app.showWordCount = true;
+    setText(app, L"# Title\n\nHello **bold** world", 0);
+    editorReparse(app, true);
+    check(app.editorDocCounts.words == 4 && app.editorDocCounts.characters == 21,
+          "the editor counts the words and characters a reader sees");
+    select(app, 9, 14);
+    app.renderTarget->BeginDraw();
+    renderEditorWordCount(app);
+    check(SUCCEEDED(app.renderTarget->EndDraw()), "the count chip paints");
+    const D2D1_RECT_F pill = editorReadingButtonRect(app);
+    const D2D1_RECT_F chip = app.editorWordCountRect;
+    check(chip.right > chip.left && chip.left > pill.right && chip.top == pill.top,
+          "the chip sits beside the Read button");
+    check(app.editorSelCounts.words == 1 && app.editorSelCounts.characters == 5,
+          "a selection shows its own count");
+    const std::string saved = app.currentFile;
+    app.currentFile = "notes.txt";
+    setText(app, L"**not markup** here", 0);
+    editorReparse(app, true);
+    check(app.editorDocCounts.words == 3 && app.editorDocCounts.characters == 19,
+          "plain-text documents count as they stand");
+    app.currentFile = saved;
+    app.showWordCount = false;
+    app.renderTarget->BeginDraw();
+    renderEditorWordCount(app);
+    app.renderTarget->EndDraw();
+    check(app.editorWordCountRect.right <= app.editorWordCountRect.left,
+          "the switch hides the chip");
+    app.showWordCount = true;
+}
 }  // namespace
 
 int runEditorFeatureTests() {
@@ -309,6 +342,7 @@ int runEditorFeatureTests() {
         nextOccurrence(app);
         caretClipboardText(app);
     }
+    wordCount(app);
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;
     state.reset();

@@ -24,6 +24,7 @@
 
 #include "markdown.h"
 #include "keymap.h"
+#include "wordcount.h"
 
 using namespace qmd;
 
@@ -243,6 +244,8 @@ struct Settings {
     // Editor markdown assists (list continuation, Tab indent, Ctrl+B/I)
     // master switch
     bool editorAssists = true;
+    // Word and character count beside the editor's Read button (#240)
+    bool showWordCount = true;
     fm::Settings frontmatter;
     // User-chosen pandoc executable ("" = auto-detect)
     std::string pandocPath;
@@ -1190,6 +1193,7 @@ struct App {
     // Unified editor (design t11): one raw buffer, live render beside it;
     // the left tool rail slides in with edit mode carrying the controls
     bool editorAssists = true;
+    bool showWordCount = true;       // #240
     fm::Settings frontmatter;
     float editRailAnim = 0.0f;       // rail slide-in 0..1
     int editRailHover = 0;           // hit id under the mouse, 0 = none
@@ -1254,6 +1258,14 @@ struct App {
     // An Alt+click happened during this Alt press: its release must not
     // put the window into system-menu mode
     bool altClickGuard = false;
+
+    // Word and character count (#240): the document's totals refresh with
+    // the reparse debounce; the selection's are cached by its range
+    TextCounts editorDocCounts;
+    bool editorDocCountsStale = true;
+    TextCounts editorSelCounts;
+    std::wstring editorSelCountsKey;
+    D2D1_RECT_F editorWordCountRect{};  // last painted chip, empty when hidden
 
     // Editor scroll
     float editorScrollY = 0;

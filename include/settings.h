@@ -25,6 +25,7 @@ void clearRecentFiles();
 void persistThemeChoice(const App& app);
 // Editor mode pill choice (and the assists switch) persist immediately
 void persistEditorMode(const App& app);
+void persistWordCount(const App& app);
 void persistOpenInTabs(const App& app);
 
 // The configuration home: the exe's folder in portable mode (a

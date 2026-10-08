@@ -86,6 +86,7 @@ set(SOURCES
     src/startpage.cpp
     src/editrail.cpp
     src/pandoc.cpp
+    src/wordcount.cpp
 )
 
 set(HEADERS
@@ -112,6 +113,7 @@ set(HEADERS
     include/i18n.h
     include/selection.h
     include/math_render.h
+    include/wordcount.h
 )
 
 # Windows resource file (icon)
@@ -326,6 +328,22 @@ if(BUILD_TESTING)
     )
     target_link_libraries(document_tests PRIVATE md4c)
     add_test(NAME document_types COMMAND document_tests)
+
+    # Word and character counting (#240): plain text and parsed Markdown
+    add_executable(wordcount_tests
+        tests/wordcount_tests.cpp
+        src/wordcount.cpp
+        src/document.cpp src/frontmatter.cpp
+        src/markdown.cpp src/footnotes.cpp
+    )
+    target_include_directories(wordcount_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${md4c_SOURCE_DIR}/src
+    )
+    target_link_libraries(wordcount_tests PRIVATE md4c)
+    target_compile_definitions(wordcount_tests PRIVATE UNICODE _UNICODE
+        TINTA_COUNT_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/word-count-240.md")
+    add_test(NAME word_count COMMAND wordcount_tests)
 
     add_executable(inline_style_tests
         tests/inline_style_tests.cpp

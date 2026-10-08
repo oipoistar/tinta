@@ -1116,6 +1116,7 @@ render_document:
         if (!app.editorReadingPreview) renderEditRail(app);
         renderEditCtxMenu(app);
         renderEditorReadingButton(app);
+        renderEditorWordCount(app);
     }
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
@@ -1797,6 +1798,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
                 settings.editorAssists = app->editorAssists;
+                // showWordCount persists at toggle time and stays as on
+                // disk here, like openInTabs below
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
@@ -1924,6 +1927,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
     app.editorAssists = savedSettings.editorAssists;
+    app.showWordCount = savedSettings.showWordCount;
     app.frontmatter = savedSettings.frontmatter;
     app.pandocUserPath = toWide(savedSettings.pandocPath);
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)

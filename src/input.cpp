@@ -700,6 +700,11 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.editorAssists = !app.editorAssists;
             persistEditorMode(app);
             break;
+        case SET_TOGGLE_WORDCOUNT:
+            app.showWordCount = !app.showWordCount;
+            app.editorDocCountsStale = true;
+            persistWordCount(app);
+            break;
         case SET_TOGGLE_HEADRULES:
             app.headingRules = !app.headingRules;
             // Layout shifts (the rule adds height), so a repaint alone
@@ -1983,6 +1988,14 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         if (x>=readButton.left && x<=readButton.right && y>=readButton.top && y<=readButton.bottom) {
             setEditorReadingPreview(app,!app.editorReadingPreview);
             app.swallowNextMouseUp=true;
+            return;
+        }
+        // The word count beside it is a label: a press there must not
+        // drop a caret into the text hidden under it (#240)
+        const D2D1_RECT_F& count = app.editorWordCountRect;
+        if (count.right > count.left && x >= count.left && x <= count.right &&
+            y >= count.top && y <= count.bottom) {
+            app.swallowNextMouseUp = true;
             return;
         }
         // Everything left of the preview edge — pane and seam — belongs

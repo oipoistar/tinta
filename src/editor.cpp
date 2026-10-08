@@ -1209,6 +1209,35 @@ void scrollEditorToMatch(App& app) {
 
 // --- Debounced reparse ---
 
+// --- Word and character count (#240) ---
+
+// Counts what a reader sees: the parsed Markdown's prose, link text and
+// inline code. Plain-text and diagram documents count as they stand.
+static TextCounts editorCountSource(App& app, const std::wstring& source) {
+    if (isPlainTextDocumentPath(app.currentFile) || isMermaidDocumentPath(app.currentFile)) {
+        return countPlainText(source);
+    }
+    auto result = parseDocument(app.parser, toUtf8(source), app.currentFile);
+    std::wstring visible;
+    if (result.success) appendCountableText(result.root, visible);
+    return countPlainText(visible);
+}
+
+// Document totals from a tree the reparse just built, or by parsing the
+// buffer when the preview pane is hidden
+static void editorRefreshDocCounts(App& app, const ElementPtr& parsed) {
+    if (parsed && !isPlainTextDocumentPath(app.currentFile) &&
+        !isMermaidDocumentPath(app.currentFile)) {
+        std::wstring visible;
+        appendCountableText(parsed, visible);
+        app.editorDocCounts = countPlainText(visible);
+    } else {
+        app.editorDocCounts = editorCountSource(app, app.editorText);
+    }
+    app.editorDocCountsStale = false;
+    app.editorSelCountsKey.clear();
+}
+
 static void scheduleReparse(App& app) {
     if (!app.editorDirty) {
         app.editorDirty = true;
@@ -1220,8 +1249,9 @@ static void scheduleReparse(App& app) {
         std::wstring title = L"Tinta - * " + fname;
         SetWindowTextW(app.hwnd, title.c_str());
     }
-    // No preview pane — nothing to keep in sync until it's shown again
-    if (!app.editorShowPreview) return;
+    // No preview pane and no word count — nothing to keep in sync until
+    // one of them is shown again
+    if (!app.editorShowPreview && !app.showWordCount) return;
     // Debounce: coalesce rapid typing into one reparse per pause. WM_TIMER
     // calls editorReparse, which kills the timer. 300ms so brief pauses
     // mid-typing (common with IME input) don't trigger a full preview
@@ -1244,7 +1274,10 @@ void editorReparse(App& app, bool force) {
         auto metadata = fm::parse(utf8);
         if (metadata.present) observeFrontmatter(app, metadata.properties);
     }
-    if (!editorPreviewVisible(app) && !force) return;
+    if (!editorPreviewVisible(app) && !force) {
+        if (app.showWordCount) editorRefreshDocCounts(app, nullptr);
+        return;
+    }
 
     // Build line-to-byte-offset mapping for scroll sync
     app.editorLineByteOffsets.clear();
@@ -1262,6 +1295,7 @@ void editorReparse(App& app, bool force) {
         app.layoutDirty = true;
         InvalidateRect(app.hwnd, nullptr, FALSE);
     }
+    if (app.showWordCount) editorRefreshDocCounts(app, result.success ? result.root : nullptr);
 }
 
 // --- Mode transitions ---
@@ -1279,8 +1313,10 @@ static void enterEditModeWithContent(App& app, const std::string& content) {
     app.folderBrowserNaming = 0;
     tableEditCancel(app);  // no stale cell editor from a previous buffer
 
-    // A new buffer starts with one caret (#251)
+    // A new buffer starts with one caret and a fresh count (#251, #240)
     app.editorExtraCarets.clear();
+    app.editorDocCountsStale = true;
+    app.editorSelCountsKey.clear();
     app.editorText = fromUtf8(content);
     // Normalize \r\n to \n
     std::wstring normalized;
@@ -2017,6 +2053,105 @@ void editorPasteAtCarets(App& app, HWND hwnd, const std::wstring& paste) {
     scheduleReparse(app);
     editorEnsureCursorVisible(app);
     InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// Counts for the selected text of every caret, cached by the selections'
+// ranges; false without a selection. A drag across a huge range recounts
+// once it settles rather than on every mouse move.
+static bool editorSelectionCounts(App& app, TextCounts& counts) {
+    std::wstring key;
+    size_t selected = 0;
+    for (const auto& caret : editorAllCarets(app)) {
+        if (!caret.hasSelection) continue;
+        key += std::to_wstring(caretStart(caret)) + L'-' + std::to_wstring(caretEnd(caret)) + L';';
+        selected += caretEnd(caret) - caretStart(caret);
+    }
+    if (key.empty()) return false;
+    key += std::to_wstring(app.editorText.size()) + L'/' +
+           std::to_wstring(app.undoStack.size()) + L'/' + std::to_wstring(app.redoStack.size());
+    if (key != app.editorSelCountsKey &&
+        !(app.editorSelecting && selected > 200000 && !app.editorSelCountsKey.empty())) {
+        app.editorSelCounts = editorCountSource(app, editorCaretSelectionsText(app));
+        app.editorSelCountsKey = key;
+    }
+    counts = app.editorSelCounts;
+    return true;
+}
+
+static std::wstring editorCountNumber(size_t value) {
+    std::wstring digits = std::to_wstring(value);
+    for (ptrdiff_t at = (ptrdiff_t)digits.size() - 3; at > 0; at -= 3) {
+        digits.insert((size_t)at, L",");
+    }
+    return digits;
+}
+
+// "1,234 words · 5,678 characters", "12 / 1,234 words · ..." while text is
+// selected, or the words alone
+static std::wstring editorCountLabel(const App& app, const TextCounts* selection,
+                                     bool wordsOnly) {
+    auto part = [&](size_t selected, size_t total, const char* one, const char* many) {
+        std::wstring number = selection ? editorCountNumber(selected) + L" / " +
+                                              editorCountNumber(total)
+                                        : editorCountNumber(total);
+        wchar_t text[96];
+        swprintf_s(text, _countof(text), tr(app, total == 1 ? one : many), number.c_str());
+        return std::wstring(text);
+    };
+    const TextCounts& doc = app.editorDocCounts;
+    std::wstring label = part(selection ? selection->words : 0, doc.words,
+                              "editor.count.word", "editor.count.words");
+    if (!wordsOnly) {
+        label += L" \xb7 ";
+        label += part(selection ? selection->characters : 0, doc.characters,
+                      "editor.count.char", "editor.count.chars");
+    }
+    return label;
+}
+
+// The count sits beside the Read pill in its shape, quieter (#240). The
+// characters drop out, then the whole chip, when the pane is too narrow.
+void renderEditorWordCount(App& app) {
+    app.editorWordCountRect = {};
+    if (!app.editMode || !app.showWordCount || !app.brush || !app.codeFormat ||
+        !app.dwriteFactory) {
+        return;
+    }
+    if (app.editorDocCountsStale) editorRefreshDocCounts(app, nullptr);
+    TextCounts selection;
+    const bool selected = !app.editorReadingPreview && editorSelectionCounts(app, selection);
+    const D2D1_RECT_F pill = editorReadingButtonRect(app);
+    const float left = pill.right + dpi(app, 8.0f);
+    const float limit = (app.editorReadingPreview ? (float)app.width : editorPaneWidth(app)) -
+                        dpi(app, 12.0f);
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+    float width = 0.0f;
+    for (bool wordsOnly : {false, true}) {
+        const std::wstring label = editorCountLabel(app, selected ? &selection : nullptr, wordsOnly);
+        layout.Reset();
+        DWRITE_TEXT_METRICS metrics{};
+        if (FAILED(app.dwriteFactory->CreateTextLayout(label.c_str(), (UINT32)label.size(),
+                app.codeFormat, 4096.0f, pill.bottom - pill.top, layout.GetAddressOf())) ||
+            FAILED(layout->GetMetrics(&metrics))) {
+            return;
+        }
+        width = metrics.widthIncludingTrailingWhitespace + dpi(app, 28.0f);
+        if (left + width <= limit) break;
+        layout.Reset();
+    }
+    if (!layout) return;
+    const D2D1_RECT_F chip = D2D1::RectF(left, pill.top, left + width, pill.bottom);
+    app.editorWordCountRect = chip;
+    app.brush->SetColor(app.theme.codeBackground);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(chip, dpi(app, 5.0f), dpi(app, 5.0f)), app.brush);
+    layout->SetMaxWidth(chip.right - chip.left);
+    layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    D2D1_COLOR_F ink = app.theme.text;
+    ink.a = 0.7f;
+    app.brush->SetColor(ink);
+    app.renderTarget->DrawTextLayout({chip.left, chip.top}, layout.Get(), app.brush);
 }
 
 // Keys that only move the caret: arrows, Home/End and the page keys (with

@@ -15,6 +15,8 @@ void exitEditMode(App& app);
 void setEditorReadingPreview(App& app, bool reading);
 D2D1_RECT_F editorReadingButtonRect(const App& app);
 void renderEditorReadingButton(App& app);
+// Word and character count beside the Read button (#240)
+void renderEditorWordCount(App& app);
 // Alt+Up/Down move lines, Ctrl+Alt+Up/Down add carets (#251); false when
 // the key is not one of them or the source editor is not in front
 bool editorAltArrowKey(App& app, HWND hwnd, WPARAM wParam);
