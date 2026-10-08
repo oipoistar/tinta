@@ -1,5 +1,19 @@
 # Changelog
 
+## [v3.7.5] - 2026-10-08
+
+### Added
+- The editor moves the current or selected lines with Alt+↑/↓, and a quote, bracket or `* ~ ^ = :` typed over a selection wraps it. Several carets (Alt+Click, Ctrl+Alt+↑/↓, Ctrl+D) type, delete and move together, for example to line up a table; each step is one undo. Suggested by @Ra0EL (#251)
+- A word and character count beside the editor's Read button, for the document or the selection. It counts the visible text, without Markdown syntax, link addresses, front matter, code blocks or math, and each Chinese or Japanese character is one word. Requested by @a86022 (#240)
+- Settings → Editor → Close without asking: closing Tinta keeps unsaved edits as drafts for the next launch instead of showing the save dialog, and a restored draft takes over its file's session tab. Suggested by @Ra0EL (#252)
+
+### Fixed
+- A click beside a zoomed image closes it for good instead of re-opening the inline image underneath. Reported by @hoinzzz (#249)
+- The editor keeps the line being typed, and the end of a long note, above the Read · Ctrl+Shift+E button; the reading view does the same for Edit · Esc when zoomed out. Reported by @a86022 and @Ra0EL (#250)
+- A running Tinta no longer locks the folder it was opened from, so it can be deleted or renamed; file dialogs no longer leave it in the folder they picked. Reported by @a86022 (#253)
+- Q and Esc in the reader close through the regular close path, so unsaved tabs ask first and the session is saved (#252)
+- Ctrl+B and Ctrl+I undo in one step (#251)
+
 ## [v3.7.4] - 2026-09-22
 
 ### Fixed

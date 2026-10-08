@@ -50,11 +50,25 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Esc and the full-width preview (#242)
-            - Esc leaves edit mode again as it did before 3.7.3: press it twice when there are no unsaved changes, and unsaved changes open the save dialog (#242)
-            - The Read button and Ctrl+Shift+E still preview unsaved edits at full width, and Esc there returns to the editor. The Read button now names its Ctrl+Shift+E shortcut (#242)
-            - The preview keeps the tab strip, the normal window buttons, a draggable title bar and a page that starts below the strip (#242)
-            - Reported by @Fromville (#242)
+            ### Editor: move lines, wrap selections, several carets (#251)
+            - Alt+↑/↓ moves the current line, or every selected line, up or down (#251)
+            - A quote, bracket or `* ~ ^ = :` typed over a selection wraps it and keeps it selected, so typing * twice makes it bold (#251)
+            - Several carets: Alt+Click adds or removes one, Ctrl+Alt+↑/↓ adds one above or below in the same column, Ctrl+D adds the next occurrence; typing, deleting, the arrow keys, copy and paste work at every caret, and Esc returns to one (#251)
+            - Suggested by @Ra0EL (#251)
+
+            ### Word and character count (#240)
+            - A count beside the editor's Read button for the whole document or the selection. It counts the text a reader sees, and each Chinese or Japanese character is one word; turn it off in Settings → Editor (#240)
+            - Requested by @a86022 (#240)
+
+            ### Close without asking (#252)
+            - Settings → Editor → Close without asking: closing Tinta keeps unsaved edits as drafts for the next launch instead of showing the save dialog (#252)
+            - Suggested by @Ra0EL (#252)
+
+            ### Fixed
+            - A click beside a zoomed image closes it for good instead of re-opening the inline image underneath. Reported by @hoinzzz (#249)
+            - The line you are typing on and the end of a long note stay above the Read · Ctrl+Shift+E button; the reading view does the same for its Edit · Esc button when zoomed out. Reported by @a86022 and @Ra0EL (#250)
+            - A running Tinta no longer locks the folder it was opened from, so the folder can be deleted or renamed. Reported by @a86022 (#253)
+            - Q and Esc in the reader close like the window's close button: unsaved tabs ask first and the open tabs are remembered (#252)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats
