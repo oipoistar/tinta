@@ -1516,6 +1516,17 @@ inline bool editSheetLayout(const App& app) {
     return app.editMode && app.editorShowPreview && !app.editorReadingPreview;
 }
 
+// The Read / Edit pill floats over the bottom-left corner in edit mode
+// (#242): its band in DIPs above the window bottom
+constexpr float kReadPillLift = 12.0f;
+constexpr float kReadPillHeight = 30.0f;
+
+// Room the source and the reading view keep above the window bottom, so
+// the caret line and the last line always scroll clear of the pill (#250)
+inline float readPillClearance(const App& app) {
+    return dpi(app, kReadPillLift + kReadPillHeight + 6.0f);
+}
+
 // Floating render sheet (design 10a): the page lies on the editor's
 // desk and rises past the tab strip to the window's top edge — the
 // caption buttons float over it as an island. Shadow is the only

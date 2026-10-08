@@ -3298,7 +3298,11 @@ bool layoutStep(App& app, float targetY, int64_t budgetUs) {
     app.layoutCursorY = y;
     // Partial content height grows as layout fills in (keeps scrollbar sane)
     float scale = app.contentScale * app.zoomFactor;
-    app.contentHeight = y + 40.0f * scale;
+    float tail = 40.0f * scale;
+    // The reading view's Edit pill does not zoom with the page: zoomed
+    // out, the last line must still scroll clear of it (#250)
+    if (app.editMode && app.editorReadingPreview) tail = std::max(tail, readPillClearance(app));
+    app.contentHeight = y + tail;
     return app.layoutNextBlock >= children.size();
 }
 

@@ -631,6 +631,12 @@ static std::wstring editorGetClipboard(HWND hwnd) {
 
 // --- Scroll helpers ---
 
+// Space the source keeps clear above the window bottom: at least a line,
+// and enough for the caret line to sit above the Read pill (#250)
+static float editorBottomClearance(const App& app, float lineHeight) {
+    return std::max(lineHeight, readPillClearance(app));
+}
+
 static void editorEnsureCursorVisible(App& app) {
     if (app.editorLineStarts.empty()) return;
     size_t line = getLineFromPos(app, app.editorCursorPos);
@@ -652,11 +658,12 @@ static void editorEnsureCursorVisible(App& app) {
     }
 
     float viewportH = (float)app.height - chromeTopHeight(app);
+    float bottomClearance = editorBottomClearance(app, lineHeight);
     if (cursorY < app.editorScrollY + lineHeight) {
         app.editorScrollY = std::max(0.0f, cursorY - lineHeight);
     }
-    if (cursorY + lineHeight > app.editorScrollY + viewportH - lineHeight) {
-        app.editorScrollY = cursorY + lineHeight * 2 - viewportH;
+    if (cursorY + lineHeight > app.editorScrollY + viewportH - bottomClearance) {
+        app.editorScrollY = cursorY + lineHeight + bottomClearance - viewportH;
     }
     app.editorScrollY = std::max(0.0f, app.editorScrollY);
 
@@ -1149,8 +1156,8 @@ D2D1_RECT_F editorReadingButtonRect(const App& app) {
             width = std::max(width, metrics.widthIncludingTrailingWhitespace + dpi(app, 28));
         }
     }
-    return {dpi(app, 56), static_cast<float>(app.height)-dpi(app, 42),
-            dpi(app, 56) + width, static_cast<float>(app.height)-dpi(app, 12)};
+    return {dpi(app, 56), static_cast<float>(app.height)-dpi(app, kReadPillLift + kReadPillHeight),
+            dpi(app, 56) + width, static_cast<float>(app.height)-dpi(app, kReadPillLift)};
 }
 void renderEditorReadingButton(App& app) {
     if (!app.editMode || !app.brush || !app.codeFormat) return;
@@ -3039,9 +3046,10 @@ static void renderEditorWrapped(App& app, float editorWidth) {
 
     // Rows draw offset by the chrome strip, so the scrollable height
     // includes it — otherwise the last strip-height of source can never
-    // scroll into view
-    app.editorContentHeight =
-        chromeTopHeight(app) + padding * 2 + app.editorTotalRows * lineHeight;
+    // scroll into view. The bottom keeps the Read pill's band clear (#250)
+    app.editorContentHeight = chromeTopHeight(app) + padding +
+                              app.editorTotalRows * lineHeight +
+                              editorBottomClearance(app, lineHeight);
 
     // Editor scrollbar (same as unwrapped)
     if (app.editorContentHeight > app.height) {
@@ -3225,10 +3233,11 @@ void renderEditor(App& app, float editorWidth) {
     }
 
     // Update content height for scrolling
-    // Includes the chrome strip offset the rows draw below (see the
-    // wrapped variant)
-    app.editorContentHeight = chromeTopHeight(app) + padding * 2 +
-                              app.editorLineStarts.size() * lineHeight;
+    // Includes the chrome strip offset the rows draw below and the Read
+    // pill's band (see the wrapped variant)
+    app.editorContentHeight = chromeTopHeight(app) + padding +
+                              app.editorLineStarts.size() * lineHeight +
+                              editorBottomClearance(app, lineHeight);
 
     // Editor scrollbar
     if (app.editorContentHeight > app.height) {
