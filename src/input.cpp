@@ -1899,6 +1899,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             SetCapture(hwnd);
         } else {
             closeLightbox(app);
+            // The release belongs to this dismissal: it used to reach the
+            // page underneath and re-open the inline image there (#249)
+            app.swallowNextMouseUp = true;
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
