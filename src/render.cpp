@@ -139,7 +139,7 @@ static void addTextRun(App& app, LayoutInfo&& info, const D2D1_POINT_2F& pos,
 
 struct LayoutSnapshot {
     size_t textRuns, rects, lines, shapes, connectors, bitmaps;
-    size_t links, textRects, lineBuckets, docTextLen, tasks;
+    size_t links, textRects, lineBuckets, docTextLen, tasks, anchors;
 };
 
 static LayoutSnapshot takeSnapshot(App& app) {
@@ -154,7 +154,8 @@ static LayoutSnapshot takeSnapshot(App& app) {
         app.textRects.size(),
         app.lineBuckets.size(),
         app.docText.size(),
-        app.taskRects.size()
+        app.taskRects.size(),
+        app.htmlAnchors.size()
     };
 }
 
@@ -180,6 +181,7 @@ static void rollbackTo(App& app, const LayoutSnapshot& s) {
     app.lineBuckets.resize(s.lineBuckets);
     app.docText.resize(s.docTextLen);
     app.taskRects.resize(s.tasks);
+    app.htmlAnchors.resize(s.anchors);  // a trial layout's anchors sit at trial positions
 }
 
 static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
@@ -603,6 +605,11 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 y += lineHeight;
                 continue;
 
+            case ElementType::Anchor:
+                // An <a id> link target draws nothing; links land on its line
+                app.htmlAnchors.push_back({elem->title, y});
+                continue;
+
             case ElementType::Image: {
                 // Break out of inline flow, render image as block
                 if (x > startX) {
@@ -963,11 +970,38 @@ static const ElementPtr* soleMathDisplayChild(const ElementPtr& elem) {
     return found;
 }
 
+// Inline content of nothing but empty anchors (<a id="x"></a> on its own
+// line above a heading) only marks link targets. Like a browser's empty
+// paragraph it takes no room; the targets pin to where it would start (#255).
+static bool pinAnchorsOnly(App& app, const std::vector<ElementPtr>& children, float y) {
+    bool anchor = false;
+    for (const auto& child : children) {
+        if (!child) continue;
+        if (child->type == ElementType::Anchor && child->children.empty()) {
+            anchor = true;
+        } else if (child->type == ElementType::Text) {
+            for (char c : child->text) {
+                if (!isspace((unsigned char)c)) return false;
+            }
+        } else if (child->type != ElementType::SoftBreak) {
+            return false;
+        }
+    }
+    if (!anchor) return false;
+    for (const auto& child : children) {
+        if (child && child->type == ElementType::Anchor) {
+            app.htmlAnchors.push_back({child->title, y});
+        }
+    }
+    return true;
+}
+
 static void layoutParagraph(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     if (const ElementPtr* math = soleMathDisplayChild(elem)) {
         layoutMathBlock(app, *math, y, indent, maxWidth);
         return;
     }
+    if (pinAnchorsOnly(app, elem->children, y)) return;
     auto format = elem->language == "footnote-backlinks" && app.supSubFormat ? app.supSubFormat : app.textFormat;
     layoutInlineContent(app, elem->children, indent, y, maxWidth, format, app.theme.text);
     app.docText += L"\n\n";
@@ -3155,7 +3189,9 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
             // inline children and render them through layoutInlineContent.
             std::vector<ElementPtr> inlineBuffer;
             auto flushInline = [&]() {
-                if (!inlineBuffer.empty()) {
+                if (pinAnchorsOnly(app, inlineBuffer, y)) {
+                    inlineBuffer.clear();
+                } else if (!inlineBuffer.empty()) {
                     layoutInlineContent(app, inlineBuffer, indent, y, maxWidth,
                                         app.textFormat, app.theme.text);
                     app.docText += L"\n\n";

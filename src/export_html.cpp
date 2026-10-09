@@ -1295,6 +1295,11 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
             }
             break;
         }
+        case ElementType::Anchor:
+            // Keep the link target the source's <a id>/<a name> made (#255)
+            ctx.out += "<a id=\"" + htmlEscape(elem->title) + "\"></a>";
+            walkChildren(ctx, elem);
+            break;
         case ElementType::Image:
             emitImage(ctx, elem);
             break;

@@ -2410,9 +2410,7 @@ static bool openFileRefTarget(App& app, HWND hwnd, const std::string& url) {
         if (scrollToHeadingId(app, target.fragment) && app.editMode) {
             size_t offset = 0;
             float headingY = 0;
-            for (const auto& h : app.headings) {
-                if (h.id == target.fragment) { headingY = h.y; break; }
-            }
+            documentTargetY(app, target.fragment, headingY);
             for (const auto& anchor : app.scrollAnchors) {
                 if (anchor.renderedY > headingY) break;
                 offset = anchor.sourceOffset;

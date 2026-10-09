@@ -819,6 +819,9 @@ struct App {
     std::vector<HeadingInfo> headings;
     std::unordered_map<std::string, int> headingSlugCounts;
     std::unordered_map<std::string, float> footnoteAnchors;
+    // <a id>/<a name> link targets and their document Y, in document order:
+    // the first of a repeated id wins, as in a browser (#255)
+    std::vector<std::pair<std::string, float>> htmlAnchors;
     int hoveredTocIndex = -1;
     float tocScroll = 0.0f;
     // Typed while the panel is open: case-insensitive substring filter
@@ -1363,6 +1366,7 @@ struct App {
         headings.clear();
         headingSlugCounts.clear();
         footnoteAnchors.clear();
+        htmlAnchors.clear();
         fileRefCache.clear();
         for (auto& a : annotations) {
             a.docStart = a.docEnd = (size_t)-1;
