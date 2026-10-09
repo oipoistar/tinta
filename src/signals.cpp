@@ -13,6 +13,9 @@ namespace {
 
 constexpr float kDrainSeconds = 4.0f;
 constexpr float kTuckSeconds = 0.18f;
+// Hints hold a moment, then fade in place (#245)
+constexpr float kHintSeconds = 1.5f;
+constexpr float kHintFadeSeconds = 0.4f;
 constexpr size_t kTrayCap = 20;
 
 bool pointIn(float x, float y, const D2D1_RECT_F& r) {
@@ -263,6 +266,7 @@ void signalPush(App& app, int severity, int icon, std::wstring text,
         chip.docAnchor = *docAnchor;
         chip.remaining = 2.0f;  // anchored Copied pills are brief
     }
+    chip.lifetime = chip.remaining;
     // An identical chip refreshing (repeat Ctrl+C) replaces its old self
     for (size_t i = 0; i < app.signalChips.size(); i++) {
         if (app.signalChips[i].text == chip.text &&
@@ -282,6 +286,28 @@ void signalPushKey(App& app, int severity, int icon, const char* trKey,
                    std::wstring emph, std::wstring context) {
     signalPush(app, severity, icon, tr(app, trKey), std::move(emph),
                std::move(context));
+}
+
+void signalHint(App& app, int icon, std::wstring text, std::wstring emph) {
+    signalPush(app, SIG_INFO, icon, std::move(text), std::move(emph));
+    App::SignalChip& chip = app.signalChips.back();
+    chip.transient = true;
+    chip.remaining = chip.lifetime = kHintSeconds;
+}
+
+void signalHintKey(App& app, int icon, const char* trKey) {
+    signalHint(app, icon, tr(app, trKey));
+}
+
+void signalFadeHints(App& app) {
+    bool fading = false;
+    for (auto& c : app.signalChips) {
+        if (c.transient && c.tuckT < 0.0f) {
+            c.tuckT = 0.0f;
+            fading = true;
+        }
+    }
+    if (fading) startNotificationTimer(app);
 }
 
 D2D1_COLOR_F signalSeverityHue(const App& app, int severity) {
@@ -317,8 +343,9 @@ void renderSignalChips(App& app) {
         auto& c = app.signalChips[i];
         if (c.tuckT >= 0.0f) {
             c.tuckT += dt;
-            if (c.tuckT >= kTuckSeconds) {
-                parkChip(app, std::move(c));
+            if (c.tuckT >= (c.transient ? kHintFadeSeconds : kTuckSeconds)) {
+                // Hints fade away; everything else parks in the tray
+                if (!c.transient) parkChip(app, std::move(c));
                 app.signalChips.erase(app.signalChips.begin() + i);
                 continue;
             }
@@ -428,9 +455,14 @@ void renderSignalChips(App& app) {
         auto& c = app.signalChips[idx];
         c.rect = c.pinRect = c.closeRect = D2D1_RECT_F{};
 
-        float tuck = c.tuckT >= 0.0f ? std::min(1.0f, c.tuckT / kTuckSeconds)
-                                     : 0.0f;
-        float alpha = 1.0f - tuck;
+        // Parking chips slide toward the bell as they fade; hints fade in
+        // place
+        float fade = c.tuckT >= 0.0f
+                         ? std::min(1.0f, c.tuckT / (c.transient ? kHintFadeSeconds
+                                                                 : kTuckSeconds))
+                         : 0.0f;
+        float alpha = 1.0f - fade;
+        float tuck = c.transient ? 0.0f : fade;
 
         if (c.anchored) {
             // Mini pill at its source block (document coords -> screen)
@@ -476,7 +508,8 @@ void renderSignalChips(App& app) {
         float textW = 0.0f;
         IDWriteTextLayout* layout =
             chipTextLayout(app, c, fmt, textMax, chipH, &textW);
-        float extras = dpi(app, 20.0f) + (hovered || c.pinned ? dpi(app, 18.0f) : 0.0f);
+        bool pinnable = (hovered || c.pinned) && !c.transient;
+        float extras = dpi(app, 20.0f) + (pinnable ? dpi(app, 18.0f) : 0.0f);
         float chipW = pad + iconBox + dpi(app, 9.0f) + textW + dpi(app, 10.0f) +
                       extras + pad * 0.6f;
         chipW = std::max(chipW, dpi(app, 190.0f));
@@ -537,7 +570,7 @@ void renderSignalChips(App& app) {
                                    D2D1::Point2F(cxg + sgl, cyg - sgl),
                                    app.brush, 1.3f);
         c.closeRect = D2D1::RectF(tx - dpi(app, 4.0f), r.top, r.right, r.bottom);
-        if (hovered || c.pinned) {
+        if (pinnable) {
             float pxg = tx - dpi(app, 18.0f) + dpi(app, 6.0f);
             D2D1_COLOR_F pink = c.pinned ? hue : inkAt(app, 0.5f * alpha);
             if (c.pinned) pink.a = 0.9f * alpha;
@@ -554,8 +587,9 @@ void renderSignalChips(App& app) {
                                     tx - dpi(app, 2.0f), r.bottom);
         }
 
-        // Drain rail: remaining lifespan; pinned wears the full quiet band
-        if (c.drains) {
+        // Drain rail: remaining lifespan; pinned wears the full quiet band.
+        // Hints are too brief for a rail and simply fade.
+        if (c.drains && !c.transient) {
             D2D1_COLOR_F rail = hue;
             if (c.pinned) {
                 rail.a = 0.22f * alpha;
@@ -565,7 +599,7 @@ void renderSignalChips(App& app) {
                                 r.right - dpi(app, 8.0f), r.bottom),
                     app.brush);
             } else {
-                float frac = std::max(0.0f, std::min(1.0f, c.remaining / kDrainSeconds));
+                float frac = std::max(0.0f, std::min(1.0f, c.remaining / c.lifetime));
                 rail.a = 0.5f * alpha;
                 app.brush->SetColor(rail);
                 float railW = (r.right - r.left - dpi(app, 16.0f)) * frac;
@@ -812,11 +846,14 @@ bool signalMouseDown(App& app, HWND hwnd, float mx, float my) {
         } else if (c.pinRect.right > c.pinRect.left &&
                    pointIn(mx, my, c.pinRect)) {
             c.pinned = !c.pinned;
-            if (!c.pinned) c.remaining = kDrainSeconds;
+            if (!c.pinned) c.remaining = c.lifetime;
         } else if (c.action != SIGA_NONE) {
             int action = c.action;
             app.signalChips.erase(app.signalChips.begin() + i);
             runSignalAction(app, hwnd, action);
+        } else if (c.transient) {
+            c.tuckT = 0.0f;  // a hint has nothing to keep: a click fades it
+            startNotificationTimer(app);
         } else {
             c.pinned = true;  // a body click on a passive chip keeps it
         }

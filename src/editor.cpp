@@ -23,6 +23,7 @@
 #include <sstream>
 #include <algorithm>
 #include <chrono>
+#include <functional>
 #include <imm.h>
 #include <commdlg.h>
 
@@ -392,15 +393,19 @@ static void editorMoveCursorVertical(App& app, bool down) {
     }
 }
 
-bool editorCaretPoint(App& app, D2D1_POINT_2F& point) {
-    if (!app.editMode || !app.editorTextFormat || app.editorLineStarts.empty()) return false;
+// Screen-space origin of a caret at pos (the primary one or an extra)
+static bool editorCaretPointAt(App& app, size_t pos, bool upstream,
+                               D2D1_POINT_2F& point) {
+    if (!app.editMode || !app.editorTextFormat || app.editorLineStarts.empty() ||
+        pos > app.editorText.size()) {
+        return false;
+    }
     ensureEditorRowMetrics(app);
-    size_t line = getLineFromPos(app, app.editorCursorPos);
+    size_t line = getLineFromPos(app, pos);
     size_t start = app.editorLineStarts[line];
     auto* layout = cachedEditorLineLayout(app, start, getLineLength(app, line));
     float x = 0, y = 0;
-    editorCaretXY(layout, app.editorCursorPos-start, x, y,
-        app.editorCaretUpstreamPos == app.editorCursorPos);
+    editorCaretXY(layout, pos - start, x, y, upstream);
     float height = app.editorTextFormat->GetFontSize() * 1.5f;
     float row = editorWrapOn(app) ? (float)app.editorRowStarts[line] : (float)line;
     point.x = editorTextX(app) + x - (editorWrapOn(app) ? 0.0f : app.editorScrollX);
@@ -409,14 +414,38 @@ bool editorCaretPoint(App& app, D2D1_POINT_2F& point) {
     return true;
 }
 
+bool editorCaretPoint(App& app, D2D1_POINT_2F& point) {
+    return editorCaretPointAt(app, app.editorCursorPos,
+                              app.editorCaretUpstreamPos == app.editorCursorPos, point);
+}
+
 // --- Undo/Redo ---
+
+// Actions pushed while a scope is alive undo and redo as one step: an
+// edit at several carets, a line move, a mark toggle (#251)
+struct UndoGroupScope {
+    App& app;
+    bool owner;
+    explicit UndoGroupScope(App& a) : app(a), owner(a.editorUndoGroup == 0) {
+        if (owner) {
+            if (++a.editorUndoGroupSerial == 0) ++a.editorUndoGroupSerial;
+            a.editorUndoGroup = a.editorUndoGroupSerial;
+        }
+    }
+    ~UndoGroupScope() {
+        if (owner) app.editorUndoGroup = 0;
+    }
+    UndoGroupScope(const UndoGroupScope&) = delete;
+    UndoGroupScope& operator=(const UndoGroupScope&) = delete;
+};
 
 static void pushUndo(App& app, App::EditAction::Type type, size_t pos,
                       const std::wstring& text, size_t curBefore, size_t curAfter) {
-    // Coalesce consecutive single-char inserts
-    if (type == App::EditAction::Insert && text.size() == 1 && !app.undoStack.empty()) {
+    // Coalesce consecutive single-char inserts (grouped edits stay apart)
+    if (type == App::EditAction::Insert && text.size() == 1 && !app.undoStack.empty() &&
+        app.editorUndoGroup == 0) {
         auto& last = app.undoStack.back();
-        if (last.type == App::EditAction::Insert &&
+        if (last.type == App::EditAction::Insert && last.group == 0 &&
             last.position + last.text.size() == pos &&
             text[0] != L'\n' && text[0] != L' ') {
             last.text += text;
@@ -424,7 +453,20 @@ static void pushUndo(App& app, App::EditAction::Type type, size_t pos,
             return;
         }
     }
-    app.undoStack.push_back({type, pos, text, curBefore, curAfter});
+    App::EditAction action{type, pos, text, curBefore, curAfter};
+    action.group = app.editorUndoGroup;
+    app.undoStack.push_back(std::move(action));
+    app.redoStack.clear();
+}
+
+// One action that swaps removed for inserted at pos
+static void pushReplaceUndo(App& app, size_t pos, const std::wstring& removed,
+                            const std::wstring& inserted, size_t curBefore,
+                            size_t curAfter) {
+    App::EditAction action{App::EditAction::Replace, pos, removed, curBefore,
+                           curAfter, inserted};
+    action.group = app.editorUndoGroup;
+    app.undoStack.push_back(std::move(action));
     app.redoStack.clear();
 }
 
@@ -437,9 +479,8 @@ void editorReplaceRangeExternal(App& app, size_t start, size_t end,
     if (end < start) end = start;
     std::wstring removed = app.editorText.substr(start, end - start);
     if (removed == repl) return;  // no-op edits stay off the undo stack
-    app.undoStack.push_back({App::EditAction::Replace,start,removed,
-                            app.editorCursorPos,start+repl.size(),repl});
-    app.redoStack.clear();
+    pushReplaceUndo(app, start, removed, repl, app.editorCursorPos, start + repl.size());
+    app.editorExtraCarets.clear();  // positions past the cell would go stale
     app.editorText.replace(start,end-start,repl);
     app.editorCursorPos = start + repl.size();
     app.editorHasSelection = false;
@@ -464,26 +505,28 @@ static std::wstring padTableForInsert(const App& app,
     return pre + table + post;
 }
 
+// A grouped step comes back as a whole, and with a single caret: the
+// extra carets' positions belong to the text before the step
 static void editorUndo(App& app) {
     if (app.undoStack.empty()) return;
-    auto action = app.undoStack.back();
-    app.undoStack.pop_back();
+    app.editorExtraCarets.clear();
+    const unsigned group = app.undoStack.back().group;
+    do {
+        auto action = app.undoStack.back();
+        app.undoStack.pop_back();
 
-    if (action.type == App::EditAction::Replace) {
-        app.editorText.replace(action.position, action.replacement.size(), action.text);
+        if (action.type == App::EditAction::Replace) {
+            app.editorText.replace(action.position, action.replacement.size(), action.text);
+        } else if (action.type == App::EditAction::Insert) {
+            // Reverse: delete the inserted text
+            app.editorText.erase(action.position, action.text.size());
+        } else {
+            // Reverse: re-insert the deleted text
+            app.editorText.insert(action.position, action.text);
+        }
         app.editorCursorPos = action.cursorBefore;
         app.redoStack.push_back(action);
-    } else if (action.type == App::EditAction::Insert) {
-        // Reverse: delete the inserted text
-        app.editorText.erase(action.position, action.text.size());
-        app.editorCursorPos = action.cursorBefore;
-        app.redoStack.push_back(action);
-    } else {
-        // Reverse: re-insert the deleted text
-        app.editorText.insert(action.position, action.text);
-        app.editorCursorPos = action.cursorBefore;
-        app.redoStack.push_back(action);
-    }
+    } while (group != 0 && !app.undoStack.empty() && app.undoStack.back().group == group);
     rebuildLineStarts(app);
     app.editorHasSelection = false;
     app.editorDesiredCol = -1;
@@ -491,22 +534,22 @@ static void editorUndo(App& app) {
 
 static void editorRedo(App& app) {
     if (app.redoStack.empty()) return;
-    auto action = app.redoStack.back();
-    app.redoStack.pop_back();
+    app.editorExtraCarets.clear();
+    const unsigned group = app.redoStack.back().group;
+    do {
+        auto action = app.redoStack.back();
+        app.redoStack.pop_back();
 
-    if (action.type == App::EditAction::Replace) {
-        app.editorText.replace(action.position, action.text.size(), action.replacement);
+        if (action.type == App::EditAction::Replace) {
+            app.editorText.replace(action.position, action.text.size(), action.replacement);
+        } else if (action.type == App::EditAction::Insert) {
+            app.editorText.insert(action.position, action.text);
+        } else {
+            app.editorText.erase(action.position, action.text.size());
+        }
         app.editorCursorPos = action.cursorAfter;
         app.undoStack.push_back(action);
-    } else if (action.type == App::EditAction::Insert) {
-        app.editorText.insert(action.position, action.text);
-        app.editorCursorPos = action.cursorAfter;
-        app.undoStack.push_back(action);
-    } else {
-        app.editorText.erase(action.position, action.text.size());
-        app.editorCursorPos = action.cursorAfter;
-        app.undoStack.push_back(action);
-    }
+    } while (group != 0 && !app.redoStack.empty() && app.redoStack.back().group == group);
     rebuildLineStarts(app);
     app.editorHasSelection = false;
     app.editorDesiredCol = -1;
@@ -590,6 +633,354 @@ static size_t editorWordRight(const App& app, size_t pos) {
     return pos;
 }
 
+// The run of one character class around pos, as double-click selects it
+static void editorWordAt(const App& app, size_t pos, size_t& start, size_t& end) {
+    start = end = pos;
+    int cls = pos < app.editorText.size() ? editorCharClass(app.editorText[pos]) : 0;
+    if (cls == 0 && pos > 0) {
+        cls = editorCharClass(app.editorText[pos - 1]);
+        if (cls != 0) start = pos - 1;
+    }
+    if (cls == 0) return;
+    while (start > 0 && editorCharClass(app.editorText[start - 1]) == cls) start--;
+    while (end < app.editorText.size() && editorCharClass(app.editorText[end]) == cls) end++;
+}
+
+// --- Extra carets (#251) ---
+//
+// The primary caret lives in editorCursorPos / editorSelStart / editorSelEnd,
+// the others in editorExtraCarets. Multi-caret commands swap each caret into
+// the primary slot in turn and run the one-caret code, so every caret types,
+// deletes and moves exactly like the single one does.
+
+static App::EditorCaret editorPrimaryCaret(const App& app) {
+    App::EditorCaret caret;
+    caret.pos = app.editorCursorPos;
+    caret.hasSelection = app.editorHasSelection;
+    caret.anchor = !caret.hasSelection ? caret.pos
+                   : app.editorCursorPos == app.editorSelStart ? app.editorSelEnd
+                                                               : app.editorSelStart;
+    caret.desiredCol = app.editorDesiredCol;
+    caret.desiredX = app.editorDesiredX;
+    caret.upstream = app.editorCaretUpstreamPos;
+    return caret;
+}
+
+static void editorSetPrimaryCaret(App& app, const App::EditorCaret& caret) {
+    app.editorCursorPos = caret.pos;
+    app.editorSelStart = caret.anchor;
+    app.editorSelEnd = caret.pos;
+    app.editorHasSelection = caret.hasSelection && caret.anchor != caret.pos;
+    app.editorDesiredCol = caret.desiredCol;
+    app.editorDesiredX = caret.desiredX;
+    app.editorCaretUpstreamPos = caret.upstream;
+}
+
+static size_t caretStart(const App::EditorCaret& caret) {
+    return caret.hasSelection ? std::min(caret.anchor, caret.pos) : caret.pos;
+}
+
+static size_t caretEnd(const App::EditorCaret& caret) {
+    return caret.hasSelection ? std::max(caret.anchor, caret.pos) : caret.pos;
+}
+
+// Every caret, the primary last
+static std::vector<App::EditorCaret> editorAllCarets(const App& app) {
+    std::vector<App::EditorCaret> carets = app.editorExtraCarets;
+    carets.push_back(editorPrimaryCaret(app));
+    return carets;
+}
+
+// Writes carets back clamped to the text, off surrogate-pair middles, and
+// merged where they meet or overlap; carets[primary] stays the primary
+static void editorStoreCarets(App& app, std::vector<App::EditorCaret> carets,
+                              size_t primary) {
+    const size_t size = app.editorText.size();
+    auto settle = [&](size_t pos) {
+        pos = std::min(pos, size);
+        if (pos > 0 && pos < size && isLowSurrogate(app.editorText[pos]) &&
+            isHighSurrogate(app.editorText[pos - 1])) {
+            --pos;
+        }
+        return pos;
+    };
+    for (auto& caret : carets) {
+        caret.pos = settle(caret.pos);
+        caret.anchor = settle(caret.anchor);
+        if (!caret.hasSelection || caret.anchor == caret.pos) {
+            caret.hasSelection = false;
+            caret.anchor = caret.pos;
+        }
+    }
+    std::vector<size_t> order(carets.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        if (caretStart(carets[a]) != caretStart(carets[b]))
+            return caretStart(carets[a]) < caretStart(carets[b]);
+        return caretEnd(carets[a]) < caretEnd(carets[b]);
+    });
+    std::vector<App::EditorCaret> merged;
+    size_t mergedPrimary = 0;
+    for (size_t index : order) {
+        const App::EditorCaret& caret = carets[index];
+        if (!merged.empty()) {
+            App::EditorCaret& last = merged.back();
+            bool meet = caretStart(caret) < caretEnd(last) ||
+                        (caretStart(caret) == caretEnd(last) &&
+                         (!caret.hasSelection || !last.hasSelection));
+            if (meet) {
+                const size_t start = caretStart(last);
+                const size_t end = std::max(caretEnd(last), caretEnd(caret));
+                const App::EditorCaret& shape = index == primary ? caret : last;
+                const bool forward = !shape.hasSelection || shape.anchor <= shape.pos;
+                if (index == primary) {
+                    mergedPrimary = merged.size() - 1;
+                    last.desiredCol = caret.desiredCol;
+                    last.desiredX = caret.desiredX;
+                    last.upstream = caret.upstream;
+                }
+                last.hasSelection = end > start;
+                last.anchor = forward ? start : end;
+                last.pos = forward ? end : start;
+                continue;
+            }
+        }
+        if (index == primary) mergedPrimary = merged.size();
+        merged.push_back(caret);
+    }
+    editorSetPrimaryCaret(app, merged[mergedPrimary]);
+    app.editorExtraCarets.clear();
+    for (size_t i = 0; i < merged.size(); ++i) {
+        if (i != mergedPrimary) app.editorExtraCarets.push_back(merged[i]);
+    }
+}
+
+// Runs a one-caret edit at every caret, the last caret first: each edit then
+// leaves the text before it unchanged, so the carets still to come keep
+// their positions. The round is one undo step. edit gets the caret's rank
+// in document order.
+static void editorEditAtCarets(App& app, const std::function<void(size_t)>& edit) {
+    if (app.editorExtraCarets.empty()) {
+        edit(0);
+        return;
+    }
+    editorStoreCarets(app, editorAllCarets(app), app.editorExtraCarets.size());
+    std::vector<App::EditorCaret> carets = editorAllCarets(app);
+    const size_t primary = carets.size() - 1;
+    std::vector<size_t> order(carets.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return caretStart(carets[a]) > caretStart(carets[b]);
+    });
+    UndoGroupScope group(app);
+    for (size_t k = 0; k < order.size(); ++k) {
+        App::EditorCaret& caret = carets[order[k]];
+        const size_t before = app.editorText.size();
+        editorSetPrimaryCaret(app, caret);
+        edit(order.size() - 1 - k);
+        caret = editorPrimaryCaret(app);
+        const ptrdiff_t delta = (ptrdiff_t)app.editorText.size() - (ptrdiff_t)before;
+        if (delta == 0) continue;
+        for (size_t j = 0; j < k; ++j) {
+            App::EditorCaret& later = carets[order[j]];
+            later.pos = (size_t)std::max<ptrdiff_t>(0, (ptrdiff_t)later.pos + delta);
+            later.anchor = (size_t)std::max<ptrdiff_t>(0, (ptrdiff_t)later.anchor + delta);
+        }
+    }
+    editorStoreCarets(app, std::move(carets), primary);
+}
+
+// Moves every caret with a one-caret motion, then merges those that meet
+static void editorMoveAtCarets(App& app, const std::function<void()>& move) {
+    if (app.editorExtraCarets.empty()) {
+        move();
+        return;
+    }
+    std::vector<App::EditorCaret> carets = editorAllCarets(app);
+    const size_t primary = carets.size() - 1;
+    for (auto& caret : carets) {
+        editorSetPrimaryCaret(app, caret);
+        move();
+        caret = editorPrimaryCaret(app);
+    }
+    editorStoreCarets(app, std::move(carets), primary);
+}
+
+// Line-start edits (indent, outdent) would run twice on a line holding two
+// carets; keep the first caret of each line
+static void editorOneCaretPerLine(App& app) {
+    if (app.editorExtraCarets.empty()) return;
+    const std::vector<App::EditorCaret> carets = editorAllCarets(app);
+    // The primary claims its line first; extras keep the lines still free
+    std::vector<App::EditorCaret> kept{carets.back()};
+    std::vector<size_t> lines{getLineFromPos(app, carets.back().pos)};
+    for (size_t i = 0; i + 1 < carets.size(); ++i) {
+        const size_t line = getLineFromPos(app, carets[i].pos);
+        if (std::find(lines.begin(), lines.end(), line) != lines.end()) continue;
+        lines.push_back(line);
+        kept.push_back(carets[i]);
+    }
+    editorStoreCarets(app, std::move(kept), 0);
+}
+
+void editorClearExtraCarets(App& app) {
+    app.editorExtraCarets.clear();
+}
+
+// Alt+click: a caret where there was none, or none where there was one
+// (the last caret always stays). The new caret becomes the primary.
+static void editorToggleCaretAt(App& app, size_t pos) {
+    std::vector<App::EditorCaret> carets = editorAllCarets(app);
+    for (size_t i = 0; i < carets.size(); ++i) {
+        if (carets[i].hasSelection || carets[i].pos != pos) continue;
+        if (carets.size() == 1) return;
+        carets.erase(carets.begin() + (ptrdiff_t)i);
+        const size_t primary = carets.size() - 1;
+        editorStoreCarets(app, std::move(carets), primary);
+        return;
+    }
+    App::EditorCaret added;
+    added.pos = added.anchor = pos;
+    carets.push_back(added);
+    const size_t primary = carets.size() - 1;
+    editorStoreCarets(app, std::move(carets), primary);
+}
+
+// Ctrl+Alt+Up / Ctrl+Alt+Down: a caret on the line above the top caret or
+// below the bottom one, at the same column (kept across short lines). It
+// becomes the primary, so the view follows it.
+static void editorAddCaretVertical(App& app, bool down) {
+    std::vector<App::EditorCaret> carets = editorAllCarets(app);
+    const App::EditorCaret* edge = &carets.back();
+    for (const auto& caret : carets) {
+        if (down ? caret.pos > edge->pos : caret.pos < edge->pos) edge = &caret;
+    }
+    const size_t line = getLineFromPos(app, edge->pos);
+    if (down ? line + 1 >= app.editorLineStarts.size() : line == 0) return;
+    // In wrap mode desiredCol is only a flag beside desiredX, never a column
+    const bool wrap = editorWrapOn(app);
+    const size_t column = !wrap && edge->desiredCol >= 0
+                              ? (size_t)edge->desiredCol
+                              : edge->pos - app.editorLineStarts[line];
+    const size_t target = down ? line + 1 : line - 1;
+    App::EditorCaret added;
+    added.pos = added.anchor =
+        app.editorLineStarts[target] + std::min(column, getLineLength(app, target));
+    added.desiredCol = wrap ? -1 : (int)column;
+    carets.push_back(added);
+    const size_t primary = carets.size() - 1;
+    editorStoreCarets(app, std::move(carets), primary);
+}
+
+// Ctrl+D: select the word at the caret; with a selection, add the next
+// occurrence of its text (wrapping at the end) as another selected caret
+static void editorSelectNextOccurrence(App& app) {
+    if (!app.editorHasSelection) {
+        size_t start = 0, end = 0;
+        editorWordAt(app, app.editorCursorPos, start, end);
+        if (start == end) return;
+        app.editorSelStart = start;
+        app.editorSelEnd = end;
+        app.editorCursorPos = end;
+        app.editorHasSelection = true;
+        app.editorDesiredCol = -1;
+        return;
+    }
+    const std::wstring needle = app.editorText.substr(
+        std::min(app.editorSelStart, app.editorSelEnd),
+        std::max(app.editorSelStart, app.editorSelEnd) - std::min(app.editorSelStart, app.editorSelEnd));
+    std::vector<App::EditorCaret> carets = editorAllCarets(app);
+    size_t from = 0;
+    for (const auto& caret : carets) from = std::max(from, caretEnd(caret));
+    auto taken = [&](size_t at) {
+        for (const auto& caret : carets) {
+            if (caretStart(caret) < at + needle.size() && at < caretEnd(caret)) return true;
+        }
+        return false;
+    };
+    size_t found = app.editorText.find(needle, from);
+    if (found == std::wstring::npos || taken(found)) {
+        found = app.editorText.find(needle);
+        while (found != std::wstring::npos && taken(found)) {
+            found = app.editorText.find(needle, found + 1);
+        }
+    }
+    if (found == std::wstring::npos) return;
+    App::EditorCaret added;
+    added.anchor = found;
+    added.pos = found + needle.size();
+    added.hasSelection = true;
+    carets.push_back(added);
+    const size_t primary = carets.size() - 1;
+    editorStoreCarets(app, std::move(carets), primary);
+}
+
+// Alt+Up / Alt+Down: each caret's line, or every line its selection
+// touches, trades places with the line above or below, carets riding
+// along. Neighbouring blocks move together; nothing moves when one block
+// is already at the edge. One undo step (#251).
+static bool editorMoveLines(App& app, bool down) {
+    std::vector<App::EditorCaret> carets = editorAllCarets(app);
+    struct Block { size_t first, last; };
+    std::vector<Block> blocks;
+    for (const auto& caret : carets) {
+        const size_t start = caretStart(caret), end = caretEnd(caret);
+        Block block{getLineFromPos(app, start), getLineFromPos(app, end)};
+        // A selection ending at a line start does not take that line along
+        if (end > start && block.last > block.first &&
+            end == app.editorLineStarts[block.last]) {
+            block.last--;
+        }
+        blocks.push_back(block);
+    }
+    std::sort(blocks.begin(), blocks.end(),
+              [](const Block& a, const Block& b) { return a.first < b.first; });
+    std::vector<Block> merged;
+    for (const Block& block : blocks) {
+        if (!merged.empty() && block.first <= merged.back().last + 1) {
+            merged.back().last = std::max(merged.back().last, block.last);
+        } else {
+            merged.push_back(block);
+        }
+    }
+    const size_t lineCount = app.editorLineStarts.size();
+    if (down ? merged.back().last + 1 >= lineCount : merged.front().first == 0) return false;
+
+    UndoGroupScope group(app);
+    const size_t primary = carets.size() - 1;
+    const size_t cursorBefore = app.editorCursorPos;
+    for (const Block& block : merged) {
+        // Swapping equal-length text keeps every other block's offsets
+        const size_t blockStart = app.editorLineStarts[block.first];
+        const size_t blockEnd = getLineEnd(app, block.last);
+        const size_t other = down ? block.last + 1 : block.first - 1;
+        const size_t otherStart = app.editorLineStarts[other];
+        const size_t otherEnd = getLineEnd(app, other);
+        const std::wstring blockText = app.editorText.substr(blockStart, blockEnd - blockStart);
+        const std::wstring otherText = app.editorText.substr(otherStart, otherEnd - otherStart);
+        const size_t regionStart = down ? blockStart : otherStart;
+        const size_t regionEnd = down ? otherEnd : blockEnd;
+        const std::wstring removed = app.editorText.substr(regionStart, regionEnd - regionStart);
+        const std::wstring inserted = down ? otherText + L"\n" + blockText
+                                           : blockText + L"\n" + otherText;
+        const ptrdiff_t shift = down ? (ptrdiff_t)otherText.size() + 1
+                                     : -((ptrdiff_t)otherText.size() + 1);
+        for (auto& caret : carets) {
+            if (caret.pos >= blockStart && caret.pos <= blockEnd)
+                caret.pos = (size_t)((ptrdiff_t)caret.pos + shift);
+            if (caret.anchor >= blockStart && caret.anchor <= blockEnd)
+                caret.anchor = (size_t)((ptrdiff_t)caret.anchor + shift);
+        }
+        pushReplaceUndo(app, regionStart, removed, inserted, cursorBefore,
+                        carets[primary].pos);
+        app.editorText.replace(regionStart, removed.size(), inserted);
+    }
+    rebuildLineStarts(app);
+    for (auto& caret : carets) caret.desiredCol = -1;
+    editorStoreCarets(app, std::move(carets), primary);
+    return true;
+}
+
 // --- Clipboard ---
 
 static void editorCopyToClipboard(HWND hwnd, const std::wstring& text) {
@@ -631,6 +1022,12 @@ static std::wstring editorGetClipboard(HWND hwnd) {
 
 // --- Scroll helpers ---
 
+// Space the source keeps clear above the window bottom: at least a line,
+// and enough for the caret line to sit above the Read pill (#250)
+static float editorBottomClearance(const App& app, float lineHeight) {
+    return std::max(lineHeight, readPillClearance(app));
+}
+
 static void editorEnsureCursorVisible(App& app) {
     if (app.editorLineStarts.empty()) return;
     size_t line = getLineFromPos(app, app.editorCursorPos);
@@ -652,11 +1049,12 @@ static void editorEnsureCursorVisible(App& app) {
     }
 
     float viewportH = (float)app.height - chromeTopHeight(app);
+    float bottomClearance = editorBottomClearance(app, lineHeight);
     if (cursorY < app.editorScrollY + lineHeight) {
         app.editorScrollY = std::max(0.0f, cursorY - lineHeight);
     }
-    if (cursorY + lineHeight > app.editorScrollY + viewportH - lineHeight) {
-        app.editorScrollY = cursorY + lineHeight * 2 - viewportH;
+    if (cursorY + lineHeight > app.editorScrollY + viewportH - bottomClearance) {
+        app.editorScrollY = cursorY + lineHeight + bottomClearance - viewportH;
     }
     app.editorScrollY = std::max(0.0f, app.editorScrollY);
 
@@ -718,6 +1116,7 @@ static void scheduleReparse(App& app);  // defined below with the debounce
 void editorReplaceCurrent(App& app, HWND hwnd) {
     if (!app.editMode || app.searchQuery.empty()) return;
     if (app.editorSearchMatches.empty()) return;
+    app.editorExtraCarets.clear();  // find and replace work at one caret
     int idx = app.editorSearchCurrentIndex;
     if (idx < 0 || idx >= (int)app.editorSearchMatches.size()) idx = 0;
     const App::EditorSearchMatch m = app.editorSearchMatches[idx];
@@ -756,6 +1155,7 @@ void editorReplaceAll(App& app, HWND hwnd) {
     if (!app.editMode || app.searchQuery.empty()) return;
     performEditorSearch(app);
     if (app.editorSearchMatches.empty()) return;
+    app.editorExtraCarets.clear();
 
     // Back to front so earlier offsets stay valid; each hunk is its own
     // undo entry, so Ctrl+Z walks the replacement back out
@@ -783,6 +1183,7 @@ void editorReplaceAll(App& app, HWND hwnd) {
 void scrollEditorToMatch(App& app) {
     if (app.editorSearchMatches.empty() || app.editorSearchCurrentIndex < 0 ||
         app.editorSearchCurrentIndex >= (int)app.editorSearchMatches.size()) return;
+    app.editorExtraCarets.clear();
 
     const auto& match = app.editorSearchMatches[app.editorSearchCurrentIndex];
 
@@ -808,6 +1209,35 @@ void scrollEditorToMatch(App& app) {
 
 // --- Debounced reparse ---
 
+// --- Word and character count (#240) ---
+
+// Counts what a reader sees: the parsed Markdown's prose, link text and
+// inline code. Plain-text and diagram documents count as they stand.
+static TextCounts editorCountSource(App& app, const std::wstring& source) {
+    if (isPlainTextDocumentPath(app.currentFile) || isMermaidDocumentPath(app.currentFile)) {
+        return countPlainText(source);
+    }
+    auto result = parseDocument(app.parser, toUtf8(source), app.currentFile);
+    std::wstring visible;
+    if (result.success) appendCountableText(result.root, visible);
+    return countPlainText(visible);
+}
+
+// Document totals from a tree the reparse just built, or by parsing the
+// buffer when the preview pane is hidden
+static void editorRefreshDocCounts(App& app, const ElementPtr& parsed) {
+    if (parsed && !isPlainTextDocumentPath(app.currentFile) &&
+        !isMermaidDocumentPath(app.currentFile)) {
+        std::wstring visible;
+        appendCountableText(parsed, visible);
+        app.editorDocCounts = countPlainText(visible);
+    } else {
+        app.editorDocCounts = editorCountSource(app, app.editorText);
+    }
+    app.editorDocCountsStale = false;
+    app.editorSelCountsKey.clear();
+}
+
 static void scheduleReparse(App& app) {
     if (!app.editorDirty) {
         app.editorDirty = true;
@@ -819,8 +1249,9 @@ static void scheduleReparse(App& app) {
         std::wstring title = L"Tinta - * " + fname;
         SetWindowTextW(app.hwnd, title.c_str());
     }
-    // No preview pane — nothing to keep in sync until it's shown again
-    if (!app.editorShowPreview) return;
+    // No preview pane and no word count — nothing to keep in sync until
+    // one of them is shown again
+    if (!app.editorShowPreview && !app.showWordCount) return;
     // Debounce: coalesce rapid typing into one reparse per pause. WM_TIMER
     // calls editorReparse, which kills the timer. 300ms so brief pauses
     // mid-typing (common with IME input) don't trigger a full preview
@@ -845,7 +1276,10 @@ void editorReparse(App& app, bool force) {
         auto metadata = fm::parse(utf8);
         if (metadata.present) observeFrontmatter(app, metadata.properties);
     }
-    if (!editorPreviewVisible(app) && !force) return;
+    if (!editorPreviewVisible(app) && !force) {
+        if (app.showWordCount) editorRefreshDocCounts(app, nullptr);
+        return;
+    }
 
     // Build line-to-byte-offset mapping for scroll sync
     app.editorLineByteOffsets.clear();
@@ -863,11 +1297,41 @@ void editorReparse(App& app, bool force) {
         app.layoutDirty = true;
         InvalidateRect(app.hwnd, nullptr, FALSE);
     }
+    if (app.showWordCount) editorRefreshDocCounts(app, result.success ? result.root : nullptr);
 }
 
 // --- Mode transitions ---
 
-static void enterEditModeWithContent(App& app, const std::string& content) {
+// New-user hints (#245): the first few edit sessions show the Esc hint
+// and fade the Read button in; later sessions keep both quiet
+constexpr int kEditHintSessions = 3;
+constexpr double kReadButtonIntroSeconds = 1.6;
+constexpr float kReadButtonFadeIn = 0.15f;
+constexpr float kReadButtonFadeOut = 0.4f;
+
+static double hintClockSeconds() {
+    using namespace std::chrono;
+    return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+
+static void editorReadingButtonIntro(App& app) {
+    app.readButtonIntroUntil = hintClockSeconds() + kReadButtonIntroSeconds;
+    app.readButtonLastTick = hintClockSeconds();
+    startNotificationTimer(app);
+}
+
+static void editHintSessionBegin(App& app) {
+    app.editHintSession = app.editHintsShown < kEditHintSessions;
+    if (!app.editHintSession) return;
+    app.editHintsShown++;
+    signalHintKey(app, SIGI_INFO, "toast.exit_edit_hint");
+    editorReadingButtonIntro(app);
+}
+
+// intro = false when a parked edit buffer comes back on a tab switch: the
+// session goes on, it does not start over
+static void enterEditModeWithContent(App& app, const std::string& content,
+                                     bool intro = true) {
     app.editorReadingPreview = false;
     // The unified editor owns the whole layout: side panels close on
     // entry, pinned or not (#156) - the pin survives for the next open
@@ -880,6 +1344,10 @@ static void enterEditModeWithContent(App& app, const std::string& content) {
     app.folderBrowserNaming = 0;
     tableEditCancel(app);  // no stale cell editor from a previous buffer
 
+    // A new buffer starts with one caret and a fresh count (#251, #240)
+    app.editorExtraCarets.clear();
+    app.editorDocCountsStale = true;
+    app.editorSelCountsKey.clear();
     app.editorText = fromUtf8(content);
     // Normalize \r\n to \n
     std::wstring normalized;
@@ -959,8 +1427,13 @@ static void enterEditModeWithContent(App& app, const std::string& content) {
     // The file-watch tick keeps running: its reload path guards editMode
     // itself, and the per-tab deleted-file sweep needs the heartbeat
 
-    // Show notification
-    signalPushKey(app, SIG_INFO, SIGI_INFO, "toast.exit_edit_hint");
+    // The Read button starts hidden; the first few sessions teach the
+    // exits, then stay quiet (#245)
+    app.readButtonAlpha = 0.0f;
+    app.readButtonHover = false;
+    app.readButtonIntroUntil = 0.0;
+    app.editSeamHover = false;
+    if (intro) editHintSessionBegin(app);
     updateBlinkTimer(app);
 
     // Force layout at new width
@@ -993,7 +1466,7 @@ void editorScrollToSourceOffset(App& app, size_t byteOffset) {
 
 void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
                        float scrollY, size_t cursor) {
-    enterEditModeWithContent(app, toUtf8(text));
+    enterEditModeWithContent(app, toUtf8(text), false);
     app.editorDirty = dirty;
     app.editorCursorPos = std::min(cursor, app.editorText.size());
     app.editorScrollY = std::max(0.0f, scrollY);
@@ -1044,6 +1517,23 @@ void enterQuickNoteMode(App& app) {
 // back at its original file when it had one
 void enterRecoveredDraft(App& app, HWND hwnd, const std::string& content,
                          const std::string& origPath) {
+    // The draft of a file that is open already, as a restored session tab
+    // usually is (#252), takes over that tab while it has no unsaved edits
+    // of its own, instead of opening a second tab for the same file
+    if (!origPath.empty()) {
+        for (size_t i = 0; i < app.tabs.size(); i++) {
+            const bool active = (int)i == app.activeTab;
+            const std::string& path = active ? app.currentFile : app.tabs[i].path;
+            const bool dirty = active ? (app.editMode && app.editorDirty)
+                                      : (app.tabs[i].editMode && app.tabs[i].editorDirty);
+            if (dirty || _stricmp(path.c_str(), origPath.c_str()) != 0) continue;
+            tabActivate(app, hwnd, (int)i);
+            enterEditModeWithContent(app, content);
+            app.editorDirty = true;
+            updateWindowTitle(app);
+            return;
+        }
+    }
     tabOpenQuickNote(app, hwnd);
     app.currentFile = origPath;
     enterEditModeWithContent(app, content);
@@ -1074,9 +1564,11 @@ void exitEditMode(App& app) {
 
     app.editMode = false;
     app.editorReadingPreview = false;
+    signalFadeHints(app);  // the mode's hints go with it (#245)
     app.clearEditorLineLayoutCache();
     app.editorText.clear();
     app.editorLineStarts.clear();
+    app.editorExtraCarets.clear();
     app.undoStack.clear();
     app.redoStack.clear();
     app.editorSearchMatches.clear();
@@ -1133,25 +1625,101 @@ void setEditorReadingPreview(App& app, bool reading) {
     app.editorReadingPreview = reading;
     app.editorSelecting = app.selecting = app.hasSelection = false;
     app.escPressedOnce = false;
+    // A hint session shows the button that leads back (#245)
+    if (app.editHintSession) editorReadingButtonIntro(app);
     editorReparse(app, true);
     app.layoutDirty = true;
     updateBlinkTimer(app);
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
+// The pill names its shortcut, so it grows to fit its label: Read carries
+// Ctrl+Shift+E since Esc leaves edit mode again (#242). It never sits over
+// the text for good (#245): see editorReadingButtonShown.
 D2D1_RECT_F editorReadingButtonRect(const App& app) {
-    return {dpi(app, 56), static_cast<float>(app.height)-dpi(app, 42),
-            dpi(app, 188), static_cast<float>(app.height)-dpi(app, 12)};
+    float width = dpi(app, 132);
+    if (app.dwriteFactory && app.codeFormat) {
+        const wchar_t* label = tr(app, app.editorReadingPreview ? "editor.resume" : "editor.read");
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        DWRITE_TEXT_METRICS metrics{};
+        if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(label, static_cast<UINT32>(wcslen(label)),
+                app.codeFormat, 4096.0f, 256.0f, layout.GetAddressOf()))) {
+            useUiFontFallback(app, layout.Get());
+            if (SUCCEEDED(layout->GetMetrics(&metrics)))
+                width = std::max(width, metrics.widthIncludingTrailingWhitespace + dpi(app, 28));
+        }
+    }
+    return {dpi(app, 56), static_cast<float>(app.height)-dpi(app, kReadPillLift + kReadPillHeight),
+            dpi(app, 56) + width, static_cast<float>(app.height)-dpi(app, kReadPillLift)};
 }
+
+// The insert menu may open over the button's corner: the menu wins
+static bool readButtonWanted(const App& app, double now) {
+    return !app.editCtxOpen &&
+           (app.readButtonHover || now < app.readButtonIntroUntil);
+}
+
+bool editorReadingButtonShown(const App& app) {
+    return app.editMode && !app.editCtxOpen &&
+           (app.readButtonHover || app.readButtonAlpha >= 0.5f);
+}
+
+bool editorReadingButtonNeedsTicks(const App& app) {
+    if (!app.editMode) return false;
+    double now = hintClockSeconds();
+    // The intro's end needs a tick too, to start the fade-out
+    if (now < app.readButtonIntroUntil) return true;
+    return readButtonWanted(app, now) ? app.readButtonAlpha < 1.0f
+                                      : app.readButtonAlpha > 0.0f;
+}
+
+void editorReadingButtonHover(App& app, float x, float y) {
+    D2D1_RECT_F r = editorReadingButtonRect(app);
+    bool over = app.editMode && !app.editorSelecting && !app.draggingSeparator &&
+                !app.editCtxOpen &&
+                x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    if (over == app.readButtonHover) return;
+    app.readButtonHover = over;
+    app.readButtonLastTick = hintClockSeconds();
+    startNotificationTimer(app);
+    if (app.hwnd) {
+        if (over) {
+            // The fade-out needs to hear the pointer leave the window
+            TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, app.hwnd, 0};
+            TrackMouseEvent(&track);
+        }
+        InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+}
+
 void renderEditorReadingButton(App& app) {
     if (!app.editMode || !app.brush || !app.codeFormat) return;
+    // Fade toward the wanted state at a pace set by the clock, not the
+    // frame rate
+    double now = hintClockSeconds();
+    float dt = app.readButtonLastTick > 0.0
+                   ? (float)std::min(0.25, std::max(0.0, now - app.readButtonLastTick))
+                   : 0.0f;
+    app.readButtonLastTick = now;
+    if (readButtonWanted(app, now)) {
+        app.readButtonAlpha = std::min(1.0f, app.readButtonAlpha + dt / kReadButtonFadeIn);
+    } else {
+        app.readButtonAlpha = std::max(0.0f, app.readButtonAlpha - dt / kReadButtonFadeOut);
+    }
+    float alpha = app.readButtonAlpha;
+    if (alpha <= 0.01f) return;
     auto r=editorReadingButtonRect(app);
-    app.brush->SetColor(app.theme.codeBackground);
+    D2D1_COLOR_F fill = app.theme.codeBackground;
+    fill.a *= alpha;
+    app.brush->SetColor(fill);
     app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(r,dpi(app,5),dpi(app,5)),app.brush);
-    app.brush->SetColor(app.theme.accent);
+    D2D1_COLOR_F ink = app.theme.accent;
+    ink.a *= alpha;
+    app.brush->SetColor(ink);
     auto label=tr(app,app.editorReadingPreview ? "editor.resume" : "editor.read");
     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
     if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(label,static_cast<UINT32>(wcslen(label)),app.codeFormat,r.right-r.left,r.bottom-r.top,layout.GetAddressOf()))) {
+        useUiFontFallback(app, layout.Get());
         layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         app.renderTarget->DrawTextLayout({r.left,r.top},layout.Get(),app.brush);
@@ -1176,7 +1744,7 @@ static bool promptSaveAsPath(App& app, HWND hwnd) {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = L"md";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (!GetSaveFileNameW(&ofn)) return false;
+    if (!runSaveFileDialog(ofn)) return false;
     app.currentFile = toUtf8(path);
     return true;
 }
@@ -1207,7 +1775,7 @@ void openFileDialog(App& app, HWND hwnd) {
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
                 OFN_HIDEREADONLY;
-    if (!GetOpenFileNameW(&ofn)) return;
+    if (!runOpenFileDialog(ofn)) return;
 
     // Only an empty launcher/note is replaced. A document or unsaved
     // buffer stays in its tab, including when the picked path is open.
@@ -1561,6 +2129,276 @@ void confirmExitAction(App& app, HWND hwnd, int action) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
+// The carets' selections in document order, one per line (copy, cut)
+std::wstring editorCaretSelectionsText(const App& app) {
+    std::vector<App::EditorCaret> carets = editorAllCarets(app);
+    std::sort(carets.begin(), carets.end(),
+              [](const App::EditorCaret& a, const App::EditorCaret& b) {
+                  return caretStart(a) < caretStart(b);
+              });
+    std::wstring text;
+    bool first = true;
+    for (const auto& caret : carets) {
+        if (!caret.hasSelection) continue;
+        if (!first) text += L'\n';
+        text.append(app.editorText, caretStart(caret), caretEnd(caret) - caretStart(caret));
+        first = false;
+    }
+    return text;
+}
+
+// Paste at every caret: a clipboard holding one line per caret (what a
+// multi-caret copy produces) hands each caret its own line; anything else
+// is pasted whole at each (#251)
+void editorPasteAtCarets(App& app, HWND hwnd, const std::wstring& paste) {
+    if (paste.empty()) return;
+    std::vector<std::wstring> lines;
+    for (size_t start = 0;;) {
+        size_t newline = paste.find(L'\n', start);
+        lines.push_back(paste.substr(start, newline == std::wstring::npos
+                                                ? std::wstring::npos : newline - start));
+        if (newline == std::wstring::npos) break;
+        start = newline + 1;
+    }
+    if (lines.size() > 1 && lines.back().empty()) lines.pop_back();
+    const bool spread = lines.size() == app.editorExtraCarets.size() + 1;
+    editorEditAtCarets(app, [&](size_t rank) {
+        const std::wstring& text = spread ? lines[rank] : paste;
+        if (app.editorHasSelection) editorDeleteSelection(app);
+        size_t before = app.editorCursorPos;
+        app.editorText.insert(before, text);
+        app.editorCursorPos = before + text.size();
+        pushUndo(app, App::EditAction::Insert, before, text, before, app.editorCursorPos);
+        rebuildLineStarts(app);
+    });
+    app.editorDesiredCol = -1;
+    scheduleReparse(app);
+    editorEnsureCursorVisible(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// Counts for the selected text of every caret, cached by the selections'
+// ranges; false without a selection. A drag across a huge range recounts
+// once it settles rather than on every mouse move.
+static bool editorSelectionCounts(App& app, TextCounts& counts) {
+    std::wstring key;
+    size_t selected = 0;
+    for (const auto& caret : editorAllCarets(app)) {
+        if (!caret.hasSelection) continue;
+        key += std::to_wstring(caretStart(caret)) + L'-' + std::to_wstring(caretEnd(caret)) + L';';
+        selected += caretEnd(caret) - caretStart(caret);
+    }
+    if (key.empty()) return false;
+    key += std::to_wstring(app.editorText.size()) + L'/' +
+           std::to_wstring(app.undoStack.size()) + L'/' + std::to_wstring(app.redoStack.size());
+    if (key != app.editorSelCountsKey &&
+        !(app.editorSelecting && selected > 200000 && !app.editorSelCountsKey.empty())) {
+        app.editorSelCounts = editorCountSource(app, editorCaretSelectionsText(app));
+        app.editorSelCountsKey = key;
+    }
+    counts = app.editorSelCounts;
+    return true;
+}
+
+static std::wstring editorCountNumber(size_t value) {
+    std::wstring digits = std::to_wstring(value);
+    for (ptrdiff_t at = (ptrdiff_t)digits.size() - 3; at > 0; at -= 3) {
+        digits.insert((size_t)at, L",");
+    }
+    return digits;
+}
+
+// "1,234 words · 5,678 characters", "12 / 1,234 words · ..." while text is
+// selected, or the words alone
+static std::wstring editorCountLabel(const App& app, const TextCounts* selection,
+                                     bool wordsOnly) {
+    auto part = [&](size_t selected, size_t total, const char* one, const char* many) {
+        std::wstring number = selection ? editorCountNumber(selected) + L" / " +
+                                              editorCountNumber(total)
+                                        : editorCountNumber(total);
+        wchar_t text[96];
+        swprintf_s(text, _countof(text), tr(app, total == 1 ? one : many), number.c_str());
+        return std::wstring(text);
+    };
+    const TextCounts& doc = app.editorDocCounts;
+    std::wstring label = part(selection ? selection->words : 0, doc.words,
+                              "editor.count.word", "editor.count.words");
+    if (!wordsOnly) {
+        label += L" \xb7 ";
+        label += part(selection ? selection->characters : 0, doc.characters,
+                      "editor.count.char", "editor.count.chars");
+    }
+    return label;
+}
+
+// The count sits beside the Read pill in its shape, quieter (#240). The
+// characters drop out, then the whole chip, when the pane is too narrow.
+void renderEditorWordCount(App& app) {
+    app.editorWordCountRect = {};
+    if (!app.editMode || !app.showWordCount || !app.brush || !app.codeFormat ||
+        !app.dwriteFactory) {
+        return;
+    }
+    if (app.editorDocCountsStale) editorRefreshDocCounts(app, nullptr);
+    TextCounts selection;
+    const bool selected = !app.editorReadingPreview && editorSelectionCounts(app, selection);
+    const D2D1_RECT_F pill = editorReadingButtonRect(app);
+    const float left = pill.right + dpi(app, 8.0f);
+    const float limit = (app.editorReadingPreview ? (float)app.width : editorPaneWidth(app)) -
+                        dpi(app, 12.0f);
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+    float width = 0.0f;
+    for (bool wordsOnly : {false, true}) {
+        const std::wstring label = editorCountLabel(app, selected ? &selection : nullptr, wordsOnly);
+        layout.Reset();
+        DWRITE_TEXT_METRICS metrics{};
+        if (FAILED(app.dwriteFactory->CreateTextLayout(label.c_str(), (UINT32)label.size(),
+                app.codeFormat, 4096.0f, pill.bottom - pill.top, layout.GetAddressOf()))) {
+            return;
+        }
+        useUiFontFallback(app, layout.Get());
+        if (FAILED(layout->GetMetrics(&metrics))) return;
+        width = metrics.widthIncludingTrailingWhitespace + dpi(app, 28.0f);
+        if (left + width <= limit) break;
+        layout.Reset();
+    }
+    if (!layout) return;
+    const D2D1_RECT_F chip = D2D1::RectF(left, pill.top, left + width, pill.bottom);
+    app.editorWordCountRect = chip;
+    app.brush->SetColor(app.theme.codeBackground);
+    app.renderTarget->FillRoundedRectangle(
+        D2D1::RoundedRect(chip, dpi(app, 5.0f), dpi(app, 5.0f)), app.brush);
+    layout->SetMaxWidth(chip.right - chip.left);
+    layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    D2D1_COLOR_F ink = app.theme.text;
+    ink.a = 0.7f;
+    app.brush->SetColor(ink);
+    app.renderTarget->DrawTextLayout({chip.left, chip.top}, layout.Get(), app.brush);
+}
+
+// Keys that only move the caret: arrows, Home/End and the page keys (with
+// Ctrl, the word and document motions; Ctrl+Up/Down and Ctrl+Page stay inert)
+static bool editorNavigationKey(WPARAM key, bool ctrl) {
+    switch (key) {
+        case VK_LEFT: case VK_RIGHT: case VK_HOME: case VK_END:
+            return true;
+        case VK_UP: case VK_DOWN: case VK_PRIOR: case VK_NEXT:
+            return !ctrl;
+        default:
+            return false;
+    }
+}
+
+// Moves the primary caret for a navigation key; Shift extends its selection.
+// Multi-caret callers run it once per caret (#251).
+static void editorNavigate(App& app, WPARAM key, bool ctrl, bool shift) {
+    // These keys choose a new logical insertion position. Vertical movement
+    // and modifier-only events retain the visual-row side of a prior hit.
+    if (key != VK_UP && key != VK_DOWN) {
+        app.editorCaretUpstreamPos = std::wstring::npos;
+    }
+    if (ctrl) {
+        editorStartOrExtendSelection(app, shift);
+        switch (key) {
+            case VK_HOME: app.editorCursorPos = 0; break;
+            case VK_END: app.editorCursorPos = app.editorText.size(); break;
+            case VK_LEFT: app.editorCursorPos = editorWordLeft(app, app.editorCursorPos); break;
+            case VK_RIGHT: app.editorCursorPos = editorWordRight(app, app.editorCursorPos); break;
+        }
+        app.editorDesiredCol = -1;
+        if (shift) editorUpdateSelEnd(app);
+        else app.editorHasSelection = false;
+        return;
+    }
+    switch (key) {
+        case VK_LEFT:
+            editorStartOrExtendSelection(app, shift);
+            if (!shift && app.editorHasSelection) {
+                app.editorCursorPos = editorSelMin(app);
+                app.editorHasSelection = false;
+            } else if (app.editorCursorPos > 0) {
+                app.editorCursorPos = editorPrevCharStart(app, app.editorCursorPos);
+            }
+            app.editorDesiredCol = -1;
+            if (shift) editorUpdateSelEnd(app);
+            return;
+
+        case VK_RIGHT:
+            editorStartOrExtendSelection(app, shift);
+            if (!shift && app.editorHasSelection) {
+                app.editorCursorPos = editorSelMax(app);
+                app.editorHasSelection = false;
+            } else if (app.editorCursorPos < app.editorText.size()) {
+                app.editorCursorPos = editorNextCharEnd(app, app.editorCursorPos);
+            }
+            app.editorDesiredCol = -1;
+            if (shift) editorUpdateSelEnd(app);
+            return;
+
+        case VK_UP:
+        case VK_DOWN: {
+            bool down = (key == VK_DOWN);
+            editorStartOrExtendSelection(app, shift);
+            size_t line = getLineFromPos(app, app.editorCursorPos);
+            if (editorWrapOn(app)) {
+                editorMoveCursorVertical(app, down);
+            } else if (!down && line > 0) {
+                size_t col = (app.editorDesiredCol >= 0) ? (size_t)app.editorDesiredCol : getColFromPos(app, app.editorCursorPos);
+                if (app.editorDesiredCol < 0) app.editorDesiredCol = (int)col;
+                size_t prevLineLen = getLineLength(app, line - 1);
+                app.editorCursorPos = app.editorLineStarts[line - 1] + std::min(col, prevLineLen);
+            } else if (down && line + 1 < app.editorLineStarts.size()) {
+                size_t col = (app.editorDesiredCol >= 0) ? (size_t)app.editorDesiredCol : getColFromPos(app, app.editorCursorPos);
+                if (app.editorDesiredCol < 0) app.editorDesiredCol = (int)col;
+                size_t nextLineLen = getLineLength(app, line + 1);
+                app.editorCursorPos = app.editorLineStarts[line + 1] + std::min(col, nextLineLen);
+            }
+            if (shift) editorUpdateSelEnd(app);
+            else app.editorHasSelection = false;
+            return;
+        }
+
+        case VK_HOME: {
+            editorStartOrExtendSelection(app, shift);
+            size_t line = getLineFromPos(app, app.editorCursorPos);
+            app.editorCursorPos = app.editorLineStarts[line];
+            app.editorDesiredCol = -1;
+            if (shift) editorUpdateSelEnd(app);
+            else app.editorHasSelection = false;
+            return;
+        }
+
+        case VK_END: {
+            editorStartOrExtendSelection(app, shift);
+            size_t line = getLineFromPos(app, app.editorCursorPos);
+            app.editorCursorPos = getLineEnd(app, line);
+            app.editorDesiredCol = -1;
+            if (shift) editorUpdateSelEnd(app);
+            else app.editorHasSelection = false;
+            return;
+        }
+
+        case VK_PRIOR:
+        case VK_NEXT: {
+            editorStartOrExtendSelection(app, shift);
+            float scale = app.contentScale * app.zoomFactor;
+            float lineHeight = app.editorTextFormat ? app.editorTextFormat->GetFontSize() * 1.5f : 20.0f * scale;
+            int pageLines = std::max(1, (int)(app.height / lineHeight) - 2);
+            size_t line = getLineFromPos(app, app.editorCursorPos);
+            size_t col = getColFromPos(app, app.editorCursorPos);
+            size_t targetLine = key == VK_PRIOR
+                ? ((line > (size_t)pageLines) ? line - pageLines : 0)
+                : std::min(line + pageLines, app.editorLineStarts.size() - 1);
+            size_t targetLineLen = getLineLength(app, targetLine);
+            app.editorCursorPos = app.editorLineStarts[targetLine] + std::min(col, targetLineLen);
+            if (shift) editorUpdateSelEnd(app);
+            else app.editorHasSelection = false;
+            return;
+        }
+    }
+}
+
 void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     if (!shortcutModifiersAllowed(static_cast<unsigned>(wParam))) return;
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -1611,8 +2449,43 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return;
     }
 
+    // Esc first folds extra carets back into one (#251)
+    if (wParam == VK_ESCAPE && !app.editorExtraCarets.empty() && !app.editorReadingPreview) {
+        app.editorExtraCarets.clear();
+        app.escPressedOnce = false;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     if (wParam == VK_ESCAPE) {
-        setEditorReadingPreview(app, !app.editorReadingPreview);
+        // The reading view (#236) is a preview laid over the editor: Esc
+        // closes it and returns to the source. Everywhere else Esc keeps
+        // its documented meaning and leaves edit mode (#242).
+        if (app.editorReadingPreview) {
+            setEditorReadingPreview(app, false);
+            return;
+        }
+        // Dirty buffer: straight to the dialog, it is the guard (#106).
+        // Clean buffer: keep the documented double-Esc exit.
+        if (app.editorDirty) {
+            exitEditMode(app);
+            app.escPressedOnce = false;
+            return;
+        }
+        auto now = std::chrono::steady_clock::now();
+        if (app.escPressedOnce) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - app.lastEscTime).count();
+            if (elapsed < 500) {
+                exitEditMode(app);
+                app.escPressedOnce = false;
+                return;
+            }
+        }
+        app.escPressedOnce = true;
+        app.lastEscTime = now;
+        signalHintKey(app, SIGI_INFO, "toast.exit_confirm");
+        InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
     app.escPressedOnce = false;
@@ -1641,11 +2514,12 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         }
     }
 
-    // These keys choose a new logical insertion position. Vertical movement
-    // and modifier-only events retain the visual-row side of a prior hit.
-    if (wParam == VK_LEFT || wParam == VK_RIGHT || wParam == VK_HOME ||
-        wParam == VK_END || wParam == VK_PRIOR || wParam == VK_NEXT) {
-        app.editorCaretUpstreamPos = std::wstring::npos;
+    // Motion keys move every caret (#251)
+    if (editorNavigationKey(wParam, ctrl)) {
+        editorMoveAtCarets(app, [&] { editorNavigate(app, wParam, ctrl, shift); });
+        editorEnsureCursorVisible(app);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
     }
 
     if (ctrl) {
@@ -1682,6 +2556,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
             case 'A':
+                app.editorExtraCarets.clear();
                 app.editorCaretUpstreamPos = std::wstring::npos;
                 app.editorSelStart = 0;
                 app.editorSelEnd = app.editorText.size();
@@ -1690,12 +2565,22 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
             case 'C':
-                if (app.editorHasSelection) {
+                if (!app.editorExtraCarets.empty()) {
+                    editorCopyToClipboard(hwnd, editorCaretSelectionsText(app));
+                } else if (app.editorHasSelection) {
                     editorCopyToClipboard(hwnd, editorGetSelectedText(app));
                 }
                 return;
             case 'X':
-                if (app.editorHasSelection) {
+                if (!app.editorExtraCarets.empty()) {
+                    std::wstring cut = editorCaretSelectionsText(app);
+                    if (cut.empty()) return;
+                    editorCopyToClipboard(hwnd, cut);
+                    editorEditAtCarets(app, [&](size_t) { editorDeleteSelection(app); });
+                    scheduleReparse(app);
+                    editorEnsureCursorVisible(app);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                } else if (app.editorHasSelection) {
                     editorCopyToClipboard(hwnd, editorGetSelectedText(app));
                     editorDeleteSelection(app);
                     scheduleReparse(app);
@@ -1704,6 +2589,10 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 return;
             case 'V': {
+                if (!app.editorExtraCarets.empty()) {
+                    editorPasteAtCarets(app, hwnd, editorGetClipboard(hwnd));
+                    return;
+                }
                 std::wstring paste = editorGetClipboard(hwnd);
                 // A bitmap without text (a screenshot) saves as PNG beside
                 // the document and pastes as its markdown link
@@ -1779,7 +2668,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     editorReparse(app);
                 }
                 app.editorRowMetricsWidth = -1.0f;  // pane width changed
-                signalPushKey(app, SIG_INFO, SIGI_EYE,
+                signalHintKey(app, SIGI_EYE,
                               app.editorShowPreview ? "toast.preview_shown"
                                                     : "toast.preview_hidden");
                 app.layoutDirty = app.editorShowPreview;
@@ -1787,13 +2676,10 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 return;
             }
             case 'B':
-                if (app.editorAssists) {
-                    editorToggleInlineMark(app, hwnd, L"**");
-                }
-                return;
             case 'I':
                 if (app.editorAssists) {
-                    editorToggleInlineMark(app, hwnd, L"*");
+                    const wchar_t* mark = wParam == 'B' ? L"**" : L"*";
+                    editorEditAtCarets(app, [&](size_t) { editorToggleInlineMark(app, hwnd, mark); });
                 }
                 return;
             case 'W': {
@@ -1803,45 +2689,15 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 app.editorDesiredX = -1.0f;
                 rebuildEditorRowMetrics(app);
                 editorEnsureCursorVisible(app);
-                signalPushKey(app, SIG_INFO, SIGI_INFO,
+                signalHintKey(app, SIGI_INFO,
                               editorWrapOn(app) ? "toast.wrap_on"
                                                 : "toast.wrap_off");
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
             }
-            case VK_HOME:
-                editorStartOrExtendSelection(app, shift);
-                app.editorCursorPos = 0;
-                app.editorDesiredCol = -1;
-                if (shift) editorUpdateSelEnd(app);
-                else app.editorHasSelection = false;
-                editorEnsureCursorVisible(app);
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
-            case VK_END:
-                editorStartOrExtendSelection(app, shift);
-                app.editorCursorPos = app.editorText.size();
-                app.editorDesiredCol = -1;
-                if (shift) editorUpdateSelEnd(app);
-                else app.editorHasSelection = false;
-                editorEnsureCursorVisible(app);
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
-            case VK_LEFT:
-                editorStartOrExtendSelection(app, shift);
-                app.editorCursorPos = editorWordLeft(app, app.editorCursorPos);
-                app.editorDesiredCol = -1;
-                if (shift) editorUpdateSelEnd(app);
-                else app.editorHasSelection = false;
-                editorEnsureCursorVisible(app);
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
-            case VK_RIGHT:
-                editorStartOrExtendSelection(app, shift);
-                app.editorCursorPos = editorWordRight(app, app.editorCursorPos);
-                app.editorDesiredCol = -1;
-                if (shift) editorUpdateSelEnd(app);
-                else app.editorHasSelection = false;
+            case 'D':
+                // Select the word, then add its next occurrence (#251)
+                editorSelectNextOccurrence(app);
                 editorEnsureCursorVisible(app);
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
@@ -1850,119 +2706,8 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     }
 
     // Non-Ctrl keys
-    switch (wParam) {
-        case VK_LEFT:
-            editorStartOrExtendSelection(app, shift);
-            if (!shift && app.editorHasSelection) {
-                app.editorCursorPos = editorSelMin(app);
-                app.editorHasSelection = false;
-            } else if (app.editorCursorPos > 0) {
-                app.editorCursorPos = editorPrevCharStart(app, app.editorCursorPos);
-            }
-            app.editorDesiredCol = -1;
-            if (shift) editorUpdateSelEnd(app);
-            editorEnsureCursorVisible(app);
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-
-        case VK_RIGHT:
-            editorStartOrExtendSelection(app, shift);
-            if (!shift && app.editorHasSelection) {
-                app.editorCursorPos = editorSelMax(app);
-                app.editorHasSelection = false;
-            } else if (app.editorCursorPos < app.editorText.size()) {
-                app.editorCursorPos = editorNextCharEnd(app, app.editorCursorPos);
-            }
-            app.editorDesiredCol = -1;
-            if (shift) editorUpdateSelEnd(app);
-            editorEnsureCursorVisible(app);
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-
-        case VK_UP:
-        case VK_DOWN: {
-            bool down = (wParam == VK_DOWN);
-            editorStartOrExtendSelection(app, shift);
-            size_t line = getLineFromPos(app, app.editorCursorPos);
-            if (editorWrapOn(app)) {
-                editorMoveCursorVertical(app, down);
-            } else if (!down && line > 0) {
-                size_t col = (app.editorDesiredCol >= 0) ? (size_t)app.editorDesiredCol : getColFromPos(app, app.editorCursorPos);
-                if (app.editorDesiredCol < 0) app.editorDesiredCol = (int)col;
-                size_t prevLineLen = getLineLength(app, line - 1);
-                app.editorCursorPos = app.editorLineStarts[line - 1] + std::min(col, prevLineLen);
-            } else if (down && line + 1 < app.editorLineStarts.size()) {
-                size_t col = (app.editorDesiredCol >= 0) ? (size_t)app.editorDesiredCol : getColFromPos(app, app.editorCursorPos);
-                if (app.editorDesiredCol < 0) app.editorDesiredCol = (int)col;
-                size_t nextLineLen = getLineLength(app, line + 1);
-                app.editorCursorPos = app.editorLineStarts[line + 1] + std::min(col, nextLineLen);
-            }
-            if (shift) editorUpdateSelEnd(app);
-            else app.editorHasSelection = false;
-            editorEnsureCursorVisible(app);
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-
-        case VK_HOME: {
-            editorStartOrExtendSelection(app, shift);
-            size_t line = getLineFromPos(app, app.editorCursorPos);
-            app.editorCursorPos = app.editorLineStarts[line];
-            app.editorDesiredCol = -1;
-            if (shift) editorUpdateSelEnd(app);
-            else app.editorHasSelection = false;
-            editorEnsureCursorVisible(app);
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-
-        case VK_END: {
-            editorStartOrExtendSelection(app, shift);
-            size_t line = getLineFromPos(app, app.editorCursorPos);
-            app.editorCursorPos = getLineEnd(app, line);
-            app.editorDesiredCol = -1;
-            if (shift) editorUpdateSelEnd(app);
-            else app.editorHasSelection = false;
-            editorEnsureCursorVisible(app);
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-
-        case VK_PRIOR: { // Page Up
-            editorStartOrExtendSelection(app, shift);
-            float scale = app.contentScale * app.zoomFactor;
-            float lineHeight = app.editorTextFormat ? app.editorTextFormat->GetFontSize() * 1.5f : 20.0f * scale;
-            int pageLines = std::max(1, (int)(app.height / lineHeight) - 2);
-            size_t line = getLineFromPos(app, app.editorCursorPos);
-            size_t col = getColFromPos(app, app.editorCursorPos);
-            size_t targetLine = (line > (size_t)pageLines) ? line - pageLines : 0;
-            size_t targetLineLen = getLineLength(app, targetLine);
-            app.editorCursorPos = app.editorLineStarts[targetLine] + std::min(col, targetLineLen);
-            if (shift) editorUpdateSelEnd(app);
-            else app.editorHasSelection = false;
-            editorEnsureCursorVisible(app);
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-
-        case VK_NEXT: { // Page Down
-            editorStartOrExtendSelection(app, shift);
-            float scale = app.contentScale * app.zoomFactor;
-            float lineHeight = app.editorTextFormat ? app.editorTextFormat->GetFontSize() * 1.5f : 20.0f * scale;
-            int pageLines = std::max(1, (int)(app.height / lineHeight) - 2);
-            size_t line = getLineFromPos(app, app.editorCursorPos);
-            size_t col = getColFromPos(app, app.editorCursorPos);
-            size_t targetLine = std::min(line + pageLines, app.editorLineStarts.size() - 1);
-            size_t targetLineLen = getLineLength(app, targetLine);
-            app.editorCursorPos = app.editorLineStarts[targetLine] + std::min(col, targetLineLen);
-            if (shift) editorUpdateSelEnd(app);
-            else app.editorHasSelection = false;
-            editorEnsureCursorVisible(app);
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-
-        case VK_DELETE:
+    if (wParam == VK_DELETE) {
+        editorEditAtCarets(app, [&](size_t) {
             if (app.editorHasSelection) {
                 editorDeleteSelection(app);
             } else if (app.editorCursorPos < app.editorText.size()) {
@@ -1974,11 +2719,35 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 rebuildLineStarts(app);
             }
             app.editorDesiredCol = -1;
-            scheduleReparse(app);
-            editorEnsureCursorVisible(app);
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
+        });
+        scheduleReparse(app);
+        editorEnsureCursorVisible(app);
+        InvalidateRect(hwnd, nullptr, FALSE);
     }
+}
+
+// Alt+Up/Down move lines, Ctrl+Alt+Up/Down add carets (#251). Called for
+// WM_SYSKEYDOWN, and ahead of the AltGr guard for WM_KEYDOWN: arrows type no
+// character, so that guard has nothing to protect for them.
+bool editorAltArrowKey(App& app, HWND hwnd, WPARAM wParam) {
+    if (wParam != VK_UP && wParam != VK_DOWN) return false;
+    if (!(GetKeyState(VK_MENU) & 0x8000) || (GetKeyState(VK_SHIFT) & 0x8000)) return false;
+    if (!sourceEditorHasFocus(app) || app.confirmExitPending || app.createRefPending ||
+        app.editCtxOpen || app.showSettings || app.showHelp || app.showThemeChooser ||
+        app.showThemeEditor || app.showShortcutEditor || app.showPrintPreview ||
+        app.showContextMenu || app.showTabMenu || app.showTabSwitcher) {
+        return false;
+    }
+    const bool down = wParam == VK_DOWN;
+    if (GetKeyState(VK_CONTROL) & 0x8000) {
+        editorAddCaretVertical(app, down);
+    } else if (editorMoveLines(app, down)) {
+        scheduleReparse(app);
+    }
+    resetCursorBlink(app);
+    editorEnsureCursorVisible(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+    return true;
 }
 
 // --- Markdown assists ---
@@ -2048,6 +2817,7 @@ static ListMarkerInfo parseListMarker(const std::wstring& text,
 // pair at the caret
 static void editorToggleInlineMark(App& app, HWND hwnd,
                                    const std::wstring& mark) {
+    UndoGroupScope group(app);  // the swap below is one undo step
     size_t ml = mark.size();
     if (app.editorHasSelection) {
         size_t s = std::min(app.editorSelStart, app.editorSelEnd);
@@ -2135,6 +2905,7 @@ static void editorToggleLinePrefix(App& app, HWND hwnd,
 static void editorInsertSnippet(App& app, HWND hwnd,
                                 const std::wstring& snippet,
                                 size_t caretOffset) {
+    app.editorExtraCarets.clear();  // blocks go in once, at the primary caret
     if (app.editorHasSelection) editorDeleteSelection(app);
     size_t before = app.editorCursorPos;
     std::wstring ins = snippet;
@@ -2157,6 +2928,7 @@ static void editorInsertSnippet(App& app, HWND hwnd,
 // Wrap the selection as a link ([sel](url) with "url" selected), or drop
 // a [text](url) template with "text" selected
 static void editorInsertLink(App& app, HWND hwnd) {
+    app.editorExtraCarets.clear();
     if (app.editorHasSelection) {
         size_t s = editorSelMin(app);
         size_t e = editorSelMax(app);
@@ -2245,6 +3017,8 @@ void editorPrepareContextMenuAt(App& app, int x, int y) {
         app.editorCaretUpstreamPos = affinity;
         return;
     }
+    // A right-click away from the selection places one caret, as a click does
+    app.editorExtraCarets.clear();
     app.editorCursorPos = position;
     app.editorSelStart = app.editorSelEnd = position;
     app.editorHasSelection = false;
@@ -2313,9 +3087,16 @@ void editorInsertSnippetPublic(App& app, HWND hwnd,
 }
 
 void editorClipboardCut(App& app, HWND hwnd) {
-    if (!app.editorHasSelection) return;
-    editorCopyToClipboard(hwnd, editorGetSelectedText(app));
-    editorDeleteSelection(app);
+    if (!app.editorExtraCarets.empty()) {
+        std::wstring cut = editorCaretSelectionsText(app);
+        if (cut.empty()) return;
+        editorCopyToClipboard(hwnd, cut);
+        editorEditAtCarets(app, [&](size_t) { editorDeleteSelection(app); });
+    } else {
+        if (!app.editorHasSelection) return;
+        editorCopyToClipboard(hwnd, editorGetSelectedText(app));
+        editorDeleteSelection(app);
+    }
     rebuildLineStarts(app);
     scheduleReparse(app);
     editorEnsureCursorVisible(app);
@@ -2323,7 +3104,9 @@ void editorClipboardCut(App& app, HWND hwnd) {
 }
 
 void editorClipboardCopy(App& app, HWND hwnd) {
-    if (app.editorHasSelection) {
+    if (!app.editorExtraCarets.empty()) {
+        editorCopyToClipboard(hwnd, editorCaretSelectionsText(app));
+    } else if (app.editorHasSelection) {
         editorCopyToClipboard(hwnd, editorGetSelectedText(app));
     }
 }
@@ -2331,6 +3114,10 @@ void editorClipboardCopy(App& app, HWND hwnd) {
 void editorClipboardPaste(App& app, HWND hwnd) {
     std::wstring paste = editorGetClipboard(hwnd);
     if (paste.empty()) return;
+    if (!app.editorExtraCarets.empty()) {
+        editorPasteAtCarets(app, hwnd, paste);
+        return;
+    }
     if (app.editorHasSelection) editorDeleteSelection(app);
     // Same Excel/TSV conversion as Ctrl+V (#181); the rail button has
     // no modifier, Ctrl+Shift+V is the raw-paste escape hatch
@@ -2351,15 +3138,24 @@ void editorClipboardPaste(App& app, HWND hwnd) {
 }
 
 void editRailInvoke(App& app, HWND hwnd, int id) {
+    // Marks act at every caret and line prefixes on every caret line
+    // (#251); links, snippets and flyouts work at the primary caret
+    auto mark = [&](const wchar_t* text) {
+        editorEditAtCarets(app, [&](size_t) { editorToggleInlineMark(app, hwnd, text); });
+    };
+    auto prefix = [&](const wchar_t* text) {
+        editorOneCaretPerLine(app);
+        editorEditAtCarets(app, [&](size_t) { editorToggleLinePrefix(app, hwnd, text); });
+    };
     switch (id) {
-        case 1: editorToggleInlineMark(app, hwnd, L"**"); break;
-        case 2: editorToggleInlineMark(app, hwnd, L"*"); break;
-        case 3: editorToggleInlineMark(app, hwnd, L"~~"); break;
-        case 4: editorToggleInlineMark(app, hwnd, L"`"); break;
+        case 1: mark(L"**"); break;
+        case 2: mark(L"*"); break;
+        case 3: mark(L"~~"); break;
+        case 4: mark(L"`"); break;
         case 5: editorInsertLink(app, hwnd); break;
-        case 10: editorToggleLinePrefix(app, hwnd, L"- "); break;
-        case 11: editorToggleLinePrefix(app, hwnd, L"- [ ] "); break;
-        case 12: editorToggleLinePrefix(app, hwnd, L"> "); break;
+        case 10: prefix(L"- "); break;
+        case 11: prefix(L"- [ ] "); break;
+        case 12: prefix(L"> "); break;
         case 20: openEditRailFlyout(app, hwnd, 1); break;  // size grid
         case 21: openEditRailFlyout(app, hwnd, 2); break;  // templates
         case 23: openEditRailFlyout(app, hwnd, 3); break;  // pandoc
@@ -2368,6 +3164,41 @@ void editRailInvoke(App& app, HWND hwnd, int id) {
             break;
     }
 }
+
+// Characters that wrap a selection instead of replacing it, with their
+// closing partner (#251)
+static wchar_t editorWrapCloser(wchar_t ch) {
+    switch (ch) {
+        case L'(': return L')';
+        case L'[': return L']';
+        case L'{': return L'}';
+        case L'"': case L'\'': case L'`': case L'*': case L'~':
+        case L'^': case L'=': case L':':
+            return ch;
+        default:
+            return 0;
+    }
+}
+
+// open + selection + close as one undo step; the text stays selected in
+// its original direction, so a second * makes the first one bold
+static void editorWrapSelection(App& app, wchar_t open, wchar_t close) {
+    const size_t start = editorSelMin(app), end = editorSelMax(app);
+    const bool forward = app.editorCursorPos == end;
+    const std::wstring selected = app.editorText.substr(start, end - start);
+    const std::wstring wrapped = std::wstring(1, open) + selected + close;
+    const size_t cursorBefore = app.editorCursorPos;
+    app.editorSelStart = forward ? start + 1 : end + 1;
+    app.editorSelEnd = forward ? end + 1 : start + 1;
+    app.editorCursorPos = app.editorSelEnd;
+    app.editorHasSelection = true;
+    pushReplaceUndo(app, start, selected, wrapped, cursorBefore, app.editorCursorPos);
+    app.editorText.replace(start, end - start, wrapped);
+    app.editorDesiredCol = -1;
+    rebuildLineStarts(app);
+}
+
+static void editorCharInputAtCaret(App& app, HWND hwnd, WPARAM wParam);
 
 void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
     if (app.editorReadingPreview) return;
@@ -2381,6 +3212,24 @@ void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
         return;
     }
 
+    if (app.editorExtraCarets.empty()) {
+        editorCharInputAtCaret(app, hwnd, wParam);
+        return;
+    }
+    // Every caret types (#251). Tab and Shift+Tab may edit at the line
+    // start, so they keep one caret per line.
+    const wchar_t ch = (wchar_t)wParam;
+    if (ch == 27 || (ch < 32 && ch != 8 && ch != 9 && ch != 13 && ch != L'\n')) return;
+    if (ch == 9) {
+        if (GetKeyState(VK_CONTROL) & 0x8000) return;  // Ctrl+I, handled on keydown
+        editorOneCaretPerLine(app);
+    }
+    editorEditAtCarets(app, [&](size_t) { editorCharInputAtCaret(app, hwnd, wParam); });
+    editorEnsureCursorVisible(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+static void editorCharInputAtCaret(App& app, HWND hwnd, WPARAM wParam) {
     wchar_t ch = (wchar_t)wParam;
 
     if (ch == 8) { // Backspace
@@ -2517,6 +3366,18 @@ void handleEditorCharInput(App& app, HWND hwnd, WPARAM wParam) {
     if (ch == 27) return; // ESC handled in KeyDown
     if (ch < 32 && ch != L'\n') return; // Ignore other control chars
 
+    // A quote, bracket or Markdown marker typed over a selection wraps it
+    // (#251); the assists switch turns this off with the other helpers
+    if (app.editorHasSelection && app.editorAssists) {
+        if (wchar_t close = editorWrapCloser(ch)) {
+            editorWrapSelection(app, ch, close);
+            scheduleReparse(app);
+            editorEnsureCursorVisible(app);
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
+    }
+
     // Normal character insertion
     if (app.editorHasSelection) editorDeleteSelection(app);
     std::wstring ins(1, ch);
@@ -2650,7 +3511,7 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
     }
 
     // The thread seam doubles as the split handle (design t11)
-    if (app.editorShowPreview) {
+    if (editSplitPreview(app)) {
         float paneW = editorPaneWidth(app);
         if ((float)x >= paneW && (float)x < paneW + editSeamWidth(app)) {
             app.draggingSeparator = true;
@@ -2668,6 +3529,19 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
     focusSourceEditor(app);
     bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     size_t clickPos = editorPosFromClick(app, x, y);
+
+    // Alt+click adds a caret, or removes one (#251); any other click starts
+    // over from a single caret. The Alt release must not then open the
+    // window menu.
+    if (GetKeyState(VK_MENU) & 0x8000) {
+        editorToggleCaretAt(app, clickPos);
+        app.altClickGuard = true;
+        app.lastClickTime = {};
+        resetCursorBlink(app);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    app.editorExtraCarets.clear();
 
     // Detect double/triple click
     auto now = std::chrono::steady_clock::now();
@@ -2762,6 +3636,19 @@ void handleEditorMouseUp(App& app, HWND, int, int) {
 void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
     float editorWidth = editorPaneWidth(app);
 
+    // Hover state for the Read button's fade and the seam's hairline (#245)
+    editorReadingButtonHover(app, (float)x, (float)y);
+    bool seam = editSplitPreview(app) && (float)y >= chromeTopHeight(app) &&
+                (float)x >= editorWidth && (float)x < editorWidth + editSeamWidth(app);
+    if (seam != app.editSeamHover) {
+        app.editSeamHover = seam;
+        if (seam) {
+            TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0};
+            TrackMouseEvent(&track);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+
     // Insert-menu hover: rows highlight, parents open their submenu
     if (editCtxMouseMove(app, x, y)) {
         SetCursor(LoadCursor(nullptr, IDC_ARROW));
@@ -2818,7 +3705,11 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
     static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
     static HCURSOR cursorArrow = LoadCursor(nullptr, IDC_ARROW);
 
-    if (app.editorShowPreview && (float)x >= editorWidth &&
+    if (app.readButtonHover) {
+        SetCursor(LoadCursor(nullptr, IDC_HAND));
+        return;
+    }
+    if (editSplitPreview(app) && (float)x >= editorWidth &&
         (float)x < editorWidth + editSeamWidth(app)) {
         SetCursor(cursorSizeWE);
         return;
@@ -2903,6 +3794,47 @@ static void editorFillRangeRects(App& app, IDWriteTextLayout* layout,
     }
 }
 
+// The extra carets' selections on one logical line, painted like the
+// primary selection (#251)
+static void editorFillExtraSelections(App& app, IDWriteTextLayout* layout,
+                                      float originX, float lineY, size_t lineStart,
+                                      size_t lineLen, float lineHeight, float charWidth) {
+    const D2D1_COLOR_F color = D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f);
+    for (const auto& caret : app.editorExtraCarets) {
+        if (!caret.hasSelection) continue;
+        const size_t start = caretStart(caret), end = caretEnd(caret);
+        if (end <= lineStart || start > lineStart + lineLen) continue;
+        const size_t from = start > lineStart ? start - lineStart : 0;
+        const size_t to = std::min(end - lineStart, lineLen);
+        editorFillRangeRects(app, layout, originX, lineY, from, to - from, color);
+        if (end > lineStart + lineLen) {
+            // Newline included: one cell past the line's end
+            float x = 0, y = 0;
+            editorCaretXY(layout, lineLen, x, y);
+            app.brush->SetColor(color);
+            app.renderTarget->FillRectangle(
+                D2D1::RectF(originX + x, lineY + y, originX + x + charWidth,
+                            lineY + y + lineHeight),
+                app.brush);
+        }
+    }
+}
+
+static void editorDrawExtraCarets(App& app, float lineHeight) {
+    if (app.editorExtraCarets.empty() || !app.cursorBlinkOn || !sourceEditorHasFocus(app)) {
+        return;
+    }
+    app.brush->SetColor(app.theme.text);
+    for (const auto& caret : app.editorExtraCarets) {
+        D2D1_POINT_2F point{};
+        if (!editorCaretPointAt(app, caret.pos, caret.upstream == caret.pos, point)) continue;
+        if (point.y + lineHeight < 0 || point.y > app.height) continue;
+        app.renderTarget->FillRectangle(
+            D2D1::RectF(point.x, point.y, point.x + dpi(app, 2.0f), point.y + lineHeight),
+            app.brush);
+    }
+}
+
 // Soft-wrap rendering: each logical line spans editorRowStarts-many visual
 // rows; highlights and the caret come from DirectWrite hit testing on the
 // wrapped per-line layouts
@@ -2914,7 +3846,7 @@ static void renderEditorWrapped(App& app, float editorWidth) {
     float padding = dpi(app, 8.0f);
     float textX = editorTextX(app);
 
-    // The source sits directly on the desk (design 10a) — no pane box
+    // The source sits directly on the desk — no pane box
     app.brush->SetColor(editDeskColor(app));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, editorWidth, (float)app.height), app.brush);
@@ -2972,6 +3904,8 @@ static void renderEditorWrapped(App& app, float editorWidth) {
                     app.brush);
             }
         }
+        editorFillExtraSelections(app, lineLayout, textX, lineY, lineStart, lineLen,
+                                  lineHeight, charWidth);
 
         // Search match highlights
         if (hasSearchMatches) {
@@ -3016,12 +3950,14 @@ static void renderEditorWrapped(App& app, float editorWidth) {
         }
 
     }
+    editorDrawExtraCarets(app, lineHeight);
 
     // Rows draw offset by the chrome strip, so the scrollable height
     // includes it — otherwise the last strip-height of source can never
-    // scroll into view
-    app.editorContentHeight =
-        chromeTopHeight(app) + padding * 2 + app.editorTotalRows * lineHeight;
+    // scroll into view. The bottom keeps the Read pill's band clear (#250)
+    app.editorContentHeight = chromeTopHeight(app) + padding +
+                              app.editorTotalRows * lineHeight +
+                              editorBottomClearance(app, lineHeight);
 
     // Editor scrollbar (same as unwrapped)
     if (app.editorContentHeight > app.height) {
@@ -3053,7 +3989,7 @@ void renderEditor(App& app, float editorWidth) {
     float padding = dpi(app, 8.0f);
     float charWidth = app.editorCharWidth > 0 ? app.editorCharWidth : app.editorTextFormat->GetFontSize() * 0.6f;
 
-    // Editor background: the desk surface (design 10a)
+    // Editor background: the desk surface
     app.brush->SetColor(editDeskColor(app));
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, editorWidth, (float)app.height), app.brush);
@@ -3128,6 +4064,8 @@ void renderEditor(App& app, float editorWidth) {
             app.renderTarget->FillRectangle(
                 D2D1::RectF(hlX1, lineY, hlX2, lineY + lineHeight), app.brush);
         }
+        editorFillExtraSelections(app, lineLayout, textBase, lineY, lineStart, lineLen,
+                                  lineHeight, charWidth);
 
         // Search match highlights on this line
         if (hasSearchMatches) {
@@ -3182,6 +4120,7 @@ void renderEditor(App& app, float editorWidth) {
                 D2D1::RectF(point.x, point.y, point.x + dpi(app, 2.0f), point.y + lineHeight), app.brush);
         }
     }
+    editorDrawExtraCarets(app, lineHeight);
 
     // The rail + gutter column last: horizontally scrolled text slides
     // under it, then the line numbers draw on top (design t11)
@@ -3205,10 +4144,11 @@ void renderEditor(App& app, float editorWidth) {
     }
 
     // Update content height for scrolling
-    // Includes the chrome strip offset the rows draw below (see the
-    // wrapped variant)
-    app.editorContentHeight = chromeTopHeight(app) + padding * 2 +
-                              app.editorLineStarts.size() * lineHeight;
+    // Includes the chrome strip offset the rows draw below and the Read
+    // pill's band (see the wrapped variant)
+    app.editorContentHeight = chromeTopHeight(app) + padding +
+                              app.editorLineStarts.size() * lineHeight +
+                              editorBottomClearance(app, lineHeight);
 
     // Editor scrollbar
     if (app.editorContentHeight > app.height) {

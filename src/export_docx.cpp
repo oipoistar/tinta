@@ -5,6 +5,7 @@
 // same primitives the viewer draws, and land as embedded pictures.
 
 #include "export.h"
+#include "d2d_init.h"
 #include <set>
 
 #include "editor.h"
@@ -616,7 +617,19 @@ struct DocxCtx {
     // private export-docx temp subtree was used (deleted at export end).
     int plantumlBudgetMsLeft = 60000;
     bool plantumlTempUsed = false;
+    // CJK faces the screen draws with, and the theme's own heading face
+    // (empty: headings use the body face)
+    std::string bodyEastAsia, monoEastAsia, headingFont, headingEastAsia;
 };
+
+// Latin and complex scripts in face, CJK in eastAsia. Without w:eastAsia
+// Word sets Chinese in its own default (DengXian or SimSun on Chinese
+// Office) rather than the face the screen shows (#256).
+std::string rFontsXml(const std::string& face, const std::string& eastAsia) {
+    std::string xml = "<w:rFonts w:ascii=\"" + face + "\" w:hAnsi=\"" + face + "\"";
+    if (!eastAsia.empty()) xml += " w:eastAsia=\"" + eastAsia + "\"";
+    return xml + " w:cs=\"" + face + "\"/>";
+}
 
 int addImageRel(DocxCtx& ctx, const std::string& extension,
                 const std::string& bytes) {
@@ -645,8 +658,7 @@ std::string runPropsXml(const DocxCtx& ctx, const RunProps& props) {
     // CT_RPr has an ordered content model. Colour precedes size, highlighting,
     // underlining and vertical alignment (including superscript footnotes).
     std::string xml;
-    if (props.code) xml += "<w:rFonts w:ascii=\"" + ctx.monoFont + "\" w:hAnsi=\"" +
-               ctx.monoFont + "\" w:cs=\"" + ctx.monoFont + "\"/>";
+    if (props.code) xml += rFontsXml(ctx.monoFont, ctx.monoEastAsia);
     if (props.bold) xml += "<w:b/>";
     if (props.italic) xml += "<w:i/>";
     if (props.strike) xml += "<w:strike/>";
@@ -1417,9 +1429,8 @@ std::string stylesXml(const DocxCtx& ctx) {
         "<w:styles "
         "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/"
         "main\">"
-        "<w:docDefaults><w:rPrDefault><w:rPr>"
-        "<w:rFonts w:ascii=\"" + ctx.bodyFont + "\" w:hAnsi=\"" +
-        ctx.bodyFont + "\" w:cs=\"" + ctx.bodyFont + "\"/>"
+        "<w:docDefaults><w:rPrDefault><w:rPr>" +
+        rFontsXml(ctx.bodyFont, ctx.bodyEastAsia) +
         "<w:color w:val=\"" + ctx.textHex + "\"/>"
         "<w:sz w:val=\"24\"/><w:szCs w:val=\"24\"/>"
         "</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>"
@@ -1434,7 +1445,10 @@ std::string stylesXml(const DocxCtx& ctx) {
                "\"/><w:basedOn w:val=\"Normal\"/>"
                "<w:pPr><w:keepNext/><w:spacing w:before=\"280\" "
                "w:after=\"120\"/><w:outlineLvl w:val=\"" +
-               std::to_string(i) + "\"/></w:pPr><w:rPr><w:b/><w:color "
+               std::to_string(i) + "\"/></w:pPr><w:rPr>" +
+               (ctx.headingFont.empty() ? std::string()
+                                        : rFontsXml(ctx.headingFont, ctx.headingEastAsia)) +
+               "<w:b/><w:color "
                "w:val=\"" + ctx.headingColors[i] + "\"/><w:sz w:val=\"" +
                std::to_string(headingSizes[i]) + "\"/><w:szCs w:val=\"" +
                std::to_string(headingSizes[i]) + "\"/></w:rPr></w:style>";
@@ -1443,8 +1457,7 @@ std::string stylesXml(const DocxCtx& ctx) {
            "<w:name w:val=\"Code Block\"/><w:basedOn w:val=\"Normal\"/>"
            "<w:pPr><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" +
            ctx.codeBgHex + "\"/><w:spacing w:after=\"160\"/></w:pPr>"
-           "<w:rPr><w:rFonts w:ascii=\"" + ctx.monoFont + "\" w:hAnsi=\"" +
-           ctx.monoFont + "\" w:cs=\"" + ctx.monoFont + "\"/>"
+           "<w:rPr>" + rFontsXml(ctx.monoFont, ctx.monoEastAsia) +
            "<w:sz w:val=\"21\"/><w:szCs w:val=\"21\"/></w:rPr></w:style>";
     xml += "<w:style w:type=\"character\" w:styleId=\"Hyperlink\">"
            "<w:name w:val=\"Hyperlink\"/><w:rPr><w:color w:val=\"" +
@@ -1533,6 +1546,14 @@ bool exportDocxFile(App& app, const std::wstring& path) {
         dark ? "BBBBBB" : hex6(theme.blockquoteBorder);
     ctx.bodyFont = xmlEscape(toUtf8(theme.fontFamily));
     ctx.monoFont = xmlEscape(toUtf8(theme.codeFontFamily));
+    ctx.bodyEastAsia = xmlEscape(toUtf8(documentCjkFamily(app, theme.fontFamily)));
+    ctx.monoEastAsia = xmlEscape(toUtf8(documentCjkFamily(app, theme.codeFontFamily)));
+    // headingfont= (#155) applies to Word's heading styles too
+    const wchar_t* headingFace = themeHeadingFont(theme);
+    if (headingFace && wcscmp(headingFace, theme.fontFamily) != 0) {
+        ctx.headingFont = xmlEscape(toUtf8(headingFace));
+        ctx.headingEastAsia = xmlEscape(toUtf8(documentCjkFamily(app, headingFace)));
+    }
 
     ParaProps rootProps;
     walkBlocks(ctx, app.root, rootProps, 0);

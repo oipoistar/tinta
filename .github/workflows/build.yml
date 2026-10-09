@@ -50,21 +50,25 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Table editing and full-width preview (#236)
-            - Rendered table cells support accurate mouse caret placement, selection, copy, cut and paste, including empty cells, with cell undo and Unicode-aware deletion (#236)
-            - The Read button and Ctrl+Shift+E preview unsaved edits at full width; returning to the editor preserves text, cursor position and undo history (#236)
-            - Reported by @a86022 (#236)
+            ### Editor: move lines, wrap selections, several carets (#251)
+            - Alt+↑/↓ moves the current line, or every selected line, up or down (#251)
+            - A quote, bracket or `* ~ ^ = :` typed over a selection wraps it and keeps it selected, so typing * twice makes it bold (#251)
+            - Several carets: Alt+Click adds or removes one, Ctrl+Alt+↑/↓ adds one above or below in the same column, Ctrl+D adds the next occurrence; typing, deleting, the arrow keys, copy and paste work at every caret, and Esc returns to one (#251)
+            - Suggested by @Ra0EL (#251)
 
-            ### Local PDF links (#237)
-            - Open local PDF links in the registered PDF viewer, including relative paths and Unicode filenames, with feedback for missing files or failed launches (#237)
-            - Reported and contributed by @msaitov (#237)
+            ### Word and character count (#240)
+            - A count beside the editor's Read button for the whole document or the selection. It counts the text a reader sees, and each Chinese or Japanese character is one word; turn it off in Settings → Editor (#240)
+            - Requested by @a86022 (#240)
+
+            ### Close without asking (#252)
+            - Settings → Editor → Close without asking: closing Tinta keeps unsaved edits as drafts for the next launch instead of showing the save dialog (#252)
+            - Suggested by @Ra0EL (#252)
 
             ### Fixed
-            - AltGr and Ctrl+Alt text input no longer trigger Ctrl shortcuts; unintended Ctrl+Shift combinations are ignored while explicit shortcuts keep working. Reported by @Fromville (#235)
-            - Long inline code wraps inside table cells without overlapping neighboring columns, including wide tables with CJK content. Reported by @haydenren (#239)
-            - Clicking the top-left icon opens its menu on release, while dragging it moves the window. Crowded tab bars reserve space for window dragging and keep the active tab visible through the overflow control. Suggested by @ILCNa (#238)
-            - Single-tab context-menu targets remain accessible in narrow windows at high DPI (#238)
-            - Table regression fixtures handle Windows line endings consistently (#236)
+            - A click beside a zoomed image closes it for good instead of re-opening the inline image underneath. Reported by @hoinzzz (#249)
+            - The line you are typing on and the end of a long note stay above the Read · Ctrl+Shift+E button; the reading view does the same for its Edit · Esc button when zoomed out. Reported by @a86022 and @Ra0EL (#250)
+            - A running Tinta no longer locks the folder it was opened from, so the folder can be deleted or renamed. Reported by @a86022 (#253)
+            - Q and Esc in the reader close like the window's close button: unsaved tabs ask first and the open tabs are remembered (#252)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats

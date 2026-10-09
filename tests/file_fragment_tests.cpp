@@ -1,5 +1,6 @@
 #include "d2d_init.h"
 #include "editor.h"
+#include "export.h"
 #include "inline_style.h"
 #include "i18n.h"
 #include "input.h"
@@ -130,6 +131,131 @@ void pdfLinks(App& app) {
     check(app.tabs.size() == initialTabs && !app.createRefPending,
           "PDF handling never creates an editor tab or empty document");
 }
+
+// Top of the rendered line holding text, or -1
+float lineTop(App& app, const std::wstring& text) {
+    const size_t at = app.docText.find(text);
+    if (at == std::wstring::npos) return -1.0f;
+    for (const auto& r : app.textRects) {
+        if (at >= r.docStart && at < r.docStart + r.docLength) return r.rect.top;
+    }
+    return -1.0f;
+}
+float landingFor(App& app, float y) {
+    return std::max(0.0f, std::min(y - chromeTopHeight(app) - dpi(app, 14),
+                                   app.contentHeight - app.height));
+}
+void landedOn(App& app, const std::wstring& text, const char* message) {
+    const float top = lineTop(app, text);
+    check(top >= 0 && std::abs(app.scrollY - landingFor(app, top)) < 1, message);
+}
+
+// Raw HTML anchors as link targets (#255): the reporter's bold link in a
+// table, and anchors alone above a heading, inside a heading, in a wrapping
+// table cell, in an HTML block and with a Unicode id
+void htmlAnchors(App& app) {
+    namespace fs = std::filesystem;
+    const auto fixture = fs::path(TINTA_FRAGMENT_FIXTURE).parent_path().parent_path() /
+                         L"anchor-links-255.md";
+    tabOpenPath(app, app.hwnd, toUtf8(fixture.wstring()), true);
+    for (int theme : {0, 5}) for (int width : {650, 1050}) {
+        applyTheme(app, theme); app.width = width; app.layoutDirty = true;
+        app.scrollY = app.targetScrollY = 0;
+        ensureLayoutComplete(app);
+        bool tagsHidden = app.docText.find(L"</a>") == std::wstring::npos;
+        for (const wchar_t* tag : {L"<a id=\"a1\"", L"<a name=\"b2\"", L"<a id=\"c3\"",
+                                   L"<a id=\"d4\"", L"<a name=\"e5\""}) {
+            tagsHidden = tagsHidden && app.docText.find(tag) == std::wstring::npos;
+        }
+        check(tagsHidden, "anchor tags are not drawn as text");
+        check(app.docText.find(L"A1. Table link should navigate here") != std::wstring::npos &&
+              app.docText.find(L"Inside an HTML block.") != std::wstring::npos &&
+              app.docText.find(L"An <a id> at the start") != std::wstring::npos,
+              "the text beside each anchor and tags in code spans still render");
+        check(std::count_if(app.root->children.begin(), app.root->children.end(),
+              [](const auto& e) { return e->type == qmd::ElementType::Table; }) == 2 &&
+              app.codeBlocks.size() == 1, "the fixture keeps both tables and the code block");
+
+        const App::LinkRect* a1 = nullptr;
+        for (const auto& r : app.linkRects) if (r.url == "#a1") { a1 = &r; break; }
+        check(a1 != nullptr, "the bold table link to #a1 is clickable");
+        if (a1) {
+            const int x = (int)(a1->bounds.left + 3), y = (int)(a1->bounds.top + 3);
+            handleMouseMove(app, app.hwnd, MAKELPARAM(x, y));
+            handleMouseDown(app, app.hwnd, MK_LBUTTON, MAKELPARAM(x, y));
+            handleMouseUp(app, app.hwnd, 0, MAKELPARAM(x, y));
+            landedOn(app, L"A1. Table link should navigate here",
+                     "the table link lands on the line of its <a id>");
+        }
+        click(app, "#b2");
+        const float b2 = lineTop(app, L"B2 heading");
+        check(b2 >= 0 && app.scrollY <= landingFor(app, b2) + 0.5f &&
+              landingFor(app, b2) - app.scrollY <= dpi(app, 24),
+              "an anchor alone above a heading lands just above it");
+        click(app, "#c3");
+        landed(app, "third-heading");
+        const float viaAnchor = app.scrollY;
+        click(app, "#third-heading");
+        check(std::abs(app.scrollY - viaAnchor) < 1,
+              "an anchor inside a heading lands on the heading, which keeps its slug");
+        click(app, "#d4");
+        landedOn(app, L"Cell target", "an anchor in a table cell lands on its row");
+        check(std::count_if(app.htmlAnchors.begin(), app.htmlAnchors.end(),
+              [](const auto& a) { return a.first == "d4"; }) == 1,
+              "the table's trial measurements leave no stray anchors");
+        click(app, "#e5");
+        landedOn(app, L"Inside an HTML block.", "an anchor in an HTML block is a target");
+        click(app, "#%E4%B8%AD%E6%96%87");
+        landedOn(app, L"\u4E2D\u6587\u951A\u70B9\u7684\u76EE\u6807\u6BB5\u843D", "a Unicode anchor id is a target");
+        click(app, "#plain-heading");
+        landed(app, "plain-heading");
+        float before = app.scrollY;
+        click(app, "#absent");
+        check(app.scrollY == before, "a missing anchor leaves the view alone");
+    }
+
+    const fs::path html = fs::current_path() / L"anchor-links-255.html";
+    check(exportHtmlFile(app, html.wstring()), "the fixture exports to HTML");
+    std::ifstream in(html, std::ios::binary);
+    const std::string exported((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    check(exported.find("<a id=\"a1\"></a>") != std::string::npos &&
+          exported.find("<a id=\"e5\"></a>") != std::string::npos &&
+          exported.find("&lt;a id=&quot;a1") == std::string::npos &&
+          exported.find("&lt;a name=&quot;e5") == std::string::npos,
+          "the HTML export keeps the anchors as anchors");
+
+    // Parser and layout details on small documents
+    auto layoutOf = [&](const char* markdown) {
+        auto doc = app.parser.parse(markdown);
+        app.root = doc.root;
+        layoutDocument(app);
+        return doc.success;
+    };
+    layoutOf("See <a href=\"https://example.com\">the site</a> here.\n");
+    check(app.docText.find(L"<a href=\"https://example.com\">the site</a>") != std::wstring::npos,
+          "an inline <a href> stays literal text as before");
+    layoutOf("<A NAME=top>Top</A> and <a id='self'/>self closing.\n");
+    float y = 0;
+    check(app.docText.find(L"Top and self closing.") != std::wstring::npos &&
+          documentTargetY(app, "top", y) && documentTargetY(app, "self", y),
+          "unquoted, uppercase and self-closing anchors are targets");
+    layoutOf("<a id=\"open\">never closed\n\nThis keeps its literal </a>\n");
+    check(app.docText.find(L"literal </a>") != std::wstring::npos,
+          "an unclosed anchor does not swallow a later paragraph's </a>");
+    layoutOf("<a id=\"dup\"></a>First.\n\nSecond.\n\n<a id=\"dup\"></a>Third.\n");
+    check(documentTargetY(app, "dup", y) && std::abs(y - lineTop(app, L"First.")) < 1,
+          "the first of a repeated id wins, as in a browser");
+    layoutOf("Intro.\n\n## Head\n");
+    const float plainY = app.headings.empty() ? -1.0f : app.headings[0].y;
+    layoutOf("Intro.\n\n<a id=\"lone\"></a>\n## Head\n");
+    const float anchoredY = app.headings.empty() ? -2.0f : app.headings[0].y;
+    check(std::abs(plainY - anchoredY) < 0.5f && documentTargetY(app, "lone", y),
+          "an anchor-only paragraph marks its target and takes no room");
+    layoutOf("Intro.\n\n<a name=\"block\"/>\n\n## Head\n");
+    const float blockY = app.headings.empty() ? -3.0f : app.headings[0].y;
+    check(std::abs(plainY - blockY) < 0.5f && documentTargetY(app, "block", y),
+          "an anchor-only HTML block marks its target and takes no room");
+}
 }
 
 int runFileFragmentTests() {
@@ -217,6 +343,7 @@ int runFileFragmentTests() {
     app.editorText = original; app.editorDirty = false;
     exitEditMode(app);
     pdfLinks(app);
+    htmlAnchors(app);
     DestroyWindow(app.hwnd); app.hwnd = nullptr; state.reset(); CoUninitialize();
     std::cout << "File fragments: " << failures << " failures\n";
     return failures ? 1 : 0;

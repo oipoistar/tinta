@@ -58,6 +58,7 @@ struct ParserContext {
     FootnoteData* notes = nullptr;
     size_t inputLength = 0;
     const char* inputStart = nullptr;  // start of markdown source for offset tracking
+    int openAnchors = 0;  // inline <a id> tags of this block awaiting their </a>
 
     ParserContext() {
         root = std::make_shared<Element>(ElementType::Document);
@@ -121,6 +122,7 @@ struct ParserContext {
 static int enterBlockCallback(MD_BLOCKTYPE type, void* detail, void* userdata) {
     auto* ctx = static_cast<ParserContext*>(userdata);
     ctx->flushText();
+    ctx->openAnchors = 0;  // inline HTML pairs up within one block
 
     ElementPtr elem;
     switch (type) {
@@ -357,6 +359,60 @@ static bool isTransparentFontTag(const MD_CHAR* text, MD_SIZE size) {
            text[afterName] == '/';
 }
 
+// <a id="x"> or <a name="x"> without an href only marks a link target, the
+// way documents written for GitHub link into themselves (#255). Close is a
+// bare </a>; Open and SelfClosed set the target's id.
+enum class AnchorTag { None, Open, SelfClosed, Close };
+
+static AnchorTag anchorTag(const MD_CHAR* text, MD_SIZE size, std::string& id) {
+    if (size < 4 || text[0] != '<' || text[size - 1] != '>') return AnchorTag::None;
+    const std::string tag(text + 1, size - 2);
+    if (tag[0] == '/') {
+        size_t end = tag.find_last_not_of(" \t\r\n");
+        return end == 1 && tolower((unsigned char)tag[1]) == 'a' ? AnchorTag::Close
+                                                                 : AnchorTag::None;
+    }
+    if (tolower((unsigned char)tag[0]) != 'a' ||
+        (tag.size() > 1 && !isspace((unsigned char)tag[1]) && tag[1] != '/')) {
+        return AnchorTag::None;
+    }
+    std::string idValue, nameValue;
+    bool href = false;
+    size_t i = 1;
+    while (i < tag.size()) {
+        while (i < tag.size() && (isspace((unsigned char)tag[i]) || tag[i] == '/')) i++;
+        size_t nameStart = i;
+        while (i < tag.size() && !isspace((unsigned char)tag[i]) && tag[i] != '=' &&
+               tag[i] != '/') {
+            i++;
+        }
+        std::string attr = tag.substr(nameStart, i - nameStart);
+        for (char& c : attr) c = (char)tolower((unsigned char)c);
+        while (i < tag.size() && isspace((unsigned char)tag[i])) i++;
+        std::string value;
+        if (i < tag.size() && tag[i] == '=') {
+            i++;
+            while (i < tag.size() && isspace((unsigned char)tag[i])) i++;
+            if (i < tag.size() && (tag[i] == '"' || tag[i] == '\'')) {
+                size_t close = tag.find(tag[i], i + 1);
+                if (close == std::string::npos) close = tag.size();
+                value = tag.substr(i + 1, close - i - 1);
+                i = close + 1;
+            } else {
+                size_t valueStart = i;
+                while (i < tag.size() && !isspace((unsigned char)tag[i])) i++;
+                value = tag.substr(valueStart, i - valueStart);
+            }
+        }
+        if (attr == "href") href = true;
+        else if (attr == "id") idValue = value;
+        else if (attr == "name") nameValue = value;
+    }
+    id = !idValue.empty() ? idValue : nameValue;
+    if (href || id.empty()) return AnchorTag::None;
+    return tag.back() == '/' ? AnchorTag::SelfClosed : AnchorTag::Open;
+}
+
 static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata) {
     auto* ctx = static_cast<ParserContext*>(userdata);
 
@@ -380,6 +436,24 @@ static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, voi
             if (ctx->current() && ctx->current()->type != ElementType::HtmlBlock &&
                 isTransparentFontTag(text, size)) {
                 break;
+            }
+            if (ctx->current() && ctx->current()->type != ElementType::HtmlBlock) {
+                std::string id;
+                AnchorTag anchor = anchorTag(text, size, id);
+                if (anchor == AnchorTag::Open || anchor == AnchorTag::SelfClosed) {
+                    ctx->flushText();
+                    auto elem = std::make_shared<Element>(ElementType::Anchor);
+                    elem->title = id;
+                    elem->parent = ctx->current();
+                    ctx->current()->children.push_back(elem);
+                    if (anchor == AnchorTag::Open) ctx->openAnchors++;
+                    break;
+                }
+                // Only the </a> of an anchor goes; others stay literal text
+                if (anchor == AnchorTag::Close && ctx->openAnchors > 0) {
+                    ctx->openAnchors--;
+                    break;
+                }
             }
             ctx->addText(text, size);
             break;
@@ -1144,6 +1218,7 @@ std::string elementTypeToString(ElementType type) {
         case ElementType::HardBreak: return "HardBreak";
         case ElementType::Ruby: return "Ruby";
         case ElementType::RubyText: return "RubyText";
+        case ElementType::Anchor: return "Anchor";
         default: return "Unknown";
     }
 }
@@ -1312,12 +1387,22 @@ void parseHtmlIntoElements(const std::string& html, Element* parent) {
         else if (tag.name == "a") {
             if (!tag.isClosing) {
                 flushText();
-                auto elem = std::make_shared<Element>(ElementType::Link);
-                elem->url = tag.href;
-                elem->title = tag.title;
+                // Without an href, id= or name= only marks a link target (#255)
+                std::string anchorId;
+                if (tag.href.empty()) {
+                    anchorId = !tag.id.empty() ? tag.id : extractAttribute(tagStr, "name");
+                }
+                auto elem = std::make_shared<Element>(
+                    anchorId.empty() ? ElementType::Link : ElementType::Anchor);
+                if (anchorId.empty()) {
+                    elem->url = tag.href;
+                    elem->title = tag.title;
+                } else {
+                    elem->title = anchorId;
+                }
                 elem->parent = elementStack.top();
                 elementStack.top()->children.push_back(elem);
-                elementStack.push(elem.get());
+                if (anchorId.empty() || !tag.isSelfClosing) elementStack.push(elem.get());
             } else if (elementStack.size() > 1) {
                 flushText();
                 elementStack.pop();

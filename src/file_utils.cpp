@@ -44,6 +44,36 @@ std::wstring getDirectoryFromFile(const std::string& filePath) {
     return wide.substr(0, pos);
 }
 
+const std::wstring& launchDirectory() {
+    static const std::wstring directory = [] {
+        DWORD capacity = GetCurrentDirectoryW(0, nullptr);
+        std::wstring current(capacity, L'\0');
+        DWORD length = capacity ? GetCurrentDirectoryW(capacity, current.data()) : 0;
+        current.resize(length && length < capacity ? length : 0);
+        return current;
+    }();
+    return directory;
+}
+
+void parkWorkingDirectory() {
+    launchDirectory();  // capture it before the first move
+    wchar_t system[MAX_PATH];
+    UINT length = GetSystemDirectoryW(system, MAX_PATH);
+    if (length && length < MAX_PATH) SetCurrentDirectoryW(system);
+}
+
+bool runOpenFileDialog(OPENFILENAMEW& ofn) {
+    bool picked = GetOpenFileNameW(&ofn) != FALSE;
+    parkWorkingDirectory();
+    return picked;
+}
+
+bool runSaveFileDialog(OPENFILENAMEW& ofn) {
+    bool picked = GetSaveFileNameW(&ofn) != FALSE;
+    parkWorkingDirectory();
+    return picked;
+}
+
 void populateFolderItems(App& app) {
     app.folderItems.clear();
     app.hoveredFolderIndex = -1;

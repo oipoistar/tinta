@@ -44,7 +44,11 @@ void saveSettings(const Settings& settings) {
     file << "hasAskedFileAssociation=" << (settings.hasAskedFileAssociation ? 1 : 0) << "\n";
     file << "editorShowPreview=" << (settings.editorShowPreview ? 1 : 0) << "\n";
     file << "editorWordWrap=" << (settings.editorWordWrap ? 1 : 0) << "\n";
+    file << "editHintsShown=" << settings.editHintsShown << "\n";
     file << "editorAssists=" << (settings.editorAssists ? 1 : 0) << "\n";
+    file << "showWordCount=" << (settings.showWordCount ? 1 : 0) << "\n";
+    file << "closeKeepsDrafts=" << (settings.closeKeepsDrafts ? 1 : 0) << "\n";
+    file << "printMarginMm=" << settings.printMarginMm << "\n";
     if (!settings.pandocPath.empty()) {
         file << "pandocPath=" << settings.pandocPath << "\n";
     }
@@ -153,6 +157,28 @@ void persistReadingPosition(const std::string& path, float scrollY,
 void persistEditorMode(const App& app) {
     Settings settings = loadSettings();
     settings.editorAssists = app.editorAssists;
+    saveSettings(settings);
+}
+
+// The word count (#240) and "Close without asking" (#252) switches
+// persist on their own the moment they change, and the exit save leaves
+// them as on disk: an older window must not write back a value another
+// window changed since
+void persistWordCount(const App& app) {
+    Settings settings = loadSettings();
+    settings.showWordCount = app.showWordCount;
+    saveSettings(settings);
+}
+
+void persistCloseKeepsDrafts(const App& app) {
+    Settings settings = loadSettings();
+    settings.closeKeepsDrafts = app.closeKeepsDrafts;
+    saveSettings(settings);
+}
+
+void persistPrintMargin(const App& app) {
+    Settings settings = loadSettings();
+    settings.printMarginMm = app.printMarginMm;
     saveSettings(settings);
 }
 
@@ -331,8 +357,27 @@ Settings loadSettings() {
             settings.editorShowPreview = (value == "1");
         } else if (key == "editorWordWrap") {
             settings.editorWordWrap = (value == "1");
+        } else if (key == "editHintsShown") {
+            // New-user hint sessions (#245); a malformed count starts over
+            try {
+                size_t consumed = 0;
+                const int shown = std::stoi(value, &consumed);
+                if (consumed == value.size() && shown >= 0) settings.editHintsShown = shown;
+            } catch (const std::exception&) { /* Keep the default. */ }
         } else if (key == "editorAssists") {
             settings.editorAssists = (value == "1");
+        } else if (key == "showWordCount") {
+            settings.showWordCount = (value == "1");
+        } else if (key == "closeKeepsDrafts") {
+            settings.closeKeepsDrafts = (value == "1");
+        } else if (key == "printMarginMm") {
+            // Any margin from 5 to 50 mm; the preview offers three (#257)
+            try {
+                size_t consumed = 0;
+                const float mm = std::stof(value, &consumed);
+                if (consumed == value.size() && std::isfinite(mm) && mm >= 5.0f && mm <= 50.0f)
+                    settings.printMarginMm = mm;
+            } catch (const std::exception&) { /* Keep the default for a malformed margin. */ }
         } else if (key == "pandocPath") {
             settings.pandocPath = value;
         } else if (key == "plantumlPath") {

@@ -113,6 +113,12 @@ static void setPrintPreviewCursor(const App& app, float x, float y) {
             return;
         }
     }
+    for (const auto& rect : app.printPreviewMarginBtn) {
+        if (cursorPointInRect(x, y, rect)) {
+            SetCursor(cursorHand);
+            return;
+        }
+    }
     SetCursor(cursorArrow);
 }
 
@@ -325,10 +331,7 @@ static void startNewFileFlow(App& app, HWND hwnd) {
         if (!app.currentFile.empty()) {
             app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
         } else {
-            wchar_t cwd[MAX_PATH];
-            if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                app.folderBrowserPath = cwd;
-            }
+            app.folderBrowserPath = launchDirectory();
         }
         populateFolderItems(app);
     }
@@ -675,6 +678,8 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.languageSetting = pick - 1;
             app.currentLanguageIndex = pick - 1;
         }
+        // The interface formats pick up the new language's CJK fonts
+        if (app.dwriteFactory) updateOverlayFormats(app);
         app.settingsLangOpen = false;
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
@@ -705,6 +710,15 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.editorAssists = !app.editorAssists;
             persistEditorMode(app);
             break;
+        case SET_TOGGLE_WORDCOUNT:
+            app.showWordCount = !app.showWordCount;
+            app.editorDocCountsStale = true;
+            persistWordCount(app);
+            break;
+        case SET_TOGGLE_CLOSE_DRAFTS:
+            app.closeKeepsDrafts = !app.closeKeepsDrafts;
+            persistCloseKeepsDrafts(app);
+            break;
         case SET_TOGGLE_HEADRULES:
             app.headingRules = !app.headingRules;
             // Layout shifts (the rule adds height), so a repaint alone
@@ -721,7 +735,7 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             ofn.lpstrFile = path;
             ofn.nMaxFile = MAX_PATH;
             ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-            if (GetOpenFileNameW(&ofn)) {
+            if (runOpenFileDialog(ofn)) {
                 pandocSetUserPath(app, path);
             }
             break;
@@ -882,11 +896,10 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
             if (delta < 0 && app.editorScrollY >= editorMax - 1.0f) {
                 // Editor is at its end: scroll the page's remaining tail
                 // directly (#85); the sync allows this overshoot. Same
-                // sheet-aware clamp as the sync, or the overshoot dies in
-                // the gap between the two formulas.
+                // clamp as the sync, or the overshoot dies in the gap
+                // between the two formulas.
                 float maxScroll =
-                    std::max(0.0f, app.contentHeight + dpi(app, 18.0f) -
-                                       editSheetRect(app).bottom);
+                    std::max(0.0f, app.contentHeight - (float)app.height);
                 app.scrollY = std::min(app.scrollY - delta * dpi(app, 60.0f), maxScroll);
                 app.targetScrollY = app.scrollY;
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -1328,6 +1341,8 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     // Edit mode: handle separator drag, editor selection, cursor shape
     if (app.editMode) {
         handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
+        // The Read button owns the pointer while it shows (#245)
+        if (app.readButtonHover) return;
         // Replace-bar controls override the pane cursor: hand over the
         // buttons, text beam over the two input fields (#119 feedback)
         if (app.showSearch && app.searchReplaceMode &&
@@ -1690,10 +1705,7 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             if (!app.currentFile.empty()) {
                 app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
             } else {
-                wchar_t cwd[MAX_PATH];
-                if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                    app.folderBrowserPath = cwd;
-                }
+                app.folderBrowserPath = launchDirectory();
             }
             populateFolderItems(app);
             break;
@@ -1879,14 +1891,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             app.swallowNextMouseUp = true;
             return;
         }
-        // With the floating sheet the top band right of the source column
-        // belongs to the desk gap and the page, not the strip — except
-        // the caption island (pin + window buttons) floating on it
-        bool overSheetBand = editorPreviewVisible(app) &&
-                             (float)mx >= editorPaneWidth(app) &&
-                             (float)mx < captionIslandLeft(app);
-        if ((float)my < chromeTopHeight(app) && !overSheetBand &&
-            !app.confirmExitPending) {
+        if ((float)my < chromeTopHeight(app) && !app.confirmExitPending) {
             tabStripMouseDown(app, hwnd, mx, my, false);
             app.swallowNextMouseUp = true;
             return;
@@ -1920,6 +1925,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             SetCapture(hwnd);
         } else {
             closeLightbox(app);
+            // The release belongs to this dismissal: it used to reach the
+            // page underneath and re-open the inline image there (#249)
+            app.swallowNextMouseUp = true;
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
@@ -2003,10 +2011,19 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     if (app.editMode) {
         int x = GET_X_LPARAM(lParam);
         int y = GET_Y_LPARAM(lParam);
+        // The Read button only takes clicks while it shows (#245)
         auto readButton=editorReadingButtonRect(app);
-        if (x>=readButton.left && x<=readButton.right && y>=readButton.top && y<=readButton.bottom) {
+        if (editorReadingButtonShown(app) && x>=readButton.left && x<=readButton.right && y>=readButton.top && y<=readButton.bottom) {
             setEditorReadingPreview(app,!app.editorReadingPreview);
             app.swallowNextMouseUp=true;
+            return;
+        }
+        // The word count beside it is a label: a press there must not
+        // drop a caret into the text hidden under it (#240)
+        const D2D1_RECT_F& count = app.editorWordCountRect;
+        if (count.right > count.left && x >= count.left && x <= count.right &&
+            y >= count.top && y <= count.bottom) {
+            app.swallowNextMouseUp = true;
             return;
         }
         // Everything left of the preview edge — pane and seam — belongs
@@ -2415,9 +2432,7 @@ static bool openFileRefTarget(App& app, HWND hwnd, const std::string& url) {
         if (scrollToHeadingId(app, target.fragment) && app.editMode) {
             size_t offset = 0;
             float headingY = 0;
-            for (const auto& h : app.headings) {
-                if (h.id == target.fragment) { headingY = h.y; break; }
-            }
+            documentTargetY(app, target.fragment, headingY);
             for (const auto& anchor : app.scrollAnchors) {
                 if (anchor.renderedY > headingY) break;
                 offset = anchor.sourceOffset;
@@ -2447,10 +2462,7 @@ static void startPageInvoke(App& app, HWND hwnd, int id) {
             closeSearchIfOpen(app);
             app.showFolderBrowser = true;
             app.folderBrowserAnimation = 0;
-            wchar_t cwd[MAX_PATH];
-            if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                app.folderBrowserPath = cwd;
-            }
+            app.folderBrowserPath = launchDirectory();
             populateFolderItems(app);
         }
     } else if (id == 4) {
@@ -2980,6 +2992,12 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
                 return;
             }
         }
+        for (int i = 0; i < PRINT_MARGIN_COUNT; i++) {
+            if (hit(app.printPreviewMarginBtn[i])) {
+                printPreviewSetMargin(app, PRINT_MARGINS_MM[i]);
+                return;
+            }
+        }
         if (hit(app.printPreviewOrientBtn[0])) {
             printPreviewSetFormat(app, app.printPreviewPaper, false);
         } else if (hit(app.printPreviewOrientBtn[1])) {
@@ -3466,6 +3484,8 @@ static void toggleZenMode(App& app, HWND hwnd) {
 }
 
 bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
+    // Ctrl+Alt+Up/Down add editor carets (#251) before the AltGr guard
+    if (editorAltArrowKey(app, hwnd, wParam)) return true;
     if (!shortcutModifiersAllowed(static_cast<unsigned>(wParam))) return false;
     if (app.appMenuPressed) {
         if (wParam == VK_ESCAPE) cancelAppMenuPress(app, hwnd);
@@ -3977,7 +3997,9 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 } else if (app.zenMode) {
                     toggleZenMode(app, hwnd);
                 } else {
-                    PostQuitMessage(0);
+                    // Through WM_CLOSE: unsaved tabs ask or become drafts
+                    // (#252), and the session is saved
+                    PostMessageW(hwnd, WM_CLOSE, 0, 0);
                 }
                 break;
             case VK_F11:
@@ -3990,7 +4012,7 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 if (!app.showThemeChooser && !app.showSearch &&
                     (!app.showFolderBrowser || app.browserPinned) &&
                     (!app.showToc || app.tocPinned)) {
-                    PostQuitMessage(0);
+                    PostMessageW(hwnd, WM_CLOSE, 0, 0);  // like Esc above (#252)
                 }
                 break;
             case 'N':
@@ -4008,14 +4030,11 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     closeFolderBrowserInput(app);
                     if (app.showFolderBrowser) {
                         app.folderBrowserAnimation = 0;
-                        // Initialize to directory of current file, or working directory
+                        // Initialize to directory of current file, or the launch folder
                         if (!app.currentFile.empty()) {
                             app.folderBrowserPath = getDirectoryFromFile(app.currentFile);
                         } else {
-                            wchar_t cwd[MAX_PATH];
-                            if (GetCurrentDirectoryW(MAX_PATH, cwd)) {
-                                app.folderBrowserPath = cwd;
-                            }
+                            app.folderBrowserPath = launchDirectory();
                         }
                         populateFolderItems(app);
                         if (app.browserFocusPath) {

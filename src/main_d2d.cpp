@@ -195,16 +195,15 @@ void render(App& app) {
             }
         }
 
-        // The page clips at the sheet's bottom edge, so its scroll range
-        // extends past the plain window-height clamp — the last blocks
-        // must clear the sheet bottom with a little breathing room
+        // The docked pane runs to the window's bottom edge (#245), so the
+        // preview scrolls exactly as far as the reader does
         float previewMaxScroll =
-            std::max(0.0f, app.contentHeight + dpi(app, 18.0f) -
-                               editSheetRect(app).bottom);
-        // renderedY includes the sheet's top padding; subtract it so an
-        // editor at its top means a sheet at its top, and snap the last
-        // half-line so the page top is always reachable (t11 feedback)
-        float alignY = targetY - editSheetRect(app).top - dpi(app, 18.0f);
+            std::max(0.0f, app.contentHeight - (float)app.height);
+        // renderedY includes the page's top padding below the strip;
+        // subtract it so an editor at its top means a page at its top, and
+        // snap the last half-line so the page top is always reachable
+        // (t11 feedback)
+        float alignY = targetY - documentContentTop(app);
         float synced = std::max(0.0f, std::min(alignY, previewMaxScroll));
         if (app.editorScrollY <= 0.5f) synced = 0.0f;
         float editorMax = std::max(0.0f, app.editorContentHeight - (float)app.height);
@@ -219,11 +218,14 @@ void render(App& app) {
         app.targetScrollY = app.scrollY;
     }
 
-    // Edit mode: split view rendering — everything sits on the desk
-    // surface, the render sheet floats above it (design 10a)
+    // Edit mode: split view rendering — the source on the desk surface,
+    // the preview docked beside it on the reader's page (#245)
     if (app.editMode) {
         app.startPageShowing = false;  // recents reload on the way back
-        app.renderTarget->Clear(editDeskColor(app));
+        // The reading view (#236) is the reader's page: plain background,
+        // content clipped to the window (#242)
+        app.renderTarget->Clear(app.editorReadingPreview ? app.theme.background
+                                                         : editDeskColor(app));
 
         float editorWidth = editorPaneWidth(app);
         float previewX = documentViewportX(app);
@@ -232,13 +234,18 @@ void render(App& app) {
         // Render editor (left pane; full width when the preview is hidden)
         if (!app.editorReadingPreview) renderEditor(app, editorWidth);
 
-        // The floating sheet (design 10a): desk, shadow, and sheet
-        // surface first, then the document clips into the sheet
-        renderEditSheetChrome(app);
+        // The docked pane's page and the seam hairline first, then the
+        // document clips into its pane: the whole window in the reading
+        // view, right of the hairline beside the source, nothing while
+        // the preview is hidden
+        renderEditPaneChrome(app);
         {
-            D2D1_RECT_F sheet = editSheetRect(app);
+            float paneLeft = app.editorReadingPreview ? 0.0f
+                             : app.editorShowPreview ? editSplitDividerX(app) + 1.0f
+                                                     : (float)app.width;
             app.renderTarget->PushAxisAlignedClip(
-                sheet, D2D1_ANTIALIAS_MODE_ALIASED);
+                D2D1::RectF(paneLeft, 0.0f, (float)app.width, (float)app.height),
+                D2D1_ANTIALIAS_MODE_ALIASED);
         }
 
         D2D1_MATRIX_3X2_F originalTransform;
@@ -633,6 +640,7 @@ render_document:
             app.dwriteFactory->CreateTextLayout(copyLabel, (UINT32)wcslen(copyLabel), app.codeFormat,
                 btnW, btnH, &btnLayout);
             if (btnLayout) {
+                useUiFontFallback(app, btnLayout);
                 btnLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 btnLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 app.renderTarget->DrawTextLayout(
@@ -701,6 +709,7 @@ render_document:
                     pngLabel, (UINT32)wcslen(pngLabel), app.codeFormat, pngW,
                     btnH, &pngLayout);
                 if (pngLayout) {
+                    useUiFontFallback(app, pngLayout);
                     pngLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                     pngLayout->SetParagraphAlignment(
                         DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -748,6 +757,7 @@ render_document:
                 copyLabel, (UINT32)wcslen(copyLabel), app.codeFormat, btnW,
                 btnH, &btnLayout);
             if (btnLayout) {
+                useUiFontFallback(app, btnLayout);
                 btnLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 btnLayout->SetParagraphAlignment(
                     DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -1111,6 +1121,7 @@ render_document:
         if (!app.editorReadingPreview) renderEditRail(app);
         renderEditCtxMenu(app);
         renderEditorReadingButton(app);
+        renderEditorWordCount(app);
     }
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
@@ -1263,12 +1274,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (button == 3) return HTCLOSE;
             // The settings backdrop also owns clicks on empty caption space.
             if (app->showSettings) return HTCLIENT;
-            // The floating sheet rises past the strip (design 10a):
-            // right of the source column the top band is desk gap and
-            // page, both of which take normal clicks
-            if (editorPreviewVisible(*app) && x >= editorPaneWidth(*app)) {
-                return HTCLIENT;
-            }
             for (const App::TabHit& hit : app->tabHits) {
                 if (x >= hit.rect.left && x <= hit.rect.right &&
                     y >= hit.rect.top && y <= hit.rect.bottom) {
@@ -1382,6 +1387,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_CLOSE:
             if (app) tableEditCommit(*app);
+            // "Close without asking" (#252): unsaved buffers stay behind as
+            // drafts, offered back on the next launch, and the window closes
+            if (app && app->closeKeepsDrafts) {
+                draftsSweep(*app);
+                app->confirmExitPending = false;
+                app->pendingWindowClose = false;
+                break;
+            }
             // Unsaved buffers (active or parked in tabs) get the dialog
             // before the window may close; tabs stay open so the session
             // save still remembers them
@@ -1566,6 +1579,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app && GetCapture() != hwnd) {
                 app->mouseX = app->mouseY = -1;
                 app->scrollbarHovered = app->hScrollbarHovered = false;
+                // The Read button fades out and the seam hairline dims (#245)
+                editorReadingButtonHover(*app, -1.0f, -1.0f);
+                app->editSeamHover = false;
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -1593,10 +1609,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return TRUE;
 
         case WM_SYSKEYDOWN:
+            // A fresh Alt press (not its autorepeat) starts a new gesture
+            if (app && wParam == VK_MENU && !(lParam & (1 << 30))) {
+                app->altClickGuard = false;
+            }
             if (app && wParam == VK_F10) {
                 handleKeyDown(*app, hwnd, wParam);
                 return 0;
             }
+            // Alt+Up / Alt+Down move the editor's lines (#251)
+            if (app && editorAltArrowKey(*app, hwnd, wParam)) return 0;
             // Alt+Left / Alt+Right mirror the mouse side buttons
             if (app && (lParam & (1 << 29)) &&
                 !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000) &&
@@ -1610,6 +1632,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_CHAR:
             if (app) handleCharInput(*app, hwnd, wParam);
             return 0;
+
+        case WM_SYSCOMMAND:
+            // Releasing Alt after an Alt+click (#251) is not a menu request
+            if (app && (wParam & 0xFFF0) == SC_KEYMENU && lParam == 0 && app->altClickGuard) {
+                app->altClickGuard = false;
+                return 0;
+            }
+            break;
 
         case WM_IME_STARTCOMPOSITION:
         case WM_IME_COMPOSITION:
@@ -1638,9 +1668,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             if (wParam == TIMER_NOTIFICATION && app) {
-                // Only draining chips need repaints; prompts are static
-                // until answered
-                bool fading = signalsNeedTicks(*app);
+                // Only draining chips and the Read button's fade need
+                // repaints; prompts are static until answered
+                bool fading = signalsNeedTicks(*app) ||
+                              editorReadingButtonNeedsTicks(*app);
                 if (fading) {
                     InvalidateRect(hwnd, nullptr, FALSE);
                 } else {
@@ -1789,8 +1820,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app && app->plantumlQueue) app->plantumlQueue->shutdown();
             // A graceful close resolved every dirty buffer through the
             // unsaved-changes flow; leftover drafts would resurrect
-            // content the user already decided about
-            if (app) draftsDeleteAll(*app);
+            // content the user already decided about. With "Close without
+            // asking" the drafts are the decision (#252): they stay.
+            if (app && !app->closeKeepsDrafts) draftsDeleteAll(*app);
             {
                 // Load existing settings to preserve values like hasAskedFileAssociation
                 Settings settings = loadSettings();
@@ -1798,7 +1830,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.zoomFactor = app->zoomFactor;
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
+                // Hint sessions only count up: another window may have
+                // used some since this one started (#245)
+                settings.editHintsShown =
+                    std::max(settings.editHintsShown, app->editHintsShown);
                 settings.editorAssists = app->editorAssists;
+                // showWordCount, closeKeepsDrafts and printMarginMm persist
+                // when changed and stay as on disk here, like openInTabs below
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
@@ -1926,6 +1964,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
     app.editorAssists = savedSettings.editorAssists;
+    app.showWordCount = savedSettings.showWordCount;
+    app.printMarginMm = savedSettings.printMarginMm;
+    app.closeKeepsDrafts = savedSettings.closeKeepsDrafts;
     app.frontmatter = savedSettings.frontmatter;
     app.pandocUserPath = toWide(savedSettings.pandocPath);
     app.plantumlUserPath = toWide(savedSettings.plantumlPath);
@@ -1939,6 +1980,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.zoomFactor = savedSettings.zoomFactor;
     app.editorShowPreview = savedSettings.editorShowPreview;
     app.editorWordWrap = savedSettings.editorWordWrap;
+    app.editHintsShown = savedSettings.editHintsShown;
     app.readingWidthPct = savedSettings.readingWidthPct;
     app.zenWidthPct = savedSettings.zenWidthPct;
     app.headingRules = savedSettings.headingRules;
@@ -2009,6 +2051,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
     LocalFree(argv);
 
+    // Relative paths resolve against the launch folder, then the process
+    // leaves it: Explorer starts Tinta inside the document's folder, and
+    // Windows will not delete or rename a folder that a running process
+    // works in (#253)
+    auto resolveArgument = [](const std::wstring& path) {
+        std::wstring full = path.empty() ? std::wstring() : absoluteFilePath(toUtf8(path));
+        return full.empty() ? path : full;
+    };
+    inputFile = toUtf8(resolveArgument(toWide(inputFile)));
+    printPagesDir = resolveArgument(printPagesDir);
+    exportHtmlPath = resolveArgument(exportHtmlPath);
+    exportDocxPath = resolveArgument(exportDocxPath);
+    exportPdfPath = resolveArgument(exportPdfPath);
+    const std::string tutorialFile = toUtf8(resolveArgument(L"syntax.md"));
+    parkWorkingDirectory();
+
     // Single instance: a plain file launch joins the existing window as a
     // new tab (Win11 Notepad model). --new/--cascade windows and the
     // openInTabs=false setting keep the one-window-per-document behavior.
@@ -2018,25 +2076,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         savedSettings.openInTabs) {
         HWND existing = FindWindowW(L"Tinta", nullptr);
         if (existing) {
-            // Resolve to an absolute path: the receiving window has its own
-            // working directory
-            std::wstring wide = toWide(inputFile);
-            wchar_t full[MAX_PATH];
-            if (GetFullPathNameW(wide.c_str(), MAX_PATH, full, nullptr)) {
-                int len = WideCharToMultiByte(CP_UTF8, 0, full, -1, nullptr, 0,
-                                              nullptr, nullptr);
-                std::string absolute(len - 1, '\0');
-                WideCharToMultiByte(CP_UTF8, 0, full, -1, &absolute[0], len,
-                                    nullptr, nullptr);
-                COPYDATASTRUCT data;
-                data.dwData = 1;
-                data.cbData = (DWORD)absolute.size() + 1;
-                data.lpData = (void*)absolute.c_str();
-                SendMessageW(existing, WM_COPYDATA, 0, (LPARAM)&data);
-                if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
-                SetForegroundWindow(existing);
-                return 0;
-            }
+            // inputFile is absolute by now: the receiving window has its
+            // own working directory
+            COPYDATASTRUCT data;
+            data.dwData = 1;
+            data.cbData = (DWORD)inputFile.size() + 1;
+            data.lpData = (void*)inputFile.c_str();
+            SendMessageW(existing, WM_COPYDATA, 0, (LPARAM)&data);
+            if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
+            SetForegroundWindow(existing);
+            return 0;
         }
     }
 
@@ -2248,9 +2297,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             showStartPage();
         }
     } else {
-        // Try syntax.md
-        if (loadFile("syntax.md")) {
-            app.currentFile = "syntax.md";
+        // Try syntax.md in the launch folder
+        if (loadFile(tutorialFile)) {
+            app.currentFile = tutorialFile;
         } else {
             showStartPage();
         }

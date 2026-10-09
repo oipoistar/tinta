@@ -1,6 +1,6 @@
 # Table editing and keyboard layouts
 
-Edit this document without saving, then use **Read · Esc** to inspect the live
+Edit this document without saving, then use **Read · Ctrl+Shift+E** to inspect the live
 render at full width. Return with **Edit · Esc**; undo and unsaved text must remain.
 
 ## Reporter example

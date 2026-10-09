@@ -174,6 +174,28 @@ void scrollToHeadingY(App& app, float headingY) {
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
+bool documentTargetY(App& app, const std::string& id, float& y) {
+    if (app.layoutDirty || !app.layoutComplete) ensureLayoutComplete(app);
+    auto note = app.footnoteAnchors.find(id);
+    if (note != app.footnoteAnchors.end()) {
+        y = note->second;
+        return true;
+    }
+    for (const auto& h : app.headings) {
+        if (h.id == id) {
+            y = h.y;
+            return true;
+        }
+    }
+    for (const auto& anchor : app.htmlAnchors) {
+        if (anchor.first == id) {
+            y = anchor.second;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool scrollToHeadingId(App& app, const std::string& id) {
     // A newly opened document may still have the previous file's headings.
     // Finish the destination layout before looking up even an existing id.
@@ -182,18 +204,10 @@ bool scrollToHeadingId(App& app, const std::string& id) {
         scrollToHeadingY(app, 0.0f);
         return true;
     }
-    auto note = app.footnoteAnchors.find(id);
-    if (note != app.footnoteAnchors.end()) {
-        scrollToHeadingY(app, note->second);
-        return true;
-    }
-    for (const auto& h : app.headings) {
-        if (h.id == id) {
-            scrollToHeadingY(app, h.y);
-            return true;
-        }
-    }
-    return false;
+    float y = 0.0f;
+    if (!documentTargetY(app, id, y)) return false;
+    scrollToHeadingY(app, y);
+    return true;
 }
 
 void handleLinkClick(App& app) {

@@ -1,11 +1,31 @@
 # Changelog
 
+## [v3.7.5] - 2026-10-08
+
+### Added
+- The editor moves the current or selected lines with Alt+↑/↓, and a quote, bracket or `* ~ ^ = :` typed over a selection wraps it. Several carets (Alt+Click, Ctrl+Alt+↑/↓, Ctrl+D) type, delete and move together, for example to line up a table; each step is one undo. Suggested by @Ra0EL (#251)
+- A word and character count beside the editor's Read button, for the document or the selection. It counts the visible text, without Markdown syntax, link addresses, front matter, code blocks or math, and each Chinese or Japanese character is one word. Requested by @a86022 (#240)
+- Settings → Editor → Close without asking: closing Tinta keeps unsaved edits as drafts for the next launch instead of showing the save dialog, and a restored draft takes over its file's session tab. Suggested by @Ra0EL (#252)
+
+### Fixed
+- A click beside a zoomed image closes it for good instead of re-opening the inline image underneath. Reported by @hoinzzz (#249)
+- The editor keeps the line being typed, and the end of a long note, above the Read · Ctrl+Shift+E button; the reading view does the same for Edit · Esc when zoomed out. Reported by @a86022 and @Ra0EL (#250)
+- A running Tinta no longer locks the folder it was opened from, so it can be deleted or renamed; file dialogs no longer leave it in the folder they picked. Reported by @a86022 (#253)
+- Q and Esc in the reader close through the regular close path, so unsaved tabs ask first and the session is saved (#252)
+- Ctrl+B and Ctrl+I undo in one step (#251)
+
+## [v3.7.4] - 2026-09-22
+
+### Fixed
+- Esc leaves edit mode again as it did before 3.7.3: press it twice when there are no unsaved changes, and unsaved changes open the save dialog. Reported by @Fromville (#242, #243)
+- The Read button and Ctrl+Shift+E still preview unsaved edits at full width, and Esc there returns to the editor. The Read button now names its Ctrl+Shift+E shortcut (#242, #243)
+- The full-width preview keeps the tab strip, the normal window buttons, a draggable title bar and a page that starts below the strip; tabs no longer lose part of their click area to the app icon (#242, #243)
+
 ## [v3.7.3] - 2026-09-20
 
 ### Added
 - The Read button and Ctrl+Shift+E preview unsaved edits at full width; returning to the editor preserves text, cursor position and undo history. Requested by @a86022 (#236)
 - Local PDF links open in the registered PDF viewer, including relative paths and Unicode filenames, with feedback for missing files or failed launches. Reported and contributed by @msaitov (#237)
-- PlantUML diagram rendering through an external tool you point at in Settings (a native `plantuml.exe`, or a `plantuml.jar` with `java` on PATH; nothing bundled, no network access): `plantuml`/`puml`/`pu` fences and standalone `.puml`/`.plantuml` files in preview, print/PDF, HTML (inline SVG), DOCX (embedded PNG) and copy-as-image, themed with the active colors, with readable source as fallback for unanchored or unrenderable diagrams. See [PlantUML support](docs/plantuml-support.md)
 
 ### Fixed
 - AltGr and Ctrl+Alt text input no longer trigger Ctrl shortcuts; unintended Ctrl+Shift combinations are ignored while explicit shortcuts keep working. Reported by @Fromville (#235)

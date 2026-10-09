@@ -36,6 +36,9 @@ void extractText(const ElementPtr& elem, std::wstring& out);
 
 std::string slugifyHeading(const std::wstring& text);
 void scrollToHeadingY(App& app, float headingY);
+// Document Y of an in-document link target: a footnote, a heading slug, or
+// an <a id>/<a name> anchor (#255)
+bool documentTargetY(App& app, const std::string& id, float& y);
 bool scrollToHeadingId(App& app, const std::string& id);
 void handleLinkClick(App& app);
 

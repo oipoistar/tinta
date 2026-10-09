@@ -1,4 +1,5 @@
 #include "d2d_init.h"
+#include "file_utils.h"
 #include "input.h"
 #include "overlays.h"
 #include "tabs.h"
@@ -61,6 +62,45 @@ void rightClick(App& app, int x, int y) {
     ClientToScreen(app.hwnd, &point);
     handleContextMenu(app, app.hwnd, MAKELPARAM(point.x, point.y));
 }
+// Explorer starts Tinta inside the document's folder. Once the process has
+// parked its working directory, that folder can be renamed and deleted
+// while Tinta runs, and the launch folder stays known for relative paths
+// and the file browser (#253). Runs first: it owns the launch capture.
+void launchFolderRelease() {
+    wchar_t temp[MAX_PATH];
+    GetTempPathW(MAX_PATH, temp);
+    const std::wstring folder =
+        std::wstring(temp) + L"tinta-launch-" + std::to_wstring(GetCurrentProcessId());
+    const std::wstring renamed = folder + L"-renamed";
+    CreateDirectoryW(folder.c_str(), nullptr);
+    wchar_t original[MAX_PATH];
+    GetCurrentDirectoryW(MAX_PATH, original);
+    check(SetCurrentDirectoryW(folder.c_str()) != FALSE, "the run starts inside a document folder");
+    check(!MoveFileW(folder.c_str(), renamed.c_str()),
+          "a working directory holds its folder (the probe is sound)");
+    parkWorkingDirectory();
+    check(launchDirectory() == folder, "the launch folder is remembered after leaving it");
+    check(MoveFileW(folder.c_str(), renamed.c_str()) != FALSE,
+          "the parked process no longer holds the launch folder");
+    MoveFileW(renamed.c_str(), folder.c_str());
+
+    auto state = std::make_unique<App>();
+    App& app = *state;
+    app.hwnd = CreateWindowExW(0, L"STATIC", L"Tinta launch folder test", 0,
+        0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
+    app.width = 1050;
+    app.height = 900;
+    openContextMenu(app, 20, 80);
+    app.hoveredContextMenuItem = CTX_BROWSE;
+    handleKeyDown(app, app.hwnd, VK_RETURN);
+    check(app.showFolderBrowser && app.folderBrowserPath == folder,
+          "without a document the file browser opens on the launch folder");
+    check(RemoveDirectoryW(folder.c_str()) != FALSE,
+          "the launch folder can be deleted while the browser shows it");
+    DestroyWindow(app.hwnd);
+    SetCurrentDirectoryW(original);
+}
+
 void titleMenuCases(bool testClipboard) {
     // Render the actual caption into a hidden test window so these checks
     // catch missing hit regions, rather than opening a tab menu directly.
@@ -157,6 +197,7 @@ int main(int argc, char** argv) {
     // Default CTest runs are read-only. The explicit clipboard mode also
     // exercises the real menus/Win32 clipboard and overwrites its contents.
     bool testClipboard = argc == 2 && std::string(argv[1]) == "--clipboard-test";
+    launchFolderRelease();
     titleMenuCases(testClipboard);
     auto state = std::make_unique<App>();
     App& app = *state;

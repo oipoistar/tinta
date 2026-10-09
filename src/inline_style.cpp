@@ -112,6 +112,12 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                 st.hasStrike = true;
                 break;
 
+            case ElementType::Anchor:
+                // Zero-width target the layout pins to its line (#255),
+                // then any text it wraps flows on as usual
+                out.push_back({elem, st});
+                break;
+
             case ElementType::Highlight:
                 // ==text== renders on a marker-pen background
                 st.hasBg = true;
