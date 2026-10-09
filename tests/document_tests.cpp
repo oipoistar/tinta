@@ -39,6 +39,41 @@ int main() {
               ".mmd content becomes a Mermaid diagram element");
     }
 
+    // Standalone PlantUML documents open as a plantuml code block so the
+    // fence render paths (preview, HTML, DOCX) pick them up unchanged
+    check(isPlantUmlDocumentPath("diagram.puml"), ".puml is detected as PlantUML");
+    check(isPlantUmlDocumentPath(L"diagram.PUML"), ".PUML is case-insensitive");
+    check(isPlantUmlDocumentPath(L"diagram.PlantUML"), ".PlantUML is case-insensitive");
+    check(!isPlantUmlDocumentPath("notes.md"), ".md is not detected as PlantUML");
+    check(!isPlainTextDocumentPath("diagram.puml"), ".puml is not plain text");
+    check(isSupportedDocumentPath("diagram.puml"), ".puml is supported");
+    check(isSupportedDocumentPath(L"diagram.plantuml"), ".plantuml is supported");
+    check(!isSupportedDocumentPath("diagram.puml2"), "similar extensions are rejected");
+    check(!isPlantUmlDocumentPath("diagram.puml2"), ".puml2 is not detected");
+    check(isSupportedDropPath(L"diagram.puml"), ".puml drag-and-drop is supported");
+
+    auto puml = parseDocument(parser, "@startuml\nA -> B\n@enduml\n", "diagram.puml");
+    check(puml.success, "PlantUML document is created");
+    check(puml.root && puml.root->children.size() == 1,
+          "PlantUML document has one block");
+    if (puml.root && puml.root->children.size() == 1) {
+        const auto& block = puml.root->children[0];
+        check(block->type == qmd::ElementType::CodeBlock,
+              ".puml content becomes a code block");
+        check(block->language == "plantuml",
+              "code block carries the plantuml language tag");
+        check(!block->children.empty() &&
+                  block->children[0]->text == "@startuml\nA -> B\n@enduml\n",
+              "PlantUML source is preserved verbatim");
+    }
+    auto plantuml = parseDocument(
+        parser, "@startuml\nAlice -> Bob\n@enduml\n", L"diagram.plantuml");
+    check(plantuml.success && plantuml.root &&
+              plantuml.root->children.size() == 1 &&
+              plantuml.root->children[0]->type == qmd::ElementType::CodeBlock &&
+              plantuml.root->children[0]->language == "plantuml",
+          ".plantuml parses through the wide-path overload");
+
     // Obsidian/Typora inline extensions
     auto ext = parseDocument(parser,
         "before ==mark 中文== mid x^2^ and H~2~O ~~gone~~ `==not this==`\n", "notes.md");

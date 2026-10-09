@@ -35,6 +35,10 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& sourceUtf8,
 // a PNG stream, for pasting into slides/chats/documents (export_docx.cpp)
 bool copyDiagramImage(App& app, HWND hwnd, const std::string& sourceUtf8);
 
+// Puts a rendered PlantUML PNG (the queue's cached file) on the clipboard
+// at 2x, composited over the active theme background (export_docx.cpp)
+bool copyPlantumlImageToClipboard(App& app, const std::wstring& pngPath);
+
 // Clipboard bitmap -> PNG file (editor image paste; export_docx.cpp)
 bool clipboardImageToPngFile(App& app, HWND hwnd, const std::wstring& path);
 

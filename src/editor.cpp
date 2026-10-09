@@ -1270,7 +1270,9 @@ void editorReparse(App& app, bool force) {
     KillTimer(app.hwnd, TIMER_EDITOR_REPARSE);
     if (!app.editMode) return;
     std::string utf8 = toUtf8(app.editorText);
-    if (!isPlainTextDocumentPath(app.currentFile) && !isMermaidDocumentPath(app.currentFile)) {
+    if (!isPlainTextDocumentPath(app.currentFile) &&
+        !isMermaidDocumentPath(app.currentFile) &&
+        !isPlantUmlDocumentPath(app.currentFile)) {
         auto metadata = fm::parse(utf8);
         if (metadata.present) observeFrontmatter(app, metadata.properties);
     }
@@ -1435,7 +1437,8 @@ static void enterEditModeWithContent(App& app, const std::string& content,
     updateBlinkTimer(app);
 
     // Force layout at new width
-    app.focusMermaidOnNextLayout = isMermaidDocumentPath(app.currentFile);
+    app.focusMermaidOnNextLayout = isMermaidDocumentPath(app.currentFile) ||
+                                   isPlantUmlDocumentPath(app.currentFile);
     app.layoutDirty = true;
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
@@ -1608,7 +1611,8 @@ void exitEditMode(App& app) {
     // Update window title (remove dirty marker)
     updateWindowTitle(app);
 
-    app.focusMermaidOnNextLayout = isMermaidDocumentPath(app.currentFile);
+    app.focusMermaidOnNextLayout = isMermaidDocumentPath(app.currentFile) ||
+                                   isPlantUmlDocumentPath(app.currentFile);
     app.layoutDirty = true;
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
@@ -1734,6 +1738,7 @@ static bool promptSaveAsPath(App& app, HWND hwnd) {
     ofn.hwndOwner = hwnd;
     ofn.lpstrFilter = L"Markdown (*.md)\0*.md;*.markdown\0"
                       L"Mermaid (*.mmd)\0*.mmd\0"
+                      L"PlantUML (*.puml;*.plantuml)\0*.puml;*.plantuml\0"
                       L"All files (*.*)\0*.*\0";
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
@@ -1762,9 +1767,9 @@ void openFileDialog(App& app, HWND hwnd) {
     ofn.hwndOwner = hwnd;
     ofn.lpstrFilter = L"Documents (*.md;*.mmd;*.txt;*.json;*.yaml;...)\0"
                       L"*.md;*.markdown;*.mmd;*.txt;*.json;*.yaml;*.yml;*.toml;"
-                      L"*.ini;*.csv;*.log\0"
+                      L"*.ini;*.csv;*.log;*.puml;*.plantuml\0"
                       L"Markdown / Mermaid (*.md;*.markdown;*.mmd)\0"
-                      L"*.md;*.markdown;*.mmd\0"
+                      L"*.md;*.markdown;*.mmd;*.puml;*.plantuml\0"
                       L"All files (*.*)\0*.*\0";
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
@@ -1918,7 +1923,9 @@ void saveEditorFile(App& app, HWND hwnd) {
     }
 
     std::string utf8 = toUtf8(app.editorText);
-    if (!isPlainTextDocumentPath(app.currentFile) && !isMermaidDocumentPath(app.currentFile))
+    if (!isPlainTextDocumentPath(app.currentFile) &&
+        !isMermaidDocumentPath(app.currentFile) &&
+        !isPlantUmlDocumentPath(app.currentFile))
         utf8 = fm::stamp(utf8, app.frontmatter, firstSeen, fm::utcNow());
     const std::wstring savedText = fromUtf8(utf8);
 
@@ -3055,9 +3062,22 @@ void editorInsertDiagramTemplate(App& app, HWND hwnd, int kind) {
         L"```mermaid\npie title Split\n    \"A\" : 60\n    \"B\" : 40\n```\n",
         // 6 empty block
         L"```mermaid\n\n```\n",
+        // 7 PlantUML sequence
+        L"```plantuml\n@startuml\nparticipant Editor\n"
+        L"participant Preview\nEditor -> Preview : render()\n"
+        L"Preview --> Editor : rendered\n@enduml\n```\n",
+        // 8 PlantUML class
+        L"```plantuml\n@startuml\nclass Document {\n"
+        L"    +title: String\n    +render()\n}\n"
+        L"Document <|-- Note\n@enduml\n```\n",
+        // 9 PlantUML activity
+        L"```plantuml\n@startuml\nstart\nif (Edited?) then (yes)\n"
+        L"    :Save file;\nelse (no)\n    :Keep editing;\n"
+        L"endif\nstop\n@enduml\n```\n",
     };
-    if (kind < 0 || kind > 6) return;
-    editorInsertSnippet(app, hwnd, kTemplates[kind], 11);
+    if (kind < 0 || kind > 9) return;
+    // PlantUML fences are one char wider: caret lands inside the body
+    editorInsertSnippet(app, hwnd, kTemplates[kind], kind >= 7 ? 12 : 11);
 }
 
 void editorInsertSnippetPublic(App& app, HWND hwnd,

@@ -22,7 +22,7 @@ namespace qmd {
 const char* const kFileRefExtensions[] = {
     ".markdown", ".json", ".yaml", ".toml", ".mmd", ".yml",
     ".ini",      ".csv",  ".log",  ".txt",  ".md",  ".xml",
-    ".pdf",
+    ".pdf",      ".puml", ".plantuml",
 };
 
 static bool endsWithNoCase(const std::string& s, const char* suffix) {
@@ -40,7 +40,9 @@ bool fileRefKnownExtension(const std::string& path) {
 
 bool fileRefIsMarkdown(const std::string& path) {
     return endsWithNoCase(path, ".md") || endsWithNoCase(path, ".mmd") ||
-           endsWithNoCase(path, ".markdown");
+           endsWithNoCase(path, ".markdown") ||
+           endsWithNoCase(path, ".puml") ||
+           endsWithNoCase(path, ".plantuml");
 }
 
 bool fileRefIsExternal(const std::string& path) {

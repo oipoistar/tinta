@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="60" viewBox="0 0 220 60">
+  <rect x="1" y="1" width="218" height="58" fill="#ffffff" stroke="#333333" stroke-width="2"/>
+  <line x1="40" y1="14" x2="180" y2="14" stroke="#333333" stroke-width="1"/>
+  <line x1="40" y1="46" x2="180" y2="46" stroke="#333333" stroke-width="1"/>
+  <text x="12" y="35" font-family="sans-serif" font-size="13" fill="#1a1a2e">TINTA-FAKE-PLANTUML</text>
+</svg>
