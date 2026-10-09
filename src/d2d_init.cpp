@@ -119,6 +119,14 @@ namespace {
 // ideograph renders with
 enum CjkOrder { CJK_SIMPLIFIED, CJK_TRADITIONAL, CJK_JAPANESE, CJK_KOREAN };
 
+// Ideograph faces per order; the first installed one with the glyph draws it
+const wchar_t* kCjkFamilies[4][4] = {
+    {L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo", L"Malgun Gothic"},
+    {L"Microsoft JhengHei UI", L"Microsoft YaHei UI", L"Yu Gothic UI", L"Malgun Gothic"},
+    {L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI", L"Malgun Gothic"},
+    {L"Malgun Gothic", L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo"},
+};
+
 // Document text follows the Windows UI language. The default keeps
 // Microsoft YaHei UI first (Chinese variants and a consistent Regular
 // weight instead of Yu Gothic UI's visually-heavier strokes); Japanese and
@@ -188,23 +196,6 @@ IDWriteFontFallback* createFontFallback(IDWriteFactory* factory, CjkOrder order,
             builder->AddMapping(krRanges, 5, krFamilies, 3);
 
             // --- CJK ideographs: in the requested order ---
-            const wchar_t* cjkZh[] = {
-                L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo", L"Malgun Gothic"
-            };
-            const wchar_t* cjkTw[] = {
-                L"Microsoft JhengHei UI", L"Microsoft YaHei UI", L"Yu Gothic UI", L"Malgun Gothic"
-            };
-            const wchar_t* cjkJa[] = {
-                L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI", L"Malgun Gothic"
-            };
-            const wchar_t* cjkKo[] = {
-                L"Malgun Gothic", L"Microsoft YaHei UI", L"Yu Gothic UI", L"Meiryo"
-            };
-            const wchar_t** cjkFamilies =
-                order == CJK_JAPANESE      ? cjkJa
-                : order == CJK_KOREAN      ? cjkKo
-                : order == CJK_TRADITIONAL ? cjkTw
-                                           : cjkZh;
             DWRITE_UNICODE_RANGE cjkRanges[] = {
                 { 0x2E80, 0x303F },    // CJK radicals, Kangxi, CJK symbols & punctuation
                 { 0x3100, 0x312F },    // Bopomofo
@@ -222,7 +213,7 @@ IDWriteFontFallback* createFontFallback(IDWriteFactory* factory, CjkOrder order,
                 { 0xFFA0, 0xFFEF },    // Halfwidth/fullwidth forms (Hangul + rest)
                 { 0x20000, 0x2FA1F },  // CJK extensions B-F
             };
-            builder->AddMapping(cjkRanges, 15, cjkFamilies, 4);
+            builder->AddMapping(cjkRanges, 15, kCjkFamilies[order], 4);
 
             // Emoji/symbol fallback for everything else
             if (emoji) {
@@ -283,6 +274,46 @@ void useUiFontFallback(const App& app, IDWriteTextLayout* layout) {
         layout2->SetFontFallback(app.uiFontFallback);
         layout2->Release();
     }
+}
+
+std::wstring documentCjkFamily(App& app, const wchar_t* family) {
+    IDWriteFontCollection* fonts = nullptr;
+    if (!app.dwriteFactory || FAILED(app.dwriteFactory->GetSystemFontCollection(&fonts)) ||
+        !fonts) {
+        return L"";
+    }
+    // A face draws ideographs itself when it has a common one such as 中
+    auto drawsHan = [&](const wchar_t* name) {
+        UINT32 index = 0;
+        BOOL exists = FALSE, han = FALSE;
+        if (!name || !name[0] || FAILED(fonts->FindFamilyName(name, &index, &exists)) ||
+            !exists) {
+            return false;
+        }
+        IDWriteFontFamily* fontFamily = nullptr;
+        IDWriteFont* font = nullptr;
+        if (SUCCEEDED(fonts->GetFontFamily(index, &fontFamily)) &&
+            SUCCEEDED(fontFamily->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &font))) {
+            font->HasCharacter(0x4E2D, &han);
+        }
+        if (font) font->Release();
+        if (fontFamily) fontFamily->Release();
+        return han != FALSE;
+    };
+    std::wstring face;
+    if (drawsHan(family)) {
+        face = family;
+    } else {
+        for (const wchar_t* candidate : kCjkFamilies[windowsCjkOrder()]) {
+            if (drawsHan(candidate)) {
+                face = candidate;
+                break;
+            }
+        }
+    }
+    fonts->Release();
+    return face;
 }
 
 void updateTextFormats(App& app) {

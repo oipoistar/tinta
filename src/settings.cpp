@@ -47,6 +47,7 @@ void saveSettings(const Settings& settings) {
     file << "editorAssists=" << (settings.editorAssists ? 1 : 0) << "\n";
     file << "showWordCount=" << (settings.showWordCount ? 1 : 0) << "\n";
     file << "closeKeepsDrafts=" << (settings.closeKeepsDrafts ? 1 : 0) << "\n";
+    file << "printMarginMm=" << settings.printMarginMm << "\n";
     if (!settings.pandocPath.empty()) {
         file << "pandocPath=" << settings.pandocPath << "\n";
     }
@@ -168,6 +169,12 @@ void persistWordCount(const App& app) {
 void persistCloseKeepsDrafts(const App& app) {
     Settings settings = loadSettings();
     settings.closeKeepsDrafts = app.closeKeepsDrafts;
+    saveSettings(settings);
+}
+
+void persistPrintMargin(const App& app) {
+    Settings settings = loadSettings();
+    settings.printMarginMm = app.printMarginMm;
     saveSettings(settings);
 }
 
@@ -352,6 +359,14 @@ Settings loadSettings() {
             settings.showWordCount = (value == "1");
         } else if (key == "closeKeepsDrafts") {
             settings.closeKeepsDrafts = (value == "1");
+        } else if (key == "printMarginMm") {
+            // Any margin from 5 to 50 mm; the preview offers three (#257)
+            try {
+                size_t consumed = 0;
+                const float mm = std::stof(value, &consumed);
+                if (consumed == value.size() && std::isfinite(mm) && mm >= 5.0f && mm <= 50.0f)
+                    settings.printMarginMm = mm;
+            } catch (const std::exception&) { /* Keep the default for a malformed margin. */ }
         } else if (key == "pandocPath") {
             settings.pandocPath = value;
         } else if (key == "sessionActive") {

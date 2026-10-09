@@ -126,7 +126,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Ctrl+S` | Save (in edit mode) |
 | `Ctrl+Shift+S` | Save As: the editor writes the buffer to a new path, the viewer saves a copy, and the document continues under the new name |
 | `Ctrl+H` | Find and replace (in edit mode): Tab switches fields, Enter replaces, Ctrl+Enter replaces all |
-| `Ctrl+P` | Print / export to PDF |
+| `Ctrl+P` | Print / export to PDF; the preview picks the paper, orientation and margins |
 | `Ctrl+E` | Show/hide preview pane (in edit mode) |
 | `Ctrl+W` | Toggle word wrap (in edit mode) |
 | `Alt+↑` / `Alt+↓` | Move the current line, or the selected lines, up or down (in edit mode) |
@@ -171,7 +171,8 @@ context menu show whatever keys are currently bound.
 Other settings of note: `browserFocusPath=1` makes `B` open the file browser
 with the path box focused and selected, so paste + Enter jumps anywhere
 (also in Settings → General). `tinta --new` starts an untitled quick note
-from the command line.
+from the command line. The print preview offers 12.7, 19.05 and 25.4 mm page
+margins; `printMarginMm=` takes any value from 5 to 50 for printing and PDF.
 
 The interface language is available in Settings → General. It follows the
 Windows display language by default, or can be changed explicitly. Transient
@@ -280,7 +281,8 @@ inlinecode=B00020
 Here inline code is red and plain fenced code stays neutral. Syntax highlighting
 keeps its own colors. Without `inlinecode`, inline code uses `code` as before.
 The override is preserved when saving a theme from the editor and applies to
-HTML and DOCX exports. Native printing keeps Tinta's existing light print palette.
+HTML and DOCX exports. Native printing keeps Tinta's light print palette, set in
+the theme's fonts.
 
 For supported code-fence languages and aliases, including SQL, PowerShell, Java,
 PHP, HTML/XML, CSS, YAML and Markdown, see [Syntax highlighting](docs/syntax-highlighting.md).

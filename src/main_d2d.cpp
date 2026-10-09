@@ -1810,8 +1810,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
                 settings.editorAssists = app->editorAssists;
-                // showWordCount and closeKeepsDrafts persist at toggle time
-                // and stay as on disk here, like openInTabs below
+                // showWordCount, closeKeepsDrafts and printMarginMm persist
+                // when changed and stay as on disk here, like openInTabs below
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
@@ -1940,6 +1940,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.openInTabs = savedSettings.openInTabs;
     app.editorAssists = savedSettings.editorAssists;
     app.showWordCount = savedSettings.showWordCount;
+    app.printMarginMm = savedSettings.printMarginMm;
     app.closeKeepsDrafts = savedSettings.closeKeepsDrafts;
     app.frontmatter = savedSettings.frontmatter;
     app.pandocUserPath = toWide(savedSettings.pandocPath);

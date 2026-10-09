@@ -2539,15 +2539,59 @@ void renderPrintPreview(App& app) {
         app.renderTarget->DrawText(cancelLabel, (UINT32)wcslen(cancelLabel), btnFmt, cancelR, app.brush);
     }
 
-    // Hint, bottom left
+    // Margin presets, bottom left (#257), in mm or inches by the locale's
+    // measurement system like the default paper; a settings.ini margin
+    // outside the presets shows as its own active chip
+    wchar_t measure[2] = L"0";
+    const bool inches = GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IMEASURE,
+                                        measure, 2) && measure[0] == L'1';
+    auto marginLabel = [&](float mm) {
+        wchar_t text[32];
+        if (inches) swprintf_s(text, L"%g in", std::round(mm / 25.4f * 100.0f) / 100.0f);
+        else swprintf_s(text, L"%g mm", std::round(mm * 100.0f) / 100.0f);
+        return std::wstring(text);
+    };
+    float mx = margin;
+    float marginChipY = h - bottomBarH + (bottomBarH - chipH) / 2.0f;
     if (uiFmt) {
         uiFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        D2D1_COLOR_F hintC = th.text;
-        hintC.a = 0.5f;
-        app.brush->SetColor(hintC);
-         const wchar_t* hint = tr(app, "print.hint");
-        app.renderTarget->DrawText(hint, (UINT32)wcslen(hint), uiFmt,
-            D2D1::RectF(margin, h - bottomBarH, cancelR.left - gap, h), app.brush);
+        const wchar_t* label = tr(app, "print.margins");
+        float labelW = measureText(app, label, uiFmt) + 10.0f * ui;
+        D2D1_COLOR_F labelC = th.text;
+        labelC.a = 0.7f;
+        app.brush->SetColor(labelC);
+        app.renderTarget->DrawText(label, (UINT32)wcslen(label), uiFmt,
+            D2D1::RectF(mx, h - bottomBarH, mx + labelW, h), app.brush);
+        mx += labelW;
+    }
+    const float marginChipW = 72.0f * ui;
+    bool preset = false;
+    for (int i = 0; i < PRINT_MARGIN_COUNT; i++) {
+        D2D1_RECT_F rect = D2D1::RectF(mx, marginChipY, mx + marginChipW, marginChipY + chipH);
+        app.printPreviewMarginBtn[i] = rect;
+        const bool active = std::fabs(app.printMarginMm - PRINT_MARGINS_MM[i]) < 0.05f;
+        preset = preset || active;
+        drawChip(rect, marginLabel(PRINT_MARGINS_MM[i]).c_str(), active);
+        mx += marginChipW + chipGap;
+    }
+    if (!preset) {
+        D2D1_RECT_F rect = D2D1::RectF(mx, marginChipY, mx + marginChipW, marginChipY + chipH);
+        drawChip(rect, marginLabel(app.printMarginMm).c_str(), true);
+        mx += marginChipW + chipGap;
+    }
+
+    // Hint after the margins, when it fits on one line
+    if (uiFmt) {
+        uiFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        const wchar_t* hint = tr(app, "print.hint");
+        float hintX = mx + 8.0f * ui;
+        if (measureText(app, hint, uiFmt) <= cancelR.left - gap - hintX) {
+            D2D1_COLOR_F hintC = th.text;
+            hintC.a = 0.5f;
+            app.brush->SetColor(hintC);
+            app.renderTarget->DrawText(hint, (UINT32)wcslen(hint), uiFmt,
+                D2D1::RectF(hintX, h - bottomBarH, cancelR.left - gap, h), app.brush);
+        }
     }
 
     if (uiFmt) uiFmt->Release();

@@ -112,6 +112,12 @@ static void setPrintPreviewCursor(const App& app, float x, float y) {
             return;
         }
     }
+    for (const auto& rect : app.printPreviewMarginBtn) {
+        if (cursorPointInRect(x, y, rect)) {
+            SetCursor(cursorHand);
+            return;
+        }
+    }
     SetCursor(cursorArrow);
 }
 
@@ -2967,6 +2973,12 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         for (int i = 0; i < PRINT_PAPER_COUNT; i++) {
             if (hit(app.printPreviewPaperBtn[i])) {
                 printPreviewSetFormat(app, i, app.printPreviewLandscape);
+                return;
+            }
+        }
+        for (int i = 0; i < PRINT_MARGIN_COUNT; i++) {
+            if (hit(app.printPreviewMarginBtn[i])) {
+                printPreviewSetMargin(app, PRINT_MARGINS_MM[i]);
                 return;
             }
         }

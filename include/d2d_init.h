@@ -18,6 +18,10 @@ void ensureThemePreviewFormats(App& app);
 // and layouts of interface text in a document format need it set.
 void useUiFontFallback(const App& app, IDWriteTextFormat* format);
 void useUiFontFallback(const App& app, IDWriteTextLayout* layout);
+// The face a document draws CJK ideographs in when set in family: the
+// family itself when it has them, else the first installed CJK face of the
+// document fallback. Word export names it as the East Asian font (#256).
+std::wstring documentCjkFamily(App& app, const wchar_t* family);
 void createTypography(App& app);
 bool createRenderTarget(App& app);
 

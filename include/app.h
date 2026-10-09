@@ -249,6 +249,9 @@ struct Settings {
     // Closing a window with unsaved edits skips the dialog and leaves them
     // as drafts, offered back on the next launch (#252)
     bool closeKeepsDrafts = false;
+    // Page margins on every side when printing and exporting PDF, in mm
+    // (#257): the preview offers 12.7, 19.05 (0.75 in) and 25.4
+    float printMarginMm = 19.05f;
     fm::Settings frontmatter;
     // User-chosen pandoc executable ("" = auto-detect)
     std::string pandocPath;
@@ -771,6 +774,9 @@ struct App {
     };
     bool showPrintPreview = false;
     PrintSavedView printSaved;
+    // Laying out for paper: the page margins frame the text, so the screen's
+    // side padding, title-strip offset and reading column stay out (#257)
+    bool printLayout = false;
     std::vector<float> printPreviewBounds;    // page boundaries in doc Y (pages + 1)
     int printPreviewPage = 0;
     float printPreviewPageW = 794.0f;         // page size in DIPs (A4 fallback)
@@ -780,10 +786,12 @@ struct App {
     unsigned printPreviewPxW = 0, printPreviewPxH = 0;
     int printPreviewPaper = -1;               // index into PRINT_PAPERS (-1: detect)
     bool printPreviewLandscape = false;
+    float printMarginMm = 19.05f;             // mirrors Settings (#257)
     D2D1_RECT_F printPreviewPrintBtn{};       // hit rects (set during render)
     D2D1_RECT_F printPreviewCancelBtn{};
     D2D1_RECT_F printPreviewPaperBtn[4]{};
     D2D1_RECT_F printPreviewOrientBtn[2]{};   // 0 portrait, 1 landscape
+    D2D1_RECT_F printPreviewMarginBtn[3]{};   // PRINT_MARGINS_MM presets
 
     // Blocks wider than the printable area (mermaid diagrams, wide tables)
     // are shrunk uniformly to fit the margins when printing; each band is a

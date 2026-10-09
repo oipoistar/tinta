@@ -3,6 +3,7 @@
 #include "d2d_init.h"
 #include "document.h"
 #include "editor.h"
+#include "settings.h"
 #include "utils.h"
 
 #include <fstream>
@@ -31,11 +32,19 @@
 
 namespace {
 
-constexpr float kPageMarginDips = 72.0f;  // 0.75 in
+// Page margins on every side (#257): the preview's choice, kept in
+// settings.ini, 0.75 in unless changed
+float printMarginDips(const App& app) {
+    return app.printMarginMm * 96.0f / 25.4f;
+}
 
-// Paper-derived palette with a true white page
-D2DTheme printTheme() {
+// Paper-derived palette with a true white page, set in the screen theme's
+// own body, heading and code faces (#258)
+D2DTheme printTheme(const D2DTheme& screen) {
     D2DTheme t = THEMES[0];  // Paper (light)
+    t.fontFamily = screen.fontFamily;
+    t.headingFontFamily = screen.headingFontFamily;
+    t.codeFontFamily = screen.codeFontFamily;
     t.background = D2D1::ColorF(1.0f, 1.0f, 1.0f);
     t.codeBackground = hexColor(0xF4F4F4);
     return t;
@@ -63,9 +72,10 @@ void enterPrintLayout(App& app, SavedView& saved) {
 
     app.editMode = false;  // layout width must be the page, not a pane (#81)
     app.showToc = app.showFolderBrowser = false;  // panel widths belong to the screen
+    app.printLayout = true;
     app.contentScale = 1.0f;
     app.zoomFactor = 1.0f;
-    app.theme = printTheme();
+    app.theme = printTheme(app.theme);
     updateTextFormats(app);
 }
 
@@ -151,6 +161,7 @@ void layoutAtPrintWidth(App& app, float contentWidthDips) {
 }
 
 void leavePrintLayout(App& app, const SavedView& saved) {
+    app.printLayout = false;
     app.editMode = saved.editMode;
     app.showToc = saved.showToc;
     app.showFolderBrowser = saved.showFolderBrowser;
@@ -417,7 +428,13 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
 struct PageGeometry {
     float pageW, pageH;          // full page in DIPs
     float contentW, contentH;    // inside the margins
+    float margin;                // on every side
 };
+
+PageGeometry pageGeometry(const App& app, float pageW, float pageH) {
+    const float margin = printMarginDips(app);
+    return {pageW, pageH, pageW - margin * 2, pageH - margin * 2, margin};
+}
 
 // Paper size for previewing before the dialog runs, decided by locale only.
 // Probing the default printer here (CreateDC) initializes third-party
@@ -425,17 +442,13 @@ struct PageGeometry {
 // error, for one) just to read a paper size — the real printer is consulted
 // after the user confirms the print dialog, and re-pagination handles any
 // difference.
-PageGeometry defaultPageGeometry() {
-    PageGeometry geo{794.0f, 1123.0f, 0.0f, 0.0f};  // A4
+PageGeometry defaultPageGeometry(const App& app) {
     wchar_t measure[2] = L"0";
     if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IMEASURE, measure, 2) &&
         measure[0] == L'1') {
-        geo.pageW = 816.0f;   // US customary: Letter
-        geo.pageH = 1056.0f;
+        return pageGeometry(app, 816.0f, 1056.0f);  // US customary: Letter
     }
-    geo.contentW = geo.pageW - kPageMarginDips * 2;
-    geo.contentH = geo.pageH - kPageMarginDips * 2;
-    return geo;
+    return pageGeometry(app, 794.0f, 1123.0f);  // A4
 }
 
 // Rasterizes one page of the active print layout into the preview pixel
@@ -478,7 +491,7 @@ bool rasterizePreviewPage(App& app, int page) {
             drawDocumentRange(app, dc, brush,
                               app.printPreviewBounds[page],
                               app.printPreviewBounds[page + 1],
-                              kPageMarginDips, kPageMarginDips);
+                              printMarginDips(app), printMarginDips(app));
             brush->Release();
         }
         dc->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -542,7 +555,7 @@ int renderPages(App& app, const PageGeometry& geo, EmitFn emitPage) {
         pageDc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
         if (brush) {
             drawDocumentRange(app, pageDc, brush, yStart, yEnd,
-                              kPageMarginDips, kPageMarginDips);
+                              geo.margin, geo.margin);
             brush->Release();
         }
         ok = SUCCEEDED(pageDc->EndDraw()) && SUCCEEDED(commandList->Close());
@@ -596,15 +609,13 @@ bool printDocument(App& app) {
 
     float dpiX = (float)GetDeviceCaps(pd.hDC, LOGPIXELSX);
     float dpiY = (float)GetDeviceCaps(pd.hDC, LOGPIXELSY);
-    PageGeometry geo{};
-    geo.pageW = GetDeviceCaps(pd.hDC, PHYSICALWIDTH) * 96.0f / dpiX;
-    geo.pageH = GetDeviceCaps(pd.hDC, PHYSICALHEIGHT) * 96.0f / dpiY;
-    if (geo.pageW < 200 || geo.pageH < 200) {  // driver returned nonsense
-        geo.pageW = 794.0f;   // A4
-        geo.pageH = 1123.0f;
+    float pageW = GetDeviceCaps(pd.hDC, PHYSICALWIDTH) * 96.0f / dpiX;
+    float pageH = GetDeviceCaps(pd.hDC, PHYSICALHEIGHT) * 96.0f / dpiY;
+    if (pageW < 200 || pageH < 200) {  // driver returned nonsense
+        pageW = 794.0f;   // A4
+        pageH = 1123.0f;
     }
-    geo.contentW = geo.pageW - kPageMarginDips * 2;
-    geo.contentH = geo.pageH - kPageMarginDips * 2;
+    PageGeometry geo = pageGeometry(app, pageW, pageH);
 
     // Printer name from the DEVNAMES block
     std::wstring printerName;
@@ -661,12 +672,11 @@ static void refreshPreviewLayout(App& app) {
     float pageH = app.printPreviewLandscape ? paper.w : paper.h;
     app.printPreviewPageW = pageW;
     app.printPreviewPageH = pageH;
-    float contentW = pageW - kPageMarginDips * 2;
-    float contentH = pageH - kPageMarginDips * 2;
+    const PageGeometry geo = pageGeometry(app, pageW, pageH);
 
-    layoutAtPrintWidth(app, contentW);
+    layoutAtPrintWidth(app, geo.contentW);
 
-    std::vector<float> breaks = computePageBreaks(app, contentH);
+    std::vector<float> breaks = computePageBreaks(app, geo.contentH);
     app.printPreviewBounds.clear();
     app.printPreviewBounds.push_back(0.0f);
     for (float b : breaks) app.printPreviewBounds.push_back(b);
@@ -689,7 +699,7 @@ static void refreshPreviewLayout(App& app) {
 // First open: start from the default printer's paper, matched to the
 // closest offered format
 static void detectDefaultFormat(App& app) {
-    PageGeometry geo = defaultPageGeometry();
+    PageGeometry geo = defaultPageGeometry(app);
     bool landscape = geo.pageW > geo.pageH;
     float w = landscape ? geo.pageH : geo.pageW;
     float h = landscape ? geo.pageW : geo.pageH;
@@ -731,6 +741,16 @@ void printPreviewSetFormat(App& app, int paper, bool landscape) {
     if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
+void printPreviewSetMargin(App& app, float mm) {
+    mm = std::max(5.0f, std::min(mm, 50.0f));
+    if (std::fabs(mm - app.printMarginMm) < 0.005f) return;
+    app.printMarginMm = mm;
+    persistPrintMargin(app);
+    if (!app.showPrintPreview) return;
+    refreshPreviewLayout(app);
+    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
 void closePrintPreview(App& app, HWND hwnd) {
     if (!app.showPrintPreview) return;
     app.showPrintPreview = false;
@@ -763,8 +783,7 @@ void printPreviewConfirm(App& app, HWND hwnd) {
 }
 
 int printDebugPages(App& app, const std::wstring& outDir) {
-    PageGeometry geo{794.0f, 1123.0f, 794.0f - kPageMarginDips * 2,
-                     1123.0f - kPageMarginDips * 2};  // A4
+    PageGeometry geo = pageGeometry(app, 794.0f, 1123.0f);  // A4
 
     ID2D1Device* device = nullptr;
     app.deviceContext->GetDevice(&device);
@@ -855,16 +874,12 @@ bool exportPdfFile(App& app, const std::wstring& path) {
         editorReparse(app);  // include unsaved edits, like the preview
     }
 
-    PageGeometry geo{};
+    PageGeometry geo = defaultPageGeometry(app);
     if (app.printPreviewPaper >= 0 &&
         app.printPreviewPaper < PRINT_PAPER_COUNT) {
         const PrintPaper& paper = PRINT_PAPERS[app.printPreviewPaper];
-        geo.pageW = app.printPreviewLandscape ? paper.h : paper.w;
-        geo.pageH = app.printPreviewLandscape ? paper.w : paper.h;
-        geo.contentW = geo.pageW - kPageMarginDips * 2;
-        geo.contentH = geo.pageH - kPageMarginDips * 2;
-    } else {
-        geo = defaultPageGeometry();
+        geo = pageGeometry(app, app.printPreviewLandscape ? paper.h : paper.w,
+                           app.printPreviewLandscape ? paper.w : paper.h);
     }
 
     IStream* fileStream = nullptr;
@@ -934,8 +949,9 @@ ID2D1Bitmap* renderPeekBitmap(App& app, const std::wstring& path,
     SavedView saved{};
     enterPrintLayout(app, saved);
     // The peek must look exactly like the screen: keep the palette, the
-    // DPI scale, and the zoom instead of the print defaults; the reading
-    // column stays full width inside the small panel
+    // DPI scale, the zoom and the screen's padding instead of the print
+    // defaults; the reading column stays full width inside the small panel
+    app.printLayout = false;
     app.theme = saved.theme;
     app.contentScale = saved.contentScale;
     app.zoomFactor = saved.zoomFactor;
