@@ -1,9 +1,11 @@
 #include "d2d_init.h"
 #include "image_loader.h"
+#include "input.h"
 #include "overlays.h"
 #include "print.h"
 #include "render.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <climits>
 #include <fstream>
@@ -194,6 +196,44 @@ void mixedLayout(App& app) {
     drawImages(app);
 }
 
+// Hover, press and release through the real handlers, as a separate click
+// rather than the second half of a double-click
+void click(App& app, float x, float y) {
+    const LPARAM point = MAKELPARAM(static_cast<int>(x), static_cast<int>(y));
+    app.lastClickTime = {};
+    handleMouseMove(app, app.hwnd, point);
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, point);
+    handleMouseUp(app, app.hwnd, 0, point);
+}
+
+// A click beside the open lightbox closes it; its release must not reach
+// the page and re-open the inline image under the pointer (#249)
+void lightboxDismissal(App& app) {
+    ensureLayoutComplete(app);
+    check(!app.layoutBitmaps.empty(), "lightbox fixture lays out inline images");
+    if (app.layoutBitmaps.empty()) return;
+    const D2D1_RECT_F image = app.layoutBitmaps.front().destRect;
+    app.scrollX = app.targetScrollX = 0.0f;
+    app.scrollY = app.targetScrollY = std::max(0.0f, image.top - dpi(app, 120.0f));
+    const float x = documentViewportX(app) + (image.left + image.right) * 0.5f;
+    const float y = std::min((image.top + image.bottom) * 0.5f, image.top + dpi(app, 40.0f)) -
+                    app.scrollY;
+
+    click(app, x, y);
+    check(app.showLightbox, "clicking an inline image opens the lightbox");
+    // Dragged aside, the zoomed image leaves the inline image uncovered
+    app.lightboxPanX = static_cast<float>(app.width) * 4.0f;
+    click(app, x, y);
+    check(!app.showLightbox, "a click beside the zoomed image closes it for good");
+    check(!app.swallowNextMouseUp, "the dismissing release is consumed exactly once");
+
+    click(app, x, y);
+    check(app.showLightbox, "the next click on the inline image opens it again");
+    const D2D1_RECT_F zoomed = lightboxImageRect(app);
+    click(app, (zoomed.left + zoomed.right) * 0.5f, (zoomed.top + zoomed.bottom) * 0.5f);
+    check(!app.showLightbox, "a plain click on the zoomed image still closes it");
+}
+
 void remoteImages(App& app, const char* base) {
     app.clearLayoutCache();
     app.releaseImageCache();
@@ -233,6 +273,7 @@ int runImageTests(const char* remoteBase) {
     decoding(app);
     ownership(app);
     mixedLayout(app);
+    lightboxDismissal(app);
     if (remoteBase) remoteImages(app, remoteBase);
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;

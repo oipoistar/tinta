@@ -138,6 +138,51 @@ void edgeClicks(App& app) {
     check(app.editorText==before && app.editorCursorPos==insert,"Undo restores text and the insertion position");
     app.editorText=source; rebuildLineStarts(app); app.editorDirty=false;
 }
+// The Read pill floats over the source's bottom-left corner: the caret
+// line and the end of a long note must always clear it (#250)
+void readPillClearance(App& app) {
+    auto source=app.editorText;
+    std::wstring text;
+    for (int n=1;n<=120;++n) text+=L"Line "+std::to_wstring(n)+L" of a long note\n\n";
+    app.editorText=text+L"Last line";
+    const float pillTop=editorReadingButtonRect(app).top;
+    const float height=app.editorTextFormat->GetFontSize()*1.5f;
+    for (bool wrap : {true,false}) {
+        ++sequences;
+        app.editorWordWrap=wrap; rebuildLineStarts(app);
+        app.editorScrollY=app.editorScrollX=0; place(app,0); paint(app);
+        bool clear=true;
+        for (size_t line=1;line<app.editorLineStarts.size();++line) {
+            key(app,VK_DOWN);
+            D2D1_POINT_2F point{};
+            clear=clear && editorCaretPoint(app,point) && point.y+height<=pillTop;
+        }
+        check(clear,"walking down a long note keeps the caret line above the Read pill");
+        app.editorScrollY=0; place(app,0); paint(app);
+        for (int n=0;n<200;++n) handleEditorMouseWheel(app,app.hwnd,-3.0f);
+        place(app,app.editorText.size());
+        D2D1_POINT_2F point{};
+        check(editorCaretPoint(app,point) && point.y+height<=pillTop,
+              "scrolled to its end, the last line rises above the Read pill");
+    }
+    // The reading view floats the same pill, labelled Edit
+    const float zoom=app.zoomFactor;
+    setEditorReadingPreview(app,true);
+    for (float level : {0.5f,1.0f,3.0f}) {
+        ++sequences;
+        app.zoomFactor=level; updateTextFormats(app); layoutDocument(app);
+        float lastBottom=0.0f;
+        for (const auto& rect : app.textRects) lastBottom=std::max(lastBottom,rect.rect.bottom);
+        app.scrollY=std::max(0.0f,app.contentHeight-app.height);
+        check(app.contentHeight>app.height,"the long note scrolls in the reading view");
+        check(!app.textRects.empty() && lastBottom-app.scrollY<=editorReadingButtonRect(app).top,
+              "scrolled to its end, the reading view's last line rises above the Edit pill");
+    }
+    setEditorReadingPreview(app,false);
+    app.zoomFactor=zoom; updateTextFormats(app); app.scrollY=0;
+    app.editorText=source; rebuildLineStarts(app); app.editorDirty=false;
+    editorReparse(app); ensureLayoutComplete(app);
+}
 }
 int runWrappedCursorTests() {
     auto state=std::make_unique<App>(); App& app=*state;
@@ -158,6 +203,7 @@ int runWrappedCursorTests() {
                     paragraph(app,marker,shift);
             }
             edgeClicks(app);
+            readPillClearance(app);
         }
     }
     check(app.editorText==original,"navigation leaves the mixed Markdown unchanged");

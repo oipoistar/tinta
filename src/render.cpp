@@ -1,5 +1,6 @@
 #include "frontmatter_ui.h"
 #include "render.h"
+#include "file_utils.h"
 #include "inline_style.h"
 #include "utils.h"
 #include "syntax.h"
@@ -138,7 +139,7 @@ static void addTextRun(App& app, LayoutInfo&& info, const D2D1_POINT_2F& pos,
 
 struct LayoutSnapshot {
     size_t textRuns, rects, lines, shapes, connectors, bitmaps;
-    size_t links, textRects, lineBuckets, docTextLen, tasks;
+    size_t links, textRects, lineBuckets, docTextLen, tasks, anchors;
 };
 
 static LayoutSnapshot takeSnapshot(App& app) {
@@ -153,7 +154,8 @@ static LayoutSnapshot takeSnapshot(App& app) {
         app.textRects.size(),
         app.lineBuckets.size(),
         app.docText.size(),
-        app.taskRects.size()
+        app.taskRects.size(),
+        app.htmlAnchors.size()
     };
 }
 
@@ -179,6 +181,7 @@ static void rollbackTo(App& app, const LayoutSnapshot& s) {
     app.lineBuckets.resize(s.lineBuckets);
     app.docText.resize(s.docTextLen);
     app.taskRects.resize(s.tasks);
+    app.htmlAnchors.resize(s.anchors);  // a trial layout's anchors sit at trial positions
 }
 
 static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
@@ -602,6 +605,11 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 y += lineHeight;
                 continue;
 
+            case ElementType::Anchor:
+                // An <a id> link target draws nothing; links land on its line
+                app.htmlAnchors.push_back({elem->title, y});
+                continue;
+
             case ElementType::Image: {
                 // Break out of inline flow, render image as block
                 if (x > startX) {
@@ -962,11 +970,38 @@ static const ElementPtr* soleMathDisplayChild(const ElementPtr& elem) {
     return found;
 }
 
+// Inline content of nothing but empty anchors (<a id="x"></a> on its own
+// line above a heading) only marks link targets. Like a browser's empty
+// paragraph it takes no room; the targets pin to where it would start (#255).
+static bool pinAnchorsOnly(App& app, const std::vector<ElementPtr>& children, float y) {
+    bool anchor = false;
+    for (const auto& child : children) {
+        if (!child) continue;
+        if (child->type == ElementType::Anchor && child->children.empty()) {
+            anchor = true;
+        } else if (child->type == ElementType::Text) {
+            for (char c : child->text) {
+                if (!isspace((unsigned char)c)) return false;
+            }
+        } else if (child->type != ElementType::SoftBreak) {
+            return false;
+        }
+    }
+    if (!anchor) return false;
+    for (const auto& child : children) {
+        if (child && child->type == ElementType::Anchor) {
+            app.htmlAnchors.push_back({child->title, y});
+        }
+    }
+    return true;
+}
+
 static void layoutParagraph(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     if (const ElementPtr* math = soleMathDisplayChild(elem)) {
         layoutMathBlock(app, *math, y, indent, maxWidth);
         return;
     }
+    if (pinAnchorsOnly(app, elem->children, y)) return;
     auto format = elem->language == "footnote-backlinks" && app.supSubFormat ? app.supSubFormat : app.textFormat;
     layoutInlineContent(app, elem->children, indent, y, maxWidth, format, app.theme.text);
     app.docText += L"\n\n";
@@ -2655,7 +2690,10 @@ static App::ImageEntry& getOrLoadImage(App& app, const std::string& src) {
             std::filesystem::path imgPath = basePath.parent_path() / wsrc;
             widePath = imgPath.wstring();
         } else {
-            widePath = wsrc;
+            // An untitled note has no folder of its own: relative images
+            // resolve against the launch folder, as they did while the
+            // process still worked there (#253)
+            widePath = (std::filesystem::path(launchDirectory()) / wsrc).wstring();
         }
     }
 
@@ -3151,7 +3189,9 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
             // inline children and render them through layoutInlineContent.
             std::vector<ElementPtr> inlineBuffer;
             auto flushInline = [&]() {
-                if (!inlineBuffer.empty()) {
+                if (pinAnchorsOnly(app, inlineBuffer, y)) {
+                    inlineBuffer.clear();
+                } else if (!inlineBuffer.empty()) {
                     layoutInlineContent(app, inlineBuffer, indent, y, maxWidth,
                                         app.textFormat, app.theme.text);
                     app.docText += L"\n\n";
@@ -3241,14 +3281,16 @@ bool layoutBegin(App& app) {
 
     float layoutWidth = documentViewportWidth(app);
 
-    app.layoutIndent = 40.0f * scale;
+    // On paper the page margins frame the text: no screen padding (#257)
+    app.layoutIndent = app.printLayout ? 0.0f : 40.0f * scale;
     app.layoutMaxWidth = layoutWidth - app.layoutIndent * 2;
     // Reading column (#82): a centered percentage of the window, with a
     // separate preference for fullscreen (zen). Edit-mode panes are exempt,
     // except the full-width reading view, which reads like the reader (#242).
+    // Pages print across their margins whatever the screen's column (#257).
     {
         int pct = app.zenMode ? app.zenWidthPct : app.readingWidthPct;
-        if (pct < 100 && (!app.editMode || app.editorReadingPreview)) {
+        if (pct < 100 && !app.printLayout && (!app.editMode || app.editorReadingPreview)) {
             float column = app.layoutMaxWidth * (float)pct / 100.0f;
             app.layoutIndent += (app.layoutMaxWidth - column) / 2.0f;
             app.layoutMaxWidth = column;
@@ -3256,8 +3298,9 @@ bool layoutBegin(App& app) {
     }
     // Content starts below the title-bar tab strip; the strip paints over
     // anything that scrolls up under it. The docked edit-mode preview
-    // starts there too (#245).
-    app.layoutCursorY = documentContentTop(app);
+    // starts there too (#245). Paper has no strip: the first page
+    // starts at its top margin (#257).
+    app.layoutCursorY = app.printLayout ? 0.0f : documentContentTop(app);
     app.layoutNextBlock = 0;
     app.layoutComplete = false;
     app.contentWidth = layoutWidth;
@@ -3295,7 +3338,11 @@ bool layoutStep(App& app, float targetY, int64_t budgetUs) {
     app.layoutCursorY = y;
     // Partial content height grows as layout fills in (keeps scrollbar sane)
     float scale = app.contentScale * app.zoomFactor;
-    app.contentHeight = y + 40.0f * scale;
+    float tail = 40.0f * scale;
+    // The reading view's Edit pill does not zoom with the page: zoomed
+    // out, the last line must still scroll clear of it (#250)
+    if (app.editMode && app.editorReadingPreview) tail = std::max(tail, readPillClearance(app));
+    app.contentHeight = y + tail;
     return app.layoutNextBlock >= children.size();
 }
 

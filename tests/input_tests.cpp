@@ -166,8 +166,14 @@ int runSuperscriptTests();
 int runSidePanelTests();
 int runImageTests(const char* remoteBase);
 int runTabDropLaunchProbe();
+int runEditorFeatureTests();
+int runUiFontTests();
+int runPrintExportTests();
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--editor-feature-tests") return runEditorFeatureTests();
+    if (argc == 2 && std::string(argv[1]) == "--ui-font-tests") return runUiFontTests();
+    if (argc == 2 && std::string(argv[1]) == "--print-export-tests") return runPrintExportTests();
     if (argc == 2 && std::string(argv[1]) == "--window-drag-tests") return runWindowDragTests();
     if (argc == 2 && std::string(argv[1]) == "--table-layout-tests") return runTableLayoutTests();
     if (argc == 2 && std::string(argv[1]) == "--table-input-tests") return runTableInputTests();

@@ -37,6 +37,9 @@ enum class ElementType {
     HardBreak,
     Ruby,
     RubyText,
+    // Raw <a id="x"> / <a name="x"> without an href: an invisible link
+    // target (#255). title holds the id; children are any text it wraps.
+    Anchor,
     // Synthetic first block built from YAML frontmatter (title + tags)
     Properties,
     Footnotes, FootnoteDefinition, FootnoteReference, FootnoteBacklink,

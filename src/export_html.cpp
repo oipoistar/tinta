@@ -7,6 +7,7 @@
 #include "export.h"
 
 #include "editor.h"
+#include "file_utils.h"
 #include "i18n.h"
 #include "signals.h"
 #include "math_render.h"
@@ -1294,6 +1295,11 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
             }
             break;
         }
+        case ElementType::Anchor:
+            // Keep the link target the source's <a id>/<a name> made (#255)
+            ctx.out += "<a id=\"" + htmlEscape(elem->title) + "\"></a>";
+            walkChildren(ctx, elem);
+            break;
         case ElementType::Image:
             emitImage(ctx, elem);
             break;
@@ -1475,7 +1481,7 @@ void exportDocumentAs(App& app, HWND hwnd) {
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (!GetSaveFileNameW(&ofn)) return;
+    if (!runSaveFileDialog(ofn)) return;
 
     // The chosen filter decides the format; a typed extension wins
     std::wstring chosen = path;

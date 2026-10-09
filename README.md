@@ -85,10 +85,10 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Tabs** - Win11 Notepad-style tabs in the title bar: files opened from Explorer join the window as tabs, Ctrl+Tab cycles, Ctrl+W or Ctrl+F4 closes (Ctrl+F4 also while editing, where Ctrl+W is word wrap), middle-click closes, Ctrl+T opens the file browser into a new tab, unsaved buffers show a dot, and dragging reorders tabs. Right-click a tab for close operations (close, close all but this, close all to the left/right) plus copy path and reveal in Explorer. Pulling a tab out of the strip floats it as a card: drop it on open space for a new window (which keeps the tab row), or onto another Tinta window to move it there — and dropping a single-file window onto a tab strip merges it back. Single-file windows stay tabless; turn the Explorer behavior off with the "Open files in tabs" setting
 - **Folder browser** - Press B to browse and open Markdown or Mermaid files (Ctrl+click a file to open it in a new tab)
 - **Table of contents** - Press Tab to see document headings, click to jump; the panel follows your reading position, and typing filters the headings
-- **Unified editor** - Press `:` to edit: your raw Markdown on the left with the rendered page docked beside it. A slim line-number gutter, a soft accent wash on the caret's line and its rendered block, a tool rail with formatting controls plus table-size and diagram-template pickers, and Markdown assists (lists continue on Enter, Tab indents, Ctrl+B/I wrap). Search and find-replace work in the editor too
+- **Unified editor** - Press `:` to edit: your raw Markdown on the left with the rendered page docked beside it. A slim line-number gutter, a soft accent wash on the caret's line and its rendered block, a tool rail with formatting controls plus table-size and diagram-template pickers, and Markdown assists (lists continue on Enter, Tab indents, Ctrl+B/I wrap, and a quote, bracket or `* ~ ^ = :` typed over a selection wraps it). Alt+↑/↓ moves lines, and several carets (Alt+click, Ctrl+Alt+↑/↓, Ctrl+D) type, delete and move together, handy for lining up tables. A word and character count sits beside the Read button, for the whole document or the selection. Search and find-replace work in the editor too
 - **Emoji shortcodes** - `:rocket:` and friends render as real emoji
 - **Fit to width** - Wide tables and diagrams grow a Fit button that shrinks them to the reading column
-- **Draft recovery** - Unsaved quick notes are stashed continuously and offered back on the next launch
+- **Draft recovery** - Unsaved quick notes are stashed continuously and offered back on the next launch. With **Close without asking** (Settings → Editor), closing Tinta skips the save prompt and keeps unsaved edits as drafts for the next launch
 - **Create on click** - Clicking a missing file reference offers to create the file and opens it ready to type
 - **Text-file references** - `.txt`, `.json`, `.yaml` and friends link like Markdown files and open as highlighted documents
 - **Update check** - Portable builds check GitHub once a day and offer a new release as a quiet, dismissible chip
@@ -126,10 +126,13 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Ctrl+S` | Save (in edit mode) |
 | `Ctrl+Shift+S` | Save As: the editor writes the buffer to a new path, the viewer saves a copy, and the document continues under the new name |
 | `Ctrl+H` | Find and replace (in edit mode): Tab switches fields, Enter replaces, Ctrl+Enter replaces all |
-| `Ctrl+P` | Print / export to PDF |
+| `Ctrl+P` | Print / export to PDF; the preview picks the paper, orientation and margins |
 | `Ctrl+E` | Show/hide preview pane (in edit mode) |
 | `Ctrl+Shift+E` | Read the unsaved edits at full width; `Esc` returns to the source (in edit mode) |
 | `Ctrl+W` | Toggle word wrap (in edit mode) |
+| `Alt+↑` / `Alt+↓` | Move the current line, or the selected lines, up or down (in edit mode) |
+| `Ctrl+Alt+↑` / `Ctrl+Alt+↓` / `Alt+Click` | Add a caret above, below or at the click; `Esc` returns to one caret (in edit mode) |
+| `Ctrl+D` | Select the word, then add its next occurrence as another caret (in edit mode) |
 | `Ctrl+F4` | Close the current tab (viewer and edit mode) |
 | `Q` | Quit |
 
@@ -169,7 +172,8 @@ context menu show whatever keys are currently bound.
 Other settings of note: `browserFocusPath=1` makes `B` open the file browser
 with the path box focused and selected, so paste + Enter jumps anywhere
 (also in Settings → General). `tinta --new` starts an untitled quick note
-from the command line.
+from the command line. The print preview offers 12.7, 19.05 and 25.4 mm page
+margins; `printMarginMm=` takes any value from 5 to 50 for printing and PDF.
 
 The interface language is available in Settings → General. It follows the
 Windows display language by default, or can be changed explicitly. Transient
@@ -278,7 +282,8 @@ inlinecode=B00020
 Here inline code is red and plain fenced code stays neutral. Syntax highlighting
 keeps its own colors. Without `inlinecode`, inline code uses `code` as before.
 The override is preserved when saving a theme from the editor and applies to
-HTML and DOCX exports. Native printing keeps Tinta's existing light print palette.
+HTML and DOCX exports. Native printing keeps Tinta's light print palette, set in
+the theme's fonts.
 
 For supported code-fence languages and aliases, including SQL, PowerShell, Java,
 PHP, HTML/XML, CSS, YAML and Markdown, see [Syntax highlighting](docs/syntax-highlighting.md).

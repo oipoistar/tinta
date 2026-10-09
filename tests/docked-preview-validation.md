@@ -138,6 +138,35 @@ directory.
 - Word wrap stays off by default. Long lines scroll sideways in the source, and
   Ctrl+W wraps them.
 
+## Merged onto 3.7.5 (2026-10-09)
+
+The branch was brought up to date with master (3.7.5 plus #254 to #258) before
+merging. Six files conflicted:
+
+- Help keeps the Ctrl+Shift+E and ESC ESC rows and adds the four #251 rows.
+- `app.h` keeps #250's Read pill band and `readPillClearance` beside the new
+  divider and content-top helpers; `editSheetRect` stays gone.
+- The layout cursor starts at `documentContentTop`, or at the top margin on
+  paper (#257).
+- The README keeps #251's and #240's additions in the docked wording, and CMake
+  registers the new suite beside the newer ones.
+
+Behaviour reconciled with what 3.7.5 added around the Read button:
+
+- The button keeps 3.7.5's label-sized width and interface font (#254); the
+  fade, the hover reveal and the click-through apply on top.
+- The word count (#240) keeps its place beside the button's slot and stays
+  visible while the button is hidden; the #250 clearance still keeps the caret
+  line and the last line above that band.
+- Esc first folds extra carets (#251); only a single caret gets the "press Esc
+  again" hint.
+- The exit save keeps the higher of the stored and current hint count, next to
+  the print margin.
+
+All 33 CTest suites passed after the merge. `editor_context_selection` crashed
+(0xc000041d) on its first run after the build, as it does without this change,
+and passed every rerun. Not checked live: the workstation was locked.
+
 ## Draft reply (not posted)
 
 ### #245

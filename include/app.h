@@ -24,6 +24,7 @@
 
 #include "markdown.h"
 #include "keymap.h"
+#include "wordcount.h"
 
 using namespace qmd;
 
@@ -246,6 +247,14 @@ struct Settings {
     // Editor markdown assists (list continuation, Tab indent, Ctrl+B/I)
     // master switch
     bool editorAssists = true;
+    // Word and character count beside the editor's Read button (#240)
+    bool showWordCount = true;
+    // Closing a window with unsaved edits skips the dialog and leaves them
+    // as drafts, offered back on the next launch (#252)
+    bool closeKeepsDrafts = false;
+    // Page margins on every side when printing and exporting PDF, in mm
+    // (#257): the preview offers 12.7, 19.05 (0.75 in) and 25.4
+    float printMarginMm = 19.05f;
     fm::Settings frontmatter;
     // User-chosen pandoc executable ("" = auto-detect)
     std::string pandocPath;
@@ -375,6 +384,11 @@ struct App {
     // DirectWrite
     IDWriteFactory* dwriteFactory = nullptr;
     IDWriteFontFallback* fontFallback = nullptr;  // For emoji font fallback
+    // Interface text in a Chinese, Japanese or Korean interface: that
+    // language's fonts first (#254). Null for other languages, which keep
+    // the system fallback; uiFontFallbackOrder is the order it was built for
+    IDWriteFontFallback* uiFontFallback = nullptr;
+    int uiFontFallbackOrder = -1;
     IDWriteTextAnalyzer* textAnalyzer = nullptr;  // UAX#14 line-break analysis
     IDWriteTextFormat* textFormat = nullptr;
     IDWriteTextFormat* supSubFormat = nullptr;  // document font for ^sup^/~sub~
@@ -763,6 +777,9 @@ struct App {
     };
     bool showPrintPreview = false;
     PrintSavedView printSaved;
+    // Laying out for paper: the page margins frame the text, so the screen's
+    // side padding, title-strip offset and reading column stay out (#257)
+    bool printLayout = false;
     std::vector<float> printPreviewBounds;    // page boundaries in doc Y (pages + 1)
     int printPreviewPage = 0;
     float printPreviewPageW = 794.0f;         // page size in DIPs (A4 fallback)
@@ -772,10 +789,12 @@ struct App {
     unsigned printPreviewPxW = 0, printPreviewPxH = 0;
     int printPreviewPaper = -1;               // index into PRINT_PAPERS (-1: detect)
     bool printPreviewLandscape = false;
+    float printMarginMm = 19.05f;             // mirrors Settings (#257)
     D2D1_RECT_F printPreviewPrintBtn{};       // hit rects (set during render)
     D2D1_RECT_F printPreviewCancelBtn{};
     D2D1_RECT_F printPreviewPaperBtn[4]{};
     D2D1_RECT_F printPreviewOrientBtn[2]{};   // 0 portrait, 1 landscape
+    D2D1_RECT_F printPreviewMarginBtn[3]{};   // PRINT_MARGINS_MM presets
 
     // Blocks wider than the printable area (mermaid diagrams, wide tables)
     // are shrunk uniformly to fit the margins when printing; each band is a
@@ -811,6 +830,9 @@ struct App {
     std::vector<HeadingInfo> headings;
     std::unordered_map<std::string, int> headingSlugCounts;
     std::unordered_map<std::string, float> footnoteAnchors;
+    // <a id>/<a name> link targets and their document Y, in document order:
+    // the first of a repeated id wins, as in a browser (#255)
+    std::vector<std::pair<std::string, float>> htmlAnchors;
     int hoveredTocIndex = -1;
     float tocScroll = 0.0f;
     // Typed while the panel is open: case-insensitive substring filter
@@ -1207,6 +1229,8 @@ struct App {
     // Unified editor (design t11): one raw buffer, live render beside it;
     // the left tool rail slides in with edit mode carrying the controls
     bool editorAssists = true;
+    bool showWordCount = true;       // #240
+    bool closeKeepsDrafts = false;   // #252
     fm::Settings frontmatter;
     float editRailAnim = 0.0f;       // rail slide-in 0..1
     int editRailHover = 0;           // hit id under the mouse, 0 = none
@@ -1256,6 +1280,30 @@ struct App {
     size_t editorSelEnd = 0;
     bool editorHasSelection = false;
 
+    // Extra carets (#251) beside the primary one above. Alt+click,
+    // Ctrl+Alt+Up/Down and Ctrl+D add them; typing, deleting and moving act
+    // on every caret, and Esc or a plain click returns to one.
+    struct EditorCaret {
+        size_t pos = 0;
+        size_t anchor = 0;
+        bool hasSelection = false;
+        int desiredCol = -1;
+        float desiredX = -1.0f;
+        size_t upstream = std::wstring::npos;
+    };
+    std::vector<EditorCaret> editorExtraCarets;
+    // An Alt+click happened during this Alt press: its release must not
+    // put the window into system-menu mode
+    bool altClickGuard = false;
+
+    // Word and character count (#240): the document's totals refresh with
+    // the reparse debounce; the selection's are cached by its range
+    TextCounts editorDocCounts;
+    bool editorDocCountsStale = true;
+    TextCounts editorSelCounts;
+    std::wstring editorSelCountsKey;
+    D2D1_RECT_F editorWordCountRect{};  // last painted chip, empty when hidden
+
     // Editor scroll
     float editorScrollY = 0;
     float editorContentHeight = 0;
@@ -1292,9 +1340,14 @@ struct App {
         std::wstring text;
         size_t cursorBefore, cursorAfter;
         std::wstring replacement; // atomic automatic metadata change
+        // Actions sharing a nonzero group undo and redo as one step: an
+        // edit at several carets, a line move (#251)
+        unsigned group = 0;
     };
     std::vector<EditAction> undoStack;
     std::vector<EditAction> redoStack;
+    unsigned editorUndoGroup = 0;        // group of the edit in progress
+    unsigned editorUndoGroupSerial = 0;
 
     // Editor text format (monospace)
     IDWriteTextFormat* editorTextFormat = nullptr;
@@ -1338,6 +1391,7 @@ struct App {
         headings.clear();
         headingSlugCounts.clear();
         footnoteAnchors.clear();
+        htmlAnchors.clear();
         fileRefCache.clear();
         for (auto& a : annotations) {
             a.docStart = a.docEnd = (size_t)-1;
@@ -1396,6 +1450,7 @@ struct App {
         if (deviceContext) { deviceContext->Release(); deviceContext = nullptr; }
         if (renderTarget) { renderTarget->Release(); renderTarget = nullptr; }
         if (fontFallback) { fontFallback->Release(); fontFallback = nullptr; }
+        if (uiFontFallback) { uiFontFallback->Release(); uiFontFallback = nullptr; }
         if (textAnalyzer) { textAnalyzer->Release(); textAnalyzer = nullptr; }
         if (textFormat) { textFormat->Release(); textFormat = nullptr; }
         if (supSubFormat) { supSubFormat->Release(); supSubFormat = nullptr; }
@@ -1531,6 +1586,17 @@ inline bool editorPreviewVisible(const App& app) {
 // rendering keeps asking editorPreviewVisible, which is true in both.
 inline bool editSplitPreview(const App& app) {
     return app.editMode && app.editorShowPreview && !app.editorReadingPreview;
+}
+
+// The Read / Edit pill floats over the bottom-left corner in edit mode
+// (#242): its band in DIPs above the window bottom
+constexpr float kReadPillLift = 12.0f;
+constexpr float kReadPillHeight = 30.0f;
+
+// Room the source and the reading view keep above the window bottom, so
+// the caret line and the last line always scroll clear of the pill (#250)
+inline float readPillClearance(const App& app) {
+    return dpi(app, kReadPillLift + kReadPillHeight + 6.0f);
 }
 
 // The hairline between source and preview sits at the seam's center

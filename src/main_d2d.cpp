@@ -640,6 +640,7 @@ render_document:
             app.dwriteFactory->CreateTextLayout(copyLabel, (UINT32)wcslen(copyLabel), app.codeFormat,
                 btnW, btnH, &btnLayout);
             if (btnLayout) {
+                useUiFontFallback(app, btnLayout);
                 btnLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 btnLayout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 app.renderTarget->DrawTextLayout(
@@ -708,6 +709,7 @@ render_document:
                     pngLabel, (UINT32)wcslen(pngLabel), app.codeFormat, pngW,
                     btnH, &pngLayout);
                 if (pngLayout) {
+                    useUiFontFallback(app, pngLayout);
                     pngLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                     pngLayout->SetParagraphAlignment(
                         DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -755,6 +757,7 @@ render_document:
                 copyLabel, (UINT32)wcslen(copyLabel), app.codeFormat, btnW,
                 btnH, &btnLayout);
             if (btnLayout) {
+                useUiFontFallback(app, btnLayout);
                 btnLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
                 btnLayout->SetParagraphAlignment(
                     DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -1118,6 +1121,7 @@ render_document:
         if (!app.editorReadingPreview) renderEditRail(app);
         renderEditCtxMenu(app);
         renderEditorReadingButton(app);
+        renderEditorWordCount(app);
     }
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
@@ -1383,6 +1387,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_CLOSE:
             if (app) tableEditCommit(*app);
+            // "Close without asking" (#252): unsaved buffers stay behind as
+            // drafts, offered back on the next launch, and the window closes
+            if (app && app->closeKeepsDrafts) {
+                draftsSweep(*app);
+                app->confirmExitPending = false;
+                app->pendingWindowClose = false;
+                break;
+            }
             // Unsaved buffers (active or parked in tabs) get the dialog
             // before the window may close; tabs stay open so the session
             // save still remembers them
@@ -1597,10 +1609,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return TRUE;
 
         case WM_SYSKEYDOWN:
+            // A fresh Alt press (not its autorepeat) starts a new gesture
+            if (app && wParam == VK_MENU && !(lParam & (1 << 30))) {
+                app->altClickGuard = false;
+            }
             if (app && wParam == VK_F10) {
                 handleKeyDown(*app, hwnd, wParam);
                 return 0;
             }
+            // Alt+Up / Alt+Down move the editor's lines (#251)
+            if (app && editorAltArrowKey(*app, hwnd, wParam)) return 0;
             // Alt+Left / Alt+Right mirror the mouse side buttons
             if (app && (lParam & (1 << 29)) &&
                 !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_SHIFT) & 0x8000) &&
@@ -1614,6 +1632,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_CHAR:
             if (app) handleCharInput(*app, hwnd, wParam);
             return 0;
+
+        case WM_SYSCOMMAND:
+            // Releasing Alt after an Alt+click (#251) is not a menu request
+            if (app && (wParam & 0xFFF0) == SC_KEYMENU && lParam == 0 && app->altClickGuard) {
+                app->altClickGuard = false;
+                return 0;
+            }
+            break;
 
         case WM_IME_STARTCOMPOSITION:
         case WM_IME_COMPOSITION:
@@ -1773,8 +1799,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             KillTimer(hwnd, TIMER_DRAFT_SAVE);
             // A graceful close resolved every dirty buffer through the
             // unsaved-changes flow; leftover drafts would resurrect
-            // content the user already decided about
-            if (app) draftsDeleteAll(*app);
+            // content the user already decided about. With "Close without
+            // asking" the drafts are the decision (#252): they stay.
+            if (app && !app->closeKeepsDrafts) draftsDeleteAll(*app);
             {
                 // Load existing settings to preserve values like hasAskedFileAssociation
                 Settings settings = loadSettings();
@@ -1787,6 +1814,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.editHintsShown =
                     std::max(settings.editHintsShown, app->editHintsShown);
                 settings.editorAssists = app->editorAssists;
+                // showWordCount, closeKeepsDrafts and printMarginMm persist
+                // when changed and stay as on disk here, like openInTabs below
                 settings.followSystemTheme = app->followSystemTheme;
                 settings.lightThemeIndex = app->lightThemeIndex;
                 settings.darkThemeIndex = app->darkThemeIndex;
@@ -1914,6 +1943,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
     app.editorAssists = savedSettings.editorAssists;
+    app.showWordCount = savedSettings.showWordCount;
+    app.printMarginMm = savedSettings.printMarginMm;
+    app.closeKeepsDrafts = savedSettings.closeKeepsDrafts;
     app.frontmatter = savedSettings.frontmatter;
     app.pandocUserPath = toWide(savedSettings.pandocPath);
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
@@ -1997,6 +2029,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
     LocalFree(argv);
 
+    // Relative paths resolve against the launch folder, then the process
+    // leaves it: Explorer starts Tinta inside the document's folder, and
+    // Windows will not delete or rename a folder that a running process
+    // works in (#253)
+    auto resolveArgument = [](const std::wstring& path) {
+        std::wstring full = path.empty() ? std::wstring() : absoluteFilePath(toUtf8(path));
+        return full.empty() ? path : full;
+    };
+    inputFile = toUtf8(resolveArgument(toWide(inputFile)));
+    printPagesDir = resolveArgument(printPagesDir);
+    exportHtmlPath = resolveArgument(exportHtmlPath);
+    exportDocxPath = resolveArgument(exportDocxPath);
+    exportPdfPath = resolveArgument(exportPdfPath);
+    const std::string tutorialFile = toUtf8(resolveArgument(L"syntax.md"));
+    parkWorkingDirectory();
+
     // Single instance: a plain file launch joins the existing window as a
     // new tab (Win11 Notepad model). --new/--cascade windows and the
     // openInTabs=false setting keep the one-window-per-document behavior.
@@ -2006,25 +2054,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         savedSettings.openInTabs) {
         HWND existing = FindWindowW(L"Tinta", nullptr);
         if (existing) {
-            // Resolve to an absolute path: the receiving window has its own
-            // working directory
-            std::wstring wide = toWide(inputFile);
-            wchar_t full[MAX_PATH];
-            if (GetFullPathNameW(wide.c_str(), MAX_PATH, full, nullptr)) {
-                int len = WideCharToMultiByte(CP_UTF8, 0, full, -1, nullptr, 0,
-                                              nullptr, nullptr);
-                std::string absolute(len - 1, '\0');
-                WideCharToMultiByte(CP_UTF8, 0, full, -1, &absolute[0], len,
-                                    nullptr, nullptr);
-                COPYDATASTRUCT data;
-                data.dwData = 1;
-                data.cbData = (DWORD)absolute.size() + 1;
-                data.lpData = (void*)absolute.c_str();
-                SendMessageW(existing, WM_COPYDATA, 0, (LPARAM)&data);
-                if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
-                SetForegroundWindow(existing);
-                return 0;
-            }
+            // inputFile is absolute by now: the receiving window has its
+            // own working directory
+            COPYDATASTRUCT data;
+            data.dwData = 1;
+            data.cbData = (DWORD)inputFile.size() + 1;
+            data.lpData = (void*)inputFile.c_str();
+            SendMessageW(existing, WM_COPYDATA, 0, (LPARAM)&data);
+            if (IsIconic(existing)) ShowWindow(existing, SW_RESTORE);
+            SetForegroundWindow(existing);
+            return 0;
         }
     }
 
@@ -2234,9 +2273,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             showStartPage();
         }
     } else {
-        // Try syntax.md
-        if (loadFile("syntax.md")) {
-            app.currentFile = "syntax.md";
+        // Try syntax.md in the launch folder
+        if (loadFile(tutorialFile)) {
+            app.currentFile = tutorialFile;
         } else {
             showStartPage();
         }

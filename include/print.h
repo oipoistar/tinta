@@ -6,7 +6,7 @@
 // Prints the current document through the Windows print pipeline
 // (ID2D1PrintControl). The user picks any installed printer — including
 // "Microsoft Print to PDF" — from the standard dialog. Rendering uses a
-// dedicated light print palette regardless of the active theme.
+// dedicated light print palette in the active theme's fonts.
 bool printDocument(App& app);
 
 // Print preview overlay: Ctrl+P opens it, the user flips through the
@@ -35,6 +35,14 @@ inline constexpr int PRINT_PAPER_COUNT = 4;
 
 // Re-paginates the open preview for a new paper size / orientation
 void printPreviewSetFormat(App& app, int paper, bool landscape);
+
+// Page margins the preview offers, in mm: 0.5, 0.75 (the default) and 1 in.
+// settings.ini's printMarginMm takes any value from 5 to 50 (#257).
+inline constexpr float PRINT_MARGINS_MM[] = {12.7f, 19.05f, 25.4f};
+inline constexpr int PRINT_MARGIN_COUNT = 3;
+
+// Sets the margin on every side, re-paginates an open preview and saves it
+void printPreviewSetMargin(App& app, float mm);
 
 // Debug/testing: renders each paginated page to <outDir>\page-N.png using
 // the same layout and pagination as printing. Returns the page count.

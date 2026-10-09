@@ -20,6 +20,16 @@ void renderEditorReadingButton(App& app);
 bool editorReadingButtonShown(const App& app);
 bool editorReadingButtonNeedsTicks(const App& app);
 void editorReadingButtonHover(App& app, float x, float y);
+// Word and character count beside the Read button (#240)
+void renderEditorWordCount(App& app);
+// Alt+Up/Down move lines, Ctrl+Alt+Up/Down add carets (#251); false when
+// the key is not one of them or the source editor is not in front
+bool editorAltArrowKey(App& app, HWND hwnd, WPARAM wParam);
+void editorClearExtraCarets(App& app);
+// Multi-caret clipboard text (#251): every selection, joined by line
+// breaks; pasting a text with one line per caret hands each its own line
+std::wstring editorCaretSelectionsText(const App& app);
+void editorPasteAtCarets(App& app, HWND hwnd, const std::wstring& paste);
 
 // Editor input handlers
 void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam);

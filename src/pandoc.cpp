@@ -8,6 +8,7 @@
 
 #include "editor.h"
 #include "export.h"
+#include "file_utils.h"
 #include "i18n.h"
 #include "settings.h"
 
@@ -178,7 +179,7 @@ void pandocExportFlow(App& app, HWND hwnd, int fmt) {
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = f.ext + 1;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-    if (!GetSaveFileNameW(&ofn)) return;
+    if (!runSaveFileDialog(ofn)) return;
 
     // Stage the input on the UI thread: our HTML export (diagrams and
     // math as SVG) for rich targets, the raw buffer for LaTeX
