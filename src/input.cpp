@@ -793,6 +793,7 @@ static void settingsAction(App& app, HWND hwnd, int action) {
 }
 
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
+    tabHoverCardDismiss(app, hwnd);
     // Lightbox: the wheel zooms the image
     if (app.showLightbox) {
         float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
@@ -944,6 +945,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
 }
 
 void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
+    tabHoverCardDismiss(app, hwnd);
     // Horizontal scroll
     float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA * dpi(app, 60.0f);
     app.targetScrollX += delta;
@@ -1114,6 +1116,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             app.hoveredTab = newHover;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
+        tabHoverCardTrack(app, hwnd, newHover);
         if (app.captionButtonHover) {
             // The pointer is back in the client area
             app.captionButtonHover = 0;
@@ -1816,6 +1819,7 @@ static void toggleApplicationMenu(App& app, HWND hwnd, bool keyboard = false) {
 void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     // A fresh press is a new gesture, even if a cancelled drag released elsewhere.
     app.swallowNextMouseUp = false;
+    tabHoverCardDismiss(app, hwnd);
     // Settings owns the entire click, including the title strip behind it.
     // Sliders drag from the press; dismissal and other actions use release.
     if (app.showSettings) {
@@ -3449,6 +3453,8 @@ static void toggleZenMode(App& app, HWND hwnd) {
 }
 
 bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
+    // Typing, scrolling and clicking all put the tab hover card away
+    tabHoverCardDismiss(app, hwnd);
     // Ctrl+Alt+Up/Down add editor carets (#251) before the AltGr guard
     if (editorAltArrowKey(app, hwnd, wParam)) return true;
     if (!shortcutModifiersAllowed(static_cast<unsigned>(wParam))) return false;

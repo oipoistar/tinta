@@ -1123,6 +1123,8 @@ render_document:
         renderEditorReadingButton(app);
         renderEditorWordCount(app);
     }
+    // A resting pointer's tab: full name and folder below the strip
+    renderTabHoverCard(app);
     if (app.showThemeChooser) renderThemeChooser(app);
     if (app.showHelp) renderHelpOverlay(app);
     if (app.showSettings) renderSettingsOverlay(app);
@@ -1307,6 +1309,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_KILLFOCUS:
+            if (app) tabHoverCardDismiss(*app, hwnd);
             if (app) searchInputMouseUp(*app);
             if (app) cancelDocumentScrollbarDrag(*app, hwnd);
             if (app) sidePanelResizeEnd(*app, hwnd, true);
@@ -1375,6 +1378,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_MBUTTONDOWN:
+            if (app) tabHoverCardDismiss(*app, hwnd);
             if (app && app->renderTarget) {
                 int mx = GET_X_LPARAM(lParam);
                 int my = GET_Y_LPARAM(lParam);
@@ -1582,6 +1586,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // The Read button fades out and the seam hairline dims (#245)
                 editorReadingButtonHover(*app, -1.0f, -1.0f);
                 app->editSeamHover = false;
+                // Off the tab strip too: its hover and hover card (#246)
+                tabHoverCardLeave(*app, hwnd);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -1609,6 +1615,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return TRUE;
 
         case WM_SYSKEYDOWN:
+            if (app) tabHoverCardDismiss(*app, hwnd);
             // A fresh Alt press (not its autorepeat) starts a new gesture
             if (app && wParam == VK_MENU && !(lParam & (1 << 30))) {
                 app->altClickGuard = false;
@@ -1661,6 +1668,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
             }
             if (wParam == TIMER_LINK_PEEK && app) handleLinkPeekTimer(*app, hwnd);
+            if (wParam == TIMER_TAB_HOVER_CARD && app) handleTabHoverCardTimer(*app, hwnd);
             if (wParam == TIMER_FILE_WATCH && app) handleFileWatchTimer(*app, hwnd);
             if (wParam == 2 && app) editorReparse(*app); // TIMER_EDITOR_REPARSE
             if (wParam == TIMER_CURSOR_BLINK && app) {
@@ -1718,6 +1726,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_CONTEXTMENU:
+            if (app) tabHoverCardDismiss(*app, hwnd);
             if (app) handleContextMenu(*app, hwnd, lParam);
             return 0;
 

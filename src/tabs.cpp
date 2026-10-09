@@ -4,6 +4,7 @@
 // a chevron opens the open-files switcher when the strip is crowded.
 
 #include "tabs.h"
+#include "d2d_init.h"
 #include "search.h"
 #include "overlays.h"
 
@@ -19,6 +20,7 @@
 #include "utils.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <shellapi.h>
@@ -766,6 +768,10 @@ void renderTabStrip(App& app) {
             App::TabHit hit;
             hit.rect = r;
             hit.index = (int)i;
+            if (labelRight > r.left + dpi(app, 12.0f)) {
+                hit.labelRect = D2D1::RectF(r.left + dpi(app, 12.0f), r.top,
+                                            labelRight, r.bottom);
+            }
             if (showClose) {
                 float cbSize = dpi(app, 20.0f);
                 float cbX = r.right - cbSize - dpi(app, 6.0f);
@@ -1066,6 +1072,311 @@ void renderTabSwitcher(App& app) {
         }
         app.tabSwitcherHits.push_back({row, (int)i});
     }
+}
+
+// --- Tab hover card (#246) ---
+//
+// A pointer resting on a tab brings up a small card below the strip: the
+// tab's whole name, the folder it lives in and, when the tab carries a
+// dot, what the dot means. A name the strip cut short reads in full, and
+// two README.md tabs from different projects stop looking alike. The
+// first card waits for a dwell; once one has been up, gliding along the
+// strip swaps cards almost at once. Suggested by Alex (@Lex987).
+
+namespace {
+
+constexpr UINT TAB_HOVER_CARD_DWELL_MS = 600;
+constexpr UINT TAB_HOVER_CARD_WARM_MS = 60;
+constexpr ULONGLONG TAB_HOVER_CARD_WARM_WINDOW_MS = 800;
+
+const App::TabHit* tabHitFor(const App& app, int tab) {
+    for (const App::TabHit& hit : app.tabHits) {
+        if (hit.index == tab) return &hit;
+    }
+    return nullptr;
+}
+
+// Menus, dialogs and drags own the pointer: no card over them
+bool tabHoverCardBlocked(const App& app) {
+    return app.showTabSwitcher || app.showTabMenu || app.showContextMenu ||
+           app.confirmExitPending || app.createRefPending || app.showHelp ||
+           app.showSettings || app.showThemeChooser || app.showThemeEditor ||
+           app.showShortcutEditor || app.showLightbox ||
+           app.showPrintPreview || app.tabDragIndex >= 0;
+}
+
+// A zero-width space after each separator lets a long folder wrap
+// between its parts rather than in the middle of a name
+std::wstring breakablePath(const std::wstring& path) {
+    std::wstring out;
+    out.reserve(path.size() + path.size() / 4);
+    for (wchar_t ch : path) {
+        out += ch;
+        if (ch == L'\\' || ch == L'/') out += wchar_t(0x200B);
+    }
+    return out;
+}
+
+// Wrapped to the card's width and cut to `maxLines`; a longer text ends
+// in the format's ellipsis
+IDWriteTextLayout* hoverCardLayout(App& app, const std::wstring& text,
+                                   IDWriteTextFormat* format, float width,
+                                   UINT32 maxLines, DWRITE_FONT_WEIGHT weight) {
+    IDWriteTextLayout* layout = nullptr;
+    if (text.empty() || !format ||
+        FAILED(app.dwriteFactory->CreateTextLayout(
+            text.c_str(), (UINT32)text.size(), format, width, 10000.0f,
+            &layout)) ||
+        !layout) {
+        return nullptr;
+    }
+    useUiFontFallback(app, layout);
+    layout->SetWordWrapping(DWRITE_WORD_WRAPPING_EMERGENCY_BREAK);
+    layout->SetFontWeight(weight, {0, (UINT32)text.size()});
+    DWRITE_TEXT_METRICS tm{};
+    layout->GetMetrics(&tm);
+    if (tm.lineCount > maxLines) {
+        std::vector<DWRITE_LINE_METRICS> lines(tm.lineCount);
+        UINT32 count = 0;
+        if (SUCCEEDED(layout->GetLineMetrics(lines.data(), tm.lineCount,
+                                             &count))) {
+            float height = 0.0f;
+            for (UINT32 i = 0; i < maxLines && i < count; i++) {
+                height += lines[i].height;
+            }
+            layout->SetMaxHeight(height);
+        }
+    }
+    return layout;
+}
+
+void hoverCardExtent(IDWriteTextLayout* layout, float& width, float& height) {
+    width = height = 0.0f;
+    if (!layout) return;
+    DWRITE_TEXT_METRICS tm{};
+    layout->GetMetrics(&tm);
+    width = tm.width;
+    height = std::min(tm.height, layout->GetMaxHeight());
+}
+
+}  // namespace
+
+TabHoverCardText tabHoverCardText(const App& app, int tab) {
+    TabHoverCardText card;
+    if (tab < 0 || tab >= (int)app.tabs.size()) return card;
+    const App::DocTab& doc = app.tabs[tab];
+    card.name = doc.title;
+    if (!doc.path.empty()) {
+        std::wstring wide = toWide(doc.path);
+        size_t sep = wide.find_last_of(L"\\/");
+        if (sep != std::wstring::npos) {
+            card.folder = wide.substr(0, sep);
+            // A drive root keeps its separator: "C:\" rather than "C:"
+            if (card.folder.size() == 2 && card.folder[1] == L':') {
+                card.folder += L'\\';
+            }
+        }
+    }
+    bool active = tab == app.activeTab;
+    card.dirty = active ? (app.editMode && app.editorDirty)
+                        : (doc.editMode && doc.editorDirty);
+    if (card.dirty) {
+        card.status = tr(app, "tabs.card.unsaved");
+    } else if (doc.fileMissing && !doc.path.empty()) {
+        card.status = tr(app, "tabs.card.missing");
+    }
+    return card;
+}
+
+void tabHoverCardTrack(App& app, HWND hwnd, int tab) {
+    // A card put away over a tab stays away until the pointer moves on
+    if (tab != app.tabHoverCardQuiet) app.tabHoverCardQuiet = -1;
+    if (tab >= 0 &&
+        (tab == app.tabHoverCardTab || tab == app.tabHoverCardPending)) {
+        return;
+    }
+    bool wasUp = app.tabHoverCardTab >= 0;
+    if (wasUp) app.tabHoverCardHiddenAt = GetTickCount64();
+    app.tabHoverCardTab = app.tabHoverCardPending = -1;
+    KillTimer(hwnd, TIMER_TAB_HOVER_CARD);
+    if (tab >= 0 && tab != app.tabHoverCardQuiet && tabStripVisible(app)) {
+        bool warm = app.tabHoverCardHiddenAt != 0 &&
+                    GetTickCount64() - app.tabHoverCardHiddenAt <
+                        TAB_HOVER_CARD_WARM_WINDOW_MS;
+        app.tabHoverCardPending = tab;
+        SetTimer(hwnd, TIMER_TAB_HOVER_CARD,
+                 warm ? TAB_HOVER_CARD_WARM_MS : TAB_HOVER_CARD_DWELL_MS,
+                 nullptr);
+        // The gaps between tabs belong to the caption: hear the pointer
+        // slip out of the client area there
+        TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0};
+        TrackMouseEvent(&track);
+    }
+    if (wasUp) InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void tabHoverCardDismiss(App& app, HWND hwnd) {
+    int tab = app.tabHoverCardTab >= 0 ? app.tabHoverCardTab
+                                       : app.tabHoverCardPending;
+    if (tab < 0) return;
+    KillTimer(hwnd, TIMER_TAB_HOVER_CARD);
+    bool wasUp = app.tabHoverCardTab >= 0;
+    app.tabHoverCardTab = app.tabHoverCardPending = -1;
+    // Put away on purpose: no quick follow-up from the neighbours
+    app.tabHoverCardQuiet = tab;
+    app.tabHoverCardHiddenAt = 0;
+    if (wasUp) InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void tabHoverCardLeave(App& app, HWND hwnd) {
+    tabHoverCardTrack(app, hwnd, -1);
+    app.tabHoverCardQuiet = -1;
+    // The strip forgets its hover too, so no tab stays lit
+    if (app.hoveredTab >= 0) {
+        app.hoveredTab = -1;
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+}
+
+void handleTabHoverCardTimer(App& app, HWND hwnd) {
+    KillTimer(hwnd, TIMER_TAB_HOVER_CARD);
+    int tab = app.tabHoverCardPending;
+    app.tabHoverCardPending = -1;
+    if (tab < 0 || tab >= (int)app.tabs.size() || tab != app.hoveredTab) {
+        return;
+    }
+    app.tabHoverCardTab = tab;
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void renderTabHoverCard(App& app) {
+    app.tabHoverCardRect = D2D1::RectF(0, 0, 0, 0);
+    int tab = app.tabHoverCardTab;
+    if (tab < 0 || tab >= (int)app.tabs.size() || tab != app.hoveredTab ||
+        !tabStripVisible(app) || tabHoverCardBlocked(app) ||
+        !app.folderBrowserFormat || !app.tocFormat) {
+        return;
+    }
+    // Only while the pointer is still on that tab
+    const App::TabHit* hit = tabHitFor(app, tab);
+    if (!hit || (float)app.mouseX < hit->rect.left ||
+        (float)app.mouseX > hit->rect.right ||
+        (float)app.mouseY < hit->rect.top ||
+        (float)app.mouseY > hit->rect.bottom) {
+        return;
+    }
+    TabHoverCardText card = tabHoverCardText(app, tab);
+    // A tab without a file adds nothing unless the strip cut its title
+    // short or it holds unsaved changes
+    if (card.folder.empty() && card.status.empty()) {
+        float room = hit->labelRect.right - hit->labelRect.left;
+        if (room > 0.0f &&
+            measureText(app, card.name, app.folderBrowserFormat) <= room) {
+            return;
+        }
+    }
+
+    float padX = dpi(app, 12.0f);
+    float padY = dpi(app, 9.0f);
+    float gap = dpi(app, 3.0f);
+    float margin = dpi(app, 8.0f);
+    float dotIndent = dpi(app, 13.0f);
+    float textW = std::min(dpi(app, 420.0f),
+                           (float)app.width - margin * 2.0f - padX * 2.0f);
+    if (textW < dpi(app, 60.0f)) return;
+
+    IDWriteTextLayout* name =
+        hoverCardLayout(app, card.name, app.folderBrowserFormat, textW, 4,
+                        DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    IDWriteTextLayout* folder =
+        hoverCardLayout(app, breakablePath(card.folder), app.tocFormat, textW,
+                        4, DWRITE_FONT_WEIGHT_NORMAL);
+    IDWriteTextLayout* status =
+        hoverCardLayout(app, card.status, app.tocFormat, textW - dotIndent, 2,
+                        DWRITE_FONT_WEIGHT_NORMAL);
+    float nameW, nameH, folderW, folderH, statusW, statusH;
+    hoverCardExtent(name, nameW, nameH);
+    hoverCardExtent(folder, folderW, folderH);
+    hoverCardExtent(status, statusW, statusH);
+    float contentW = std::max(nameW, folderW);
+    if (status) contentW = std::max(contentW, statusW + dotIndent);
+    float w = std::ceil(contentW) + padX * 2.0f;
+    float h = padY * 2.0f + nameH + (folder ? gap + folderH : 0.0f) +
+              (status ? gap + statusH : 0.0f);
+    float x = std::max(margin,
+                       std::min(hit->rect.left, (float)app.width - w - margin));
+    float y = chromeTopHeight(app) + dpi(app, 6.0f);
+    D2D1_RECT_F rect = D2D1::RectF(x, y, x + w, y + h);
+    float radius = dpi(app, 8.0f);
+
+    // A soft lift off the page underneath, then the strip's own surface
+    float shadowAlpha = app.theme.isDark ? 0.30f : 0.10f;
+    for (int ring = 2; ring >= 1; ring--) {
+        float spread = dpi(app, (float)ring * 2.0f);
+        app.brush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f,
+                                         shadowAlpha / (float)(ring * ring)));
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(
+                D2D1::RectF(rect.left - spread, rect.top - spread * 0.5f,
+                            rect.right + spread, rect.bottom + spread * 1.5f),
+                radius + spread, radius + spread),
+            app.brush);
+    }
+    D2D1_COLOR_F text = app.theme.text;
+    D2D1_COLOR_F panel = stripBackground(app);
+    panel.a = 1.0f;  // opaque: no page text ghosting through
+    D2D1_COLOR_F border = text;
+    border.a = 0.12f;
+    D2D1_COLOR_F muted = text;
+    muted.a = 0.62f;
+    D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(rect, radius, radius);
+    app.brush->SetColor(panel);
+    app.renderTarget->FillRoundedRectangle(rr, app.brush);
+    app.brush->SetColor(border);
+    app.renderTarget->DrawRoundedRectangle(rr, app.brush, 1.0f);
+
+    float ty = y + padY;
+    if (name) {
+        app.brush->SetColor(text);
+        app.renderTarget->DrawTextLayout(D2D1::Point2F(x + padX, ty), name,
+                                         app.brush,
+                                         D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        ty += nameH;
+    }
+    if (folder) {
+        ty += gap;
+        app.brush->SetColor(muted);
+        app.renderTarget->DrawTextLayout(D2D1::Point2F(x + padX, ty), folder,
+                                         app.brush,
+                                         D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        ty += folderH;
+    }
+    if (status) {
+        ty += gap;
+        // The strip's dot, explained: orange unsaved, red-grey gone
+        DWRITE_TEXT_METRICS tm{};
+        status->GetMetrics(&tm);
+        std::vector<DWRITE_LINE_METRICS> lines(std::max(1u, tm.lineCount));
+        UINT32 count = 0;
+        status->GetLineMetrics(lines.data(), (UINT32)lines.size(), &count);
+        DWRITE_LINE_METRICS first = lines[0];
+        float dotR = dpi(app, 3.5f);
+        app.brush->SetColor(card.dirty ? D2D1::ColorF(0.94f, 0.56f, 0.12f)
+                                       : D2D1::ColorF(0.74f, 0.36f, 0.34f));
+        app.renderTarget->FillEllipse(
+            D2D1::Ellipse(D2D1::Point2F(x + padX + dotR,
+                                        ty + first.height * 0.5f),
+                          dotR, dotR),
+            app.brush);
+        app.brush->SetColor(muted);
+        app.renderTarget->DrawTextLayout(
+            D2D1::Point2F(x + padX + dotIndent, ty), status, app.brush,
+            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+    for (IDWriteTextLayout* layout : {name, folder, status}) {
+        if (layout) layout->Release();
+    }
+    app.tabHoverCardRect = rect;
 }
 
 // --- input ---

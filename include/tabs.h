@@ -42,6 +42,21 @@ void renderTabSwitcher(App& app);
 // Tab row vs tabless title text (drag-out satellites force the row)
 bool tabStripVisible(const App& app);
 
+// Hover card (#246): a pointer resting on a tab shows its whole name, its
+// folder and what its dot means on a card below the strip
+struct TabHoverCardText {
+    std::wstring name;
+    std::wstring folder;  // empty for a tab without a file
+    std::wstring status;  // unsaved changes / gone from disk, else empty
+    bool dirty = false;   // status colour follows the strip's dot
+};
+TabHoverCardText tabHoverCardText(const App& app, int tab);
+void tabHoverCardTrack(App& app, HWND hwnd, int tab);  // pointer's tab, -1 none
+void tabHoverCardDismiss(App& app, HWND hwnd);         // click, key or wheel
+void tabHoverCardLeave(App& app, HWND hwnd);           // pointer left the client
+void handleTabHoverCardTimer(App& app, HWND hwnd);
+void renderTabHoverCard(App& app);
+
 // Right-click tab context menu (NPP-style close operations)
 int tabContextMenuIndexAt(const App& app, float x, float y);
 void openTabMenu(App& app, int tabIndex, float x, float y);

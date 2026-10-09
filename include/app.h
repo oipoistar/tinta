@@ -44,6 +44,7 @@ inline int64_t usElapsed(Clock::time_point start) {
 #define TIMER_LINK_PEEK 9
 #define TIMER_UPDATE_CHECK 10
 #define TIMER_SIDE_PANEL_SCROLLBARS 12
+#define TIMER_TAB_HOVER_CARD 13
 
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
@@ -494,6 +495,13 @@ struct App {
     bool showTabSwitcher = false;      // chevron dropdown (open-files list)
     int tabSwitcherHover = -1;
     int hoveredTab = -1;               // strip hover for close-button reveal
+    // Tab hover card (#246): a resting pointer shows the tab's full name
+    // and folder below the strip; a click, key or wheel turn puts it away
+    int tabHoverCardTab = -1;          // tab whose card is up
+    int tabHoverCardPending = -1;      // tab the dwell timer waits on
+    int tabHoverCardQuiet = -1;        // dismissed over this tab: wait for a move
+    ULONGLONG tabHoverCardHiddenAt = 0;  // neighbours of a closed card come quickly
+    D2D1_RECT_F tabHoverCardRect{};    // client coords, zero while hidden
     int captionButtonHover = 0;        // 0 none, 1 min, 2 max, 3 close
     int captionButtonPressed = 0;
     bool tabNewTabIntent = false;      // Ctrl+T: next browser pick -> new tab
@@ -507,6 +515,7 @@ struct App {
         bool hasClose = false;
         // The lone title accepts right-clicks while remaining draggable.
         D2D1_RECT_F contextRect{};
+        D2D1_RECT_F labelRect{};  // room the title had (zero: none drawn)
     };
     std::vector<TabHit> tabHits;       // refreshed by renderTabStrip
     // Pin button in the title bar: keeps this window above every other
