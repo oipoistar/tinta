@@ -5,7 +5,8 @@
 
 // Signal chips (design t13): one anatomy for every notification. Chips
 // stack bottom-right, drain over a visible rail, hold while hovered,
-// pin to stay, and park into the bell tray instead of vanishing.
+// pin to stay, and park into the bell tray instead of vanishing. Hints
+// are the exception (#245): they fade out and leave nothing behind.
 
 enum SignalSeverity { SIG_INFO = 0, SIG_SUCCESS, SIG_WARN, SIG_ERROR };
 enum SignalIcon {
@@ -41,6 +42,15 @@ void signalPush(App& app, int severity, int icon, std::wstring text,
 // Convenience for plain translated one-liners
 void signalPushKey(App& app, int severity, int icon, const char* trKey,
                    std::wstring emph = L"", std::wstring context = L"");
+// Hints (#245): a brief chip that fades out after a moment and leaves
+// nothing in the tray or on the bell. For teaching prompts and toggle
+// feedback, never for anything the user may need later.
+void signalHint(App& app, int icon, std::wstring text,
+                std::wstring emph = L"");
+void signalHintKey(App& app, int icon, const char* trKey);
+// Fade every hint at once: leaving edit mode retires its hints, so a
+// "press Esc again" never outlives the mode it was about
+void signalFadeHints(App& app);
 
 // True while chips are draining or animating (keeps TIMER_NOTIFICATION)
 bool signalsNeedTicks(const App& app);

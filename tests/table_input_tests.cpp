@@ -184,7 +184,7 @@ void escapeAndChrome(App& app) {
         confirmExitAction(app,app.hwnd,3);
         // The reading view keeps its entry point and wears the reader's chrome
         key(app,'E',true,true);
-        check(app.editorReadingPreview && app.editorDirty && !editSheetLayout(app),"Ctrl+Shift+E reads unsaved edits outside the sheet layout");
+        check(app.editorReadingPreview && app.editorDirty && !editSplitPreview(app),"Ctrl+Shift+E reads unsaved edits outside the split layout");
         check(documentViewportX(app)==0 && documentViewportWidth(app)==static_cast<float>(app.width),"reading view spans the window without the sheet inset");
         ensureLayoutComplete(app);
         check(!app.scrollAnchors.empty() && app.scrollAnchors.front().renderedY>=chromeTopHeight(app),"reading page starts below the tab strip");

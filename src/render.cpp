@@ -3297,14 +3297,10 @@ bool layoutBegin(App& app) {
         }
     }
     // Content starts below the title-bar tab strip; the strip paints over
-    // anything that scrolls up under it. On the edit-mode floating sheet
-    // (design 10a) content instead starts just inside the sheet's top
-    // edge — the sheet rises past the strip, so the page top is its own.
-    // Paper has no strip: the first page starts at its top margin (#257).
-    app.layoutCursorY = app.printLayout ? 0.0f
-                        : editSheetLayout(app)
-                            ? editSheetRect(app).top + dpi(app, 18.0f)
-                            : chromeTopHeight(app) + 20.0f * scale;
+    // anything that scrolls up under it. The docked edit-mode preview
+    // starts there too (#245). Paper has no strip: the first page
+    // starts at its top margin (#257).
+    app.layoutCursorY = app.printLayout ? 0.0f : documentContentTop(app);
     app.layoutNextBlock = 0;
     app.layoutComplete = false;
     app.contentWidth = layoutWidth;

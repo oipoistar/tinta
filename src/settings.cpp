@@ -44,6 +44,7 @@ void saveSettings(const Settings& settings) {
     file << "hasAskedFileAssociation=" << (settings.hasAskedFileAssociation ? 1 : 0) << "\n";
     file << "editorShowPreview=" << (settings.editorShowPreview ? 1 : 0) << "\n";
     file << "editorWordWrap=" << (settings.editorWordWrap ? 1 : 0) << "\n";
+    file << "editHintsShown=" << settings.editHintsShown << "\n";
     file << "editorAssists=" << (settings.editorAssists ? 1 : 0) << "\n";
     file << "showWordCount=" << (settings.showWordCount ? 1 : 0) << "\n";
     file << "closeKeepsDrafts=" << (settings.closeKeepsDrafts ? 1 : 0) << "\n";
@@ -353,6 +354,13 @@ Settings loadSettings() {
             settings.editorShowPreview = (value == "1");
         } else if (key == "editorWordWrap") {
             settings.editorWordWrap = (value == "1");
+        } else if (key == "editHintsShown") {
+            // New-user hint sessions (#245); a malformed count starts over
+            try {
+                size_t consumed = 0;
+                const int shown = std::stoi(value, &consumed);
+                if (consumed == value.size() && shown >= 0) settings.editHintsShown = shown;
+            } catch (const std::exception&) { /* Keep the default. */ }
         } else if (key == "editorAssists") {
             settings.editorAssists = (value == "1");
         } else if (key == "showWordCount") {

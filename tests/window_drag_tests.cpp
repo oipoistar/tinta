@@ -103,10 +103,10 @@ void stripLayout(App& app) {
     renderTabStrip(app);
     check(SUCCEEDED(app.renderTarget->EndDraw()), "native title strip renders");
     const auto drag = titleDragRect(app);
-    if (app.editMode && app.editorReadingPreview) {
-        check(drag.right >= captionIslandLeft(app),
-              "the reading view keeps the reader's drag area beside the window buttons (#242)");
-    }
+    // Reader, docked split editor and reading view share one title bar
+    // (#242, #245): the drag area sits beside the window buttons
+    check(drag.right >= captionIslandLeft(app),
+          "the drag area sits beside the window buttons in every mode");
     if (app.width >= dpi(app, 500)) {
         check(std::abs(drag.right - drag.left - dpi(app, 32)) < 0.1f, "32 logical pixels remain available for dragging");
     } else {
@@ -169,8 +169,8 @@ int runWindowDragTests() {
                 for (int width : {325, 500, 650, 1050}) {
                     app.width = (int)(width * scale);
                     app.height = (int)(700 * scale);
-                    // Reader, split editor, and the full-width reading view
-                    // of unsaved edits, which keeps the reader's title bar (#242)
+                    // Reader, docked split editor (#245), and the full-width
+                    // reading view of unsaved edits (#242)
                     for (int mode : {0, 1, 2}) {
                         app.editMode = mode > 0;
                         app.editorReadingPreview = mode == 2;
