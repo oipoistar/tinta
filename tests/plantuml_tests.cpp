@@ -441,10 +441,11 @@ void testCommandLine() {
     jar.jar = L"C:\\tools\\plantuml.jar";
     const std::wstring jarSvg =
         plantuml::buildCommandLine(jar, 1, L"C:\\out", L"C:\\in\\input.puml");
-    check(jarSvg == L"\"C:\\Java\\bin\\java.exe\" -jar \"C:\\tools\\plantuml.jar\" "
+    check(jarSvg == L"\"C:\\Java\\bin\\java.exe\" -DPLANTUML_SECURITY_PROFILE=SANDBOX "
+                    L"-jar \"C:\\tools\\plantuml.jar\" "
                     L"-tsvg -charset UTF-8 -failfast2 -o \"C:\\out\" "
                     L"\"C:\\in\\input.puml\"",
-          "jar SVG command line is exact");
+          "jar SVG command line is exact, with the sandbox property before -jar");
     check(jarSvg.find(L"-jar") != std::wstring::npos &&
           jarSvg.find(L"java.exe") != std::wstring::npos,
           "jar command line spawns java with -jar");
@@ -503,6 +504,50 @@ void testRenderSuccess() {
                   "the SVG carries the fake sentinel");
         }
     }
+}
+
+// ------------------------------------------------------------------ sandbox
+
+// A document's diagram must not read local files or fetch URLs: the tool
+// always runs in PlantUML's SANDBOX profile, whatever the user's environment
+void testSandbox() {
+    const std::wstring inherited = std::wstring(L"=C:=C:\\work") + L'\0' +
+                                   L"Path=C:\\Windows" + L'\0' +
+                                   L"plantuml_security_profile=UNSECURE" + L'\0' +
+                                   L"ALPHA=1" + L'\0' + L'\0';
+    const std::wstring block = plantuml::sandboxEnvironment(inherited.c_str());
+    std::vector<std::wstring> entries;
+    for (const wchar_t* p = block.c_str(); *p != L'\0'; p += wcslen(p) + 1) entries.emplace_back(p);
+    check(block.size() >= 2 && block[block.size() - 1] == L'\0' && block[block.size() - 2] == L'\0',
+          "the environment block ends with two nulls");
+    check(std::count(entries.begin(), entries.end(), L"PLANTUML_SECURITY_PROFILE=SANDBOX") == 1 &&
+              std::none_of(entries.begin(), entries.end(), [](const std::wstring& e) {
+                  return e.find(L"UNSECURE") != std::wstring::npos;
+              }),
+          "the user's own profile is replaced by SANDBOX");
+    check(entries.size() == 4 && entries[0] == L"=C:=C:\\work" && entries[1] == L"ALPHA=1" &&
+              entries[2] == L"Path=C:\\Windows" &&
+              entries[3] == L"PLANTUML_SECURITY_PROFILE=SANDBOX",
+          "other variables pass through, sorted by name with drive entries first");
+    check(plantuml::sandboxEnvironment(nullptr) ==
+              std::wstring(L"PLANTUML_SECURITY_PROFILE=SANDBOX") + L'\0' + L'\0',
+          "an empty environment still gets the sandbox");
+
+    // The spawned tool sees SANDBOX even when Tinta's environment says otherwise
+    const plantuml::Tool tool = plantuml::resolveTool(kFakeToolPath);
+    const std::filesystem::path dir = freshScratch(L"sandbox");
+    const std::filesystem::path profileLog = freshScratch(L"sandbox-log") / L"profile.txt";
+    std::filesystem::create_directories(profileLog.parent_path());
+    const ScopedEnv userProfile(L"PLANTUML_SECURITY_PROFILE", L"UNSECURE");
+    const ScopedEnv logEnv(L"TINTA_FAKE_PLANTUML_PROFILE_LOG", profileLog.c_str());
+    std::wstring out;
+    std::wstring error;
+    const bool ok = plantuml::renderSync(tool, "@startuml\nA -> B\n@enduml\n", 0,
+                                         dir.wstring(), out, 15000, error);
+    std::ifstream log(profileLog);
+    std::string seen;
+    std::getline(log, seen);
+    check(ok && seen == "SANDBOX", "the tool runs with PLANTUML_SECURITY_PROFILE=SANDBOX");
 }
 
 // --------------------------------------------------------------- render failure
@@ -1213,6 +1258,7 @@ int main(int argc, char** argv) {
     testPreambleContent();
     testCacheKey();
     testCommandLine();
+    testSandbox();
     testRenderSuccess();
     testRenderFailureExitCode();
     testRenderFailureWithImage();

@@ -428,7 +428,9 @@ std::wstring buildCommandLine(const Tool& tool, int format,
     cmd += tool.program;
     cmd += L'"';
     if (tool.isJar) {
-        cmd += L" -jar \"";
+        // The JVM property as well as the environment (sandboxEnvironment):
+        // either one puts PlantUML in its sandbox
+        cmd += L" -DPLANTUML_SECURITY_PROFILE=SANDBOX -jar \"";
         cmd += tool.jar;
         cmd += L'"';
     }
@@ -440,6 +442,37 @@ std::wstring buildCommandLine(const Tool& tool, int format,
     cmd += inputFile;
     cmd += L'"';
     return cmd;
+}
+
+std::wstring sandboxEnvironment(const wchar_t* inherited) {
+    static const wchar_t kProfile[] = L"PLANTUML_SECURITY_PROFILE";
+    // Variable name: up to the first '=' after position 0, since the
+    // per-drive current directories ("=C:=C:\...") start with one
+    auto nameOf = [](const std::wstring& entry) {
+        const size_t eq = entry.find(L'=', 1);
+        return eq == std::wstring::npos ? entry : entry.substr(0, eq);
+    };
+    std::vector<std::wstring> vars;
+    for (const wchar_t* p = inherited; p != nullptr && *p != L'\0'; p += wcslen(p) + 1) {
+        std::wstring entry(p);
+        // Whatever profile the user's environment names, Tinta's renders
+        // run in the sandbox: a document must not reach files or the net
+        if (_wcsicmp(nameOf(entry).c_str(), kProfile) == 0) continue;
+        vars.push_back(std::move(entry));
+    }
+    vars.push_back(std::wstring(kProfile) + L"=SANDBOX");
+    // CreateProcessW expects the block sorted by name, ignoring case
+    std::stable_sort(vars.begin(), vars.end(),
+                     [&](const std::wstring& a, const std::wstring& b) {
+                         return _wcsicmp(nameOf(a).c_str(), nameOf(b).c_str()) < 0;
+                     });
+    std::wstring block;
+    for (const std::wstring& entry : vars) {
+        block += entry;
+        block += L'\0';
+    }
+    block += L'\0';
+    return block;
 }
 
 bool renderSync(const Tool& tool, const std::string& sourceWithPreamble,
@@ -493,11 +526,20 @@ bool renderSync(const Tool& tool, const std::string& sourceWithPreamble,
     std::vector<wchar_t> mutableCommand(command.begin(), command.end());
     mutableCommand.push_back(L'\0');
 
+    std::wstring environment;
+    if (wchar_t* inherited = GetEnvironmentStringsW()) {
+        environment = sandboxEnvironment(inherited);
+        FreeEnvironmentStringsW(inherited);
+    } else {
+        environment = sandboxEnvironment(nullptr);
+    }
+
     STARTUPINFOW si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
     if (!CreateProcessW(nullptr, mutableCommand.data(), nullptr, nullptr, FALSE,
-                        CREATE_NO_WINDOW, nullptr, workDir.c_str(), &si, &pi)) {
+                        CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+                        environment.data(), workDir.c_str(), &si, &pi)) {
         const DWORD lastError = GetLastError();
         scrubWorkDir(dir);
         error = L"Cannot start the PlantUML tool (error " +

@@ -110,6 +110,28 @@ GitHub releases) and point Tinta at it in Settings.
 - Printed/PDF diagrams are Paper-toned even under dark themes (printTheme forces
   the light palette by design).
 
+## Merged onto 3.7.5, with the sandbox (2026-10-09)
+
+- The branch was brought up to date with master: 3.7.4, 3.7.5, #254 to #258
+  and the docked preview (#247). CMakeLists, `app.h` and the DOCX export
+  context conflicted and keep both sides. The changelog line written into the
+  3.7.3 section was left out; the release that ships PlantUML will list it.
+- PlantUML now runs in its `SANDBOX` security profile. `renderSync` hands the
+  tool an environment with `PLANTUML_SECURITY_PROFILE=SANDBOX`, replacing any
+  value the user set, and the jar form also passes
+  `-DPLANTUML_SECURITY_PROFILE=SANDBOX` to Java. Before, a diagram in an
+  opened document could `!include` local files into the preview and the
+  exports, or fetch URLs.
+- `plantuml_parser` checks the command lines and the environment block: the
+  user's value is replaced, other variables are kept and sorted, and the block
+  ends with two nulls. It also spawns the fake tool under
+  `PLANTUML_SECURITY_PROFILE=UNSECURE`, which reports `SANDBOX`. Launching
+  without the new environment fails that check.
+- All 35 suites pass.
+- Not checked: the real tool's behaviour in the sandbox, since Java and
+  PlantUML are not installed on the test machine. The profile and its effect
+  are PlantUML's documented ones.
+
 ## Artifacts
 
 Screenshots, page bitmaps, exports and gate logs listed above are under

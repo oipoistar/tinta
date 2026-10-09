@@ -2,6 +2,8 @@
 
 Tinta renders PlantUML diagrams by running the real PlantUML program as a separate process. Nothing is bundled: Tinta never downloads anything and never makes network calls for diagrams. You point Tinta at a PlantUML copy you already have.
 
+PlantUML itself can read files and fetch URLs when a diagram asks it to, through `!include` and similar directives. Tinta therefore always runs it in PlantUML's `SANDBOX` security profile, which refuses both, so opening a document cannot make a diagram read files from your disk or reach the network. The profile is set for every run, as the `PLANTUML_SECURITY_PROFILE` environment variable and, for a jar, as the matching Java system property; a value in your own environment does not change it.
+
 ## Obtaining PlantUML
 
 The [official download page](https://plantuml.com/download) ships compiled jars under several license flavors: GPL, GPL v2, LGPL, Apache, BSD, EPL and MIT. Tinta works with any flavor. The MIT build (a `plantuml-mit` jar) generates all UML diagrams but, like every flavor except GPL, leaves out a few extras such as ditaa; the [FAQ](https://plantuml.com/faq) explains the differences. Tinta only ever runs the tool, so the flavor changes what PlantUML itself can draw, not how Tinta behaves.
@@ -37,7 +39,7 @@ Only the first `@startuml` block of a source is rendered, and the anchor is requ
 
 ## How rendering works
 
-Before spawning the tool, Tinta injects `skinparam` lines right after the `@startuml` anchor: a transparent background, shadowing off, and the active theme's font family, size and text color. On dark palettes the injection also themes every shape fill, border, arrow and lifeline - fills take the palette surface its text is designed to sit on, borders and strokes take the accent - so a diagram is not left at PlantUML's light-page defaults; light palettes keep PlantUML's own colors. The preview and the HTML/DOCX exports therefore follow your theme; printing and PDF export always use the light Paper palette, by design.
+Before spawning the tool, Tinta injects `skinparam` lines right after the `@startuml` anchor: a transparent background, shadowing off, and the active theme's font family, size and text color. On dark palettes the injection also themes every shape fill, border, arrow and lifeline - fills take the palette surface its text is designed to sit on, borders and strokes take the accent - so a diagram is not left at PlantUML's light-page defaults; light palettes keep PlantUML's own colors. The preview and the HTML/DOCX exports therefore follow your theme; printing and PDF export always use the light Paper palette, by design, in your theme's fonts.
 
 The preview renders in the background: each diagram appears as its process finishes, results are cached per source and theme, repeated transient failures back off before being retried (the retry schedule is finite), and a source the tool outright rejects stops being retried until you edit it. Print, PDF and the HTML/DOCX exports render synchronously with bounded timeouts: print and PDF give each diagram 15 seconds with a 30-second budget for the whole document, and an HTML or DOCX export gives each fence 20 seconds with a 60-second budget per export. A wedged tool therefore degrades to source instead of hanging the document.
 
@@ -49,6 +51,7 @@ Whenever no tool is configured, a source lacks the `@startuml` anchor, or a rend
 
 - **The row still shows the hint after Browse.** The picked file is not runnable. For a jar, check that `java.exe` is on your `PATH`: run `java -version` in a terminal, install a JDK or JRE if that fails, then reopen Settings.
 - **A diagram shows as source although the tool resolved.** Check the `@startuml`/`@enduml` anchor. Multi-block sources render only their first block. A PlantUML error also leaves the source: run the same text through the tool on the command line to read its message.
+- **A diagram with `!include` shows as source.** The sandbox refuses includes of local files and URLs, so PlantUML reports an error and Tinta keeps the source. Paste the included definitions into the diagram instead.
 - **The first diagram is slow, later ones are instant.** A cold Java process takes time to start. Once rendered, a diagram is cached.
 - **A diagram occasionally falls back to source.** A render that outlives its bounded timeout is abandoned and the source is shown instead: 15 seconds per diagram during print and PDF, 20 seconds per fence in HTML and DOCX exports. Large or complex diagrams can hit this; split them or use a faster tool.
 - **Embedded diagrams look soft in Word or on high-DPI screens.** The DOCX embeds the PNG at its natural 1x size. Use the copy button for the 2x image, or open the HTML export for crisp vectors.

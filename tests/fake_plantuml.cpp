@@ -18,6 +18,9 @@
 //   TINTA_FAKE_PLANTUML_LOG=<path>         append one line per invocation with
 //                                          the full joined command line (spawn
 //                                          counting / command-line assertions)
+//   TINTA_FAKE_PLANTUML_PROFILE_LOG=<path> append the PLANTUML_SECURITY_PROFILE
+//                                          the tool was started with, or
+//                                          "(unset)" (sandbox assertions)
 //
 // The fixture directory is located via TINTA_FAKE_PLANTUML_FIXTURE_DIR first,
 // then by walking up from the current directory and from the directory of
@@ -189,6 +192,12 @@ int main(int argc, char* argv[]) {
     const std::string logPath = envString("TINTA_FAKE_PLANTUML_LOG");
     if (!logPath.empty()) {
         appendLog(logPath, args);
+    }
+    const std::string profileLog = envString("TINTA_FAKE_PLANTUML_PROFILE_LOG");
+    if (!profileLog.empty()) {
+        std::ofstream log(profileLog, std::ios::app);
+        const std::string profile = envString("PLANTUML_SECURITY_PROFILE");
+        log << (profile.empty() ? "(unset)" : profile) << '\n';
     }
 
     // Parse the supported flag subset (order is free, last positional wins).

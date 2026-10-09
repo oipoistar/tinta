@@ -9,7 +9,9 @@
 // and file APIs, no Direct2D/DirectWrite, no UI, no theme or App types, and
 // no remote or network access of any kind. That keeps it unit-testable
 // against the fake CLI double in tests/fake_plantuml.cpp and keeps the
-// shipped binary a dependency-free, offline product.
+// shipped binary a dependency-free, offline product. The tool itself runs
+// in PlantUML's SANDBOX security profile, so a document's diagram cannot
+// read local files or fetch URLs either.
 //
 // Real-CLI facts this interface is built on (probed against PlantUML 1.2026.8):
 //   - skinparam lines placed BEFORE `@startuml` are silently ignored, so the
@@ -120,17 +122,28 @@ uint64_t cacheKey(const std::string& source, const std::string& preambleLines,
 // is upgraded in place. Returns 0 when the file cannot be queried.
 uint64_t toolStampFor(const std::wstring& path);
 
-// Exact command line for the tool: the quoted program first, then an optional
-// `-jar "<jar>"`, then `-tpng|-tsvg -charset UTF-8 -failfast2 -o "<outDir>"
-// "<inputFile>"`. Format 0 selects PNG, 1 SVG (anything else renders PNG).
+// Exact command line for the tool: the quoted program first, then for a jar
+// `-DPLANTUML_SECURITY_PROFILE=SANDBOX -jar "<jar>"`, then `-tpng|-tsvg
+// -charset UTF-8 -failfast2 -o "<outDir>" "<inputFile>"`. Format 0 selects
+// PNG, 1 SVG (anything else renders PNG).
 std::wstring buildCommandLine(const Tool& tool, int format,
                               const std::wstring& outDir,
                               const std::wstring& inputFile);
 
+// The environment the tool runs with: the inherited block (a Win32
+// environment block, may be null) with PLANTUML_SECURITY_PROFILE forced to
+// SANDBOX, sorted by name and double-null-terminated for CreateProcessW.
+// The sandbox keeps a document's diagram from reading local files or
+// fetching URLs through !include and friends, whatever the user's own
+// environment says.
+std::wstring sandboxEnvironment(const wchar_t* inherited);
+
 // Runs the tool synchronously in `workDir` and returns the rendered image.
 // Writes `workDir\input.puml` (UTF-8, no BOM), spawns the tool with
-// CREATE_NO_WINDOW and waits at most `timeoutMs`, terminating the process on
-// timeout (an INFINITE budget is rejected: every spawn stays bounded).
+// CREATE_NO_WINDOW in PlantUML's SANDBOX security profile
+// (sandboxEnvironment) and waits at most `timeoutMs`, terminating the
+// process on timeout (an INFINITE budget is rejected: every spawn stays
+// bounded).
 //
 // The exit code is validated FIRST: on any failure (non-zero exit, timeout,
 // or no usable artifact) the private workDir is scrubbed of every image

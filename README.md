@@ -254,7 +254,7 @@ Diagrams follow the active theme, print through Ctrl+P, export as SVG in HTML an
 
 ## PlantUML Support
 
-PlantUML diagrams render through the real PlantUML tool. Tinta never bundles PlantUML, never downloads anything, and makes no network calls - you point it at a tool you already have: either a native `plantuml.exe`, or a `plantuml.jar` run through the `java` found on your PATH.
+PlantUML diagrams render through the real PlantUML tool. Tinta never bundles PlantUML, never downloads anything, and makes no network calls - you point it at a tool you already have: either a native `plantuml.exe`, or a `plantuml.jar` run through the `java` found on your PATH. PlantUML runs in its sandbox security profile, so a diagram in a document you open cannot read files from your disk or fetch anything from the network.
 
 - **Configuration** - the Settings dialog has a **PlantUML diagrams** row. Press **Browse** and pick the exe or the jar; the row then shows the exact command Tinta resolved (for a jar, the `java` executable plus the jar path). A `plantuml.exe` on PATH is auto-detected without touching any setting. The choice persists as `plantumlPath` in `settings.ini`.
 - **What renders** - fenced `plantuml`, `puml` and `pu` blocks inside Markdown, and standalone `.puml` or `.plantuml` files, which open straight as a diagram and join the open/save dialogs, drag-and-drop and file-association registration.
