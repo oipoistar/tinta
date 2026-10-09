@@ -50,25 +50,31 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown and Mermaid files
 
-            ### Editor: move lines, wrap selections, several carets (#251)
-            - Alt+↑/↓ moves the current line, or every selected line, up or down (#251)
-            - A quote, bracket or `* ~ ^ = :` typed over a selection wraps it and keeps it selected, so typing * twice makes it bold (#251)
-            - Several carets: Alt+Click adds or removes one, Ctrl+Alt+↑/↓ adds one above or below in the same column, Ctrl+D adds the next occurrence; typing, deleting, the arrow keys, copy and paste work at every caret, and Esc returns to one (#251)
-            - Suggested by @Ra0EL (#251)
+            ### Search results panel (#246)
+            - Ctrl+Shift+F, or the new list button at the end of the search bar, opens a Results panel beside the page: every match with a snippet, grouped under its heading (#246)
+            - Matches in your other open tabs and in the document's folder follow, by line. A click opens the file in its own tab at that match, and two checkboxes choose what else is searched (#246)
+            - Suggested by @Lex987 (#246)
 
-            ### Word and character count (#240)
-            - A count beside the editor's Read button for the whole document or the selection. It counts the text a reader sees, and each Chinese or Japanese character is one word; turn it off in Settings → Editor (#240)
-            - Requested by @a86022 (#240)
+            ### Tab hover card (#246)
+            - Resting the pointer on a tab shows its full name, its folder and what its dot means, so two README.md tabs can be told apart (#246)
+            - Suggested by @Lex987 (#246)
 
-            ### Close without asking (#252)
-            - Settings → Editor → Close without asking: closing Tinta keeps unsaved edits as drafts for the next launch instead of showing the save dialog (#252)
-            - Suggested by @Ra0EL (#252)
+            ### Docked edit-mode preview (#245)
+            - The preview in edit mode is docked beside the editor like the side panels, below a tab strip that spans the window, instead of floating over it (#245)
+            - The Esc hint and the Read button's introduction show in your first three edit sessions only, and fade in place (#245)
+            - Reported by @whiskyrye (#245)
+
+            ### Print margins (#257)
+            - The print preview chooses the page margins, 12.7, 19.05 or 25.4 mm (in inches where Windows measures in inches), and remembers the choice (#257)
 
             ### Fixed
-            - A click beside a zoomed image closes it for good instead of re-opening the inline image underneath. Reported by @hoinzzz (#249)
-            - The line you are typing on and the end of a long note stay above the Read · Ctrl+Shift+E button; the reading view does the same for its Edit · Esc button when zoomed out. Reported by @a86022 and @Ra0EL (#250)
-            - A running Tinta no longer locks the folder it was opened from, so the folder can be deleted or renamed. Reported by @a86022 (#253)
-            - Q and Esc in the reader close like the window's close button: unsaved tabs ask first and the open tabs are remembered (#252)
+            - Interface text uses the interface language's font, so a Chinese, Japanese or Korean interface no longer mixes fonts from other languages. Reported by @go4399 (#254)
+            - Links to raw HTML anchors such as `<a id="a1"></a>` jump to them, and the tags no longer show as text. Reported by @derek-price (#255)
+            - Word export uses the screen's font for Chinese text, also for code and the theme's heading font. Reported by @go4399 (#256)
+            - Printing and PDF use the full width between the page margins whatever the reading width, and every code block lines up with the text. Reported by @go4399 (#257)
+            - Printing and PDF keep a custom theme's fonts. Reported by @go4399 (#258)
+            - Double-clicking a word in a table cell selects only that word, and a copied row pastes into a spreadsheet as separate columns. Spotted by @Lex987 (#246)
+            - An open search follows tab switches and file reloads (#246)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats

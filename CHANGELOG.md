@@ -1,5 +1,26 @@
 # Changelog
 
+## [v3.8.0] - 2026-10-10
+
+### Added
+- A search results panel: Ctrl+Shift+F, or the new list button at the end of the search bar, lists every match beside the page with a snippet, grouped under its heading, followed by the matches in the other open tabs and in the document's folder, by line. A click jumps to a match, or opens another file in its own tab at that match; two checkboxes choose the tabs and the folder. Suggested by @Lex987 (#246)
+- Resting the pointer on a tab shows its full name, its folder and what its dot means, so two README.md tabs can be told apart. Suggested by @Lex987 (#246)
+- The print preview chooses the page margins, 12.7, 19.05 or 25.4 mm (in inches where Windows measures in inches), and remembers the choice (#257)
+
+### Changed
+- The edit-mode preview is docked beside the editor like the side panels, below a tab strip that spans the window, instead of floating over it. The Esc hint and the Read button's introduction show in the first three edit sessions only and fade in place. Reported by @whiskyrye (#245)
+- Sibling files matching a search appear in the results panel rather than in a box over the page, and open in their own tab instead of replacing the open document (#246)
+- The search bar centers over the page between side panels (#246)
+
+### Fixed
+- Interface text uses the interface language's font, so a Chinese, Japanese or Korean interface no longer mixes fonts from other languages. Reported by @go4399 (#254)
+- Links to raw HTML anchors such as `<a id="a1"></a>` jump to them, and the tags no longer show as text. Reported by @derek-price (#255)
+- Word export names the font the screen uses for Chinese text, also for code and the theme's heading font. Reported by @go4399 (#256)
+- Printing and PDF use the full width between the page margins whatever the reading width, and every code block lines up with the text. Reported by @go4399 (#257)
+- Printing and PDF keep a custom theme's fonts on the white page. Reported by @go4399 (#258)
+- Double-clicking a word in a table cell selects only that word, and a copied row pastes into a spreadsheet as separate columns. Spotted by @Lex987 (#246)
+- An open search follows tab switches and file reloads instead of keeping the previous document's matches (#246)
+
 ## [v3.7.5] - 2026-10-08
 
 ### Added
