@@ -155,6 +155,7 @@ void settingsDismissal() {
 
 int runTabDropTests();
 int runTabHoverCardTests();
+int runSearchPanelTests();
 int runTableInputTests();
 int runDockedPreviewTests();
 int runTableLayoutTests();
@@ -189,6 +190,7 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--superscript-tests") return runSuperscriptTests();
     if (argc == 2 && std::string(argv[1]) == "--tab-drop-tests") return runTabDropTests();
     if (argc == 2 && std::string(argv[1]) == "--tab-hover-card-tests") return runTabHoverCardTests();
+    if (argc == 2 && std::string(argv[1]) == "--search-panel-tests") return runSearchPanelTests();
     if (argc == 7 && std::string(argv[1]) == "--cascade") return runTabDropLaunchProbe();
     settingsDismissal();
     auto state = std::make_unique<App>();

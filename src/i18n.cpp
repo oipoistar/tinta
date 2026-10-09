@@ -108,6 +108,14 @@ const Entry kEntries[] = {
     // Fixed argument order (current, total): MSVC's printf family has no
     // positional specifiers, so locales phrase around the same order
     { "search.match_count",    L"%d of %zu",                                L"\u7B2C %d / %zu \u4E2A",                       L"%d / %zu \u4EF6", L"%zu\uAC1C \uC911 %d\uBC88\uC9F8" },
+    { "search.results.title", L"Results", L"\u641C\u7D22\u7ED3\u679C", L"\u691C\u7D22\u7D50\u679C", L"\uAC80\uC0C9 \uACB0\uACFC" },
+    { "search.results.tabs", L"Open tabs", L"\u5DF2\u6253\u5F00\u7684\u6807\u7B7E\u9875", L"\u958B\u3044\u3066\u3044\u308B\u30BF\u30D6", L"\uC5F4\uB9B0 \uD0ED" },
+    { "search.results.folder", L"This folder", L"\u6B64\u6587\u4EF6\u5939", L"\u3053\u306E\u30D5\u30A9\u30EB\u30C0\u30FC", L"\uC774 \uD3F4\uB354" },
+    { "search.results.type", L"Type to search", L"\u8F93\u5165\u4EE5\u641C\u7D22", L"\u5165\u529B\u3057\u3066\u691C\u7D22", L"\uC785\uB825\uD558\uC5EC \uAC80\uC0C9" },
+    { "search.results.scanning", L"Searching other files...", L"\u6B63\u5728\u641C\u7D22\u5176\u4ED6\u6587\u4EF6...", L"\u4ED6\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...", L"\uB2E4\uB978 \uD30C\uC77C \uAC80\uC0C9 \uC911..." },
+    { "search.results.more", L"+%d more", L"\u8FD8\u6709 %d \u5904", L"\u4ED6 %d \u4EF6", L"%d\uAC1C \uB354" },
+    { "search.results.hint", L"Enter: next match", L"Enter\uFF1A\u4E0B\u4E00\u5904", L"Enter: \u6B21\u306E\u4E00\u81F4", L"Enter: \uB2E4\uC74C \uD56D\uBAA9" },
+    { "help.view.search_results", L"List every match beside the page", L"\u5728\u9875\u9762\u65C1\u5217\u51FA\u6240\u6709\u5339\u914D\u9879", L"\u30DA\u30FC\u30B8\u306E\u6A2A\u306B\u3059\u3079\u3066\u306E\u4E00\u81F4\u3092\u4E00\u89A7\u8868\u793A", L"\uD398\uC774\uC9C0 \uC606\uC5D0 \uBAA8\uB4E0 \uC77C\uCE58 \uD56D\uBAA9 \uD45C\uC2DC" },
 
     // ----- Table of contents -----
     { "toc.title",             L"Contents",                                 L"\u76EE\u5F55",                                         L"\u76EE\u6B21", L"\uBAA9\uCC28" },
@@ -744,6 +752,14 @@ const BuiltinTranslation kBuiltinTranslations[] = {
       L"%d von %zu",
       L"%d sur %zu",
       L"%d di %zu" },
+    { "search.results.title", L"Ergebnisse", L"R\u00E9sultats", L"Risultati" },
+    { "search.results.tabs", L"Ge\u00F6ffnete Tabs", L"Onglets ouverts", L"Schede aperte" },
+    { "search.results.folder", L"Dieser Ordner", L"Ce dossier", L"Questa cartella" },
+    { "search.results.type", L"Tippen zum Suchen", L"Saisissez pour rechercher", L"Digita per cercare" },
+    { "search.results.scanning", L"Andere Dateien werden durchsucht...", L"Recherche dans les autres fichiers...", L"Ricerca negli altri file..." },
+    { "search.results.more", L"+%d weitere", L"+%d de plus", L"+%d altri" },
+    { "search.results.hint", L"Enter: n\u00E4chster Treffer", L"Entr\u00E9e : occurrence suivante", L"Invio: risultato successivo" },
+    { "help.view.search_results", L"Alle Treffer neben der Seite auflisten", L"Lister toutes les occurrences \u00E0 c\u00F4t\u00E9 de la page", L"Elenca tutti i risultati accanto alla pagina" },
     { "toc.title",
       L"Inhalt",
       L"Sommaire",

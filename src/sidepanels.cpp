@@ -115,7 +115,7 @@ bool documentScrollbarEdgeHovered(const App& app) {
 
 float sidePanelDocumentScrollbarOpacity(App& app, ULONGLONG now) {
     auto& fade = app.panelScrollbarFade;
-    if (app.editMode || (!app.showToc && !app.showFolderBrowser)) {
+    if (app.editMode || (!contentsSlotOpen(app) && !app.showFolderBrowser)) {
         fade = {};
         return 1;
     }
@@ -144,7 +144,7 @@ float sidePanelDocumentScrollbarOpacity(App& app, ULONGLONG now) {
 }
 
 bool sidePanelScrollbarNeedsTicks(const App& app, ULONGLONG now) {
-    if (app.editMode || app.showPrintPreview || (!app.showToc && !app.showFolderBrowser)) return false;
+    if (app.editMode || app.showPrintPreview || (!contentsSlotOpen(app) && !app.showFolderBrowser)) return false;
     return app.panelScrollbarFade.running ||
         (app.lastPanelScrollActivity && now - app.lastPanelScrollActivity <= 800);
 }

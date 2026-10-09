@@ -1,4 +1,5 @@
 #include "search.h"
+#include "search_panel.h"
 #include "editor.h"
 #include "input.h"
 #include "tableedit.h"
@@ -190,6 +191,7 @@ void openSearchInput(App& app, bool replace) {
 }
 void closeSearchInput(App& app) {
     releaseSearchInput(app);
+    closeSearchPanel(app);  // the results panel lives with the bar (#246)
     app.showSearch = false;
     app.searchQuery.clear();
     app.searchFields[0] = {};

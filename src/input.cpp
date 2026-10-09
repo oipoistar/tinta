@@ -11,6 +11,7 @@
 #include "file_utils.h"
 #include "utils.h"
 #include "search.h"
+#include "search_panel.h"
 #include "d2d_init.h"
 #include "settings.h"
 #include "render.h"
@@ -910,6 +911,12 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
         }
     }
 
+    // The search results panel scrolls its own list (#246)
+    if (!ctrl && searchPanelWheel(app, (float)app.mouseX, (float)app.mouseY, delta)) {
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     // Handle TOC scroll (not when Ctrl is held — that's zoom)
     if (app.showToc && !ctrl) {
         float panelWidth = tocPanelWidth(app);
@@ -1241,16 +1248,9 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     }
 
     if (app.showSearch) {
-        bool overResult = false;
-        for (const auto& hit : app.folderResultHits) {
-            if (cursorPointInRect((float)app.mouseX, (float)app.mouseY, hit.rect)) {
-                overResult = true;
-                break;
-            }
-        }
-        if (folderSearchToggleAt(app, (float)app.mouseX, (float)app.mouseY) || overResult) {
-            SetCursor(cursorHand);
-        } else {
+        // Row hover in the results panel follows the pointer (#246)
+        if (app.showSearchPanel && mouseMoved) InvalidateRect(hwnd, nullptr, FALSE);
+        if (!searchPanelSetCursor(app, (float)app.mouseX, (float)app.mouseY)) {
             setSearchCursor(app, (float)app.mouseX, (float)app.mouseY);
         }
         return;
@@ -1984,6 +1984,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     // The chooser acts on release; do not place an editor caret under it.
     if (app.showThemeChooser) return;
 
+    // The search bar's results button and the results panel (#246)
+    if (searchPanelMouseDown(app, hwnd, static_cast<float>(GET_X_LPARAM(lParam)),
+                             static_cast<float>(GET_Y_LPARAM(lParam)))) return;
     if (searchInputMouseDown(app, hwnd, static_cast<float>(GET_X_LPARAM(lParam)),
                              static_cast<float>(GET_Y_LPARAM(lParam)))) return;
 
@@ -2081,40 +2084,6 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         }
     }
 
-    // Folder search: the bar's toggle button and result-panel clicks
-    if (app.showSearch && !app.editMode) {
-        float clickX = (float)GET_X_LPARAM(lParam);
-        float clickY = (float)GET_Y_LPARAM(lParam);
-        if (folderSearchToggleAt(app, clickX, clickY)) {
-            app.folderSearchEnabled = !app.folderSearchEnabled;
-            if (!app.folderSearchEnabled) {
-                clearFolderSearch(app);
-            } else {
-                performSearch(app);  // re-arms the scan timer
-            }
-            InvalidateRect(hwnd, nullptr, FALSE);
-            return;
-        }
-        for (const auto& hit : app.folderResultHits) {
-            if (clickX >= hit.rect.left && clickX <= hit.rect.right &&
-                clickY >= hit.rect.top && clickY <= hit.rect.bottom &&
-                hit.fileIndex >= 0 && hit.fileIndex < (int)app.folderResults.size()) {
-                // Open the file and land on the first match of the same query
-                if (openDocumentInViewer(app, app.folderResults[hit.fileIndex].fullPath)) {
-                    app.folderResults.clear();
-                    app.folderResultHits.clear();
-                    ensureLayoutComplete(app);
-                    performSearch(app);
-                    if (!app.searchMatches.empty()) {
-                        app.searchCurrentIndex = 0;
-                        scrollToCurrentMatch(app);
-                    }
-                }
-                InvalidateRect(hwnd, nullptr, FALSE);
-                return;
-            }
-        }
-    }
     // Pinned side panels only claim presses inside their own envelope.
     {
         bool browserClaims = false;
@@ -3697,8 +3666,18 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return true;
     }
 
+    // Ctrl+Shift+F: the search bar with every match listed beside the page
+    // (#246). The editor has no side panels, and the chord never stands in
+    // for Ctrl+F (#235).
+    bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    if (ctrl && shiftDown && wParam == 'F' && !app.editMode &&
+        !app.confirmExitPending) {
+        openSearchPanel(app);
+        return true;
+    }
     // Focus transitions precede cell keyboard capture, including Ctrl+H (#223).
-    if (ctrl && (wParam == 'F' || wParam == 'H') && !app.confirmExitPending) {
+    if (ctrl && !shiftDown && (wParam == 'F' || wParam == 'H') &&
+        !app.confirmExitPending) {
         if (wParam == 'H' && !app.editMode) enterEditMode(app);
         openSearchInput(app, wParam == 'H');
         return true;
@@ -4452,6 +4431,15 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
                     for (const auto& e : app.root->children)
                         if (e->type == ElementType::Properties) observeFrontmatter(app, e->properties);
                     annotationsParseSource(app);
+                    // An open search follows the new text, keeping its
+                    // place, and the results panel lists it afresh (#246)
+                    if (app.showSearch && !app.editMode && !app.searchQuery.empty()) {
+                        int current = app.searchCurrentIndex;
+                        performSearch(app);
+                        if (current < (int)app.searchMatches.size()) {
+                            app.searchCurrentIndex = current;
+                        }
+                    }
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
             }

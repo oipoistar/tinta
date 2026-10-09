@@ -151,10 +151,13 @@ void renderLightbox(App& app);
 // Where the image currently draws, in screen coordinates
 D2D1_RECT_F lightboxImageRect(const App& app);
 
-// Folder-wide search results beside the search bar; the toggle button sits
-// at the bar's right edge (geometry shared with input hit-testing)
-void renderFolderSearchResults(App& app);
-bool folderSearchToggleAt(const App& app, float x, float y);
+// Floating-panel language shared with the search results panel (#246)
+D2D1_COLOR_F promptChipSurface(const App& app);
+float promptKeycap(App& app, const wchar_t* label, float rightX, float cy);
+void panelFooterText(App& app, const wchar_t* text, const D2D1_RECT_F& rect);
+// The search bar's rect once slid in, and its results-panel button
+D2D1_RECT_F searchBarRect(const App& app);
+D2D1_RECT_F searchResultsButtonRect(const App& app);
 // Opens at (x, y) client coordinates, clamped so the menu stays on screen
 void openContextMenu(App& app, float x, float y, bool application = false);
 // Item index under the point, or -1 (separators and gaps count as none)

@@ -197,8 +197,10 @@ struct Settings {
     bool followSystemTheme = false;
     int lightThemeIndex = 0;   // Paper
     int darkThemeIndex = 5;    // Midnight
-    // Search results from sibling markdown files in the search overlay
+    // Search results panel (#246): other open tabs and sibling markdown
+    // files join the current document's matches
     bool folderSearchEnabled = true;
+    bool tabSearchEnabled = true;
     // B opens the folder browser with the path box focused (#81)
     bool browserFocusPath = false;
     // Plain file launches join the existing window as a new tab (Win11
@@ -782,7 +784,7 @@ struct App {
         // from documentViewportWidth, which in edit mode is the preview
         // pane — printing from the editor wrapped at half the page (#81)
         bool editMode = false;
-        bool showToc = false, showFolderBrowser = false;
+        bool showToc = false, showFolderBrowser = false, showSearchPanel = false;
     };
     bool showPrintPreview = false;
     PrintSavedView printSaved;
@@ -968,9 +970,12 @@ struct App {
     std::vector<SearchMatch> searchMatches;
     bool overText = false;
 
-    // Folder-wide search: sibling .md files matching the current query,
-    // filled by a worker thread and shown beside the search bar
+    // Files beyond the open document for the results panel: other open
+    // tabs and the sibling .md files of its folder, matched by a worker
+    // thread while the panel is up (#246)
     bool folderSearchEnabled = true;
+    bool tabSearchEnabled = true;
+    bool folderSearchPending = false;  // waiting on the debounce or the scan
     // B opens the folder browser with the path box focused (#81)
     bool browserFocusPath = false;
     // Plain file launches join this window as tabs (settings toggle)
@@ -980,19 +985,24 @@ struct App {
         std::wstring snippet;
         size_t matchStart = 0;
         size_t matchLen = 0;
+        int line = 0;  // 1-based source line
     };
     struct FolderFileResult {
         std::wstring fileName;
         std::wstring fullPath;
         std::vector<FolderMatch> matches;  // first few only
         int totalMatches = 0;
+        bool openTab = false;  // from another tab rather than the folder
     };
     std::vector<FolderFileResult> folderResults;
-    struct FolderResultHit {
-        D2D1_RECT_F rect{};
-        int fileIndex = -1;
-    };
-    std::vector<FolderResultHit> folderResultHits;  // rebuilt each paint
+    // Search results panel (#246): Ctrl+Shift+F lists every match of the
+    // search bar's query in the Contents slot, grouped under headings,
+    // with the other files below. It lives no longer than the search bar
+    // and stands in for Contents while it is up.
+    bool showSearchPanel = false;
+    bool searchPanelRestoreToc = false;  // Contents returns on close
+    float searchPanelScroll = 0.0f;
+    int searchPanelFollow = -1;  // current match last scrolled into view
 
     // Text selection (#83): a pair of character offsets into docText.
     // Highlights and copies derive from the same range, and offsets survive
@@ -1530,15 +1540,21 @@ inline float sidePanelBudget(const App& app) {
     return width - std::min(dpi(app, 240.0f), width * 0.4f);
 }
 
+// The Contents slot holds the outline or, while it is up, the search
+// results panel (#246): one width, one side, never both at once
+inline bool contentsSlotOpen(const App& app) {
+    return app.showToc || app.showSearchPanel;
+}
+
 struct SidePanelWidths { float toc = 0, browser = 0; };
 
 // Clamp the displayed widths together, without changing saved preferences
 // when a window shrinks. Keep room for the document even with both panels open.
 inline SidePanelWidths sidePanelWidths(const App& app) {
-    const float minToc = app.showToc ? dpi(app, 180.0f) : 0;
+    const float minToc = contentsSlotOpen(app) ? dpi(app, 180.0f) : 0;
     const float minBrowser = app.showFolderBrowser ? dpi(app, 200.0f) : 0;
     SidePanelWidths widths{
-        app.showToc ? dpi(app, std::clamp(std::isfinite(app.tocWidth) ? app.tocWidth : 280.0f, 180.0f, 4000.0f)) : 0,
+        contentsSlotOpen(app) ? dpi(app, std::clamp(std::isfinite(app.tocWidth) ? app.tocWidth : 280.0f, 180.0f, 4000.0f)) : 0,
         app.showFolderBrowser ? dpi(app, std::clamp(std::isfinite(app.browserWidth) ? app.browserWidth : 300.0f, 200.0f, 4000.0f)) : 0};
     const float budget = sidePanelBudget(app);
     if (widths.toc + widths.browser > budget) {
@@ -1570,7 +1586,7 @@ inline float documentViewportX(const App& app) {
         if (app.showFolderBrowser) {
             x += folderBrowserPanelWidth(app) * app.folderBrowserAnimation;
         }
-        if (app.showToc && app.tocOnLeft) {
+        if (contentsSlotOpen(app) && app.tocOnLeft) {
             x += tocPanelWidth(app) * app.tocAnimation;
         }
         return x;
@@ -1647,7 +1663,7 @@ inline float documentViewportWidth(const App& app) {
         // the reading column relayouts once per toggle, not per frame.
         // Both panels can be up together (#156).
         if (app.showFolderBrowser) width -= folderBrowserPanelWidth(app);
-        if (app.showToc) width -= tocPanelWidth(app);
+        if (contentsSlotOpen(app)) width -= tocPanelWidth(app);
     }
     return width > 0.0f ? width : 0.0f;
 }

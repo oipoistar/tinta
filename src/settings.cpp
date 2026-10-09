@@ -56,6 +56,7 @@ void saveSettings(const Settings& settings) {
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
     file << "folderSearchEnabled=" << (settings.folderSearchEnabled ? 1 : 0) << "\n";
+    file << "tabSearchEnabled=" << (settings.tabSearchEnabled ? 1 : 0) << "\n";
     file << "browserFocusPath=" << (settings.browserFocusPath ? 1 : 0) << "\n";
     file << "openInTabs=" << (settings.openInTabs ? 1 : 0) << "\n";
     file << "readingWidthPct=" << settings.readingWidthPct << "\n";
@@ -176,6 +177,15 @@ void persistCloseKeepsDrafts(const App& app) {
 void persistPrintMargin(const App& app) {
     Settings settings = loadSettings();
     settings.printMarginMm = app.printMarginMm;
+    saveSettings(settings);
+}
+
+// The results panel's scope chips (#246) keep their state for the next
+// search and the next window
+void persistSearchScopes(const App& app) {
+    Settings settings = loadSettings();
+    settings.folderSearchEnabled = app.folderSearchEnabled;
+    settings.tabSearchEnabled = app.tabSearchEnabled;
     saveSettings(settings);
 }
 
@@ -328,6 +338,8 @@ Settings loadSettings() {
             settings.language = (idx >= 0 && idx < 4) ? ids[idx] : "auto";
         } else if (key == "folderSearchEnabled") {
             settings.folderSearchEnabled = (value == "1");
+        } else if (key == "tabSearchEnabled") {
+            settings.tabSearchEnabled = (value == "1");
         } else if (key == "browserFocusPath") {
             settings.browserFocusPath = (value == "1");
         } else if (key == "openInTabs") {

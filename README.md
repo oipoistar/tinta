@@ -92,7 +92,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Create on click** - Clicking a missing file reference offers to create the file and opens it ready to type
 - **Text-file references** - `.txt`, `.json`, `.yaml` and friends link like Markdown files and open as highlighted documents
 - **Update check** - Portable builds check GitHub once a day and offer a new release as a quiet, dismissible chip
-- **Search** - Find text with F or Ctrl+F, cycle through matches with Enter; every match shows as a tick on the scrollbar
+- **Search** - Find text with F or Ctrl+F, cycle through matches with Enter; every match shows as a tick on the scrollbar. Ctrl+Shift+F, or the list button at the end of the search bar, opens a results panel beside the page: every match with a snippet, grouped under its heading, then the matches in your other open tabs and in the document's folder, by line. A click jumps to a match, or opens another file in its own tab at that match
 - **Persistent settings** - Remembers your theme, zoom level, and window position
 - **Portable mode** - Create a `settings.ini` next to `tinta.exe` (an empty file works) and the whole configuration — settings, custom themes, languages, drafts — lives beside the executable and travels with it; without one, everything stays in `%APPDATA%\Tinta`
 - **Localized interface** - English, Simplified Chinese, Japanese, Korean, German, French, and Italian UI; follows Windows or a chosen language
@@ -110,6 +110,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `A` | Annotate the selected text |
 | `F` / `Ctrl+F` | Open search |
 | `Enter` | Next search match |
+| `Ctrl+Shift+F` | Search results panel: every match beside the page |
 | `ESC` | Close overlay / Quit |
 | `T` | Open theme chooser |
 | `S` | Toggle stats overlay |

@@ -69,9 +69,11 @@ void enterPrintLayout(App& app, SavedView& saved) {
     saved.editMode = app.editMode;
     saved.showToc = app.showToc;
     saved.showFolderBrowser = app.showFolderBrowser;
+    saved.showSearchPanel = app.showSearchPanel;
 
     app.editMode = false;  // layout width must be the page, not a pane (#81)
-    app.showToc = app.showFolderBrowser = false;  // panel widths belong to the screen
+    // Panel widths belong to the screen
+    app.showToc = app.showFolderBrowser = app.showSearchPanel = false;
     app.printLayout = true;
     app.contentScale = 1.0f;
     app.zoomFactor = 1.0f;
@@ -165,6 +167,7 @@ void leavePrintLayout(App& app, const SavedView& saved) {
     app.editMode = saved.editMode;
     app.showToc = saved.showToc;
     app.showFolderBrowser = saved.showFolderBrowser;
+    app.showSearchPanel = saved.showSearchPanel;
     app.width = saved.width;
     app.height = saved.height;
     app.contentScale = saved.contentScale;

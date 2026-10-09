@@ -1336,6 +1336,8 @@ static void enterEditModeWithContent(App& app, const std::string& content,
     app.showToc = false;
     app.tocAnimation = 0.0f;
     app.tocFilter.clear();
+    app.showSearchPanel = false;  // the search results panel too (#246)
+    app.searchPanelRestoreToc = false;
     app.showFolderBrowser = false;
     app.folderBrowserAnimation = 0.0f;
     app.folderBrowserEditingPath = false;
@@ -2404,7 +2406,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         if (wParam == VK_ESCAPE) return;
     }
 
-    if (ctrl && (wParam == 'F' || wParam == 'H')) {
+    if (ctrl && !shift && (wParam == 'F' || wParam == 'H')) {
         openSearchInput(app, wParam == 'H');
         return;
     }

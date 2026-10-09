@@ -30,70 +30,149 @@ std::wstring utf8ToWideString(const std::string& bytes) {
 void clearFolderSearch(App& app) {
     app.folderSearchGeneration++;   // orphan any scan in flight
     app.folderResults.clear();
-    app.folderResultHits.clear();
+    app.folderSearchPending = false;
     if (app.hwnd) KillTimer(app.hwnd, TIMER_FOLDER_SEARCH);
 }
 
+namespace {
+
+// One file for the scan, gathered on the UI thread: another tab's path
+// and, while that tab is being edited, its parked buffer
+struct ScanSource {
+    std::filesystem::path path;
+    bool hasText = false;
+    std::wstring text;
+};
+
+// Every match in one file: the total, and the first few with their source
+// line and a snippet of the line around them
+App::FolderFileResult scanText(const std::wstring& content,
+                               const std::wstring& queryLower) {
+    App::FolderFileResult result;
+    std::wstring lower = content;
+    for (auto& c : lower) c = (wchar_t)std::towlower(c);
+    size_t pos = 0, counted = 0;
+    int line = 1;
+    while ((pos = lower.find(queryLower, pos)) != std::wstring::npos) {
+        result.totalMatches++;
+        if (result.matches.size() < 3) {
+            for (; counted < pos; counted++) {
+                if (content[counted] == L'\n') line++;
+            }
+            size_t lineStart = content.rfind(L'\n', pos);
+            lineStart = (lineStart == std::wstring::npos) ? 0 : lineStart + 1;
+            size_t lineEnd = content.find(L'\n', pos);
+            if (lineEnd == std::wstring::npos) lineEnd = content.size();
+            size_t snipStart = pos > lineStart + 40 ? pos - 40 : lineStart;
+            size_t snipEnd = std::min(lineEnd, pos + queryLower.size() + 70);
+            App::FolderMatch m;
+            m.snippet = content.substr(snipStart, snipEnd - snipStart);
+            for (auto& c : m.snippet) {
+                if (c == L'\r' || c == L'\t') c = L' ';
+            }
+            m.matchStart = pos - snipStart;
+            m.matchLen = queryLower.size();
+            m.line = line;
+            result.matches.push_back(std::move(m));
+        }
+        pos += queryLower.size();
+    }
+    return result;
+}
+
+bool readSmallFile(const std::filesystem::path& path, std::wstring& text) {
+    std::error_code ec;
+    auto size = std::filesystem::file_size(path, ec);
+    if (ec || size > 1024 * 1024) return false;
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+    std::string bytes((std::istreambuf_iterator<char>(file)),
+                      std::istreambuf_iterator<char>());
+    text = utf8ToWideString(bytes);
+    return true;
+}
+
+bool sameFile(const std::filesystem::path& a, const std::filesystem::path& b) {
+    return _wcsicmp(a.c_str(), b.c_str()) == 0;
+}
+
+}  // namespace
+
 void startFolderSearchScan(App& app) {
-    if (app.editMode || !app.folderSearchEnabled || !app.showSearch ||
-        app.searchQuery.empty() || app.currentFile.empty()) {
+    app.folderSearchPending = false;
+    if (app.editMode || !app.showSearchPanel || !app.showSearch ||
+        app.searchQuery.empty() ||
+        (!app.folderSearchEnabled && !app.tabSearchEnabled)) {
         return;
     }
+    // Other tabs first, in strip order; a tab being edited is searched in
+    // its parked buffer, unsaved changes included
+    std::vector<ScanSource> tabs;
+    if (app.tabSearchEnabled) {
+        for (size_t i = 0; i < app.tabs.size(); i++) {
+            const App::DocTab& tab = app.tabs[i];
+            if ((int)i == app.activeTab || tab.path.empty()) continue;
+            ScanSource source;
+            source.path = toWide(tab.path);
+            if (tab.editMode && !tab.editorText.empty()) {
+                source.hasText = true;
+                source.text = tab.editorText;
+            }
+            tabs.push_back(std::move(source));
+        }
+    }
+    std::filesystem::path current, folder;
+    if (!app.currentFile.empty()) current = toWide(app.currentFile);
+    if (app.folderSearchEnabled && !current.empty()) folder = current.parent_path();
+    if (tabs.empty() && folder.empty()) return;
     int generation = ++app.folderSearchGeneration;
+    app.folderSearchPending = true;
     std::wstring queryLower = toLower(app.searchQuery);
-    std::filesystem::path current(toWide(app.currentFile));
-    std::filesystem::path dir = current.parent_path();
-    std::wstring currentName = current.filename().wstring();
     HWND hwnd = app.hwnd;
 
-    std::thread([generation, queryLower, dir, currentName, hwnd] {
+    std::thread([generation, queryLower, tabs, folder, current, hwnd] {
         auto* msg = new FolderScanMsg{generation, {}};
-        std::error_code ec;
-        int scanned = 0;
-        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-            if (msg->files.size() >= 12 || scanned >= 200) break;
-            if (!entry.is_regular_file(ec)) continue;
-            std::wstring ext = entry.path().extension().wstring();
-            for (auto& c : ext) c = (wchar_t)std::towlower(c);
-            if (ext != L".md" && ext != L".markdown") continue;
-            if (_wcsicmp(entry.path().filename().c_str(), currentName.c_str()) == 0) continue;
-            if (entry.file_size(ec) > 1024 * 1024) continue;
-            scanned++;
-
-            std::ifstream file(entry.path(), std::ios::binary);
-            if (!file) continue;
-            std::string bytes((std::istreambuf_iterator<char>(file)),
-                              std::istreambuf_iterator<char>());
-            std::wstring content = utf8ToWideString(bytes);
-            std::wstring lower = content;
-            for (auto& c : lower) c = (wchar_t)std::towlower(c);
-
-            App::FolderFileResult result;
-            size_t pos = 0;
-            while ((pos = lower.find(queryLower, pos)) != std::wstring::npos) {
-                result.totalMatches++;
-                if (result.matches.size() < 3) {
-                    size_t lineStart = content.rfind(L'\n', pos);
-                    lineStart = (lineStart == std::wstring::npos) ? 0 : lineStart + 1;
-                    size_t lineEnd = content.find(L'\n', pos);
-                    if (lineEnd == std::wstring::npos) lineEnd = content.size();
-                    size_t snipStart = pos > lineStart + 40 ? pos - 40 : lineStart;
-                    size_t snipEnd = std::min(lineEnd, pos + queryLower.size() + 70);
-                    App::FolderMatch m;
-                    m.snippet = content.substr(snipStart, snipEnd - snipStart);
-                    for (auto& c : m.snippet) {
-                        if (c == L'\r' || c == L'\t') c = L' ';
-                    }
-                    m.matchStart = pos - snipStart;
-                    m.matchLen = queryLower.size();
-                    result.matches.push_back(std::move(m));
-                }
-                pos += queryLower.size();
+        auto add = [&](const std::filesystem::path& path, bool openTab,
+                       const std::wstring& content) {
+            App::FolderFileResult result = scanText(content, queryLower);
+            if (result.totalMatches == 0) return false;
+            result.fileName = path.filename().wstring();
+            result.fullPath = path.wstring();
+            result.openTab = openTab;
+            msg->files.push_back(std::move(result));
+            return true;
+        };
+        for (const auto& tab : tabs) {
+            std::wstring content;
+            if (tab.hasText) content = tab.text;
+            else if (!readSmallFile(tab.path, content)) continue;
+            add(tab.path, true, content);
+        }
+        if (!folder.empty()) {
+            // The folder's other Markdown files, by name; the open document
+            // and files already listed as tabs are not repeated
+            std::vector<std::filesystem::path> siblings;
+            std::error_code ec;
+            for (const auto& entry : std::filesystem::directory_iterator(folder, ec)) {
+                if (siblings.size() >= 400) break;
+                if (!entry.is_regular_file(ec)) continue;
+                std::wstring ext = entry.path().extension().wstring();
+                for (auto& c : ext) c = (wchar_t)std::towlower(c);
+                if (ext != L".md" && ext != L".markdown") continue;
+                if (!current.empty() && sameFile(entry.path(), current)) continue;
+                bool listed = false;
+                for (const auto& tab : tabs) listed = listed || sameFile(entry.path(), tab.path);
+                if (!listed) siblings.push_back(entry.path());
             }
-            if (result.totalMatches > 0) {
-                result.fileName = entry.path().filename().wstring();
-                result.fullPath = entry.path().wstring();
-                msg->files.push_back(std::move(result));
+            std::sort(siblings.begin(), siblings.end(),
+                      [](const std::filesystem::path& a, const std::filesystem::path& b) {
+                          return _wcsicmp(a.filename().c_str(), b.filename().c_str()) < 0;
+                      });
+            int found = 0;
+            for (const auto& path : siblings) {
+                if (found >= 50) break;
+                std::wstring content;
+                if (readSmallFile(path, content) && add(path, false, content)) found++;
             }
         }
         if (!PostMessageW(hwnd, WM_APP_FOLDER_SEARCH, 0, (LPARAM)msg)) delete msg;
@@ -104,12 +183,12 @@ void completeFolderSearch(App& app, void* results) {
     auto* msg = static_cast<FolderScanMsg*>(results);
     if (!msg) return;
     if (msg->generation != app.folderSearchGeneration ||
-        !app.showSearch || app.editMode || !app.folderSearchEnabled) {
+        !app.showSearch || !app.showSearchPanel || app.editMode) {
         delete msg;
         return;
     }
     app.folderResults = std::move(msg->files);
-    app.folderResultHits.clear();
+    app.folderSearchPending = false;
     delete msg;
     if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
 }
@@ -118,13 +197,16 @@ void performSearch(App& app) {
     app.searchMatches.clear();
     app.searchCurrentIndex = 0;
     app.searchMatchCursor = 0;
+    app.searchPanelFollow = -1;
 
-    // Folder-wide results follow the query, debounced on a timer so fast
-    // typing doesn't spawn a scan per keystroke
-    if (!app.editMode && app.folderSearchEnabled && app.hwnd) {
-        if (app.searchQuery.empty()) {
-            clearFolderSearch(app);
-        } else if (!app.currentFile.empty()) {
+    // The results panel's other files follow the query, debounced on a
+    // timer so fast typing doesn't spawn a scan per keystroke. Earlier
+    // hits go at once: they belong to the previous query (#246)
+    if (!app.editMode && app.hwnd) {
+        clearFolderSearch(app);
+        if (app.showSearchPanel && !app.searchQuery.empty() &&
+            (app.folderSearchEnabled || app.tabSearchEnabled)) {
+            app.folderSearchPending = true;
             SetTimer(app.hwnd, TIMER_FOLDER_SEARCH, 250, nullptr);
         }
     }

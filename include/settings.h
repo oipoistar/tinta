@@ -29,6 +29,7 @@ void persistWordCount(const App& app);
 void persistCloseKeepsDrafts(const App& app);
 // Print margins persist when picked in the preview (#257)
 void persistPrintMargin(const App& app);
+void persistSearchScopes(const App& app);
 void persistOpenInTabs(const App& app);
 
 // The configuration home: the exe's folder in portable mode (a

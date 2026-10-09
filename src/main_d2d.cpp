@@ -46,6 +46,7 @@
 #include "export.h"
 #include "i18n.h"
 #include "tabs.h"
+#include "search_panel.h"
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
 
@@ -825,7 +826,7 @@ render_document:
         KillTimer(app.hwnd, TIMER_SIDE_PANEL_SCROLLBARS);
         app.panelScrollbarTimerActive = false;
     }
-    const bool quietScrollbars = !app.editMode && (app.showToc || app.showFolderBrowser);
+    const bool quietScrollbars = !app.editMode && (contentsSlotOpen(app) || app.showFolderBrowser);
 
     // Scrollbar color: dark on light themes, light on dark themes
     float sbColorValue = app.theme.isDark ? 1.0f : 0.0f;
@@ -1083,12 +1084,11 @@ render_document:
     }
 
     // Render overlays (search overlay handled separately for edit mode)
-    if (app.showSearch && !app.editMode) {
-        renderSearchOverlay(app);
-        renderFolderSearchResults(app);
-    }
+    if (app.showSearch && !app.editMode) renderSearchOverlay(app);
     if (app.showFolderBrowser) renderFolderBrowser(app);
-    if (app.showToc) renderToc(app);
+    // The Contents slot: the outline, or the search results (#246)
+    if (app.showSearchPanel) renderSearchPanel(app);
+    else if (app.showToc) renderToc(app);
     if (app.annotEditorOpen) renderAnnotationEditor(app);
 
     // Close edit mode split view clipping
@@ -1662,7 +1662,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_TIMER:
             if (wParam == TIMER_SIDE_PANEL_SCROLLBARS && app) {
                 InvalidateRect(hwnd, nullptr, FALSE);
-                if (app->editMode || app->showPrintPreview || (!app->showToc && !app->showFolderBrowser)) {
+                if (app->editMode || app->showPrintPreview || (!contentsSlotOpen(*app) && !app->showFolderBrowser)) {
                     KillTimer(hwnd, TIMER_SIDE_PANEL_SCROLLBARS);
                     app->panelScrollbarTimerActive = false;
                 }
@@ -1832,6 +1832,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.lastUpdateCheck = app->updateLastCheck;
                 settings.dismissedUpdate = app->updateDismissedVersion;
                 settings.folderSearchEnabled = app->folderSearchEnabled;
+                settings.tabSearchEnabled = app->tabSearchEnabled;
                 settings.browserFocusPath = app->browserFocusPath;
                 // openInTabs persists at toggle time (persistOpenInTabs)
                 // and is preserved from disk here: a window opened before
@@ -1949,6 +1950,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.lightThemeIndex = savedSettings.lightThemeIndex;
     app.darkThemeIndex = savedSettings.darkThemeIndex;
     app.folderSearchEnabled = savedSettings.folderSearchEnabled;
+    app.tabSearchEnabled = savedSettings.tabSearchEnabled;
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
     app.editorAssists = savedSettings.editorAssists;

@@ -6,6 +6,7 @@
 #include "tabs.h"
 #include "d2d_init.h"
 #include "search.h"
+#include "search_panel.h"
 #include "overlays.h"
 
 #include "document.h"
@@ -175,6 +176,13 @@ void tabActivate(App& app, HWND hwnd, int index) {
         tab.editorText.clear();  // ownership moved back to the app
     }
     app.showTabSwitcher = false;
+    // An open search follows to the new document: its highlights, count
+    // and, in the results panel, the other files from here (#246). The
+    // editor has no side panels.
+    if (app.editMode) closeSearchPanel(app);
+    if (app.showSearch && !app.editMode && !app.searchQuery.empty()) {
+        performSearch(app);
+    }
     updateWindowTitle(app);
     InvalidateRect(hwnd, nullptr, FALSE);
 }
