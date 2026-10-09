@@ -3070,6 +3070,13 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
                 }
             }
 
+            // A tab between cells keeps them apart in the selectable text:
+            // double-click takes one cell's word instead of gluing on its
+            // neighbours ("DeltaEchoFoxtrot"), and a copied row pastes into
+            // a spreadsheet as columns (#246, spotted by @Lex987)
+            if (c + 1 < row->children.size() && c + 1 < (size_t)colCount) {
+                app.docText += L"\t";
+            }
             cellX += colWidths[c];
         }
         app.docText += L"\n";

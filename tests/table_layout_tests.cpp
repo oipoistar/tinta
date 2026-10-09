@@ -155,6 +155,60 @@ void checkTables(App& app) {
 }
 }
 
+// Double-click inside a cell takes that cell's word, and a copied row keeps
+// its cells apart (#246, spotted by @Lex987)
+void checkCellWords(App& app) {
+    const auto fixture = std::filesystem::path(TINTA_FRAGMENT_FIXTURE).parent_path().parent_path() /
+                         "table-cells-246.md";
+    std::ifstream file(fixture);
+    check(file.good(), "cell fixture opens");
+    std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    auto doc = app.parser.parse(source);
+    check(doc.success, "cell fixture parses");
+    app.root = doc.root;
+    app.fitBlocks.clear();
+    for (int theme : {0, 5}) {
+        applyTheme(app, theme);
+        for (int width : {1050, 650}) {
+            app.width = width;
+            scenario = "cells-theme" + std::to_string(theme) + "-width" + std::to_string(width);
+            layoutDocument(app);
+            check(app.tableRects.size() == 1 && app.codeBlocks.size() == 1,
+                  "the table and the code block around it render");
+            check(app.docText.find(L"Delta\tEcho\tFoxtrot\n") != std::wstring::npos &&
+                      app.docText.find(L"Golf\tHotel\tIndia\n") != std::wstring::npos &&
+                      app.docText.find(L"code\tbold\tlink\n") != std::wstring::npos,
+                  "a row's cells are tab-separated, so a copied row pastes as columns");
+            // The double-click path: hit-test inside the cell's own run,
+            // then take the word around that offset
+            for (const wchar_t* word : {L"Delta", L"Echo", L"Foxtrot", L"Hotel", L"code", L"bold",
+                                        L"link", L"\u4E2D\u6587", L"\u65E5\u672C\u8A9E", L"\uD55C\uAD6D\uC5B4"}) {
+                const size_t at = app.docText.find(word);
+                const App::TextRect* hit = nullptr;
+                for (const auto& r : app.textRects) {
+                    if (at != std::wstring::npos && at >= r.docStart && at < r.docStart + r.docLength) {
+                        hit = &r;
+                        break;
+                    }
+                }
+                check(hit != nullptr, "every cell word is laid out");
+                if (!hit) continue;
+                const size_t off = selectionOffsetAtPoint(app, (hit->rect.left + hit->rect.right) / 2,
+                                                          (hit->rect.top + hit->rect.bottom) / 2);
+                size_t start = 0, end = 0;
+                selectionWordRange(app, off, start, end);
+                check(app.docText.substr(start, end - start) == word,
+                      "double-click in a cell selects only that cell's word");
+            }
+            const size_t bravo = app.docText.find(L"Bravo");
+            size_t start = 0, end = 0;
+            selectionWordRange(app, bravo + 1, start, end);
+            check(app.docText.substr(start, end - start) == L"Bravo",
+                  "paragraph words still select one at a time");
+        }
+    }
+}
+
 int runTableLayoutTests() {
     {
         auto state = std::make_unique<App>();
@@ -196,6 +250,9 @@ int runTableLayoutTests() {
                 }
             }
         }
+        app.contentScale = 1.0f;
+        updateTextFormats(app);
+        checkCellWords(app);
     }
     CoUninitialize();
     std::cout << "Wide table layout: " << failures << " failures\n";
