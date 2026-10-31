@@ -672,7 +672,7 @@ const Entry kEntries[] = {
     { "rail.live", L"Live: the page as it reads", L"\u5B9E\u65F6\uFF1A\u6309\u9605\u8BFB\u6548\u679C\u663E\u793A\u7684\u9875\u9762", L"\u30E9\u30A4\u30D6\uFF1A\u8AAD\u3080\u3068\u304A\u308A\u306E\u30DA\u30FC\u30B8", L"\uB77C\uC774\uBE0C: \uC77D\uB294 \uBAA8\uC2B5 \uADF8\uB300\uB85C\uC758 \uD398\uC774\uC9C0" },
     { "live.placeholder", L"Start writing, or type / to insert a block", L"\u5F00\u59CB\u4E66\u5199\uFF0C\u6216\u8F93\u5165 / \u63D2\u5165\u5757", L"\u66F8\u304D\u59CB\u3081\u308B\u304B\u3001/ \u3092\u5165\u529B\u3057\u3066\u30D6\u30ED\u30C3\u30AF\u3092\u633F\u5165", L"\uAE00\uC744 \uC4F0\uAC70\uB098 / \uB97C \uC785\uB825\uD574 \uBE14\uB85D\uC744 \uC0BD\uC785\uD558\uC138\uC694" },
     { "help.edit.live", L"Live or Source: the page as it reads, or its Markdown", L"\u5B9E\u65F6\u6216\u6E90\u7801\uFF1A\u6309\u9605\u8BFB\u6548\u679C\u7684\u9875\u9762\uFF0C\u6216\u5176 Markdown", L"\u30E9\u30A4\u30D6\u307E\u305F\u306F\u30BD\u30FC\u30B9\uFF1A\u8AAD\u3080\u3068\u304A\u308A\u306E\u30DA\u30FC\u30B8\u3001\u307E\u305F\u306F\u305D\u306E Markdown", L"\uB77C\uC774\uBE0C \uB610\uB294 \uC18C\uC2A4: \uC77D\uB294 \uBAA8\uC2B5\uC758 \uD398\uC774\uC9C0 \uB610\uB294 \uADF8 Markdown" },
-    { "help.edit.slash", L"Insert a block in Live or on a card: headings, lists, callouts, code, diagrams, tables", L"\u5728\u5B9E\u65F6\u6A21\u5F0F\u6216\u5361\u7247\u4E2D\u63D2\u5165\u5757\uFF1A\u6807\u9898\u3001\u5217\u8868\u3001\u63D0\u793A\u6846\u3001\u4EE3\u7801\u3001\u56FE\u8868\u3001\u8868\u683C", L"\u30E9\u30A4\u30D6\u307E\u305F\u306F\u30AB\u30FC\u30C9\u3067\u30D6\u30ED\u30C3\u30AF\u3092\u633F\u5165\uFF1A\u898B\u51FA\u3057\u3001\u30EA\u30B9\u30C8\u3001\u6CE8\u8A18\u3001\u30B3\u30FC\u30C9\u3001\u56F3\u3001\u8868", L"\uB77C\uC774\uBE0C \uB610\uB294 \uCE74\uB4DC\uC5D0\uC11C \uBE14\uB85D \uC0BD\uC785: \uC81C\uBAA9, \uBAA9\uB85D, \uC54C\uB9BC, \uCF54\uB4DC, \uB2E4\uC774\uC5B4\uADF8\uB7A8, \uD45C" },
+    { "help.edit.slash", L"Insert a block in Live or on a card", L"\u5728\u5B9E\u65F6\u6A21\u5F0F\u6216\u5361\u7247\u4E2D\u63D2\u5165\u5757", L"\u30E9\u30A4\u30D6\u307E\u305F\u306F\u30AB\u30FC\u30C9\u3067\u30D6\u30ED\u30C3\u30AF\u3092\u633F\u5165", L"\uB77C\uC774\uBE0C \uB610\uB294 \uCE74\uB4DC\uC5D0\uC11C \uBE14\uB85D \uC0BD\uC785" },
     { "help.edit.link", L"Make a link of the selection", L"\u5C06\u6240\u9009\u5185\u5BB9\u8BBE\u4E3A\u94FE\u63A5", L"\u9078\u629E\u7BC4\u56F2\u3092\u30EA\u30F3\u30AF\u306B\u3059\u308B", L"\uC120\uD0DD \uC601\uC5ED\uC744 \uB9C1\uD06C\uB85C \uB9CC\uB4E4\uAE30" },
 };
 
@@ -2954,9 +2954,9 @@ const BuiltinTranslation kBuiltinTranslations[] = {
       L"Live ou Source : la page telle qu'elle se lit, ou son Markdown",
       L"Live o Sorgente: la pagina come si legge, o il suo Markdown" },
     { "help.edit.slash",
-      L"Einen Block einf\u00FCgen, in Live oder auf einer Karte: \u00DCberschriften, Listen, Hinweise, Code, Diagramme, Tabellen",
-      L"Ins\u00E9rer un bloc en Live ou sur une carte : titres, listes, encadr\u00E9s, code, diagrammes, tableaux",
-      L"Inserire un blocco in Live o su una scheda: titoli, elenchi, riquadri, codice, diagrammi, tabelle" },
+      L"Einen Block einf\u00FCgen, in Live oder auf einer Karte",
+      L"Ins\u00E9rer un bloc, en Live ou sur une carte",
+      L"Inserire un blocco, in Live o su una scheda" },
     { "help.edit.link",
       L"Die Auswahl verlinken",
       L"Faire un lien de la s\u00E9lection",

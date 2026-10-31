@@ -12,6 +12,7 @@
 #include "keystroke.h"
 #include "live_editor.h"
 #include "live_text.h"
+#include "overlays.h"
 #include "render.h"
 #include "settings.h"
 #include "tabs.h"
@@ -436,6 +437,15 @@ void switching(App& app, const fs::path& out) {
     keystroke(app, VK_OEM_2, {true, false, false});
     check(editorLiveOn(app), "Ctrl+/ again shows Live");
     check(loadSettings().editorLive, "Live is saved as the choice");
+    // The help overlay lists Live's keys with the editor's
+    app.showHelp = true;
+    app.helpAnimation = 1.0f;
+    for (float scroll : {0.0f, 500.0f}) {
+        app.helpScroll = scroll;
+        check(saveFramePreview(app, out / ("live-help-" + std::to_string((int)scroll) + ".png"), [&] { drawLive(app); renderHelpOverlay(app); }),
+              "the help overlay draws over Live");
+    }
+    app.showHelp = false;
     // The rail's pill switches too
     paint(app);
     D2D1_RECT_F source{};

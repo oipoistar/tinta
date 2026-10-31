@@ -2862,6 +2862,14 @@ bool sheetMouseMove(App& app, HWND hwnd, int x, int y) {
     D2D1_POINT_2F s = toSheet(app, doc, fx, fy);
     float sc = scale(app, doc);
     bool moved = std::abs(x - doc.pressX) > 3 || std::abs(y - doc.pressY) > 3;
+    // The popup's rows and the format bar's buttons light under the pointer
+    if (doc.editing == SheetDoc::Edit::Card) {
+        int hit = live::hitAt(doc.edit, fx, fy);
+        if (hit != doc.edit.hoverHit) {
+            doc.edit.hoverHit = hit;
+            invalidate(app);
+        }
+    }
     switch (doc.gesture) {
         case SheetDoc::Gesture::None:
             if (doc.menuOpen) {
