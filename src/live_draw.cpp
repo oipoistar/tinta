@@ -8,6 +8,7 @@
 #include "live_text.h"
 #include "d2d_init.h"
 #include "i18n.h"
+#include "syntax.h"
 #include "ui_paint.h"
 #include "utils.h"
 
@@ -246,6 +247,7 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
         cache.linkBrush.Reset();
         cache.glyphBrush.Reset();
         cache.codeBrush.Reset();
+        cache.tokenBrushes.clear();
         for (auto& b : cache.headingBrush) b.Reset();
         app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &cache.markBrush);
         app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &cache.linkBrush);
@@ -300,6 +302,20 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
         layout->SetFontSize(look.codeSize * lineSize / look.size, range(at, length));
         layout->SetDrawingEffect(cache.codeBrush.Get(), range(at, length));
     };
+    // A brush for a token's colour, made once per colour
+    auto tokenBrush = [&](D2D1_COLOR_F c) -> ID2D1SolidColorBrush* {
+        unsigned key = ((unsigned)(c.r * 255) << 24) | ((unsigned)(c.g * 255) << 16) | ((unsigned)(c.b * 255) << 8) |
+                       (unsigned)(c.a * 255);
+        for (auto& entry : cache.tokenBrushes) {
+            if (entry.first == key) return entry.second.Get();
+        }
+        ComPtr<ID2D1SolidColorBrush> brush;
+        app.renderTarget->CreateSolidColorBrush(c, &brush);
+        cache.tokenBrushes.push_back({key, brush});
+        return brush.Get();
+    };
+    int language = 0;
+    SyntaxState syntax;
     size_t start = 0, lineIndex = 0;
     bool inFence = false, inMath = false, inFront = from == 0 && t.compare(0, 3, L"---") == 0;
     size_t fenceStart = 0, frontEnd = 0;
@@ -325,9 +341,26 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
             code(start, end - start);
             if (fence) {
                 layout->SetDrawingEffect(cache.markBrush.Get(), range(start, end - start));
-                if (!inFence) fenceStart = start;
-                else cache.backs.push_back({fenceStart, end - fenceStart, look.codeBack, true});
+                if (!inFence) {
+                    // Its language, after the fence's marks
+                    fenceStart = start;
+                    size_t marks = rest.find_first_not_of(rest[0]);
+                    std::wstring_view info = marks == std::wstring_view::npos ? std::wstring_view() : rest.substr(marks);
+                    size_t word = info.find_first_of(L" {");
+                    language = detectLanguage(std::wstring(info.substr(0, word)));
+                    syntax = SyntaxState();
+                } else {
+                    cache.backs.push_back({fenceStart, end - fenceStart, look.codeBack, true});
+                }
                 inFence = !inFence;
+            } else if (language && end > start) {
+                // Its tokens in the page's colours
+                std::wstring line(lineText);
+                for (const SyntaxToken& token : tokenizeLine(line, language, syntax)) {
+                    if (token.text.empty()) continue;
+                    size_t at = (size_t)(token.text.data() - line.data());
+                    layout->SetDrawingEffect(tokenBrush(getTokenColor(app.theme, token.tokenType)), range(start + at, token.text.size()));
+                }
             }
         } else if (mathFence || inMath) {
             code(start, end - start);
@@ -350,16 +383,18 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
         } else if (!here && dividerLine(lineText) && !lineText.empty()) {
             mark(start, end - start, MarkObject::Rule, std::max(0.0f, width - 2.0f));
         } else {
+            // Up to three spaces may come before a heading's marks
+            size_t h0 = lead != std::wstring_view::npos && lead <= 3 ? lead : 0;
             size_t hashes = 0;
-            while (hashes < lineText.size() && lineText[hashes] == L'#') ++hashes;
-            if (hashes >= 1 && hashes <= 6 && hashes < lineText.size() && lineText[hashes] == L' ') {
+            while (h0 + hashes < lineText.size() && lineText[h0 + hashes] == L'#') ++hashes;
+            if (hashes >= 1 && hashes <= 6 && h0 + hashes < lineText.size() && lineText[h0 + hashes] == L' ') {
                 DWRITE_TEXT_RANGE whole = range(start, end - start);
                 lineSize = look.headingSize[hashes - 1];
                 layout->SetFontFamilyName(look.headingFace.c_str(), whole);
                 layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, whole);
                 layout->SetFontSize(lineSize, whole);
                 layout->SetDrawingEffect(cache.headingBrush[hashes - 1].Get(), whole);
-                mark(start, hashes + 1, MarkObject::Hidden);
+                mark(start, h0 + hashes + 1, MarkObject::Hidden);
             } else if (lead != std::wstring_view::npos) {
                 // List, task and quote marks
                 size_t at = start + lead;

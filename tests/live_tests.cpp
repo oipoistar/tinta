@@ -56,6 +56,7 @@ void drawLive(App& app) {
     // The rail covers the strip's left corner, as in the window
     renderTabStrip(app);
     app.editRailAnim = 1.0f;
+    app.editRailHover = 0;  // no tooltip left from a click on the rail
     renderEditRail(app);
 }
 
@@ -399,6 +400,9 @@ void drawings(App& app, const fs::path& dir, const fs::path& out) {
     frame(app, out / "live-diagram.png");
     placeCaret(app, find(app, L"$$") + 3);
     frame(app, out / "live-math.png");
+    placeCaret(app, find(app, L"return 0;") + 3);
+    app.scrollY = app.targetScrollY = std::max(0.0f, app.scrollY - 160.0f);
+    frame(app, out / "live-code.png");
     placeCaret(app, find(app, L"![Board mock]") + 3);
     frame(app, out / "live-picture.png");
     // The wheel scrolls the page
@@ -445,6 +449,21 @@ void switching(App& app, const fs::path& out) {
     check(saveFramePreview(app, out / "live-source-rail.png", [&] { app.editRailAnim = 1.0f; renderEditRail(app); }),
           "the source's rail is drawn");
     setEditorLive(app, app.hwnd, true);
+}
+
+// A new note opens in Live on its empty page: the prompt to begin, with
+// the Open and New sheet buttons of a new tab
+void emptyNote(App& app, const fs::path& out) {
+    tabOpenQuickNote(app, app.hwnd);
+    check(app.editMode && app.editorText.empty() && editorLiveOn(app), "a new note opens in Live");
+    paint(app);
+    check(saveFramePreview(app, out / "live-empty.png", [&] { drawLive(app); renderQuickNoteEmptyState(app); }),
+          "the empty note is drawn");
+    check(app.quickNoteButtonRect.right > app.quickNoteButtonRect.left, "its page keeps the Open button");
+    typeText(app, L"# Fresh\nA new note.");
+    check(app.editorText == L"# Fresh\nA new note.", "typing on the empty page makes the note: " + narrow(app.editorText));
+    frame(app, out / "live-new-note.png");
+    app.editorDirty = false;
 }
 
 // A long document: switching to Live, a key typed in its middle, a frame,
@@ -542,6 +561,7 @@ int runLiveTests(const char* fixtureDir) {
     }
     app.width = 1050;
     app.layoutDirty = true;
+    emptyNote(app, out);
     performance(app, dir);
 
     app.editorDirty = false;

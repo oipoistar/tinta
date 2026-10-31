@@ -55,6 +55,8 @@ cards are typed in with the same engine (`include/live_text.h`).
     and a Mermaid file opens in Source while the tour opens in Live again;
   - the find bar keeps what is typed into it while Live shows (the page
     took the characters before the guard);
+  - a new note opens in Live on its empty page, keeps the Open button,
+    and `# Fresh`, Enter and a line make the note;
   - two themes (Paper, Midnight) at 1050 and 650 px;
   - the long document: switching to Live, a key, a frame and leaving the
     block typed in are timed, and a key and a frame must stay under 40 ms.
@@ -80,6 +82,13 @@ cards are typed in with the same engine (`include/live_text.h`).
   - table pipes are muted;
   - a picture's block took the divider after it, so a divider with no
     text of its own is now a block of its own;
+  - an open code block lost its colours, so its lines take the page's
+    token colours (`live-code.png`), in cards too;
+  - `## Next` after a space was not drawn as a heading in a card, and a
+    heading's marks may now follow up to three spaces;
+  - Live's empty page drew the source's hint about typing "on the left"
+    under the Open and New sheet buttons; it now has only its own prompt
+    (`live-empty.png`, `live-new-note.png`);
   - the test's frames drew the strip over the rail.
 
 ## The real app

@@ -2167,11 +2167,13 @@ void renderQuickNoteEmptyState(App& app) {
     labelLayouts[1]->Release();
     chipLayout->Release();
 
-    // Hint lines, centered under the buttons, wrapping in a narrow pane
+    // Hint lines, centered under the buttons, wrapping in a narrow pane.
+    // Live's page says how to begin on its own first line instead.
     const char* hintKeys[2] = { "empty.hint1", "empty.hint2" };
     float hintY = rects[1].bottom + dpi(app, 18.0f);
     float hintW = paneW - dpi(app, 32.0f);
     for (const char* key : hintKeys) {
+        if (editorLiveOn(app)) break;
         const wchar_t* hint = tr(app, key);
         IDWriteTextLayout* layout = nullptr;
         app.dwriteFactory->CreateTextLayout(hint, (UINT32)wcslen(hint),

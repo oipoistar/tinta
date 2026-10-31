@@ -199,6 +199,8 @@ struct LayoutCache {
     float factor = 1.0f;                // line spacing over the font's own
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> markBrush, linkBrush, glyphBrush, codeBrush;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> headingBrush[6];
+    // A code block's colours, as the page gives its tokens
+    std::vector<std::pair<unsigned, Microsoft::WRL::ComPtr<ID2D1SolidColorBrush>>> tokenBrushes;
     // Spans drawn behind the text: inline code and ==marks== (layout positions)
     struct Back {
         size_t at, length;
