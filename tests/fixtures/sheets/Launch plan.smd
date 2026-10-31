@@ -1,0 +1,36 @@
+---
+folder: Launch plan
+---
+
+# Launch plan
+
+- [Kickoff](<Launch plan/Kickoff.md>)
+
+```json canvas
+{
+	"nodes":[
+		{"id":"g-discovery","type":"group","label":"Discovery","color":"5","x":-60,"y":-100,"width":1260,"height":600},
+		{"id":"g-todo","type":"group","label":"To do","tintaLane":"status","x":-60,"y":640,"width":420,"height":520},
+		{"id":"g-doing","type":"group","label":"Doing","tintaLane":"status","color":"3","x":400,"y":640,"width":420,"height":520},
+		{"id":"g-done","type":"group","label":"Done","tintaLane":"status","color":"4","x":860,"y":640,"width":420,"height":520},
+		{"id":"kickoff","type":"file","file":"Launch plan/Kickoff.md","color":"2","x":0,"y":0,"width":360,"height":420},
+		{"id":"research","type":"file","file":"Launch plan/Research.md","x":420,"y":0,"width":360,"height":420},
+		{"id":"budget","type":"file","file":"Launch plan/Budget.md","x":840,"y":0,"width":320,"height":360},
+		{"id":"design","type":"file","file":"Launch plan/Design.md","color":"6","x":1300,"y":0,"width":380,"height":420},
+		{"id":"ship","type":"file","file":"Launch plan/Ship.md","x":-20,"y":720,"width":340,"height":280},
+		{"id":"build","type":"file","file":"Launch plan/Build.md","x":440,"y":720,"width":340,"height":360},
+		{"id":"retro","type":"file","file":"Launch plan/Retro.md","x":900,"y":720,"width":340,"height":380},
+		{"id":"mock","type":"file","file":"Launch plan/mock.png","x":1760,"y":0,"width":360,"height":225},
+		{"id":"spec","type":"link","url":"https://jsoncanvas.org/spec/1.0/","x":1300,"y":480,"width":380,"height":120},
+		{"id":"note","type":"text","color":"4","text":"**Remember** — a text card lives in the sheet itself.\n\nEvery other card is a note in the folder.","x":1300,"y":660,"width":380,"height":200}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"kickoff","fromSide":"right","toNode":"research","toSide":"left","label":"first"},
+		{"id":"e2","fromNode":"research","fromSide":"right","toNode":"budget","toSide":"left"},
+		{"id":"e3","fromNode":"research","toNode":"design","label":"shapes"},
+		{"id":"e4","fromNode":"design","fromSide":"bottom","toNode":"build","toSide":"right","color":"1"},
+		{"id":"e5","fromNode":"build","fromSide":"left","toNode":"ship","toSide":"right","label":"when green"},
+		{"id":"e6","fromNode":"spec","fromSide":"left","toNode":"research","toSide":"bottom","fromEnd":"arrow","toEnd":"none"}
+	]
+}
+```

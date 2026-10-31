@@ -57,6 +57,12 @@ int printDebugPages(App& app, const std::wstring& outDir);
 // Link peek: renders the top of another markdown file at the live theme
 // into a 2x bitmap (caller releases). heightDips shrinks to the target's
 // content height when the document is shorter than the request.
+// Sheets: lay out the current document at a width (print layout must be
+// entered by the caller), then replay a slice of it into a device context
+void layoutForWidth(App& app, float widthDips);
+void drawLayoutRange(App& app, ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brush,
+                     float yStart, float yEnd, float offsetX, float offsetY);
+
 ID2D1Bitmap* renderPeekBitmap(App& app, const std::wstring& path,
                               float widthDips, float& heightDips);
 

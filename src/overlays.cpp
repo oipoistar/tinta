@@ -2019,6 +2019,25 @@ void renderHelpOverlay(App& app) {
         {kQuit.c_str(),   tr(app, "help.general.quit")},
     };
 
+    // Sheets (sheet_ui.h): the keys a sheet's tab answers to
+    const HelpEntry sheetEntries[] = {
+        {L"N / Double-click", tr(app, "sheet.tool.note")},
+        {L"Tab / Shift+Enter", tr(app, "help.sheet.child")},
+        {L"\x2190\x2191\x2192\x2193",       tr(app, "help.sheet.walk")},
+        {L"Ctrl+\x2190\x2191\x2192\x2193",  tr(app, "help.sheet.nudge")},
+        {L"Enter / E",        tr(app, "help.sheet.edit")},
+        {L"Drag side dot",    tr(app, "help.sheet.connect")},
+        {L"Ctrl+G / Ctrl+Shift+G", tr(app, "help.sheet.group")},
+        {L"1 \x2013 6 / 0",   tr(app, "help.sheet.color")},
+        {L"F",                tr(app, "sheet.find_placeholder")},
+        {L"S",                tr(app, "sheet.menu.spotlight")},
+        {L"P",                tr(app, "sheet.tool.present")},
+        {L"Ctrl+L",           tr(app, "sheet.tool.tidy")},
+        {L"L / M",            tr(app, "help.sheet.layers")},
+        {L"Shift+1 / Shift+2", tr(app, "help.sheet.fit")},
+        {L"Space+Drag",       tr(app, "help.sheet.pan")},
+    };
+
     float padding = dpi(app, 20.0f);
     float keyColWidth = dpi(app, 150.0f);
     float leftX = panelX + padding;
@@ -2036,7 +2055,8 @@ void renderHelpOverlay(App& app) {
     float totalContentHeight = sectionHeight((int)_countof(navEntries)) +
                                sectionHeight((int)_countof(overlayEntries)) +
                                sectionHeight((int)_countof(editEntries)) +
-                               sectionHeight((int)_countof(generalEntries)) + footerH;
+                               sectionHeight((int)_countof(generalEntries)) +
+                               sectionHeight((int)_countof(sheetEntries)) + footerH;
 
     // Scrollable area
     float contentTopY = titleBottomY + dpi(app, 10.0f);
@@ -2095,6 +2115,7 @@ void renderHelpOverlay(App& app) {
     drawSection(tr(app, "help.section.view"), overlayEntries, (int)_countof(overlayEntries));
     drawSection(tr(app, "help.section.editing"), editEntries, (int)_countof(editEntries));
     drawSection(tr(app, "help.section.general"), generalEntries, (int)_countof(generalEntries));
+    drawSection(tr(app, "help.section.sheets"), sheetEntries, (int)_countof(sheetEntries));
 
     // Footer hint
     D2D1_COLOR_F footerColor = app.theme.text;

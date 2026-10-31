@@ -92,6 +92,10 @@ set(SOURCES
     src/plantuml_queue.cpp
     src/plantuml_app.cpp
     src/wordcount.cpp
+    src/sheet_model.cpp
+    src/sheet_doc.cpp
+    src/sheet_render.cpp
+    src/sheet_input.cpp
 )
 
 set(HEADERS
@@ -124,6 +128,8 @@ set(HEADERS
     include/plantuml_queue.h
     include/plantuml_app.h
     include/wordcount.h
+    include/sheet.h
+    include/sheet_ui.h
 )
 
 # Windows resource file (icon)
@@ -169,7 +175,7 @@ if(BUILD_TESTING)
     # window, including layout-dependent character sequences (#195).
     set(INPUT_TEST_SOURCES ${SOURCES})
     list(REMOVE_ITEM INPUT_TEST_SOURCES src/main_d2d.cpp)
-    add_executable(input_tests tests/input_tests.cpp tests/deleted_tab_tests.cpp tests/table_input_tests.cpp tests/docked_preview_tests.cpp tests/table_layout_tests.cpp tests/highlight_layout_tests.cpp tests/window_drag_tests.cpp tests/tab_drop_tests.cpp tests/tab_hover_card_tests.cpp tests/search_panel_tests.cpp tests/superscript_tests.cpp tests/sidepanel_tests.cpp tests/image_tests.cpp tests/search_input_tests.cpp tests/wrapped_cursor_tests.cpp tests/file_fragment_tests.cpp tests/editor_context_tests.cpp tests/editor_features_tests.cpp tests/ui_font_tests.cpp tests/print_export_tests.cpp tests/scroll_sync_tests.cpp tests/notification_setting_tests.cpp tests/goto_line_tests.cpp tests/reading_position_tests.cpp tests/split_scrollbar_tests.cpp tests/touch_tests.cpp tests/editor_drag_tests.cpp tests/byte_order_mark_tests.cpp ${INPUT_TEST_SOURCES})
+    add_executable(input_tests tests/input_tests.cpp tests/deleted_tab_tests.cpp tests/table_input_tests.cpp tests/docked_preview_tests.cpp tests/table_layout_tests.cpp tests/highlight_layout_tests.cpp tests/window_drag_tests.cpp tests/tab_drop_tests.cpp tests/tab_hover_card_tests.cpp tests/search_panel_tests.cpp tests/superscript_tests.cpp tests/sidepanel_tests.cpp tests/image_tests.cpp tests/search_input_tests.cpp tests/wrapped_cursor_tests.cpp tests/file_fragment_tests.cpp tests/editor_context_tests.cpp tests/editor_features_tests.cpp tests/ui_font_tests.cpp tests/print_export_tests.cpp tests/scroll_sync_tests.cpp tests/notification_setting_tests.cpp tests/goto_line_tests.cpp tests/reading_position_tests.cpp tests/split_scrollbar_tests.cpp tests/touch_tests.cpp tests/editor_drag_tests.cpp tests/byte_order_mark_tests.cpp tests/sheet_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(input_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(input_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
     target_compile_definitions(input_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
@@ -461,6 +467,38 @@ if(BUILD_TESTING)
         TINTA_MERMAID_C4_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mermaid-c4-labels.md"
         TINTA_MERMAID_ASYMMETRIC_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mermaid-asymmetric-shape.md")
     add_test(NAME mermaid_parser COMMAND mermaid_tests)
+
+    # Sheets: the JSON Canvas model, the .smd format and the layouts
+    add_executable(sheet_model_tests
+        tests/sheet_model_tests.cpp
+        src/sheet_model.cpp
+        src/frontmatter.cpp
+        src/mermaid.cpp
+        src/mermaid_ext.cpp
+        src/mermaid_seq.cpp
+        src/mermaid_pie.cpp
+        src/mermaid_uml.cpp
+        src/mermaid_git.cpp
+        src/mermaid_gantt.cpp
+        src/mermaid_charts.cpp
+        src/mermaid_narrative.cpp
+        src/mermaid_grid.cpp
+        src/mermaid_charts2.cpp
+        src/mermaid_block.cpp
+        src/mermaid_c4.cpp
+    )
+    target_include_directories(sheet_model_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+    target_compile_definitions(sheet_model_tests PRIVATE
+        TINTA_SHEET_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/sheets")
+    add_test(NAME sheet_model COMMAND sheet_model_tests)
+    # Sheets in the window: the fixture sheet worked through the handlers
+    add_test(NAME sheet_canvas COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:input_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/sheet-test-$<CONFIG>
+        -DTEST_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/sheets
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_sheet_tests.cmake)
 
     # PlantUML CLI test double (used by the plantuml suites; no Java needed).
     add_executable(fake_plantuml tests/fake_plantuml.cpp)

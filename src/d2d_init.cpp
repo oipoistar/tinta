@@ -726,6 +726,7 @@ bool createRenderTarget(App& app) {
     // every old-target drawing before recreating device resources (#220).
     app.clearLayoutCache();
     app.layoutDirty = true;
+    ++app.renderTargetGeneration;
     if (app.lightboxBitmap) {
         app.lightboxBitmap->Release();
         app.lightboxBitmap = nullptr;

@@ -5,6 +5,7 @@
 #include "editor.h"
 #include "input.h"
 #include "overlays.h"
+#include "sheet_ui.h"
 #include "sidepanels.h"
 #include "startpage.h"
 #include "tabs.h"
@@ -68,6 +69,13 @@ void scrollOf(const App& app, TouchTarget target, PanelList list, float& x, floa
     switch (target) {
         case TouchTarget::Document: x = app.scrollX; y = app.scrollY; break;
         case TouchTarget::Editor: y = app.editorScrollY; break;
+        case TouchTarget::Sheet:
+            // A sheet's camera, in pixels so a finger's travel moves it
+            if (SheetDoc* doc = activeSheet(const_cast<App&>(app))) {
+                x = doc->camX * sheetui::scale(app, *doc);
+                y = doc->camY * sheetui::scale(app, *doc);
+            }
+            break;
         case TouchTarget::List: {
             PanelListView view;
             if (panelListView(app, list, view)) y = view.scroll;
@@ -89,6 +97,10 @@ void scrollRange(const App& app, TouchTarget target, PanelList list, float& maxX
             // pans down and up only
             maxY = std::max(0.0f, app.editorContentHeight - static_cast<float>(app.height));
             break;
+        case TouchTarget::Sheet:
+            // A sheet has no edges
+            maxX = maxY = 1e9f;
+            break;
         case TouchTarget::List: {
             PanelListView view;
             if (panelListView(app, list, view)) maxY = panelListScrollbar(app, view).maxScroll;
@@ -104,8 +116,10 @@ bool scrollTo(App& app, TouchTarget target, PanelList list, float& x, float& y) 
     float maxX, maxY, oldX, oldY;
     scrollRange(app, target, list, maxX, maxY);
     scrollOf(app, target, list, oldX, oldY);
-    x = std::clamp(x, 0.0f, maxX);
-    y = std::clamp(y, 0.0f, maxY);
+    if (target != TouchTarget::Sheet) {
+        x = std::clamp(x, 0.0f, maxX);
+        y = std::clamp(y, 0.0f, maxY);
+    }
     if (std::fabs(x - oldX) < 0.01f && std::fabs(y - oldY) < 0.01f) return false;
     switch (target) {
         case TouchTarget::Document:
@@ -117,6 +131,15 @@ bool scrollTo(App& app, TouchTarget target, PanelList list, float& x, float& y) 
             break;
         case TouchTarget::Editor: app.editorScrollY = y; break;
         case TouchTarget::List: setPanelListScroll(app, list, y); break;
+        case TouchTarget::Sheet:
+            if (SheetDoc* doc = activeSheet(app)) {
+                float s = sheetui::scale(app, *doc);
+                doc->camX = x / s;
+                doc->camY = y / s;
+                doc->flight.active = false;
+                doc->placed = true;
+            }
+            break;
         default: break;
     }
     InvalidateRect(app.hwnd, nullptr, FALSE);
@@ -124,6 +147,7 @@ bool scrollTo(App& app, TouchTarget target, PanelList list, float& x, float& y) 
 }
 
 bool pansAcross(const App& app, TouchTarget target) {
+    if (target == TouchTarget::Sheet) return true;
     return target == TouchTarget::Document && app.contentWidth > documentViewportWidth(app);
 }
 
@@ -235,6 +259,8 @@ TouchTarget touchTargetAt(const App& app, POINT pt, PanelList& list) {
     // A panel's header, buttons and footer, and the search bar, take clicks
     if (onSidePanel(app, x) || onSearchBar(app, x, y)) return TouchTarget::None;
     const float left = documentViewportX(app);
+    // A sheet's canvas pans under the finger; taps reach its buttons
+    if (sheetActive(app) && x >= left) return TouchTarget::Sheet;
     if (app.editMode && x < left) {
         // The editor's text, short of the rail, its scrollbar and the seam
         return x >= editRailWidth(app) && x < editorPaneWidth(app) - dpi(app, 16.0f)
@@ -290,14 +316,16 @@ bool touchMove(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
         // also pans across
         KillTimer(hwnd, TIMER_TOUCH_HOLD);
         t.phase = Phase::Panning;
-        t.axis = std::fabs(dx) > std::fabs(dy) && pansAcross(app, t.target) ? 2 : 1;
+        // A sheet pans every way at once
+        t.axis = t.target == TouchTarget::Sheet ? 3
+                 : std::fabs(dx) > std::fabs(dy) && pansAcross(app, t.target) ? 2 : 1;
         scrollOf(app, t.target, t.list, t.originX, t.originY);
         tabHoverCardDismiss(app, hwnd);
     }
     if (t.phase == Phase::Panning) {
         // The content moves with the finger from where the pan began
-        float x = t.originX - (t.axis == 2 ? dx : 0.0f);
-        float y = t.originY - (t.axis == 1 ? dy : 0.0f);
+        float x = t.originX - (t.axis >= 2 ? dx : 0.0f);
+        float y = t.originY - (t.axis != 2 ? dy : 0.0f);
         scrollTo(app, t.target, t.list, x, y);
     } else if (t.phase == Phase::Holding) {
         // The selection grows word by word, as a double-click's drag does

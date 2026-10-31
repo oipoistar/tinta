@@ -18,6 +18,7 @@
 #include "sidepanels.h"
 
 #include "export.h"
+#include "sheet_ui.h"
 
 #include <filesystem>
 #include <fstream>
@@ -1628,6 +1629,8 @@ void restoreEditBuffer(App& app, const std::wstring& text, bool dirty,
 
 void enterEditMode(App& app) {
     if (app.editMode) { setEditorReadingPreview(app, false); return; }
+    // A sheet saves before its own text opens in the editor
+    if (sheetActive(app)) sheetLeave(app);
     if (app.currentFile.empty()) {
         if (app.startPageEmbeddedOpen) {
             // Learn documents have no backing file. Edit an untitled copy;
@@ -1942,9 +1945,10 @@ void openFileDialog(App& app, HWND hwnd) {
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = L"Documents (*.md;*.mmd;*.txt;*.json;*.yaml;...)\0"
-                      L"*.md;*.markdown;*.mmd;*.txt;*.json;*.yaml;*.yml;*.toml;"
+    ofn.lpstrFilter = L"Documents (*.md;*.mmd;*.smd;*.txt;*.json;*.yaml;...)\0"
+                      L"*.md;*.markdown;*.mmd;*.smd;*.canvas;*.txt;*.json;*.yaml;*.yml;*.toml;"
                       L"*.ini;*.csv;*.log;*.puml;*.plantuml\0"
+                      L"Sheets (*.smd;*.canvas)\0*.smd;*.canvas\0"
                       L"Markdown / Mermaid (*.md;*.markdown;*.mmd)\0"
                       L"*.md;*.markdown;*.mmd;*.puml;*.plantuml\0"
                       L"All files (*.*)\0*.*\0";

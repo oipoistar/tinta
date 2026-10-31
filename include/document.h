@@ -7,12 +7,13 @@
 #include <string>
 #include <string_view>
 
-inline constexpr std::array<std::wstring_view, 5> DOCUMENT_FILE_EXTENSIONS = {
+inline constexpr std::array<std::wstring_view, 6> DOCUMENT_FILE_EXTENSIONS = {
     L".md",
     L".markdown",
     L".mmd",
     L".puml",
     L".plantuml",
+    L".smd",  // a sheet (sheet.h)
 };
 
 bool isMermaidDocumentPath(std::string_view path);

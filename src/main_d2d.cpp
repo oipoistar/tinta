@@ -48,6 +48,7 @@
 #include "i18n.h"
 #include "tabs.h"
 #include "search_panel.h"
+#include "sheet_ui.h"
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
 
@@ -97,9 +98,14 @@ static int autoThemeIndex(const App& app) {
 // Forward declarations
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void render(App& app);
+static void renderChromeAndEnd(App& app);
 
 void render(App& app) {
     if (!app.renderTarget) return;
+
+    // A sheet draws its cards' content before the frame begins: the
+    // layout it borrows must not change under a frame in progress
+    if (sheetActive(app)) sheetPrepareFrame(app);
 
     app.renderTarget->BeginDraw();
     app.drawCalls = 0;
@@ -109,6 +115,17 @@ void render(App& app) {
     if (app.showPrintPreview) {
         renderPrintPreview(app);
         app.renderTarget->EndDraw();
+        return;
+    }
+
+    // A sheet's tab shows the canvas instead of the page; the panels,
+    // chips, strip and overlays still layer above it
+    if (sheetActive(app)) {
+        app.startPageShowing = false;
+        app.renderTarget->Clear(app.theme.background);
+        renderSheet(app);
+        if (app.showFolderBrowser) renderFolderBrowser(app);
+        renderChromeAndEnd(app);
         return;
     }
 
@@ -1045,6 +1062,12 @@ render_document:
         if (app.showSearch) renderSearchOverlay(app);
     }
 
+    renderChromeAndEnd(app);
+}
+
+// Everything above the page or the sheet: prompts, chips, the tab strip,
+// overlays and dialogs, then the end of the frame
+static void renderChromeAndEnd(App& app) {
     // Ctrl+G's go-to-line prompt, at the top of the pane it acts on (#276)
     renderGotoLinePrompt(app);
 
@@ -1328,11 +1351,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     tabStripMouseDown(*app, hwnd, mx, my, true);
                     return 0;
                 }
+                // A sheet pans with the middle button held
+                if (sheetMiddleDown(*app, hwnd, mx, my)) return 0;
             }
+            break;
+
+        case WM_MBUTTONUP:
+            if (app && sheetMiddleUp(*app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return 0;
             break;
 
         case WM_CLOSE:
             if (app) tableEditCommit(*app);
+            if (app) sheetLeave(*app);
             // "Close without asking" (#252): unsaved buffers stay behind as
             // drafts, offered back on the next launch, and the window closes
             if (app && app->closeKeepsDrafts) {
@@ -1515,6 +1545,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app && (HWND)lParam != hwnd) panelScrollbarEnd(*app, hwnd, true);
             if (app && (HWND)lParam != hwnd) sidePanelResizeEnd(*app, hwnd, true);
             if (app && (HWND)lParam != hwnd) editorTextDragCancel(*app, hwnd);
+            if (app && (HWND)lParam != hwnd) sheetCaptureLost(*app, hwnd);
             // Losing capture mid tab-drag (Alt+Tab, a popup stealing the
             // mouse) aborts the drag instead of leaving a stray ghost
             if (app && app->tabDragIndex >= 0 && (HWND)lParam != hwnd) {
@@ -1535,6 +1566,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) panelScrollbarEnd(*app, hwnd, true);
             if (app) sidePanelResizeEnd(*app, hwnd, true);
             if (app) editorTextDragCancel(*app, hwnd);
+            if (app) sheetCaptureLost(*app, hwnd);
             break;
 
         case WM_MOUSELEAVE:
@@ -1561,6 +1593,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) touchStopFling(*app, hwnd);
             if (app) return handleKeyDown(*app, hwnd, wParam) ? 1 : 0;
             return 0;
+
+        case WM_KEYUP:
+            if (app) sheetKeyUp(*app, hwnd, wParam);
+            break;
 
         case WM_XBUTTONUP:
             // Mouse side buttons walk back/forward across link jumps
@@ -1627,6 +1663,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
             }
             if (wParam == TIMER_LINK_PEEK && app) handleLinkPeekTimer(*app, hwnd);
+            if (wParam == sheetui::SHEET_TIMER_ID && app) sheetTimer(*app, hwnd);
             if (wParam == TIMER_TAB_HOVER_CARD && app) handleTabHoverCardTimer(*app, hwnd);
             if (wParam == TIMER_FILE_WATCH && app) handleFileWatchTimer(*app, hwnd);
             if (wParam == 2 && app) editorReparse(*app); // TIMER_EDITOR_REPARSE
@@ -1666,6 +1703,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // One relayout for however many images arrived since armed
                 KillTimer(hwnd, TIMER_IMAGE_REFLOW);
                 app->layoutDirty = true;
+                // Notes on a sheet that show the new image draw again
+                sheetImagesArrived(*app);
                 // The open print preview draws its own cached pages: lay
                 // them out again so the diagram appears and paginates as
                 // it will print

@@ -10,6 +10,7 @@
 #include "document.h"
 #include "i18n.h"
 #include "settings.h"
+#include "sheet_ui.h"
 #include "tabs.h"
 #include "utils.h"
 
@@ -533,7 +534,8 @@ void renderStartPage(App& app) {
     spDraw(app, tag, x0, tagY, withA(text, 0.56f));
     if (tag) tag->Release();
 
-    // --- Action buttons: Open a file (accent), New document, Browse
+    // --- Action buttons: Open a file (accent), New document, New sheet,
+    // Browse; they wrap onto a second row when the column is narrow
     float btnY = tagY + tagM.height + dpi(app, 26.0f);
     float btnH = dpi(app, 38.0f);
     struct Btn {
@@ -543,9 +545,10 @@ void renderStartPage(App& app) {
         int id;
     };
     // The chips show the user's actual bindings, not hardcoded defaults
-    Btn btns[3] = {
+    Btn btns[4] = {
         {"start.open", L"Ctrl+O", true, 1},
         {"start.new", keyLabel(app.keymap[KA_NEWFILE]), false, 2},
+        {"start.new_sheet", L"", false, 6},
         {"start.browse", keyLabel(app.keymap[KA_BROWSE]), false, 3},
     };
     float bx = x0;
@@ -561,9 +564,13 @@ void renderStartPage(App& app) {
                                            4096.0f);
         DWRITE_TEXT_METRICS km = spMetrics(keyL);
         if (keyL) keyL->Release();
-        float chipW = km.width + dpi(app, 14.0f);
-        float w = dpi(app, 14.0f) + lm.width + dpi(app, 9.0f) + chipW +
+        float chipW = b.key.empty() ? 0.0f : km.width + dpi(app, 14.0f);
+        float w = dpi(app, 14.0f) + lm.width + (b.key.empty() ? 0.0f : dpi(app, 9.0f) + chipW) +
                   dpi(app, 14.0f);
+        if (bx > x0 && bx + w > x0 + leftW + dpi(app, 2.0f)) {
+            bx = x0;
+            btnY += btnH + dpi(app, 8.0f);
+        }
         D2D1_RECT_F r = D2D1::RectF(bx, btnY, bx + w, btnY + btnH);
         D2D1_ROUNDED_RECT rr =
             D2D1::RoundedRect(r, dpi(app, 8.0f), dpi(app, 8.0f));
@@ -594,8 +601,9 @@ void renderStartPage(App& app) {
         if (label) label->Release();
         D2D1_COLOR_F kBg = b.primary ? withA(onAccent, 0.14f) : chipBg;
         D2D1_COLOR_F kFg = b.primary ? withA(onAccent, 0.75f) : chipFg;
-        spChip(app, b.key, tx + lm.width + dpi(app, 9.0f),
-               btnY + btnH * 0.5f, kBg, kFg);
+        if (!b.key.empty())
+            spChip(app, b.key, tx + lm.width + dpi(app, 9.0f),
+                   btnY + btnH * 0.5f, kBg, kFg);
         addHit(r.left, r.top, r.right, r.bottom, b.id);
         bx += w + dpi(app, 8.0f);
     }
@@ -653,15 +661,26 @@ void renderStartPage(App& app) {
                     dpi(app, 2.0f), dpi(app, 2.0f)),
                 app.brush);
         }
-        // Little page glyph
+        // Little page glyph, or four cards for a sheet
         float gx = x0;
         float gy = top + (rowH - dpi(app, 15.0f)) * 0.5f;
         app.brush->SetColor(withA(text, 0.5f));
-        app.renderTarget->DrawRoundedRectangle(
-            D2D1::RoundedRect(D2D1::RectF(gx, gy, gx + dpi(app, 12.0f),
-                                          gy + dpi(app, 15.0f)),
-                              dpi(app, 2.0f), dpi(app, 2.0f)),
-            app.brush, 1.0f);
+        if (isSheetPath(rd.path)) {
+            float c = dpi(app, 5.5f), g = dpi(app, 2.0f);
+            for (int k = 0; k < 4; ++k) {
+                float cx = gx + (k % 2) * (c + g) - dpi(app, 0.5f);
+                float cy = gy + dpi(app, 1.5f) + (k / 2) * (c + g);
+                app.renderTarget->DrawRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(cx, cy, cx + c, cy + c), dpi(app, 1.2f), dpi(app, 1.2f)),
+                    app.brush, 1.0f);
+            }
+        } else {
+            app.renderTarget->DrawRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(gx, gy, gx + dpi(app, 12.0f),
+                                              gy + dpi(app, 15.0f)),
+                                  dpi(app, 2.0f), dpi(app, 2.0f)),
+                app.brush, 1.0f);
+        }
 
         std::string pathUtf8 = rd.path;
         size_t slash = pathUtf8.find_last_of("/\\");

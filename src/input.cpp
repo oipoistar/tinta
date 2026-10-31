@@ -1,5 +1,6 @@
 #include "frontmatter_ui.h"
 #include "input.h"
+#include "sheet_ui.h"
 #include "link_target.h"
 #include "network_path.h"
 #include "annotations.h"
@@ -947,6 +948,12 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
         return;
     }
 
+    // A sheet: the wheel pans, Ctrl+wheel zooms about the pointer
+    if (sheetActive(app) && !app.showThemeChooser &&
+        sheetMouseWheel(app, hwnd, (float)GET_WHEEL_DELTA_WPARAM(wParam), false, app.mouseX, app.mouseY)) {
+        return;
+    }
+
     // Edit mode: the wheel scrolls the editor from either pane — the preview
     // follows through the scroll-anchor sync, so the panes cannot drift
     // apart and both sides always respond (#77)
@@ -1035,6 +1042,10 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
 
 void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
     tabHoverCardDismiss(app, hwnd);
+    if (sheetActive(app) && !app.showThemeChooser && !app.showHelp && !app.showSettings &&
+        sheetMouseWheel(app, hwnd, (float)GET_WHEEL_DELTA_WPARAM(wParam), true, app.mouseX, app.mouseY)) {
+        return;
+    }
     // Horizontal scroll
     float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA * dpi(app, 60.0f);
     app.targetScrollX += delta;
@@ -1132,6 +1143,11 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     bool mouseMoved = app.mouseX != GET_X_LPARAM(lParam) || app.mouseY != GET_Y_LPARAM(lParam);
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
+    // A press that began on a sheet keeps the pointer, over the strip too
+    if (sheetActive(app) && sheetPressed(app)) {
+        sheetMouseMove(app, hwnd, app.mouseX, app.mouseY);
+        return;
+    }
 
     if (app.showToc || app.showFolderBrowser) {
         TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, hwnd, 0};
@@ -1421,6 +1437,9 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         }
         return;
     }
+
+    // A sheet: hover, cursor and its menu
+    if (sheetActive(app) && sheetMouseMove(app, hwnd, app.mouseX, app.mouseY)) return;
 
     // Edit mode: handle separator drag, editor selection, cursor shape
     if (app.editMode) {
@@ -1841,6 +1860,9 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
         ScreenToClient(hwnd, &pt);
     }
 
+    // A sheet has its own menu for its cards, arrows, groups and ground
+    if (sheetActive(app) && (float)pt.y >= chromeTopHeight(app) && sheetContextMenu(app, hwnd, pt.x, pt.y)) return;
+
     // A right-click on a tab opens the tab menu (works in edit mode and
     // above panels too — the strip stays interactive there)
     if (!fromKeyboard && !app.showPrintPreview && !app.confirmExitPending &&
@@ -2110,6 +2132,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
 
     if (sidePanelResizeBegin(app, hwnd, static_cast<float>(GET_X_LPARAM(lParam)),
                             static_cast<float>(GET_Y_LPARAM(lParam)))) return;
+
+    // A sheet takes presses on its canvas
+    if (sheetActive(app) && sheetMouseDown(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return;
 
     // Edit mode: route to editor or preview
     if (app.editMode) {
@@ -2524,6 +2549,9 @@ static void startPageInvoke(App& app, HWND hwnd, int id) {
         app.startPageHover = 0;
     } else if (id == 5) {
         app.showHelp = true;
+    } else if (id == 6) {
+        // New sheet: a Save dialog names it; it opens in this tab
+        sheetCreateInteractive(app, hwnd);
     } else if (id >= 10 && id < 20) {
         int index = id - 10;
         if (index < (int)app.startPageRecents.size()) {
@@ -2873,6 +2901,9 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         app.swallowNextMouseUp = false;
         return;
     }
+
+    // The release of a press the sheet took
+    if (sheetActive(app) && sheetMouseUp(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return;
 
     // Lightbox: a plain click closes, a pan drag just ends
     if (app.showLightbox) {
@@ -3600,7 +3631,7 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         !(GetKeyState(VK_MENU) & 0x8000) && !app.showLightbox && !app.showSettings &&
         !app.showHelp && !app.showPrintPreview && !app.showThemeEditor &&
         !app.showShortcutEditor && !app.annotEditorOpen && !app.confirmExitPending &&
-        !app.createRefPending && !startPageActive(app)) {
+        !app.createRefPending && !startPageActive(app) && !sheetActive(app)) {
         gotoLineOpenPrompt(app);
         InvalidateRect(hwnd, nullptr, FALSE);
         return true;
@@ -3820,6 +3851,15 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         closeTabMenu(app);
         InvalidateRect(hwnd, nullptr, FALSE);
         return false;
+    }
+
+    // A sheet's keys: its text box, the arrow-key walk, the mind-map keys
+    // and its commands; what it leaves goes on to the window's keys
+    if (sheetActive(app) && !app.confirmExitPending &&
+        !(app.showFolderBrowser && (app.folderBrowserEditingPath || app.folderBrowserNaming != 0))) {
+        bool handled = false;
+        bool consumed = sheetKeyDown(app, hwnd, wParam, handled);
+        if (handled) return consumed;
     }
 
     // Function-key Help remains available while editing. Printable custom
@@ -4293,6 +4333,12 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
         return;
     }
 
+    // A sheet's text box types what the keys did not take
+    if (sheetActive(app) && !app.showSettings && !app.showThemeEditor && !app.showHelp &&
+        sheetCharInput(app, hwnd, (wchar_t)wParam)) {
+        return;
+    }
+
     // Annotation note editor takes all typing (#126)
     if (app.annotEditorOpen && !app.editMode) {
         annotationEditorChar(app, wParam);
@@ -4440,6 +4486,20 @@ void handleDropFiles(App& app, HWND hwnd, WPARAM wParam) {
     // drop on a single-document window is where the tab strip first appears
     HDROP hDrop = (HDROP)wParam;
     UINT count = DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
+    // Onto a sheet, files become cards where they land
+    if (sheetActive(app)) {
+        POINT at{};
+        DragQueryPoint(hDrop, &at);
+        std::vector<std::wstring> files;
+        for (UINT i = 0; i < count && i < 200; i++) {
+            wchar_t path[MAX_PATH * 4];
+            if (DragQueryFileW(hDrop, i, path, (UINT)std::size(path))) files.push_back(path);
+        }
+        if ((float)at.y >= chromeTopHeight(app) && sheetDropFiles(app, hwnd, files, at.x, at.y)) {
+            DragFinish(hDrop);
+            return;
+        }
+    }
     bool activated = false;
     for (UINT i = 0; i < count; i++) {
         wchar_t wpath[MAX_PATH];

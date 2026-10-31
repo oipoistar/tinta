@@ -125,7 +125,8 @@ int main() {
     // A count lists its plural forms split by '|', as many as the
     // language's rule has; each form keeps the English argument
     const std::set<std::string> counts = {"fm.ago.minutes", "fm.ago.hours", "fm.ago.days", "fm.in.minutes",
-                                          "fm.in.hours", "fm.in.days", "fm.items"};
+                                          "fm.in.hours", "fm.in.days", "fm.items",
+                                          "sheet.sorted", "sheet.tray", "sheet.words"};
     auto arguments = [&](const char* key, const wchar_t* text) {
         if (!counts.count(key)) return formats(text);
         std::set<std::wstring> forms;
@@ -146,7 +147,7 @@ int main() {
         check(arguments(entry.key, tr(en, entry.key)) == arguments(entry.key, entry.text),
               "Russian preserves printf arguments and order");
     }
-    check(russianKeys.size() == 370, "Russian covers every current interface key");
+    check(russianKeys.size() == 470, "Russian covers every current interface key");
     // Every shipped language has its own text for every key, with the
     // English printf arguments in order. A few read the same everywhere
     // and stay out of the de/fr/it table: the window titles and the key

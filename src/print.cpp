@@ -958,6 +958,15 @@ bool exportPdfFile(App& app, const std::wstring& path) {
     return ok;
 }
 
+// Sheets: a note card lays out at its card's width and draws a slice of
+// itself into its own bitmap, through the print path's layout and replay
+void layoutForWidth(App& app, float widthDips) { layoutAtPrintWidth(app, widthDips); }
+
+void drawLayoutRange(App& app, ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brush,
+                     float yStart, float yEnd, float offsetX, float offsetY) {
+    drawDocumentRange(app, dc, brush, yStart, yEnd, offsetX, offsetY);
+}
+
 // Link peek: renders the top of another markdown file at the live theme
 // into a 2x bitmap. The document swap rides the print-layout save/restore
 // (the palette switch is undone so the peek matches the screen).

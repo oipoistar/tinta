@@ -17,6 +17,7 @@
 #include "startpage.h"
 #include "file_utils.h"
 #include "i18n.h"
+#include "sheet_ui.h"
 #include "input.h"
 #include "utils.h"
 
@@ -81,6 +82,8 @@ void syncActiveTab(App& app) {
 // nothing: the teardown mirrors exitEditMode minus the dialog and reload
 // (another document loads immediately after).
 void parkActiveEditBuffer(App& app) {
+    // A sheet being left commits its text box and saves
+    sheetLeave(app);
     if (!app.editMode || app.tabs.empty()) return;
     // An open table cell belongs to this buffer, not the next tab (#148)
     tableEditCommit(app);

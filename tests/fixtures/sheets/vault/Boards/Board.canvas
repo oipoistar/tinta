@@ -1,0 +1,10 @@
+{
+	"nodes":[
+		{"id":"i1","type":"file","file":"Notes/Idea.md","x":0,"y":0,"width":400,"height":300},
+		{"id":"p1","type":"file","file":"Notes/Plan.md","color":"4","x":500,"y":0,"width":400,"height":300},
+		{"id":"t1","type":"text","text":"## Inline\n\nA text card from **Obsidian**.","x":0,"y":400,"width":400,"height":160}
+	],
+	"edges":[
+		{"id":"c1","fromNode":"i1","fromSide":"right","toNode":"p1","toSide":"left"}
+	]
+}

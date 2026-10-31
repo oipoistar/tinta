@@ -159,6 +159,8 @@ inline D2D1_COLOR_F hexColor(uint32_t hex, float alpha = 1.0f) {
 
 // Forward declare App for dpi() helper
 struct App;
+// A sheet open in a tab (sheet_ui.h)
+struct SheetDoc;
 
 // DPI scaling helper for UI chrome elements.
 // Scales by contentScale only (not zoomFactor) so UI chrome tracks monitor DPI.
@@ -204,7 +206,7 @@ enum class SidePanel { None, Contents, Browser };
 enum class PanelList { None, Contents, Browser, Search };
 // What a finger drives (#286): the page (the reader or the docked
 // preview), the editor's text, or a side panel's list
-enum class TouchTarget { None, Document, Editor, List };
+enum class TouchTarget { None, Document, Editor, List, Sheet };
 
 struct Settings {
     int themeIndex = 5;          // Default to Midnight
@@ -673,6 +675,13 @@ struct App {
     std::vector<std::pair<D2D1_RECT_F, int>> startPageHits;  // rebuilt each paint
     ID2D1Bitmap* startPageIconBitmap = nullptr;  // hero icon (device bitmap)
 
+    // Sheets (sheet_ui.h): each sheet file opened this session, by its
+    // lowercased path, keeps its camera, selection, undo and card drawings
+    // across tab switches
+    std::unordered_map<std::string, std::shared_ptr<SheetDoc>> sheetDocs;
+    // Counts render target recreations: bitmaps made for an older target are redrawn
+    unsigned renderTargetGeneration = 0;
+
     // Folder browser overlay
     bool showFolderBrowser = false;
     float folderBrowserAnimation = 0.0f;  // 0 to 1 for slide-in from left
@@ -917,7 +926,7 @@ struct App {
         TouchTarget target = TouchTarget::None;
         PanelList list = PanelList::None;
         POINT start{}, last{};
-        int axis = 0;  // while panning: 1 vertical, 2 horizontal
+        int axis = 0;  // while panning: 1 vertical, 2 horizontal, 3 both (a sheet)
         float originX = 0, originY = 0;
         struct Sample { double ms; float x, y; };
         std::vector<Sample> samples;  // recent positions, for a flick's speed
