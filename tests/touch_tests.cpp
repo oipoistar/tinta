@@ -291,6 +291,21 @@ void scenario(App& app, const char* path, int width, float scale) {
     check(app.editorScrollY > 0 && std::fabs(app.scrollY - 300) <= dpi(app, 90),
           "a pan on the preview takes the editor along" + where + ": page " + std::to_string(app.scrollY) +
               ", editor " + std::to_string(app.editorScrollY));
+    // A preview link must survive the following frames' source-to-preview sync.
+    app.editorScrollY = 0;
+    editFrame(app);
+    const auto sourceBeforeJump = app.editorText;
+    const bool dirtyBeforeJump = app.editorDirty;
+    const size_t caretBeforeJump = app.editorCursorPos;
+    tapAt(app, 70, wordPoint(app, L"jump to the end"));
+    check(app.editorScrollY > 0, "a preview anchor jump also moves the source viewport" + where);
+    editFrame(app);
+    editFrame(app);
+    check(app.scrollY > app.height && app.editorScrollY > 0,
+          "a preview anchor jump stays at its destination after repaint" + where);
+    check(app.editorText == sourceBeforeJump && app.editorDirty == dirtyBeforeJump &&
+              app.editorCursorPos == caretBeforeJump,
+          "preview link navigation does not edit source or move its caret" + where);
     exitEditMode(app);
 }
 }  // namespace

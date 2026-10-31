@@ -17,6 +17,10 @@ the link. A catching finger can also continue straight into a new pan.
 The same braking rule applies to the source editor and scrolling lists;
 touching a different control still operates that control immediately.
 
+In split edit mode, tap **jump to the end** in the preview. Both panes
+should scroll, and the destination must remain visible on subsequent
+repaints. The source text, unsaved state and caret must remain unchanged.
+
 | Bed 1 | Bed 2 | Bed 3 | Bed 4 | Bed 5 | Bed 6 | Bed 7 | Bed 8 | Bed 9 | Bed 10 | Bed 11 | Bed 12 | Bed 13 | Bed 14 | Bed 15 | Bed 16 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `12` cm | `24` cm | `36` cm | **Chard** | `60` cm | `72` cm | `84` cm | **Beans** | `108` cm | `120` cm | `132` cm | **Chard** | `156` cm | `168` cm | `180` cm | **Beans** |

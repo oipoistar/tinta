@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "editor.h"
 #include "link_target.h"
 #include "render.h"
 #include "i18n.h"
@@ -215,7 +216,11 @@ bool scrollToHeadingId(App& app, const std::string& id) {
 void handleLinkClick(App& app) {
     if (app.hoveredLink.empty()) return;
     if (app.hoveredLink[0] == '#') {
-        scrollToHeadingId(app, qmd::decodeLinkComponent(app.hoveredLink.substr(1)));
+        if (scrollToHeadingId(app, qmd::decodeLinkComponent(app.hoveredLink.substr(1))) && app.editMode) {
+            // The next frame follows the source pane. Move it with the
+            // explicit jump, just as a preview scrollbar drag does.
+            editorFollowPreview(app);
+        }
     } else {
         openUrl(app.hoveredLink);
     }
