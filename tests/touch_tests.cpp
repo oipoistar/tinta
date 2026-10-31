@@ -13,6 +13,7 @@
 #include "settings.h"
 #include "sidepanels.h"
 #include "touch.h"
+#include "tableedit.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -455,6 +456,36 @@ void scenario(App& app, const char* path, int width, float scale) {
           "preview link navigation does not edit source or move its caret" + where);
     controlRoutingScenario(app);
     editorHoldScenario(app);
+    app.editorScrollY = 0;
+    editFrame(app);
+    const auto sourceBeforeHold = app.editorText;
+    const POINT previewFrom = wordPoint(app, L"lavender"), previewTo = wordPoint(app, L"rosemary");
+    touchDown(app, app.hwnd, 71, previewFrom, ms += 1000);
+    touchHold(app, app.hwnd);
+    check(selected(app) == L"lavender", "split-preview hold selects rendered text");
+    touchMove(app, app.hwnd, 71, previewTo, ms += 100);
+    const auto previewSelection = selected(app);
+    check(previewSelection.find(L"lavender") == 0 && previewSelection.find(L"rosemary") != std::wstring::npos,
+          "split-preview hold extends through whole words");
+    touchUp(app, app.hwnd, 71, previewTo, ms += 100, false);
+    check(app.showContextMenu && !app.editCtxOpen && !app.selecting && selected(app) == previewSelection,
+          "preview lift opens its copy menu and keeps the selection");
+    check(contextMenuItemEnabled(app, CTX_COPY) && app.editorText == sourceBeforeHold,
+          "preview copy is enabled without modifying source");
+    closeContextMenu(app);
+    check(!app.tableCellRects.empty(), "preview hold fixture contains table cells");
+    if (!app.tableCellRects.empty()) {
+        const auto cell = app.tableCellRects.front();
+        app.scrollY = app.targetScrollY = cell.rect.top - chromeTopHeight(app) - dpi(app, 80);
+        const POINT p{(LONG)(documentViewportX(app) + cell.rect.left + dpi(app, 12)),
+                      (LONG)(cell.rect.top - app.scrollY + dpi(app, 12))};
+        touchDown(app, app.hwnd, 72, p, ms += 1000);
+        touchHold(app, app.hwnd);
+        check(!app.tableEditActive && app.selecting, "holding a preview cell selects instead of opening its editor");
+        touchUp(app, app.hwnd, 72, p, ms += 100, false);
+        check(app.showContextMenu && !app.tableEditActive, "table hold opens the preview copy menu");
+        closeContextMenu(app);
+    }
     exitEditMode(app);
 }
 }  // namespace

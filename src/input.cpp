@@ -1923,10 +1923,14 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
         return;
     }
 
-    // Document menu: viewer mode only, and never on top of a modal
+    // The rendered preview has its own selection/copy menu too. Never
+    // route a source-pane or modal press into the document beneath it.
+    const bool inPreview = app.editMode && editorPreviewVisible(app) &&
+                           pt.x >= documentViewportX(app) && pt.y >= chromeTopHeight(app);
+    // Document menu: viewer or preview, and never on top of a modal
     // overlay. The search bar is fine — it shares the viewport rather
     // than covering it.
-    if (app.editMode || app.showThemeChooser || app.showHelp ||
+    if ((app.editMode && !inPreview) || app.showThemeChooser || app.showHelp ||
         app.showPrintPreview || app.showSettings || app.showThemeEditor) {
         return;
     }

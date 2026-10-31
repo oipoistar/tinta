@@ -6,8 +6,11 @@
 #include "editrail.h"
 #include "input.h"
 #include "overlays.h"
+#include "render.h"
+#include "selection.h"
 #include "sheet_ui.h"
 #include "sidepanels.h"
+#include "tableedit.h"
 #include "startpage.h"
 #include "tabs.h"
 
@@ -170,6 +173,30 @@ void pointerAway(App& app, HWND hwnd) {
     handleMouseMove(app, hwnd, MAKELPARAM(-1, -1));
     app.mouseX = app.mouseY = -1;
     InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// A preview hold selects rendered text directly. Synthesizing a mouse
+// press here would open an inline table cell instead of selecting it.
+void previewHoldSelection(App& app, POINT pt, bool begin) {
+    if (begin && app.tableEditActive) {
+        tableEditCommit(app);
+        editorReparse(app, true);
+    }
+    ensureLayoutComplete(app);
+    const size_t at = selectionOffsetAtPoint(app, pt.x - documentViewportX(app) + app.scrollX,
+                                             pt.y + app.scrollY);
+    size_t first, last;
+    selectionWordRange(app, at, first, last);
+    if (begin) {
+        app.selAnchorRangeStart = first;
+        app.selAnchorRangeEnd = last;
+        app.selectionMode = App::SelectionMode::Word;
+    }
+    app.selAnchor = std::min(first, app.selAnchorRangeStart);
+    app.selFocus = std::max(last, app.selAnchorRangeEnd);
+    app.selecting = true;
+    app.hasSelection = app.selAnchor != app.selFocus;
+    InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 // A tap is a click at the point, through the mouse handlers, so links,
@@ -367,6 +394,7 @@ bool touchMove(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
     } else if (t.phase == Phase::Holding) {
         // The selection grows word by word, as a double-click's drag does
         if (t.target == TouchTarget::Editor) editorTouchSelection(app, pt.x, pt.y, false);
+        else if (t.target == TouchTarget::Document && app.editMode) previewHoldSelection(app, pt, false);
         else handleMouseMove(app, hwnd, MAKELPARAM(pt.x, pt.y));
     }
     t.last = pt;
@@ -395,6 +423,9 @@ bool touchUp(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms, bool canc
                 editorTouchSelection(app, pt.x, pt.y, false);
                 openEditCtxMenu(app, hwnd, (float)pt.x, (float)pt.y, true);
             }
+        } else if (target == TouchTarget::Document && app.editMode) {
+            if (!canceled) previewHoldSelection(app, pt, false);
+            app.selecting = false;
         } else {
             handleMouseMove(app, hwnd, point);
             handleMouseUp(app, hwnd, 0, point);
@@ -425,6 +456,10 @@ void touchHold(App& app, HWND hwnd) {
     t.phase = Phase::Holding;
     if (t.target == TouchTarget::Editor) {
         editorTouchSelection(app, t.start.x, t.start.y, true);
+        return;
+    }
+    if (t.target == TouchTarget::Document && app.editMode) {
+        previewHoldSelection(app, t.start, true);
         return;
     }
     // The word under the finger, selected as a double-click selects it:
