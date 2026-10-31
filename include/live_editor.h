@@ -22,6 +22,8 @@ void liveCharInput(App& app, HWND hwnd, wchar_t ch);
 bool liveMouseDown(App& app, HWND hwnd, int x, int y);
 bool liveMouseMove(App& app, HWND hwnd, int x, int y);
 bool liveMouseUp(App& app, HWND hwnd, int x, int y);
+// The mouse went elsewhere mid-drag (WM_CAPTURECHANGED, WM_CANCELMODE)
+void liveCaptureLost(App& app);
 // A right-click: the caret goes there unless it is in the selection
 void livePrepareContextMenu(App& app, HWND hwnd, int x, int y);
 // A rail button on the Live text; false for the ones that insert through the source

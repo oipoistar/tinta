@@ -257,6 +257,18 @@ void spliceKeep(LiveText& e, size_t at, size_t removed, const std::wstring& with
     splice(e, at, removed, with);
 }
 
+// How far a line's quote marks run ("> ", "> > "), from its start; 0: none
+size_t quoteLength(const std::wstring& t, size_t ls) {
+    size_t end = lineEnd(t, ls), i = ls;
+    while (i < end && t[i] == L' ') ++i;
+    size_t q = i;
+    while (q < end && t[q] == L'>') {
+        ++q;
+        if (q < end && t[q] == L' ') ++q;
+    }
+    return q > i ? q - ls : 0;
+}
+
 // A line's mark put on, swapped or taken off: the caret and the selection
 // keep to the text after it
 void spliceMark(LiveText& e, size_t at, size_t removed, const std::wstring& with) {
@@ -413,7 +425,9 @@ void newline(LiveText& e, bool plain) {
             if (!blank(line.substr(bounds[k] + 1, bounds[k + 1] - bounds[k] - 1))) empty = false;
         }
         size_t above = ls > 0 ? lineStart(e.text, ls - 1) : ls;
-        if (empty && above < ls && tableRow(lineView(e.text, above))) {
+        size_t below = le < e.text.size() ? le + 1 : std::wstring::npos;
+        bool rowBelow = below != std::wstring::npos && tableRow(lineView(e.text, below));
+        if (empty && !rowBelow && above < ls && tableRow(lineView(e.text, above))) {
             // An empty last row ends the table
             pushUndo(e, false);
             splice(e, ls, le - ls, L"\n");
@@ -421,11 +435,17 @@ void newline(LiveText& e, bool plain) {
             return;
         }
         if (bounds.size() >= 2) {
+            // Under the header, the new row goes past the delimiter row
+            size_t at = rowBelow && delimiterRow(lineView(e.text, below)) ? lineEnd(e.text, below) : le;
             std::wstring row = pad + L"|";
             for (size_t k = 0; k + 1 < bounds.size(); ++k) row += L"  |";
             pushUndo(e, false);
-            splice(e, a, b - a, L"\n" + row);
-            settle(e, a + 2 + pad.size() + 1, a + 2 + pad.size() + 1);
+            if (b > a) {
+                splice(e, a, b - a, L"");
+                at -= b - a;
+            }
+            splice(e, at, 0, L"\n" + row);
+            settle(e, at + pad.size() + 3, at + pad.size() + 3);
             return;
         }
     }
@@ -473,7 +493,7 @@ void backspace(LiveText& e, bool word) {
         // A line's mark goes first, all of it
         size_t ls = lineStart(e.text, e.caret);
         LineMark m = lineMark(e.text, ls);
-        if (m.kind != LineMark::None && e.caret == ls + m.indent + m.length) {
+        if (m.kind != LineMark::None && e.caret == ls + m.indent + m.length && fenceState(e.text, ls) == 0) {
             pushUndo(e, false);
             splice(e, ls + m.indent, m.length, L"");
             settle(e, ls + m.indent, ls + m.indent);
@@ -499,7 +519,7 @@ void deleteForward(LiveText& e, bool word) {
     // Joining the next line takes its mark with the break
     if (e.multiline && !word && e.text[e.caret] == L'\n') {
         LineMark m = lineMark(e.text, e.caret + 1);
-        if (m.kind != LineMark::None) to = e.caret + 1 + m.indent + m.length;
+        if (m.kind != LineMark::None && fenceState(e.text, e.caret + 1) == 0) to = e.caret + 1 + m.indent + m.length;
     }
     pushUndo(e, !word);
     splice(e, e.caret, to - e.caret, L"");
@@ -608,8 +628,13 @@ void moveCell(LiveText& e, bool back) {
         if (!delimiterRow(line)) break;
     }
     if (at == std::wstring::npos) {
-        // After the last cell: a new row
-        size_t le = lineEnd(e.text, ls);
+        // After the last cell: a new row under the table's last
+        size_t lastRow = ls;
+        for (size_t end = lineEnd(e.text, ls); end < e.text.size() && tableRow(lineView(e.text, end + 1));
+             end = lineEnd(e.text, end + 1)) {
+            lastRow = end + 1;
+        }
+        size_t le = lineEnd(e.text, lastRow);
         size_t lead = lineView(e.text, ls).find_first_not_of(L' ');
         std::wstring row = std::wstring(lead == std::wstring::npos ? 0 : lead, L' ') + L"|";
         for (size_t c = 0; c + 1 < bounds.size(); ++c) row += L"  |";
@@ -643,18 +668,19 @@ void tab(LiveText& e, bool back) {
     if (!e.multiline) return;
     size_t ls = lineStart(e.text, e.caret);
     std::wstring_view line = lineView(e.text, ls);
+    // In code, four spaces, whatever the line looks like
+    if (fenceState(e.text, ls) == 2) {
+        if (!back && !e.hasSelection()) replace(e, L"    ");
+        else indent(e, back);
+        return;
+    }
     if (tableRow(line) && lineStart(e.text, e.anchor) == ls) {
         moveCell(e, back);
         return;
     }
     if (!back && !e.hasSelection() && linkAddress(e)) return;
     LineMark m = lineMark(e.text, ls);
-    int fence = fenceState(e.text, ls);
-    if (fence == 2 && !back && !e.hasSelection()) {
-        replace(e, L"    ");
-        return;
-    }
-    if (e.hasSelection() || back || listKind(m.kind) || fence == 2) {
+    if (e.hasSelection() || back || listKind(m.kind)) {
         indent(e, back);
         return;
     }
@@ -816,10 +842,13 @@ void setHeading(LiveText& e, int level) {
 void toggleLineMark(LiveText& e, LineMark::Kind kind) {
     size_t first = 0, last = 0;
     selectedLines(e, first, last);
+    const bool quote = kind == LineMark::Quote;
+    // A quote goes around what a line holds, a list mark inside its quote
+    auto markAt = [&](size_t ls) { return quote ? ls : ls + quoteLength(e.text, ls); };
     bool all = true;
     eachLineBack(e, first, last, [&](size_t at) {
         if (blank(lineView(e.text, at)) && first != last) return;
-        if (lineMark(e.text, at).kind != kind) all = false;
+        if (quote ? quoteLength(e.text, at) == 0 : lineMark(e.text, markAt(at)).kind != kind) all = false;
     });
     // Marks are worked out top down (numbers count on) and written bottom up
     std::vector<std::pair<size_t, std::wstring>> marks;
@@ -837,11 +866,18 @@ void toggleLineMark(LiveText& e, LineMark::Kind kind) {
     }
     pushUndo(e, false);
     for (auto it = marks.rbegin(); it != marks.rend(); ++it) {
-        LineMark m = lineMark(e.text, it->first);
-        bool replaces = listKind(m.kind) || m.kind == LineMark::Quote;
+        size_t at = markAt(it->first);
+        LineMark m = lineMark(e.text, at);
+        if (quote) {
+            // In, or a level out: the first > and the space after it
+            size_t mark = it->first + m.indent;
+            if (!all) spliceMark(e, mark, 0, it->second);
+            else spliceMark(e, mark, mark + 1 < e.text.size() && e.text[mark + 1] == L' ' ? 2 : 1, L"");
+            continue;
+        }
         // A task stays a task when it turns into a list of tasks
         if (kind == LineMark::Task && m.kind == LineMark::Task && !all) continue;
-        spliceMark(e, it->first + m.indent, replaces ? m.length : 0, all ? std::wstring() : it->second);
+        spliceMark(e, at + m.indent, listKind(m.kind) ? m.length : 0, all ? std::wstring() : it->second);
     }
     e.preferredX = -1;
 }
@@ -1136,9 +1172,9 @@ void applyInsert(LiveText& e, int insert, const std::wstring& image) {
 
 namespace {
 
-void openPopup(LiveText& e, LiveText::Popup kind, size_t from, std::vector<LiveText::Choice> list) {
+void openPopup(LiveText& e, LiveText::Popup kind, LiveText::Popup was, size_t from, std::vector<LiveText::Choice> list) {
     // Typing on keeps the place in the list while its rows stay the same
-    bool same = kind == e.popup && list.size() == e.choices.size() &&
+    bool same = kind == was && from == e.popupFrom && list.size() == e.choices.size() &&
                 std::equal(list.begin(), list.end(), e.choices.begin(),
                            [](const LiveText::Choice& a, const LiveText::Choice& b) { return a.label == b.label; });
     if (!same) {
@@ -1154,6 +1190,7 @@ void openPopup(LiveText& e, LiveText::Popup kind, size_t from, std::vector<LiveT
 }  // namespace
 
 void updatePopup(App& app, LiveText& e, const Host& host) {
+    const LiveText::Popup was = e.popup;
     e.popup = LiveText::Popup::None;
     if (!e.multiline || e.hasSelection()) {
         e.choices.clear();
@@ -1170,7 +1207,7 @@ void updatePopup(App& app, LiveText& e, const Host& host) {
                 std::vector<LiveText::Choice> list = host.names(query);
                 if (!list.empty()) {
                     if (list.size() > 8) list.resize(8);
-                    openPopup(e, LiveText::Popup::Names, i, std::move(list));
+                    openPopup(e, LiveText::Popup::Names, was, i, std::move(list));
                     return;
                 }
                 break;
@@ -1213,7 +1250,7 @@ void updatePopup(App& app, LiveText& e, const Host& host) {
         e.choices.clear();
         return;
     }
-    openPopup(e, LiveText::Popup::Slash, slash + 1, std::move(list));
+    openPopup(e, LiveText::Popup::Slash, was, slash + 1, std::move(list));
 }
 
 void closePopup(LiveText& e) {

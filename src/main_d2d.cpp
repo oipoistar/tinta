@@ -1557,6 +1557,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app && (HWND)lParam != hwnd) sidePanelResizeEnd(*app, hwnd, true);
             if (app && (HWND)lParam != hwnd) editorTextDragCancel(*app, hwnd);
             if (app && (HWND)lParam != hwnd) sheetCaptureLost(*app, hwnd);
+            if (app && (HWND)lParam != hwnd) liveCaptureLost(*app);
             // Losing capture mid tab-drag (Alt+Tab, a popup stealing the
             // mouse) aborts the drag instead of leaving a stray ghost
             if (app && app->tabDragIndex >= 0 && (HWND)lParam != hwnd) {
@@ -1578,6 +1579,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app) sidePanelResizeEnd(*app, hwnd, true);
             if (app) editorTextDragCancel(*app, hwnd);
             if (app) sheetCaptureLost(*app, hwnd);
+            if (app) liveCaptureLost(*app);
             break;
 
         case WM_MOUSELEAVE:

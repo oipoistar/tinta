@@ -3232,6 +3232,7 @@ bool sheetDropFiles(App& app, HWND hwnd, const std::vector<std::wstring>& files,
 void sheetCaptureLost(App& app, HWND hwnd) {
     SheetDoc* doc = activeSheet(app);
     if (!doc) return;
+    doc->edit.selectingWithMouse = false;  // the format bar shows again
     if (doc->gesture == SheetDoc::Gesture::None) {
         doc->pressed = false;
         return;

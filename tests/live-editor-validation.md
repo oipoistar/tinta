@@ -91,6 +91,32 @@ cards are typed in with the same engine (`include/live_text.h`).
     (`live-empty.png`, `live-new-note.png`);
   - the test's frames drew the strip over the rail.
 
+## Review
+
+A review of the code after the first version found these, all fixed;
+`live_editor` checks each on a fixture of its own (`Fixes.md`: a table with
+no rows, a list, a footnote defined mid-document, a code fence):
+
+- Ctrl+Z in Live left a stale selection: the page now takes the caret
+  back from the source's undo.
+- Enter at a table's header, and Tab past its last cell with no rows
+  below, put the new row above the delimiter row.
+- Down on a line after the last block, or Up on one before the first,
+  jumped back into that block.
+- Alt+arrows moved lines while the find bar or a dialog had the keys.
+- A drag whose mouse went elsewhere (Alt+Tab) kept selecting; on a card the
+  format bar stayed hidden after it.
+- A Mermaid or plain-text file lost the source's preview chrome while Live
+  was the remembered mode, and Ctrl+/ there set a mode it could not show.
+- Backspace, Delete and Tab treated code lines starting `#`, `-`, `>` or
+  `|` as Markdown.
+- The popup went back to its first row on every key.
+- Footnotes defined mid-document opened with the last paragraph.
+- The rail's quote button took a list item's bullet instead of quoting it.
+- A task box's `[` was read as a link's; with the preview and the word
+  count off, Live never caught up after a pause; the popup's and the
+  bar's clamps could invert in a very narrow window.
+
 ## The real app
 
 The build, run from an isolated portable copy (`out/live-playground/`,
@@ -120,7 +146,7 @@ and captured with PrintWindow (`out/live-playground/shots/`):
   page in view), a key 0.66 ms, a frame 2.3 ms, leaving the block typed
   in 186 ms (the page parsed and laid out again, as Source's preview
   does after a pause).
-- `tinta.exe` grows by 133 KB (3,691,520 to 3,827,200 bytes) for Live,
+- `tinta.exe` grows by 141 KB (3,691,520 to 3,835,904 bytes) for Live,
   the engine, the strings in eight languages and the shared drawing
   helpers; the sheets' own text box code went into the engine.
 

@@ -444,8 +444,9 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
                     }
                 }
             }
-            // Inline spans
-            for (size_t i = 0; i < lineText.size(); ++i) {
+            // Inline spans, past the line's mark: a task's box is no link
+            LineMark lineMarks = lineMark(t, start);
+            for (size_t i = lineMarks.kind == LineMark::None ? 0 : lineMarks.indent + lineMarks.length; i < lineText.size(); ++i) {
                 wchar_t c = lineText[i];
                 size_t at = start + i;
                 if (c == L'\\' && i + 1 < lineText.size()) {
@@ -795,7 +796,7 @@ void drawPopup(App& app, LiveText& e, D2D1_POINT_2F caretTop, float caretBottom,
     e.popupTop = std::clamp(e.popupTop, 0, std::max(0, count - shown));
     float h = rowH * (float)shown + pad * 2;
     float x = std::clamp(caretTop.x - dpi(app, 10.0f), bounds.left + dpi(app, 6.0f),
-                         std::max(bounds.left, bounds.right - w - dpi(app, 6.0f)));
+                         std::max(bounds.left + dpi(app, 6.0f), bounds.right - w - dpi(app, 6.0f)));
     float y = caretBottom + dpi(app, 6.0f);
     if (y + h > bounds.bottom - dpi(app, 6.0f)) y = std::max(bounds.top + dpi(app, 6.0f), caretTop.y - h - dpi(app, 6.0f));
     D2D1_RECT_F box = D2D1::RectF(x, y, x + w, y + h);
@@ -850,7 +851,8 @@ void drawFormatBar(App& app, LiveText& e, D2D1_POINT_2F top, float bottom, const
     const int count = FMT_COUNT;
     float w = b * count + pad * 2 + gap;
     float h = b + pad * 2;
-    float x = std::clamp(top.x - w * 0.3f, bounds.left + dpi(app, 6.0f), std::max(bounds.left, bounds.right - w - dpi(app, 6.0f)));
+    float x = std::clamp(top.x - w * 0.3f, bounds.left + dpi(app, 6.0f),
+                         std::max(bounds.left + dpi(app, 6.0f), bounds.right - w - dpi(app, 6.0f)));
     float y = top.y - h - dpi(app, 8.0f);
     if (y < bounds.top + dpi(app, 6.0f)) y = bottom + dpi(app, 8.0f);
     D2D1_RECT_F box = D2D1::RectF(x, y, x + w, y + h);

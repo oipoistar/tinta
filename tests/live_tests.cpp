@@ -31,6 +31,14 @@
 namespace {
 namespace fs = std::filesystem;
 
+// The test window hands a lost capture to Live as the app's window does
+App* g_liveApp = nullptr;
+WNDPROC g_staticProc = nullptr;
+LRESULT CALLBACK captureProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_CAPTURECHANGED && g_liveApp && (HWND)lParam != hwnd) liveCaptureLost(*g_liveApp);
+    return CallWindowProcW(g_staticProc, hwnd, msg, wParam, lParam);
+}
+
 int failures = 0;
 void check(bool ok, const std::string& message) {
     if (!ok) {
@@ -461,6 +469,105 @@ void switching(App& app, const fs::path& out) {
     setEditorLive(app, app.hwnd, true);
 }
 
+void openInEditor(App& app, const fs::path& path) {
+    app.editorDirty = false;
+    exitEditMode(app);
+    check(openDocumentInViewer(app, path.wstring()), "opens: " + path.filename().string());
+    enterEditMode(app);
+}
+
+// What a review of the first version found, each checked here
+void reviewed(App& app, const fs::path& dir) {
+    // A diagram file keeps the source's own chrome with Live remembered
+    check(app.editorLive, "Live is the remembered mode");
+    openInEditor(app, dir / "Chart.mmd");
+    app.editorShowPreview = true;
+    check(!editorLiveOn(app) && editSplitPreview(app), "a Mermaid file keeps its preview's chrome while Live is remembered");
+    keystroke(app, VK_OEM_2, {true, false, false});
+    check(!editorLiveOn(app) && app.editorLive, "Ctrl+/ leaves a Mermaid file in its source");
+
+    const fs::path path = dir / "Fixes.md";
+    std::ofstream(path, std::ios::binary)
+        << "# Fixes\n\n| A | B |\n| --- | --- |\n\n- a\n\nText[^1].\n\n[^1]: Note.\n\nLast.\n\n```cpp\nint x;\n```\n";
+    openInEditor(app, path);
+    check(editorLiveOn(app), "the fixes open in Live");
+    // A row made from the header goes past the delimiter row
+    size_t header = find(app, L"| A | B |");
+    placeCaret(app, header + 9);
+    keystroke(app, VK_RETURN);
+    check(find(app, L"| A | B |\n| --- | --- |\n|  |  |") != std::wstring::npos, "Enter on the header adds a row under the delimiter row");
+    keystroke(app, 'Z', {true, false, false});
+    placeCaret(app, header + 7);
+    keystroke(app, VK_TAB);
+    check(find(app, L"| A | B |\n| --- | --- |\n|  |  |") != std::wstring::npos, "Tab past the header's last cell adds a row under the delimiter row");
+    keystroke(app, 'Z', {true, false, false});
+    // Undo leaves the source's caret, not a stale selection
+    size_t text = find(app, L"Text[^1]");
+    app.editorSelStart = text;
+    app.editorSelEnd = app.editorCursorPos = text + 4;
+    app.editorHasSelection = true;
+    keystroke(app, 'B', {true, false, false});
+    check(find(app, L"**Text**") != std::wstring::npos, "Ctrl+B makes it bold");
+    keystroke(app, 'Z', {true, false, false});
+    check(find(app, L"**Text**") == std::wstring::npos && !app.editorHasSelection,
+          "Ctrl+Z puts it back and leaves no stale selection");
+    // A quote goes around a list item; it does not take its bullet
+    placeCaret(app, find(app, L"- a") + 2);
+    liveRailCommand(app, app.hwnd, 12);
+    check(find(app, L"> - a") != std::wstring::npos, "the rail's quote goes around a list item");
+    keystroke(app, 'Z', {true, false, false});
+    // Footnotes gathered at the page's end stay the page's
+    placeCaret(app, find(app, L"Last.") + 2);
+    float top = 0, bottom = 0, shift = 0;
+    livePageGeometry(app, top, bottom, shift);
+    check(bottom - top < dpi(app, 120.0f), "a paragraph after a footnote opens alone, not with the footnotes");
+    // Down at the very end stays there
+    keystroke(app, VK_END, {true, false, false});
+    size_t end = app.editorCursorPos;
+    keystroke(app, VK_DOWN);
+    check(app.editorCursorPos >= end, "Down at the end does not go back up: " + std::to_string(app.editorCursorPos));
+    // In code, # and | are just characters
+    placeCaret(app, find(app, L"int x;") + 6);
+    keystroke(app, VK_RETURN);
+    typeText(app, L"# ");
+    keystroke(app, VK_BACK);
+    check(find(app, L"int x;\n#\n```") != std::wstring::npos, "Backspace in code takes one character");
+    keystroke(app, VK_BACK);
+    typeText(app, L"|");
+    keystroke(app, VK_HOME);
+    keystroke(app, VK_TAB);
+    check(find(app, L"int x;\n    |\n```") != std::wstring::npos, "Tab on a code line starting | indents it");
+    // Alt+arrows leave the page alone while the find bar has the keys
+    const std::wstring before = app.editorText;
+    keystroke(app, 'F', {true, false, false});
+    keystroke(app, VK_UP, {false, false, true});
+    check(app.editorText == before, "Alt+Up with the find bar open moves no lines");
+    keystroke(app, VK_ESCAPE);
+    // A drag whose mouse goes elsewhere (Alt+Tab) ends with it
+    pauseClicks();
+    placeCaret(app, find(app, L"Last.") + 2);
+    D2D1_POINT_2F p = caretOnScreen(app);
+    handleMouseMove(app, app.hwnd, at(p));
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, at(p));
+    check(GetCapture() == app.hwnd, "a press on the page holds the mouse");
+    size_t caret = app.editorCursorPos;
+    ReleaseCapture();
+    handleMouseMove(app, app.hwnd, at(D2D1::Point2F(p.x, p.y - dpi(app, 120.0f))));
+    check(app.editorCursorPos == caret && !app.editorHasSelection, "a lost mouse ends the drag");
+    handleMouseUp(app, app.hwnd, 0, at(p));
+    // The popup keeps its row while its rows stay the same
+    LiveText e;
+    e.text = L"/";
+    e.caret = e.anchor = 1;
+    live::Host none;
+    live::updatePopup(app, e, none);
+    check(e.popup == LiveText::Popup::Slash && e.choices.size() > 3, "a / opens the menu");
+    e.choice = 2;
+    live::updatePopup(app, e, none);
+    check(e.choice == 2, "the menu keeps its row while its rows stay the same");
+    app.editorDirty = false;
+}
+
 // A new note opens in Live on its empty page: the prompt to begin, with
 // the Open and New sheet buttons of a new tab
 void emptyNote(App& app, const fs::path& out) {
@@ -525,6 +632,8 @@ int runLiveTests(const char* fixtureDir) {
     App& app = *state;
     app.hwnd = CreateWindowExW(0, L"STATIC", L"Live tests", WS_POPUP, 0, 0, 1050, 800, nullptr, nullptr, nullptr, nullptr);
     if (!app.hwnd || !initD2D(app) || !createRenderTarget(app)) return 2;
+    g_liveApp = &app;
+    g_staticProc = (WNDPROC)SetWindowLongPtrW(app.hwnd, GWLP_WNDPROC, (LONG_PTR)captureProc);
     // The user's clipboard comes back as it was
     auto clipboard = std::make_unique<ClipboardSnapshot>(app.hwnd);
     app.width = 1050;
@@ -558,6 +667,7 @@ int runLiveTests(const char* fixtureDir) {
     menus(app);
     switching(app, out);
     drawings(app, dir, out);
+    reviewed(app, dir);
 
     // Two themes at two widths
     for (int theme : {0, 5}) {
@@ -576,6 +686,7 @@ int runLiveTests(const char* fixtureDir) {
 
     app.editorDirty = false;
     clipboard.reset();
+    g_liveApp = nullptr;
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;
     state.reset();

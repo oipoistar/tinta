@@ -1801,7 +1801,7 @@ inline float documentViewportX(const App& app) {
 }
 
 inline bool editorPreviewVisible(const App& app) {
-    return app.editMode && (app.editorShowPreview || app.editorReadingPreview || app.editorLive);
+    return app.editMode && (app.editorShowPreview || app.editorReadingPreview || editorLiveOn(app));
 }
 
 // The split editor is up: the source with the preview docked beside it,
@@ -1811,7 +1811,7 @@ inline bool editorPreviewVisible(const App& app) {
 // chrome (#242). The seam and the pane chrome ask this; document
 // rendering keeps asking editorPreviewVisible, which is true in both.
 inline bool editSplitPreview(const App& app) {
-    return app.editMode && app.editorShowPreview && !app.editorReadingPreview && !app.editorLive;
+    return app.editMode && app.editorShowPreview && !app.editorReadingPreview && !editorLiveOn(app);
 }
 
 // The Read / Edit pill floats over the bottom-left corner in edit mode

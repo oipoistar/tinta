@@ -1435,7 +1435,7 @@ static void scheduleReparse(App& app) {
     }
     // No preview pane and no word count — nothing to keep in sync until
     // one of them is shown again
-    if (!app.editorShowPreview && !app.showWordCount) return;
+    if (!app.editorShowPreview && !app.showWordCount && !editorLiveOn(app)) return;
     // Debounce: coalesce rapid typing into one reparse per pause. WM_TIMER
     // calls editorReparse, which kills the timer. 300ms so brief pauses
     // mid-typing (common with IME input) don't trigger a full preview
@@ -3052,14 +3052,15 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 // character, so that guard has nothing to protect for them.
 bool editorAltArrowKey(App& app, HWND hwnd, WPARAM wParam) {
     if (wParam != VK_UP && wParam != VK_DOWN) return false;
-    if (editorLiveOn(app)) return liveAltArrow(app, hwnd, wParam);
     if (!(GetKeyState(VK_MENU) & 0x8000) || (GetKeyState(VK_SHIFT) & 0x8000)) return false;
-    if (!sourceEditorHasFocus(app) || app.confirmExitPending || app.createRefPending ||
+    const bool live = editorLiveOn(app) && !(app.showSearch && app.searchActive) && !app.tableEditActive;
+    if ((!live && !sourceEditorHasFocus(app)) || app.confirmExitPending || app.createRefPending ||
         app.editCtxOpen || app.showSettings || app.showHelp || app.showThemeChooser ||
         app.showThemeEditor || app.showShortcutEditor || app.showPrintPreview ||
         app.showContextMenu || app.showTabMenu || app.showTabSwitcher) {
         return false;
     }
+    if (live) return liveAltArrow(app, hwnd, wParam);
     const bool down = wParam == VK_DOWN;
     if (GetKeyState(VK_CONTROL) & 0x8000) {
         editorAddCaretVertical(app, down);

@@ -43,6 +43,7 @@ struct Block {
     float baseline = -1;           // its first line's baseline, when that is text
     float runTop = 0, runX = 0;
     bool code = false;             // a fenced block, drawn on its background
+    bool pageOnly = false;         // drawn from text elsewhere (footnotes gathered at the end)
     // Stretches after it with no text of their own (a divider), last first
     std::vector<std::pair<float, float>> after;
 };
@@ -273,7 +274,14 @@ void buildBlocks(App& app, LiveEditor& L) {
         while (line > 0 && trimmed(lineText(line)).substr(0, 1) == L">" && trimmed(lineText(line - 1)).substr(0, 1) == L">") --line;
         size_t from = lines[line];
         if (!L.blocks.empty() && from <= L.blocks.back().from) {
-            L.blocks.back().bottom = span.bottom;
+            // Its text comes earlier (footnotes gathered at the page's end):
+            // a stretch of the page alone, never opened
+            Block b;
+            b.from = b.to = L.blocks.back().from;
+            b.top = span.top;
+            b.bottom = span.bottom;
+            b.pageOnly = true;
+            L.blocks.push_back(b);
             continue;
         }
         Block b;
@@ -285,7 +293,14 @@ void buildBlocks(App& app, LiveEditor& L) {
     }
     // Each runs to the end of its last line with text before the next
     for (size_t i = 0; i < L.blocks.size(); ++i) {
-        size_t next = i + 1 < L.blocks.size() ? L.blocks[i + 1].from : t.size();
+        if (L.blocks[i].pageOnly) continue;
+        size_t next = t.size();
+        for (size_t j = i + 1; j < L.blocks.size(); ++j) {
+            if (!L.blocks[j].pageOnly) {
+                next = L.blocks[j].from;
+                break;
+            }
+        }
         size_t to = L.blocks[i].from;
         for (size_t at = L.blocks[i].from; at < next || at == t.size();) {
             size_t end = std::min(live::lineEnd(t, at), next);
@@ -298,7 +313,7 @@ void buildBlocks(App& app, LiveEditor& L) {
     // A divider after a block is a block of its own: its line, and the
     // stretch the page gave it
     for (size_t i = 0; i < L.blocks.size(); ++i) {
-        while (!L.blocks[i].after.empty()) {
+        while (!L.blocks[i].pageOnly && !L.blocks[i].after.empty()) {
             Block& b = L.blocks[i];
             size_t ls = live::lineStart(t, b.to);
             if (ls <= b.from || !dividerLine(std::wstring_view(t.data() + ls, b.to - ls))) break;
@@ -370,6 +385,7 @@ void columnOf(App& app, const live::Look& look, bool code, float& x, float& widt
 void blocksTouching(const LiveEditor& L, size_t a, size_t b, int& first, int& last, int& before) {
     first = last = before = -1;
     for (int i = 0; i < (int)L.blocks.size(); ++i) {
+        if (L.blocks[i].pageOnly) continue;
         size_t f = today(L, L.blocks[i].from, false), e = today(L, L.blocks[i].to, true);
         if (e < a) {
             before = i;
@@ -484,6 +500,12 @@ size_t positionAtShown(App& app, LiveEditor& L, float x, float y, int direction)
     auto it = std::upper_bound(L.blocks.begin(), L.blocks.end(), py, [](float v, const Block& b) { return v < b.top; });
     int i = it == L.blocks.begin() ? 0 : (int)(it - L.blocks.begin()) - 1;
     if (L.first >= 0 && i >= L.first && i <= L.last) i = direction < 0 || y < L.top ? L.first - 1 : L.last + 1;
+    // Past the page's first or last block there is nothing to go to
+    if (direction > 0 && i >= 0 && i < (int)L.blocks.size() && py >= L.blocks[i].bottom) return L.to;
+    if (direction < 0 && i >= 0 && i < (int)L.blocks.size() && py < L.blocks[i].top) return L.from;
+    // A stretch with no lines of its own (footnotes gathered from elsewhere)
+    // gives way to the block beside it
+    while (i >= 0 && i < (int)L.blocks.size() && L.blocks[i].pageOnly) i += direction < 0 ? -1 : 1;
     if (i < 0) return L.from;
     if (i >= (int)L.blocks.size()) return L.to;
     // That block laid out as it reads, where the page has it
@@ -664,7 +686,10 @@ live::Host hostFor(App& app, HWND hwnd, LiveEditor& L) {
     host.positionAt = [&app, &L](float x, float y, int direction) { return positionAtShown(app, L, x, y, direction); };
     host.names = [&app, &L](const std::wstring& typed) { return noteNames(app, L, typed); };
     host.pickImage = [&app, hwnd]() { return pickImage(app, hwnd); };
-    host.undo = [&app](bool redo) { editorUndoRedo(app, redo); };
+    host.undo = [&app, &L](bool redo) {
+        editorUndoRedo(app, redo);
+        sync(app, L);  // the text and the caret as the source's undo left them
+    };
     return host;
 }
 
@@ -800,7 +825,7 @@ void renderLivePage(App& app) {
 // --- Switching ----------------------------------------------------------------------
 
 void setEditorLive(App& app, HWND hwnd, bool live) {
-    if (app.editorLive == live) return;
+    if (app.editorLive == live || (live && app.editMode && app.editorRawDocument)) return;
     LiveEditor& L = state(app);
     // The caret keeps its height in the window
     float caretY = -1;
@@ -1077,6 +1102,12 @@ bool liveMouseMove(App& app, HWND hwnd, int x, int y) {
     if ((keyDown(VK_CONTROL) && !linkAt(app, L, gx, gy).empty()) || taskAt(app, L, gx, gy) != (size_t)-1) SetCursor(hand);
     else SetCursor(beam);
     return true;
+}
+
+void liveCaptureLost(App& app) {
+    LiveEditor& L = state(app);
+    L.dragging = false;
+    L.e.selectingWithMouse = false;
 }
 
 bool liveMouseUp(App& app, HWND hwnd, int, int) {
