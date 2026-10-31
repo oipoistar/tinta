@@ -680,7 +680,7 @@ void tableEditMouseUp(App& app) {
 }
 
 void renderTableEditOverlay(App& app) {
-    if (app.editorReadingPreview) return;
+    if (app.editorReadingPreview || editorLiveOn(app)) return;
     if (!app.editMode || !editorPreviewVisible(app)) return;
     if (!app.renderTarget || !app.brush || !app.textFormat) return;
 

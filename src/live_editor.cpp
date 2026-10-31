@@ -13,6 +13,7 @@
 #include "d2d_init.h"
 #include "editor.h"
 #include "i18n.h"
+#include "editrail.h"
 #include "input.h"
 #include "live_text.h"
 #include "print.h"
@@ -42,6 +43,8 @@ struct Block {
     float baseline = -1;           // its first line's baseline, when that is text
     float runTop = 0, runX = 0;
     bool code = false;             // a fenced block, drawn on its background
+    // Stretches after it with no text of their own (a divider), last first
+    std::vector<std::pair<float, float>> after;
 };
 
 struct LiveEditor {
@@ -67,6 +70,9 @@ struct LiveEditor {
     float top = 0, bottom = 0;
     float textX = 0, textY = 0, width = 0, height = 0, liveBottom = 0, shift = 0;
     IDWriteTextLayout* layout = nullptr;  // owned by `region`
+    // A diagram, a formula or a picture: what the page drew for it, under its Markdown
+    bool preview = false;
+    float previewTop = 0, previewBottom = 0, previewY = 0;
     long long regionKey = -2;      // its first block, or below -1 the line between blocks
     // After a switch, the caret goes back to its height in the window
     float wantCaretY = -1;
@@ -87,6 +93,19 @@ LiveEditor& state(const App& app) {
     L.e.trackChanges = true;
     L.e.multiline = true;
     return L;
+}
+
+// ---, *** or ___ alone on a line
+bool dividerLine(std::wstring_view line) {
+    wchar_t mark = 0;
+    int count = 0;
+    for (wchar_t c : line) {
+        if (c == L' ') continue;
+        if ((c != L'-' && c != L'*' && c != L'_') || (mark && c != mark)) return false;
+        mark = c;
+        ++count;
+    }
+    return count >= 3;
 }
 
 bool blank(const std::wstring& t, size_t from, size_t to) {
@@ -242,6 +261,7 @@ void buildBlocks(App& app, LiveEditor& L) {
                 b.bottom = span.bottom;
                 L.blocks.push_back(b);
             } else {
+                L.blocks.back().after.push_back({span.top, span.bottom});
                 L.blocks.back().bottom = span.bottom;
             }
             continue;
@@ -274,6 +294,31 @@ void buildBlocks(App& app, LiveEditor& L) {
             at = end + 1;
         }
         L.blocks[i].to = to;
+    }
+    // A divider after a block is a block of its own: its line, and the
+    // stretch the page gave it
+    for (size_t i = 0; i < L.blocks.size(); ++i) {
+        while (!L.blocks[i].after.empty()) {
+            Block& b = L.blocks[i];
+            size_t ls = live::lineStart(t, b.to);
+            if (ls <= b.from || !dividerLine(std::wstring_view(t.data() + ls, b.to - ls))) break;
+            Block rule;
+            rule.from = ls;
+            rule.to = b.to;
+            rule.top = b.after.back().first;
+            rule.bottom = b.bottom;
+            b.bottom = rule.top;
+            b.after.pop_back();
+            // The block ends at its last line with text above the divider
+            size_t to = b.from;
+            for (size_t at = b.from; at < ls;) {
+                size_t end = std::min(live::lineEnd(t, at), ls);
+                if (!blank(t, at, end)) to = end;
+                at = end + 1;
+            }
+            b.to = to;
+            L.blocks.insert(L.blocks.begin() + (std::ptrdiff_t)i + 1, rule);
+        }
     }
     measureInk(app, L);
 }
@@ -336,6 +381,20 @@ void blocksTouching(const LiveEditor& L, size_t a, size_t b, int& first, int& la
     }
 }
 
+// A block the page draws as a picture: a diagram's or a formula's fence,
+// or a line with an image
+bool drawsSomething(const std::wstring& t, size_t from, size_t to) {
+    std::wstring_view text(t.data() + from, to - from);
+    size_t lead = text.find_first_not_of(L" ");
+    if (lead == std::wstring_view::npos) return false;
+    std::wstring_view first = text.substr(lead, live::lineEnd(t, from) - from - lead);
+    for (const wchar_t* fence : {L"```mermaid", L"~~~mermaid", L"```plantuml", L"~~~plantuml", L"```puml", L"$$"}) {
+        if (first.substr(0, wcslen(fence)) == fence) return true;
+    }
+    size_t image = text.find(L"![");
+    return image != std::wstring_view::npos && text.find(L"](", image) != std::wstring_view::npos;
+}
+
 void place(App& app, LiveEditor& L) {
     refreshBlocks(app, L);
     const std::wstring& t = L.e.text;
@@ -380,6 +439,7 @@ void place(App& app, LiveEditor& L) {
     L.last = last;
     L.layout = live::layoutOf(app, L.e, L.from, L.to, L.width, look, L.region, live::caretLineOf(L.e, L.from, L.to));
     L.height = L.layout ? paint::metrics(L.layout).height : 0;
+    L.preview = false;
     if (first >= 0) {
         const Block& fb = L.blocks[first];
         const Block& lb = L.blocks[last];
@@ -388,6 +448,13 @@ void place(App& app, LiveEditor& L) {
         L.textY = blockTextY(fb, L.layout);
         L.liveBottom = L.textY + L.height + (lb.bottom - lb.inkBottom);
         L.regionKey = first;
+        if (first == last && fb.inkBottom > fb.inkTop && drawsSomething(t, L.from, L.to)) {
+            L.preview = true;
+            L.previewTop = fb.inkTop;
+            L.previewBottom = fb.inkBottom;
+            L.previewY = L.textY + L.height + dpi(app, 12.0f);
+            L.liveBottom = L.previewY + (L.previewBottom - L.previewTop) + (lb.bottom - lb.inkBottom);
+        }
     } else {
         // A line between blocks: it opens where the block before it ends
         float y = before >= 0 ? L.blocks[before].bottom : !L.blocks.empty() ? L.blocks[0].top : documentContentTop(app);
@@ -693,6 +760,11 @@ void renderLivePage(App& app) {
     app.renderTarget->GetTransform(&saved);
     app.renderTarget->SetTransform(D2D1::Matrix3x2F::Translation(L.textX - sx, L.textY - sy) * saved);
     live::draw(app, L.e, L.layout, L.region, L.from, look, app.cursorBlinkOn, 1.0f);
+    app.renderTarget->SetTransform(saved);
+    // Under a diagram's, a formula's or a picture's Markdown, what the page
+    // drew for it, caught up after each pause in the typing
+    if (L.preview) slice(L.previewTop, L.previewBottom, L.previewY - L.previewTop);
+    app.renderTarget->SetTransform(D2D1::Matrix3x2F::Translation(L.textX - sx, L.textY - sy) * saved);
     // An empty document says how to begin
     if (L.e.text.empty()) {
         IDWriteTextLayout* hint = paint::makeLayout(app, tr(app, "live.placeholder"),
@@ -773,7 +845,17 @@ void setEditorLive(App& app, HWND hwnd, bool live) {
 
 bool liveKeyDown(App& app, HWND hwnd, WPARAM key, bool& consumed) {
     consumed = false;
-    if (!editorLiveOn(app)) return false;
+    // The unsaved-changes dialog and the find bar keep their keys
+    if (!editorLiveOn(app) || app.confirmExitPending || (app.showSearch && app.searchActive)) return false;
+    // The insert menu closes on a key, as in the source
+    if (app.editCtxOpen) {
+        closeEditCtxMenu(app);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        if (key == VK_ESCAPE) {
+            consumed = true;
+            return true;
+        }
+    }
     bool ctrl = keyDown(VK_CONTROL), shift = keyDown(VK_SHIFT);
     // Ctrl+/ shows the source; Ctrl+E the source with its preview beside it
     if (ctrl && key == VK_OEM_2) {

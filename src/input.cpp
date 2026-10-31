@@ -4485,7 +4485,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
             return;
         }
         if (tableEditChar(app, (wchar_t)wParam)) return;
-        if (editorLiveOn(app)) {
+        if (editorLiveOn(app) && !app.confirmExitPending && !(app.showSearch && app.searchActive)) {
             // Enter, Tab and Backspace were keys; Ctrl and a letter type nothing
             if (wParam >= 0x20 && wParam != 0x7F) liveCharInput(app, hwnd, (wchar_t)wParam);
             return;

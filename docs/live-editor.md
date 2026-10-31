@@ -122,7 +122,9 @@ The pill is at the top of the edit rail: **#** for Source and **Aa** for
 Live, with a knob that slides to the one showing. Clicking either side
 switches, as does **Ctrl+/**. **Ctrl+E** in Live shows Source with its
 preview beside it. Ctrl+Shift+E opens the reading view from either. Live
-fills the window beside the rail, in the reading view's column.
+fills the window beside the rail, in the reading view's column. A plain
+text, Mermaid or PlantUML file is its own source: it opens in Source, and
+the pill's Live side is dimmed.
 
 ## Sheets
 
@@ -141,8 +143,10 @@ what is typed, and naming a new note after its first line.
 
 - No dragging blocks by a handle: cut and paste moves them, and Alt+↑ / ↓
   moves lines.
-- While a block is open, its pictures and diagrams show as their Markdown.
-  They draw again once the caret leaves.
+- A block that is a diagram, a formula or a picture keeps its drawing
+  under its Markdown while open; it catches up after a pause in the typing.
+  A picture inside a longer block shows as its Markdown until the caret
+  leaves.
 - Tables are typed in as their Markdown. The reading view's cell editor
   stays Source's.
 - One caret. Source keeps its several carets and Ctrl+D.

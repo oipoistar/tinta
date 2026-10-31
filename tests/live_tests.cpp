@@ -368,6 +368,14 @@ void menus(App& app) {
     check(app.editorCursorPos >= third && app.editorCursorPos <= third + 10, "the caret goes where it was clicked");
     keystroke(app, VK_ESCAPE);
     check(!app.editCtxOpen, "Esc closes it");
+    // The find bar keeps its typing; the page does not take it
+    const std::wstring before = app.editorText;
+    keystroke(app, 'F', {true, false, false});
+    check(app.showSearch && app.searchActive, "Ctrl+F opens the find bar in Live");
+    typeText(app, L"tour");
+    check(app.editorText == before, "typing in the find bar leaves the page alone");
+    check(app.searchQuery.find(L"tour") != std::wstring::npos, "the find bar takes the typing");
+    keystroke(app, VK_ESCAPE);
     // A caret moved elsewhere, by find or go to line, comes into view
     app.scrollY = app.targetScrollY = 0;
     app.editorCursorPos = app.editorSelStart = app.editorSelEnd = find(app, L"The last paragraph");
@@ -375,6 +383,43 @@ void menus(App& app) {
     paint(app);
     D2D1_POINT_2F caret = caretOnScreen(app);
     check(app.scrollY > 0 && caret.y > chromeTopHeight(app) && caret.y < app.height, "a caret moved elsewhere is brought into view");
+}
+
+// An open diagram keeps what it draws under its Markdown; the wheel
+// scrolls the page; a file that is its own source stays in Source
+void drawings(App& app, const fs::path& dir, const fs::path& out) {
+    size_t flow = find(app, L"flowchart LR");
+    placeCaret(app, flow + 4);
+    float top = 0, bottom = 0, shift = 0;
+    D2D1_POINT_2F top2{};
+    float height = 0;
+    livePageGeometry(app, top, bottom, shift);
+    liveCaretClientPoint(app, top2, height);
+    check(bottom - (top2.y + app.scrollY) > dpi(app, 120.0f), "an open diagram keeps its drawing under its Markdown");
+    frame(app, out / "live-diagram.png");
+    placeCaret(app, find(app, L"$$") + 3);
+    frame(app, out / "live-math.png");
+    placeCaret(app, find(app, L"![Board mock]") + 3);
+    frame(app, out / "live-picture.png");
+    // The wheel scrolls the page
+    app.scrollY = app.targetScrollY = 0;
+    paint(app);
+    handleMouseWheel(app, app.hwnd, MAKEWPARAM(0, (WORD)(short)-WHEEL_DELTA), MAKELPARAM(500, 400));
+    for (int i = 0; i < 30 && std::fabs(app.scrollY - app.targetScrollY) > 0.5f; ++i) app.scrollY = app.targetScrollY;
+    check(app.targetScrollY > 0.0f, "the wheel scrolls the page");
+    // A Mermaid file is its own source
+    const fs::path mmd = dir / "Chart.mmd";
+    std::ofstream(mmd, std::ios::binary) << "flowchart LR\n    A --> B\n";
+    app.editorDirty = false;
+    exitEditMode(app);
+    check(openDocumentInViewer(app, mmd.wstring()), "the Mermaid file opens");
+    enterEditMode(app);
+    check(app.editMode && !editorLiveOn(app), "a Mermaid file is edited as its source");
+    app.editorDirty = false;
+    exitEditMode(app);
+    check(openDocumentInViewer(app, (dir / "Live tour.md").wstring()), "the tour opens again");
+    enterEditMode(app);
+    check(editorLiveOn(app), "and Live is back for it");
 }
 
 void switching(App& app, const fs::path& out) {
@@ -483,6 +528,7 @@ int runLiveTests(const char* fixtureDir) {
     pointer(app, out);
     menus(app);
     switching(app, out);
+    drawings(app, dir, out);
 
     // Two themes at two widths
     for (int theme : {0, 5}) {

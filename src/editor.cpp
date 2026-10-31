@@ -1518,6 +1518,8 @@ static void editHintSessionBegin(App& app) {
 static void enterEditModeWithContent(App& app, const std::string& content,
                                      bool intro = true) {
     app.editorReadingPreview = false;
+    app.editorRawDocument = isPlainTextDocumentPath(app.currentFile) || isMermaidDocumentPath(app.currentFile) ||
+                            isPlantUmlDocumentPath(app.currentFile);
     // The unified editor owns the whole layout: side panels close on
     // entry, pinned or not (#156) - the pin survives for the next open
     app.showToc = false;

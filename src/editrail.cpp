@@ -223,9 +223,11 @@ void renderEditRail(App& app) {
     y += dpi(app, 9.0f);
 
     // Source | Live: a pill whose knob slides to the way the document is
-    // typed in, the source as written or the page as it reads
+    // typed in, the source as written or the page as it reads. A file that
+    // is its own source (plain text, a diagram) has no Live side.
     {
-        float target = app.editorLive ? 1.0f : 0.0f;
+        const bool liveAllowed = !app.editorRawDocument;
+        float target = app.editorLive && liveAllowed ? 1.0f : 0.0f;
         if (app.editorLiveAnim != target) {
             float step = 0.25f;
             app.editorLiveAnim = target > app.editorLiveAnim ? std::min(target, app.editorLiveAnim + step)
@@ -248,9 +250,10 @@ void renderEditRail(App& app) {
             D2D1_RECT_F r = D2D1::RectF(px, y + pad + seg * k, px + pw, y + pad + seg * (k + 1));
             bool on = (k == 1) == (eased > 0.5f);
             bool hov = app.editRailHover == b.id;
+            bool off = k == 1 && !liveAllowed;
             railGlyph(app, b.glyph, b.size, b.weight, b.style, b.family, r,
-                      on ? onAccent : railA(text, hov ? 0.9f : 0.55f));
-            addHit(r, b.id);
+                      on ? onAccent : railA(text, off ? 0.25f : hov ? 0.9f : 0.55f));
+            if (!off) addHit(r, b.id);
         }
         y = pill.bottom + dpi(app, 9.0f);
         sep(y);

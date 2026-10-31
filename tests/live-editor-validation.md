@@ -50,6 +50,11 @@ cards are typed in with the same engine (`include/live_text.h`).
   - switching: Ctrl+/ shows Source with the caret on the same character
     and saves the choice, Ctrl+/ shows Live again, the pill's Source side
     switches back;
+  - drawings: an open diagram keeps its drawing under its Markdown (also
+    a formula and a picture, in the frames), the wheel scrolls the page,
+    and a Mermaid file opens in Source while the tour opens in Live again;
+  - the find bar keeps what is typed into it while Live shows (the page
+    took the characters before the guard);
   - two themes (Paper, Midnight) at 1050 and 650 px;
   - the long document: switching to Live, a key, a frame and leaving the
     block typed in are timed, and a key and a frame must stay under 40 ms.
@@ -73,6 +78,8 @@ cards are typed in with the same engine (`include/live_text.h`).
   - list items opened a few pixels left of the page's, so a list mark
     now takes the page's indent;
   - table pipes are muted;
+  - a picture's block took the divider after it, so a divider with no
+    text of its own is now a block of its own;
   - the test's frames drew the strip over the rail.
 
 ## The real app

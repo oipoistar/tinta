@@ -1458,6 +1458,8 @@ struct App {
     // rail's Source | Live pill slides its knob over editorLiveAnim
     bool editorLive = false;
     float editorLiveAnim = 0.0f;
+    // A plain-text, Mermaid or PlantUML file is its own source: no Live
+    bool editorRawDocument = false;
 
     // Soft-wrap metrics: cumulative visual rows before each logical line
     // (editorRowStarts.size() == lines + 1). Only maintained while
@@ -1696,7 +1698,7 @@ inline float editSeamWidth(const App& app) {
 
 // Live (docs/live-editor.md): the page is typed in where it reads
 inline bool editorLiveOn(const App& app) {
-    return app.editMode && app.editorLive && !app.editorReadingPreview;
+    return app.editMode && app.editorLive && !app.editorReadingPreview && !app.editorRawDocument;
 }
 
 inline float editorPaneWidth(const App& app) {
