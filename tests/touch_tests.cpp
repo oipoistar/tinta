@@ -149,6 +149,24 @@ void scenario(App& app, const char* path, int width, float scale) {
 
     // A tap follows a link, and leaves no hover behind
     app.scrollY = app.targetScrollY = 0;
+    swipe(app, 52, low, 0, -10, 2, 10, 5);
+    check(app.touch.flinging, "the page is flinging before a braking tap");
+    const POINT brakeLink = wordPoint(app, L"jump to the end");
+    const float brakeY = app.scrollY;
+    touchDown(app, app.hwnd, 53, brakeLink, ms += 16);
+    touchHold(app, app.hwnd); // even a queued timer must not select
+    touchUp(app, app.hwnd, 53, brakeLink, ms += 600, false);
+    check(!app.touch.flinging && app.scrollY == brakeY && !app.hasSelection && !app.showContextMenu,
+          "catching a fling over a link only stops it, even if held");
+    tapAt(app, 54, brakeLink);
+    check(app.scrollY > maxY - dpi(app, 400), "the next deliberate tap follows the link");
+    app.scrollY = app.targetScrollY = 0;
+    swipe(app, 55, low, 0, -20, 4, 10, 5);
+    const float beforeDrag = app.scrollY;
+    swipe(app, 56, middle, 0, -20, 4, 16, 200);
+    check(!app.touch.flinging && std::fabs(app.scrollY - beforeDrag - 80) < 1,
+          "a braking press can continue directly into another pan");
+    app.scrollY = app.targetScrollY = 0;
     tapAt(app, 6, wordPoint(app, L"jump to the end"));
     check(app.scrollY > maxY - dpi(app, 400) && !app.hasSelection && app.mouseX == -1 && app.hoveredLink.empty(),
           "a tap follows a link" + where + ": " + std::to_string(app.scrollY));

@@ -930,6 +930,7 @@ struct App {
         UINT32 pointer = 0;
         std::vector<UINT32> extra;
         bool multi = false;  // another finger came down
+        bool braking = false;  // this press caught its target's fling
         TouchTarget target = TouchTarget::None;
         PanelList list = PanelList::None;
         POINT start{}, last{};

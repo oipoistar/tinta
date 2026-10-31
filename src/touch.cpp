@@ -226,6 +226,7 @@ void endGesture(App::TouchGesture& t) {
     t.active = false;
     t.phase = Phase::Idle;
     t.multi = false;
+    t.braking = false;
     t.samples.clear();
 }
 
@@ -285,12 +286,20 @@ bool touchDown(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
         KillTimer(hwnd, TIMER_TOUCH_HOLD);
         return true;
     }
-    touchStopFling(app, hwnd);
     PanelList list = PanelList::None;
     const TouchTarget target = touchTargetAt(app, pt, list);
+    const bool braking = t.flinging && target != TouchTarget::None &&
+                         target == t.flingTarget && list == t.flingList &&
+                         app.activeTab == t.flingTab && app.currentFile == t.flingFile;
+    touchStopFling(app, hwnd);
     if (target == TouchTarget::None) return false;
     endGesture(t);
     t.active = true;
+    t.braking = braking;
+    if (braking) {
+        t.tapMs = 0;
+        app.lastClickTime = {};
+    }
     t.pointer = pointer;
     t.phase = Phase::Pending;
     t.target = target;
@@ -299,7 +308,7 @@ bool touchDown(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
     t.axis = 0;
     t.samples.push_back({ms, static_cast<float>(pt.x), static_cast<float>(pt.y)});
     // A held row is a slow tap: only text selects
-    if (target != TouchTarget::List) SetTimer(hwnd, TIMER_TOUCH_HOLD, kHoldMs, nullptr);
+    if (target != TouchTarget::List && !braking) SetTimer(hwnd, TIMER_TOUCH_HOLD, kHoldMs, nullptr);
     return true;
 }
 
@@ -363,7 +372,7 @@ bool touchUp(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms, bool canc
         float vx, vy;
         releaseSpeed(t, ms, vx, vy);
         startFling(app, hwnd, vx, vy, ms);
-    } else if (!canceled && phase == Phase::Pending && !multi) {
+    } else if (!canceled && phase == Phase::Pending && !multi && !t.braking) {
         tap(app, hwnd, pt, ms, target);
     }
     endGesture(t);
@@ -373,7 +382,7 @@ bool touchUp(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms, bool canc
 void touchHold(App& app, HWND hwnd) {
     KillTimer(hwnd, TIMER_TOUCH_HOLD);
     auto& t = app.touch;
-    if (!t.active || t.phase != Phase::Pending || t.multi) return;
+    if (!t.active || t.phase != Phase::Pending || t.multi || t.braking) return;
     t.phase = Phase::Holding;
     // The word under the finger, selected as a double-click selects it:
     // the click handlers see a second click at the same place
