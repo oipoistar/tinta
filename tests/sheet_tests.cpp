@@ -562,6 +562,15 @@ void touch(App& app, SheetDoc& doc) {
     check(doc.model.nodes.size() == nodes + 1 && doc.editing == SheetDoc::Edit::Card,
           "a double tap a few pixels apart still makes a note");
     keystroke(app, VK_ESCAPE);
+    // A held finger opens the sheet's menu where it lifts, as a right-click
+    // does: a touchscreen has no other way to it
+    const POINT held{from.x + 250, from.y + 200};
+    touchDown(app, app.hwnd, 11, held, ms += 900);
+    touchHold(app, app.hwnd);
+    touchUp(app, app.hwnd, 11, held, ms += 700, false);
+    check(doc.menuOpen, "a held finger on open ground opens the sheet's menu");
+    keystroke(app, VK_ESCAPE);
+    check(!doc.menuOpen, "Esc puts the held finger's menu away");
 }
 
 void saving(App& app, const fs::path& sheetPath) {

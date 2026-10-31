@@ -29,6 +29,10 @@ using Phase = App::TouchGesture::Phase;
 // Movement under this is still a tap or a hold
 float slop(const App& app) { return dpi(app, 10.0f); }
 
+// A held finger selects text, and on a sheet opens its menu where it
+// lifts; a list's row and Help take it as a slow tap
+bool holds(TouchTarget target) { return target != TouchTarget::List && target != TouchTarget::Help; }
+
 bool sameContext(const App& app) {
     const auto& t = app.touch;
     return app.activeTab == t.contextTab && app.currentFile == t.contextFile &&
@@ -373,9 +377,7 @@ bool touchDown(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
     t.contextEdit = app.editMode;
     t.axis = 0;
     t.samples.push_back({ms, static_cast<float>(pt.x), static_cast<float>(pt.y)});
-    // A held row is a slow tap: only text selects
-    if ((target == TouchTarget::Document || target == TouchTarget::Editor) && !braking)
-        SetTimer(hwnd, TIMER_TOUCH_HOLD, kHoldMs, nullptr);
+    if (holds(target) && !braking) SetTimer(hwnd, TIMER_TOUCH_HOLD, kHoldMs, nullptr);
     return true;
 }
 
@@ -465,7 +467,7 @@ void touchHold(App& app, HWND hwnd) {
     KillTimer(hwnd, TIMER_TOUCH_HOLD);
     auto& t = app.touch;
     if (!t.active || t.phase != Phase::Pending || t.multi || t.braking) return;
-    if (t.target != TouchTarget::Document && t.target != TouchTarget::Editor) return;
+    if (!holds(t.target)) return;
     if (!sameContext(app)) { touchCancel(app, hwnd); return; }
     resetTap(app);
     t.phase = Phase::Holding;
