@@ -16,6 +16,7 @@
 #include "render.h"
 #include "settings.h"
 #include "tabs.h"
+#include "touch.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -1111,6 +1112,31 @@ void performance(App& app, const fs::path& dir) {
     app.editorDirty = false;
 }
 
+// A finger held on the page (#286): Live's page is the document viewport, but
+// the split preview's own hold (#301) stays out of it. The press goes to Live,
+// and Live's menu opens where the finger lifts
+void heldFinger(App& app, const fs::path& doc) {
+    openInEditor(app, doc);
+    app.scrollY = app.targetScrollY = 0;
+    paint(app);
+    D2D1_POINT_2F w{};
+    check(renderedWord(app, L"paragraph", w), "the page draws a word to hold");
+    const POINT p{(LONG)std::lround(w.x), (LONG)std::lround(w.y)};
+    PanelList list;
+    check(touchTargetAt(app, p, list) == TouchTarget::Document, "a finger on Live's page drives the page");
+    const size_t word = find(app, L"paragraph");
+    const LiveText& L = liveText(app);
+    pauseClicks();
+    double ms = touchClockMs();
+    check(touchDown(app, app.hwnd, 90, p, ms), "the held finger is taken");
+    touchHold(app, app.hwnd);
+    check(!app.selecting && !app.hasSelection, "a finger held in Live leaves the preview's selection alone");
+    check(L.caret >= word && L.caret <= word + 9, "a finger held in Live puts its caret in the word");
+    touchUp(app, app.hwnd, 90, p, ms += 700, false);
+    check(liveMenuOpen(app) && !app.showContextMenu, "lifting the finger opens Live's menu there");
+    liveCloseMenu(app);
+}
+
 }  // namespace
 
 int runLiveTests(const char* fixtureDir) {
@@ -1156,6 +1182,7 @@ int runLiveTests(const char* fixtureDir) {
     reviewed(app, dir);
     menuEngine(app);
     contextMenu(app, dir, out);
+    heldFinger(app, doc);
 
     // Two themes at two widths, on the tour
     openInEditor(app, doc);

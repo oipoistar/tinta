@@ -184,6 +184,13 @@ void pointerAway(App& app, HWND hwnd) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
+// A finger held on the split preview selects its rendered words itself.
+// Live's page is the document viewport too, but Live owns its text: a hold
+// there goes through its press like any other
+bool previewHolds(const App& app, TouchTarget target) {
+    return target == TouchTarget::Document && app.editMode && !editorLiveOn(app);
+}
+
 // A preview hold selects rendered text directly. Synthesizing a mouse
 // press here would open an inline table cell instead of selecting it.
 void previewHoldSelection(App& app, POINT pt, bool begin) {
@@ -410,7 +417,7 @@ bool touchMove(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
     } else if (t.phase == Phase::Holding) {
         // The selection grows word by word, as a double-click's drag does
         if (t.target == TouchTarget::Editor) editorTouchSelection(app, pt.x, pt.y, false);
-        else if (t.target == TouchTarget::Document && app.editMode) previewHoldSelection(app, pt, false);
+        else if (previewHolds(app, t.target)) previewHoldSelection(app, pt, false);
         else handleMouseMove(app, hwnd, MAKELPARAM(pt.x, pt.y));
     }
     t.last = pt;
@@ -439,7 +446,7 @@ bool touchUp(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms, bool canc
                 editorTouchSelection(app, pt.x, pt.y, false);
                 openEditCtxMenu(app, hwnd, (float)pt.x, (float)pt.y, true);
             }
-        } else if (target == TouchTarget::Document && app.editMode) {
+        } else if (previewHolds(app, target)) {
             if (!canceled) previewHoldSelection(app, pt, false);
             app.selecting = false;
         } else {
@@ -475,7 +482,7 @@ void touchHold(App& app, HWND hwnd) {
         editorTouchSelection(app, t.start.x, t.start.y, true);
         return;
     }
-    if (t.target == TouchTarget::Document && app.editMode) {
+    if (previewHolds(app, t.target)) {
         previewHoldSelection(app, t.start, true);
         return;
     }
