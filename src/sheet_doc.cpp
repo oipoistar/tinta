@@ -637,7 +637,7 @@ std::string writeNoteFile(App& app, SheetDoc& doc, const std::wstring& stem, con
 
 std::string newNoteCard(App& app, SheetDoc& doc, float x, float y, const std::string& text, float width,
                         float height) {
-    std::wstring stem = text.empty() ? std::wstring(tr(app, "title.untitled")) : toWide(noteTitle(text, ""));
+    std::wstring stem = toWide(noteFirstLine(text));
     if (stem.empty()) stem = tr(app, "title.untitled");
     std::wstring created;
     std::string rel = writeNoteFile(app, doc, stem, text, &created);
@@ -651,9 +651,7 @@ std::string newNoteCard(App& app, SheetDoc& doc, float x, float y, const std::st
     node.x = std::round(x / kGrid) * kGrid;
     node.y = std::round(y / kGrid) * kGrid;
     doc.model.nodes.push_back(node);
-    SheetCard& c = doc.cards[node.id];
-    c.createdHere = true;
-    c.autoNamed = text.empty();
+    doc.madeHere.insert(node.id);
     refreshCard(app, doc, node, true);
     return node.id;
 }
@@ -968,17 +966,24 @@ bool sheetCreateInteractive(App& app, HWND hwnd) {
     if (!runSaveFileDialog(ofn)) return false;
     std::wstring path = file;
     if (!endsWithNoCase(path, L".smd")) path += L".smd";
+    return sheetCreateAndOpen(app, hwnd, path);
+}
+
+bool sheetCreateAndOpen(App& app, HWND hwnd, const std::wstring& path) {
     std::string error;
     if (!sheetCreateAt(app, path, &error)) {
         signalPush(app, SIG_ERROR, SIGI_WARNING, tr(app, "sheet.create_failed"));
         return false;
     }
-    // The launcher hands its tab to the sheet; a document keeps its own
-    bool launcher = app.currentFile.empty() && !app.editMode;
+    // An empty tab, the launcher or a new note nothing was typed into,
+    // hands itself to the sheet (as Open a file does); a document keeps
+    // its own
+    bool empty = app.currentFile.empty() && !app.startPageEmbeddedOpen &&
+                 (!app.editMode || (app.editorText.empty() && !app.editorDirty));
     tabsInit(app);
     int shellId = app.tabs[app.activeTab].id;
     tabOpenPath(app, hwnd, toUtf8(path));
-    if (launcher) {
+    if (empty) {
         for (int i = 0; i < (int)app.tabs.size(); i++) {
             if (app.tabs[i].id == shellId && i != app.activeTab) {
                 tabCloseIndex(app, hwnd, i);

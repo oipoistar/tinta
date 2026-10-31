@@ -14,9 +14,10 @@ second and draws a whole-sheet frame in about 20 ms.
 
 ## Making a sheet
 
-- On the start page (a new tab), choose **New sheet**. A Save dialog names
-  the sheet: `Roadmap.smd` is created with a folder `Roadmap` beside it, and
-  every note you add goes into that folder.
+- On the start page, or on the empty page of a new tab (+), choose **New
+  sheet**. A Save dialog names the sheet: `Roadmap.smd` is created with a
+  folder `Roadmap` beside it, and every note you add goes into that folder.
+  The sheet opens in the empty tab's place.
 - Name the sheet after a folder that already holds notes, and the new sheet
   lays all of them out in a grid.
 - A `.smd` opens like any file: from the start page's recents, the file
@@ -36,7 +37,7 @@ second and draws a whole-sheet frame in about 20 ms.
 | Move between cards | | Arrow keys (Shift adds to the selection) |
 | Move cards | Drag; Alt+drag leaves a copy; Ctrl turns snapping off | Ctrl+arrows (Shift+Ctrl: one unit) |
 | Resize | Drag an edge or the corner; double-click the bottom edge to fit the note | |
-| Select | Click, Shift+click, drag a box on open ground | Ctrl+A |
+| Select | Click, Shift+click (again to take a card out), drag a box on open ground; drag any selected card to move them all | Ctrl+A |
 | Group | Context menu | Ctrl+G, Ctrl+Shift+G to ungroup |
 | Colour | The swatches in the context menu | 1 to 6, 0 for none |
 | Pan | Wheel, Space+drag, middle drag, the minimap | |
@@ -95,9 +96,15 @@ address a link card, and a pasted Mermaid flowchart a set of cards.
 
 And a few smaller ones: connections pick the facing sides by themselves as
 cards move (Obsidian pins them), z-order is in the menu, cards align and
-distribute, a new note names its file after its first line, and nothing in
-the sheet is a web view: a link card shows its address and opens it in your
-browser.
+distribute, and nothing in the sheet is a web view: a link card shows its
+address and opens it in your browser.
+
+A new note starts as `Untitled.md` and takes its first line as its name
+when you finish typing in its card, a heading or not (`#Idea` and `# Idea`
+both make `Idea.md`; only the second is a heading, as in any Markdown).
+An Untitled left in the sheet's folder by an earlier session does the same
+the next time you type into it; a note with a name of its own keeps it, and
+so does an Untitled in an Obsidian vault, where other notes may link to it.
 
 ## The .smd format
 

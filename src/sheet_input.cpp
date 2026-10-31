@@ -62,6 +62,31 @@ std::wstring stemOf(const std::wstring& path) {
     return dot == std::wstring::npos || dot == 0 ? name : name.substr(0, dot);
 }
 
+// The name a new note keeps until its first line names it: Untitled,
+// Untitled 2 and so on, in the interface's language or in English
+bool placeholderName(App& app, const std::wstring& stem) {
+    for (const std::wstring& base : {std::wstring(tr(app, "title.untitled")), std::wstring(L"Untitled")}) {
+        if (stem.size() < base.size() || _wcsnicmp(stem.c_str(), base.c_str(), base.size()) != 0) continue;
+        std::wstring rest = stem.substr(base.size());
+        if (rest.empty()) return true;
+        if (rest.size() >= 2 && rest[0] == L' ' && rest.find_first_not_of(L"0123456789", 1) == std::wstring::npos)
+            return true;
+    }
+    return false;
+}
+
+// A note just written can be held for a moment by a virus scanner or the
+// search indexer; its rename waits that out
+bool moveNote(const std::wstring& from, const std::wstring& to) {
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        if (MoveFileW(from.c_str(), to.c_str())) return true;
+        DWORD error = GetLastError();
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) return false;
+        Sleep(30);
+    }
+    return false;
+}
+
 float snap(float v, float step = kGrid) { return std::round(v / step) * step; }
 
 void selectOnly(SheetDoc& doc, const std::string& id) {
@@ -505,31 +530,32 @@ void commitEdit(App& app, SheetDoc& doc, bool stay) {
                     }
                 }
                 refreshCard(app, doc, n, true);
-                // A new note names itself after its first line when it is done
-                if (!stay && c.createdHere && c.autoNamed && !doc.edit.text.empty()) {
-                    std::string title = noteTitle(toUtf8(doc.edit.text), "");
-                    if (!title.empty()) {
-                        std::wstring stem = safeFileStem(toWide(title));
-                        std::wstring dir = c.path.substr(0, c.path.find_last_of(L"\\/"));
-                        if (_wcsicmp(stem.c_str(), stemOf(c.path).c_str()) != 0) {
-                            std::wstring target;
-                            for (int k = 1; k < 1000; ++k) {
-                                target = dir + L"\\" + stem + (k == 1 ? L"" : L" " + std::to_wstring(k)) + L".md";
-                                if (GetFileAttributesW(target.c_str()) == INVALID_FILE_ATTRIBUTES) break;
-                            }
-                            if (MoveFileW(c.path.c_str(), target.c_str())) {
-                                SheetDoc::FileChange change;
-                                change.kind = SheetDoc::FileChange::Renamed;
-                                change.path = target;
-                                change.otherPath = c.path;
-                                doc.pendingFiles.push_back(change);
-                                n.file = relativePath(doc, target);
-                                c.autoNamed = false;
-                                changedModel = true;
-                                refreshCard(app, doc, n, true);
-                            }
-                        } else {
-                            c.autoNamed = false;
+                // A note still under the name the sheet gives new notes
+                // names itself after its first line when it is done. It has
+                // to be the sheet's own: made here this session or, in a
+                // .smd, kept in the sheet's folder (in an Obsidian vault
+                // other notes may link to an Untitled).
+                std::wstring dir = c.path.substr(0, c.path.find_last_of(L"\\/"));
+                bool ours = doc.madeHere.count(n.id) ||
+                            (!doc.canvasFile && _wcsicmp(dir.c_str(), doc.cardDir.c_str()) == 0);
+                std::string first = !stay && ours ? noteFirstLine(toUtf8(doc.edit.text)) : std::string();
+                if (!first.empty() && placeholderName(app, stemOf(c.path))) {
+                    std::wstring stem = safeFileStem(toWide(first));
+                    if (_wcsicmp(stem.c_str(), stemOf(c.path).c_str()) != 0) {
+                        std::wstring target;
+                        for (int k = 1; k < 1000; ++k) {
+                            target = dir + L"\\" + stem + (k == 1 ? L"" : L" " + std::to_wstring(k)) + L".md";
+                            if (GetFileAttributesW(target.c_str()) == INVALID_FILE_ATTRIBUTES) break;
+                        }
+                        if (moveNote(c.path, target)) {
+                            SheetDoc::FileChange change;
+                            change.kind = SheetDoc::FileChange::Renamed;
+                            change.path = target;
+                            change.otherPath = c.path;
+                            doc.pendingFiles.push_back(change);
+                            n.file = relativePath(doc, target);
+                            changedModel = true;
+                            refreshCard(app, doc, n, true);
                         }
                     }
                 }
@@ -1034,7 +1060,7 @@ void removeSelection(App& app, SheetDoc& doc) {
         if (i < 0) continue;
         // A note made here and never written to goes with its card
         auto it = doc.cards.find(id);
-        if (it != doc.cards.end() && it->second.createdHere && it->second.kind == SheetCard::Kind::Note) {
+        if (it != doc.cards.end() && doc.madeHere.count(id) && it->second.kind == SheetCard::Kind::Note) {
             std::string text;
             if (readFileUtf8(it->second.path, text) && text.find_first_not_of(" \t\r\n") == std::string::npos &&
                 DeleteFileW(it->second.path.c_str())) {
@@ -2052,7 +2078,8 @@ void runAction(App& app, HWND hwnd, SheetDoc& doc, int action) {
             if (i < 0 || doc.model.nodes[i].type != NodeType::Text) break;
             beginStep(doc);
             std::string text = doc.model.nodes[i].text;
-            std::string title = noteTitle(text, toUtf8(tr(app, "title.untitled")));
+            std::string title = noteFirstLine(text);
+            if (title.empty()) title = toUtf8(tr(app, "title.untitled"));
             std::string rel = writeNoteFile(app, doc, toWide(title), text);
             if (rel.empty()) {
                 doc.undo.pop_back();
@@ -2793,15 +2820,12 @@ bool sheetMouseDown(App& app, HWND hwnd, int x, int y) {
             doc.gesture = SheetDoc::Gesture::None;
             return true;
         }
+        // Shift or Ctrl adds a card at once, so a drag takes it along with the
+        // rest; one already selected comes out on release, if not dragged
         doc.pressWasSelected = isSelected(doc, n.id);
-        if (doc.pressShift || doc.pressCtrl) {
-            if (doc.pressWasSelected) {
-                doc.selected.erase(std::remove(doc.selected.begin(), doc.selected.end(), n.id), doc.selected.end());
-            } else {
-                doc.selected.push_back(n.id);
-            }
-        } else if (!doc.pressWasSelected) {
-            selectOnly(doc, n.id);
+        if (!doc.pressWasSelected) {
+            if (doc.pressShift || doc.pressCtrl) doc.selected.push_back(n.id);
+            else selectOnly(doc, n.id);
         }
         doc.gesture = SheetDoc::Gesture::Pending;
         invalidate(app);
@@ -2821,10 +2845,9 @@ bool sheetMouseDown(App& app, HWND hwnd, int x, int y) {
                 return true;
             }
             doc.pressWasSelected = isSelected(doc, doc.pressNode);
-            if (doc.pressShift) {
-                if (!doc.pressWasSelected) doc.selected.push_back(doc.pressNode);
-            } else if (!doc.pressWasSelected) {
-                selectOnly(doc, doc.pressNode);
+            if (!doc.pressWasSelected) {
+                if (doc.pressShift || doc.pressCtrl) doc.selected.push_back(doc.pressNode);
+                else selectOnly(doc, doc.pressNode);
             }
             doc.gesture = SheetDoc::Gesture::Pending;
             invalidate(app);
@@ -2982,8 +3005,14 @@ bool sheetMouseUp(App& app, HWND hwnd, int x, int y) {
             break;
         }
         case SheetDoc::Gesture::Pending:
-            // A plain click on a card that was already part of a selection picks it alone
-            if (doc.pressWasSelected && !doc.pressShift && !doc.pressCtrl) selectOnly(doc, doc.pressNode);
+            // A click on a card that was already selected: a plain one picks
+            // it alone, one with Shift or Ctrl takes it out
+            if (doc.pressWasSelected && (doc.pressShift || doc.pressCtrl)) {
+                doc.selected.erase(std::remove(doc.selected.begin(), doc.selected.end(), doc.pressNode),
+                                   doc.selected.end());
+            } else if (doc.pressWasSelected) {
+                selectOnly(doc, doc.pressNode);
+            }
             break;
         case SheetDoc::Gesture::Move: {
             std::vector<std::string> ids;

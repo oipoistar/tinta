@@ -1516,6 +1516,32 @@ std::string noteTitle(std::string_view markdown, std::string_view fallback) {
     return std::string(fallback);
 }
 
+std::string noteFirstLine(std::string_view markdown) {
+    std::string fromFront = frontmatterValue(markdown, "title");
+    if (!fromFront.empty()) return fromFront;
+    bool inFence = false;
+    char fenceChar = 0;
+    int fenceLen = 0;
+    for (const Line& line : splitLines(noteBody(markdown))) {
+        char marker = 0;
+        int run = fenceRun(line.text, marker);
+        if (inFence) {
+            if (run >= fenceLen && marker == fenceChar) inFence = false;
+            continue;
+        }
+        if (run) {
+            inFence = true;
+            fenceChar = marker;
+            fenceLen = run;
+            continue;
+        }
+        if (trimView(line.text).substr(0, 3) == "---") continue;
+        std::string text = lineText(line.text);
+        if (!text.empty()) return clipUtf8(text, 120);
+    }
+    return {};
+}
+
 void noteTasks(std::string_view markdown, int& done, int& total) {
     done = total = 0;
     bool inFence = false;

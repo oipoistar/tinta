@@ -306,6 +306,29 @@ void pointer(App& app, SheetDoc& doc, const fs::path& dir) {
         std::set<std::string> picked(doc.selected.begin(), doc.selected.end());
         check(picked == std::set<std::string>({"kickoff", "research"}), "a box selects the cards it touches");
     }
+    // Any card of a selection drags all of it, Shift held or not; a Shift
+    // click without a drag takes a card out
+    {
+        auto at = [&](const char* id) { return doc.model.nodes[nodeIndex(doc.model, id)]; };
+        auto together = [&](const Node& k0, const Node& r0) {
+            Node k1 = at("kickoff"), r1 = at("research");
+            return k1.y != k0.y && k1.x - k0.x == r1.x - r0.x && k1.y - k0.y == r1.y - r0.y;
+        };
+        Node k0 = at("kickoff"), r0 = at("research");
+        D2D1_POINT_2F grab = centreOf(app, doc, "kickoff");
+        drag(app, grab, D2D1::Point2F(grab.x + 60, grab.y + 90));
+        check(together(k0, r0) && doc.selected.size() == 2, "a drag on one selected card moves the selection");
+        keystroke(app, 'Z', {true, false, false});
+        grab = centreOf(app, doc, "research");
+        drag(app, grab, D2D1::Point2F(grab.x + 60, grab.y + 90), {false, true, false});
+        check(together(k0, r0) && doc.selected.size() == 2,
+              "so does a Shift+drag on a selected card, which stays selected");
+        keystroke(app, 'Z', {true, false, false});
+        check(at("kickoff").x == k0.x && at("research").y == r0.y, "undo puts both back");
+        pauseClicks();
+        click(app, centreOf(app, doc, "research"), {false, true, false});
+        check(doc.selected == std::vector<std::string>{"kickoff"}, "a Shift+click takes a selected card out");
+    }
 
     // A card dropped into a lane takes the lane's value into its note
     const Node& doing = doc.model.nodes[nodeIndex(doc.model, "g-doing")];
@@ -662,6 +685,148 @@ void performance(App& app, const fs::path& dir) {
 
 }  // namespace
 
+// A note still called Untitled names itself after its first line once it
+// is done, a heading or not, whatever ran while it was typed: here an arrow
+// dropped on open ground makes it, and the window's timer saves the typing
+// and looks at the folder before a click elsewhere ends it. An Untitled
+// left in the sheet's folder by an earlier session names itself too.
+void naming(App& app, const fs::path& dir) {
+    fs::path path = dir / "Naming.smd";
+    fs::create_directories(dir / "Naming");
+    writeBytes(dir / "Naming" / "Start.md", "# Start\n");
+    writeBytes(dir / "Naming" / "Untitled.md", "Left from before\n");
+    check(sheetCreateAt(app, path.wstring()), "a sheet to name notes on is made");
+    tabOpenPath(app, app.hwnd, toUtf8(path.wstring()));
+    SheetDoc* docPtr = activeSheet(app);
+    check(docPtr && docPtr->model.nodes.size() == 2, "it opens with the two notes in its folder");
+    if (!docPtr || docPtr->model.nodes.size() != 2) return;
+    SheetDoc& doc = *docPtr;
+    auto nodeOf = [&](const std::string& file) {
+        for (const Node& n : doc.model.nodes) {
+            if (n.file == file) return n;
+        }
+        return Node{};
+    };
+    const Node start = nodeOf("Naming/Start.md");
+    const Node old = nodeOf("Naming/Untitled.md");
+    check(!start.id.empty() && !old.id.empty(), "Start and Untitled are on it");
+    if (start.id.empty() || old.id.empty()) return;
+    flyTo(doc, start.x + start.width * 0.5f, start.y + start.height + 100, 1.0f, 0);
+    doc.selected = {start.id};
+    D2D1_POINT_2F dot = toScreen(app, doc, start.x + start.width * 0.5f, start.y + start.height);
+    move(app, centreOf(app, doc, start.id));
+    drag(app, dot, D2D1::Point2F(dot.x, dot.y + 160));
+    settle(app);
+    check(doc.model.nodes.size() == 3 && doc.editing == SheetDoc::Edit::Card,
+          "an arrow dropped on open ground opens a new note");
+    std::string id = doc.editId;
+    keystroke(app, VK_RETURN);
+    typeKeys(app, L"#This is a header");
+    keystroke(app, VK_RETURN);
+    keystroke(app, VK_RETURN);
+    typeKeys(app, L"And here is just some paragraph");
+    keystroke(app, VK_RETURN);
+    keystroke(app, VK_RETURN);
+    typeKeys(app, L"### This is a subheader");
+    // The window's timer: the typing reaches the note, the folder is read
+    doc.edit.lastTypeMs = 0;
+    sheetTimer(app, app.hwnd);
+    pollFolder(app, doc, true);
+    pauseClicks();
+    click(app, toScreen(app, doc, start.x - 200, start.y + start.height * 0.5f));
+    check(doc.editing == SheetDoc::Edit::None, "a click on open ground ends the typing");
+    int i = nodeIndex(doc.model, id);
+    std::string file = i >= 0 ? doc.model.nodes[i].file : std::string();
+    check(file == "Naming/This is a header.md", "the note is named after its first line: " + file);
+    check(fs::exists(dir / "Naming" / "This is a header.md") && !fs::exists(dir / "Naming" / "Untitled 2.md"),
+          "and its file is renamed");
+
+    // The Untitled from before: a new first line typed into its card names it
+    flyTo(doc, old.x + old.width * 0.5f, old.y + old.height * 0.5f, 1.0f, 0);
+    pauseClicks();
+    doubleClick(app, centreOf(app, doc, old.id));
+    check(doc.editing == SheetDoc::Edit::Card && doc.editId == old.id, "a double-click opens the old Untitled");
+    keystroke(app, VK_HOME, {true, false, false});
+    typeKeys(app, L"Fresh name");
+    keystroke(app, VK_RETURN);
+    keystroke(app, VK_ESCAPE);
+    i = nodeIndex(doc.model, old.id);
+    file = i >= 0 ? doc.model.nodes[i].file : std::string();
+    check(file == "Naming/Fresh name.md" && fs::exists(dir / "Naming" / "Fresh name.md") &&
+              readBytes(dir / "Naming" / "Fresh name.md").rfind("Fresh name\nLeft from before", 0) == 0,
+          "an Untitled in the sheet's folder names itself too: " + file);
+    // A note with a name of its own keeps it
+    flyTo(doc, start.x + start.width * 0.5f, start.y + start.height * 0.5f, 1.0f, 0);
+    pauseClicks();
+    doubleClick(app, centreOf(app, doc, start.id));
+    keystroke(app, VK_HOME, {true, false, false});
+    typeKeys(app, L"Another title");
+    keystroke(app, VK_RETURN);
+    keystroke(app, VK_ESCAPE);
+    check(doc.model.nodes[nodeIndex(doc.model, start.id)].file == "Naming/Start.md", "a named note keeps its name");
+}
+
+// The start page's four buttons stand two by two, of one width: Open a file
+// and Browse over New document and New sheet. Drawn at two widths in a dark
+// and a light theme for a look.
+void startPage(App& app, const fs::path& out) {
+    auto width = [](const D2D1_RECT_F& r) { return r.right - r.left; };
+    for (int theme : {5, 0}) {
+        applyTheme(app, theme);
+        for (int w : {1050, 650}) {
+            app.width = w;
+            app.height = w == 1050 ? 800 : 620;
+            std::string name = std::string("start-") + (theme == 0 ? "paper" : "midnight") + "-" + std::to_string(w);
+            check(saveFramePreview(app, out / (name + ".png"), [&] { renderStartPage(app); }), "frame saved: " + name);
+            D2D1_RECT_F at[7] = {};
+            for (const auto& hit : app.startPageHits) {
+                if (hit.second >= 1 && hit.second <= 6) at[hit.second] = hit.first;
+            }
+            const D2D1_RECT_F &open = at[1], &newDoc = at[2], &browse = at[3], &sheet = at[6];
+            check(width(open) > 0 && width(newDoc) > 0 && width(browse) > 0 && width(sheet) > 0,
+                  name + ": the start page has its four buttons");
+            check(open.top == browse.top && newDoc.top == sheet.top && newDoc.top > open.bottom,
+                  name + ": Open and Browse on top, New document and New sheet under them");
+            check(open.left == newDoc.left && browse.left == sheet.left && browse.left > open.right,
+                  name + ": in two columns");
+            check(std::fabs(width(open) - width(browse)) < 0.5f && std::fabs(width(open) - width(newDoc)) < 0.5f &&
+                      std::fabs(width(open) - width(sheet)) < 0.5f,
+                  name + ": of one width");
+        }
+    }
+    app.width = 1050;
+    app.height = 800;
+}
+
+// The new tab's empty page offers New sheet beside Open a file, under it
+// when the pane is narrow; a sheet made from it takes the empty tab's place
+void newTabPage(App& app, const fs::path& dir, const fs::path& out) {
+    size_t tabs = app.tabs.size();
+    tabOpenQuickNote(app, app.hwnd);
+    check(quickNoteEmptyStateActive(app) && app.tabs.size() == tabs + 1, "+ opens an empty note");
+    if (!quickNoteEmptyStateActive(app)) return;
+    // The narrow one first: the pointer below finds the wide one's buttons
+    for (int w : {650, 1050}) {
+        app.width = w;
+        app.height = w == 1050 ? 800 : 620;
+        std::string name = "new-tab-" + std::to_string(w);
+        check(saveFramePreview(app, out / (name + ".png"), [&] { renderQuickNoteEmptyState(app); }),
+              "frame saved: " + name);
+        const D2D1_RECT_F &open = app.quickNoteButtonRect, &sheet = app.quickNoteSheetRect;
+        bool beside = sheet.left >= open.right && sheet.top == open.top;
+        bool under = sheet.top >= open.bottom && sheet.left == open.left;
+        check(sheet.right > sheet.left && (w == 1050 ? beside : beside || under),
+              name + ": New sheet stands beside Open a file, or under it in a narrow pane");
+    }
+    const D2D1_RECT_F& r = app.quickNoteSheetRect;
+    move(app, D2D1::Point2F((r.left + r.right) * 0.5f, (r.top + r.bottom) * 0.5f));
+    check(app.quickNoteSheetHover && !app.quickNoteButtonHover, "the pointer over New sheet lights it alone");
+    fs::path made = dir / "From a new tab.smd";
+    check(sheetCreateAndOpen(app, app.hwnd, made.wstring()) && fs::exists(made), "a sheet is made from the new tab");
+    check(sheetActive(app) && app.tabs.size() == tabs + 1 && !app.editMode,
+          "it opens in the empty tab's place: " + std::to_string(app.tabs.size()) + " tabs");
+}
+
 int runSheetTests(const char* fixtureDir) {
     auto state = std::make_unique<App>();
     App& app = *state;
@@ -686,6 +851,7 @@ int runSheetTests(const char* fixtureDir) {
     fs::create_directories(out, ec);
     const fs::path sheetPath = dir / "Launch plan.smd";
 
+    startPage(app, out);
     tabsInit(app);
     tabOpenPath(app, app.hwnd, toUtf8(sheetPath.wstring()));
     check(sheetActive(app), "a .smd opens as a sheet");
@@ -734,6 +900,8 @@ int runSheetTests(const char* fixtureDir) {
     SmdInfo info;
     check(parseSmd(readBytes(fresh), model, info) && model.nodes.size() == 2 && info.folder == "Fresh",
           "a new sheet takes the notes already in its folder");
+    naming(app, dir);
+    newTabPage(app, dir, out);
     performance(app, dir);
 
     DestroyWindow(app.hwnd);

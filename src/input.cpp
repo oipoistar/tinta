@@ -1464,18 +1464,20 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         // If mouse is in the preview pane and not dragging separator, fall through for link hover etc.
         if ((float)app.mouseX < documentViewportX(app) ||
             app.draggingSeparator || app.editorSelecting || app.editorTextDrag.armed) return;
-        // Quick-note empty state: hover feedback for the Open button
+        // Quick-note empty state: hover feedback for Open and New sheet
         if (quickNoteEmptyStateActive(app) && app.editorShowPreview) {
-            const D2D1_RECT_F& r = app.quickNoteButtonRect;
-            bool over = (float)app.mouseX >= r.left &&
-                        (float)app.mouseX <= r.right &&
-                        (float)app.mouseY >= r.top &&
-                        (float)app.mouseY <= r.bottom;
-            if (over != app.quickNoteButtonHover) {
-                app.quickNoteButtonHover = over;
+            auto inside = [&](const D2D1_RECT_F& r) {
+                return (float)app.mouseX >= r.left && (float)app.mouseX <= r.right &&
+                       (float)app.mouseY >= r.top && (float)app.mouseY <= r.bottom;
+            };
+            bool overOpen = inside(app.quickNoteButtonRect);
+            bool overSheet = inside(app.quickNoteSheetRect);
+            if (overOpen != app.quickNoteButtonHover || overSheet != app.quickNoteSheetHover) {
+                app.quickNoteButtonHover = overOpen;
+                app.quickNoteSheetHover = overSheet;
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
-            if (over) {
+            if (overOpen || overSheet) {
                 SetCursor(cursorHand);
                 return;
             }
@@ -2169,6 +2171,17 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             (float)y <= app.quickNoteButtonRect.bottom) {
             app.swallowNextMouseUp = true;
             openFileDialog(app, hwnd);
+            return;
+        }
+        // and New sheet beside it: a Save dialog names the sheet, which
+        // takes this empty tab's place
+        if (quickNoteEmptyStateActive(app) && app.editorShowPreview &&
+            (float)x >= app.quickNoteSheetRect.left &&
+            (float)x <= app.quickNoteSheetRect.right &&
+            (float)y >= app.quickNoteSheetRect.top &&
+            (float)y <= app.quickNoteSheetRect.bottom) {
+            app.swallowNextMouseUp = true;
+            sheetCreateInteractive(app, hwnd);
             return;
         }
         // In-place table editing (#148): cells and the + affordances

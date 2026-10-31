@@ -637,6 +637,8 @@ struct App {
     // an untitled, still-empty buffer (rect refreshed by its renderer)
     D2D1_RECT_F quickNoteButtonRect = {};
     bool quickNoteButtonHover = false;
+    D2D1_RECT_F quickNoteSheetRect = {};  // New sheet, beside Open a file
+    bool quickNoteSheetHover = false;
     // Editor pane scrollbar dragging (#121)
     bool editorScrollbarDragging = false;
     float editorScrollbarDragStartY = 0.0f;

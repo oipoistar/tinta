@@ -50,8 +50,6 @@ struct SheetCard {
     // What its text links to: a note's full path, or "*" and a note name
     // for a [[wiki]] link, lowercased; matched to cards by ghostLinks
     std::vector<std::wstring> linkKeys;
-    bool createdHere = false;            // made by this sheet this session
-    bool autoNamed = false;              // its file still has the name it was given
 
     // The content drawn for one zoom: a slice of the laid-out note
     Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
@@ -174,6 +172,9 @@ struct SheetDoc {
     std::vector<std::wstring> unplaced;  // notes in the folder not on the sheet
     unsigned long long lastPollMs = 0;
     std::unordered_map<std::string, SheetCard> cards;
+    // Note cards this sheet made this session. Kept with the sheet, not its
+    // cards: a card's runtime state goes when a reload misses its node.
+    std::unordered_set<std::string> madeHere;
     // Cards by their note's lowercased path and name, kept while the sheet's files stay the same
     size_t linkIndexKey = 0;
     std::unordered_map<std::wstring, std::string> cardByPath, cardByName;
@@ -239,6 +240,8 @@ void sheetSetCursor(App& app, int x, int y);
 // folder of the same name beside it (an existing folder's notes are
 // placed on the new sheet). Opens the sheet in this tab or a new one.
 bool sheetCreateInteractive(App& app, HWND hwnd);
+// Makes the sheet at `path` and opens it; an empty tab gives it its place
+bool sheetCreateAndOpen(App& app, HWND hwnd, const std::wstring& path);
 // Creates the sheet file and folder; false when the file could not be written
 bool sheetCreateAt(App& app, const std::wstring& sheetPath, std::string* error = nullptr);
 

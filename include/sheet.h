@@ -130,6 +130,9 @@ std::vector<std::string> noteLinks(std::string_view markdown);
 // The title a card shows for its note: front matter `title:`, else the
 // first heading, else the first line of text, else the fallback
 std::string noteTitle(std::string_view markdown, std::string_view fallback);
+// What a new note is named after: front matter `title:`, else its first
+// line of text, a heading or not; empty when it has none
+std::string noteFirstLine(std::string_view markdown);
 
 // Task boxes in a note: done and total
 void noteTasks(std::string_view markdown, int& done, int& total);

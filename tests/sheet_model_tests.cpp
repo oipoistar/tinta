@@ -331,6 +331,14 @@ void notes() {
           "the first heading, without its markup");
     check(noteTitle("- [ ] first task\nmore", "f") == "first task", "else the first line's text");
     check(noteTitle("\n\n", "Fallback") == "Fallback", "else the fallback");
+    // A new note is named after its first line, a heading or not: `#This`
+    // has no space, so it is text, and the # cannot go into a file name
+    std::string typed = "\n#This is a header\n\nAnd a paragraph\n\n### This is a subheader\n";
+    check(noteFirstLine(typed) == "#This is a header", "the first line names a note: " + noteFirstLine(typed));
+    check(safeFileStem(L"#This is a header") == L"This is a header", "and the # stays out of the file name");
+    check(noteFirstLine("```\ncode\n```\n## Real start\n") == "Real start", "a heading first line, fences skipped");
+    check(noteFirstLine(note) == "Launch: the plan", "the front matter title still wins");
+    check(noteFirstLine("\n \n").empty(), "a note with no text has no first line");
     int done = 0, total = 0;
     noteTasks(note, done, total);
     check(done == 2 && total == 4, "task boxes counted: " + std::to_string(done) + "/" + std::to_string(total));

@@ -1975,6 +1975,8 @@ void openFileDialog(App& app, HWND hwnd) {
 }
 
 void renderQuickNoteEmptyState(App& app) {
+    app.quickNoteButtonRect = {};
+    app.quickNoteSheetRect = {};
     if (!quickNoteEmptyStateActive(app) || !app.editorShowPreview) return;
     IDWriteTextFormat* format = app.folderBrowserFormat;
     if (!format || !app.renderTarget || !app.brush || !app.dwriteFactory)
@@ -1984,108 +1986,159 @@ void renderQuickNoteEmptyState(App& app) {
     float paneW = documentViewportWidth(app);
     if (paneW < dpi(app, 180.0f)) return;  // pane too narrow to bother
 
-    const wchar_t* label = tr(app, "empty.open_button");
+    // Two buttons: Open a file with its Ctrl+O keycap, and New sheet
+    const wchar_t* labels[2] = { tr(app, "empty.open_button"),
+                                 tr(app, "start.new_sheet") };
     const wchar_t* chip = L"Ctrl+O";
 
-    IDWriteTextLayout* labelLayout = nullptr;
+    IDWriteTextLayout* labelLayouts[2] = {};
     IDWriteTextLayout* chipLayout = nullptr;
-    app.dwriteFactory->CreateTextLayout(label, (UINT32)wcslen(label), format,
-                                        2000.0f, 100.0f, &labelLayout);
+    for (int i = 0; i < 2; i++)
+        app.dwriteFactory->CreateTextLayout(labels[i], (UINT32)wcslen(labels[i]),
+                                            format, 2000.0f, 100.0f,
+                                            &labelLayouts[i]);
     app.dwriteFactory->CreateTextLayout(chip, (UINT32)wcslen(chip), format,
                                         2000.0f, 100.0f, &chipLayout);
-    if (!labelLayout || !chipLayout) {
-        if (labelLayout) labelLayout->Release();
+    if (!labelLayouts[0] || !labelLayouts[1] || !chipLayout) {
+        for (IDWriteTextLayout* layout : labelLayouts)
+            if (layout) layout->Release();
         if (chipLayout) chipLayout->Release();
         return;
     }
-    DWRITE_TEXT_METRICS lm{}, cm{};
-    labelLayout->GetMetrics(&lm);
+    DWRITE_TEXT_METRICS lm[2] = {}, cm{};
+    labelLayouts[0]->GetMetrics(&lm[0]);
+    labelLayouts[1]->GetMetrics(&lm[1]);
     chipLayout->GetMetrics(&cm);
 
-    // Button geometry: folder icon, label, and a Ctrl+O keycap chip
+    // Button geometry: an icon, the label, and for Open its keycap chip;
+    // side by side when the pane has room, else one over the other
     float iconW = dpi(app, 20.0f);
     float chipW = cm.width + dpi(app, 16.0f);
-    float btnW = dpi(app, 18.0f) + iconW + dpi(app, 10.0f) + lm.width +
-                 dpi(app, 12.0f) + chipW + dpi(app, 14.0f);
+    float widths[2] = {
+        dpi(app, 18.0f) + iconW + dpi(app, 10.0f) + lm[0].width +
+            dpi(app, 12.0f) + chipW + dpi(app, 14.0f),
+        dpi(app, 18.0f) + iconW + dpi(app, 10.0f) + lm[1].width +
+            dpi(app, 18.0f) };
     float btnH = dpi(app, 44.0f);
+    float gap = dpi(app, 10.0f);
     float chromeTop = chromeTopHeight(app);
     float cx = paneX + paneW * 0.5f;
     float cy = chromeTop + ((float)app.height - chromeTop) * 0.5f -
                dpi(app, 40.0f);
-    D2D1_RECT_F btn = D2D1::RectF(cx - btnW * 0.5f, cy - btnH * 0.5f,
-                                  cx + btnW * 0.5f, cy + btnH * 0.5f);
-    app.quickNoteButtonRect = btn;
+    D2D1_RECT_F rects[2];
+    if (widths[0] + gap + widths[1] <= paneW - dpi(app, 32.0f)) {
+        float left = cx - (widths[0] + gap + widths[1]) * 0.5f;
+        rects[0] = D2D1::RectF(left, cy - btnH * 0.5f, left + widths[0],
+                               cy + btnH * 0.5f);
+        rects[1] = D2D1::RectF(rects[0].right + gap, rects[0].top,
+                               rects[0].right + gap + widths[1],
+                               rects[0].bottom);
+    } else {
+        float w = std::max(widths[0], widths[1]);
+        rects[0] = D2D1::RectF(cx - w * 0.5f, cy - btnH - gap * 0.5f,
+                               cx + w * 0.5f, cy - gap * 0.5f);
+        rects[1] = D2D1::RectF(rects[0].left, cy + gap * 0.5f,
+                               rects[0].right, cy + btnH + gap * 0.5f);
+    }
+    app.quickNoteButtonRect = rects[0];
+    app.quickNoteSheetRect = rects[1];
 
-    // Raised card over the empty pane; a touch stronger under the cursor
-    D2D1_COLOR_F fill = app.theme.text;
-    fill.a = app.quickNoteButtonHover ? 0.10f : 0.06f;
-    app.brush->SetColor(fill);
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(btn, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush);
-    D2D1_COLOR_F border = app.theme.text;
-    border.a = 0.12f;
-    app.brush->SetColor(border);
-    app.renderTarget->DrawRoundedRectangle(
-        D2D1::RoundedRect(btn, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush,
-        1.0f);
+    bool hover[2] = { app.quickNoteButtonHover, app.quickNoteSheetHover };
+    for (int i = 0; i < 2; i++) {
+        const D2D1_RECT_F& btn = rects[i];
+        float my = (btn.top + btn.bottom) * 0.5f;
+        // Raised card over the empty pane; a touch stronger under the cursor
+        D2D1_COLOR_F fill = app.theme.text;
+        fill.a = hover[i] ? 0.10f : 0.06f;
+        app.brush->SetColor(fill);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(btn, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush);
+        D2D1_COLOR_F border = app.theme.text;
+        border.a = 0.12f;
+        app.brush->SetColor(border);
+        app.renderTarget->DrawRoundedRectangle(
+            D2D1::RoundedRect(btn, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush,
+            1.0f);
 
-    // Folder icon: tab flap over a rounded body, in the accent color
-    float ix = btn.left + dpi(app, 18.0f);
-    float iy = cy - dpi(app, 7.5f);
-    app.brush->SetColor(app.theme.accent);
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(D2D1::RectF(ix, iy, ix + dpi(app, 9.0f),
-                                      iy + dpi(app, 6.0f)),
-                          dpi(app, 1.5f), dpi(app, 1.5f)),
-        app.brush);
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(D2D1::RectF(ix, iy + dpi(app, 2.5f), ix + iconW,
-                                      iy + dpi(app, 15.0f)),
-                          dpi(app, 2.0f), dpi(app, 2.0f)),
-        app.brush);
+        float ix = btn.left + dpi(app, 18.0f);
+        float iy = my - dpi(app, 7.5f);
+        app.brush->SetColor(app.theme.accent);
+        if (i == 0) {
+            // Folder icon: tab flap over a rounded body
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(ix, iy, ix + dpi(app, 9.0f),
+                                              iy + dpi(app, 6.0f)),
+                                  dpi(app, 1.5f), dpi(app, 1.5f)),
+                app.brush);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(ix, iy + dpi(app, 2.5f),
+                                              ix + iconW, iy + dpi(app, 15.0f)),
+                                  dpi(app, 2.0f), dpi(app, 2.0f)),
+                app.brush);
+        } else {
+            // Sheet icon: four cards, as the start page lists a sheet
+            float card = dpi(app, 8.0f), cardGap = dpi(app, 3.0f);
+            for (int k = 0; k < 4; k++) {
+                float kx = ix + dpi(app, 0.5f) + (float)(k % 2) * (card + cardGap);
+                float ky = my - card - cardGap * 0.5f + (float)(k / 2) * (card + cardGap);
+                app.renderTarget->FillRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(kx, ky, kx + card, ky + card),
+                                      dpi(app, 1.5f), dpi(app, 1.5f)),
+                    app.brush);
+            }
+        }
 
-    // Label
-    float labelX = ix + iconW + dpi(app, 10.0f);
-    app.brush->SetColor(app.theme.text);
-    app.renderTarget->DrawTextLayout(
-        D2D1::Point2F(labelX, cy - lm.height * 0.5f), labelLayout, app.brush);
+        // Label
+        float labelX = ix + iconW + dpi(app, 10.0f);
+        app.brush->SetColor(app.theme.text);
+        app.renderTarget->DrawTextLayout(
+            D2D1::Point2F(labelX, my - lm[i].height * 0.5f), labelLayouts[i],
+            app.brush);
+        if (i != 0) continue;
 
-    // Ctrl+O keycap chip
-    float chipX = labelX + lm.width + dpi(app, 12.0f);
-    float chipH = dpi(app, 22.0f);
-    D2D1_RECT_F chipRect = D2D1::RectF(chipX, cy - chipH * 0.5f,
-                                       chipX + chipW, cy + chipH * 0.5f);
-    D2D1_COLOR_F chipBg = app.theme.text;
-    chipBg.a = 0.08f;
-    app.brush->SetColor(chipBg);
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(chipRect, dpi(app, 4.0f), dpi(app, 4.0f)),
-        app.brush);
-    D2D1_COLOR_F chipText = app.theme.text;
-    chipText.a = 0.55f;
-    app.brush->SetColor(chipText);
-    app.renderTarget->DrawTextLayout(
-        D2D1::Point2F(chipX + dpi(app, 8.0f), cy - cm.height * 0.5f),
-        chipLayout, app.brush);
-    labelLayout->Release();
+        // Ctrl+O keycap chip
+        float chipX = labelX + lm[0].width + dpi(app, 12.0f);
+        float chipH = dpi(app, 22.0f);
+        D2D1_RECT_F chipRect = D2D1::RectF(chipX, my - chipH * 0.5f,
+                                           chipX + chipW, my + chipH * 0.5f);
+        D2D1_COLOR_F chipBg = app.theme.text;
+        chipBg.a = 0.08f;
+        app.brush->SetColor(chipBg);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(chipRect, dpi(app, 4.0f), dpi(app, 4.0f)),
+            app.brush);
+        D2D1_COLOR_F chipText = app.theme.text;
+        chipText.a = 0.55f;
+        app.brush->SetColor(chipText);
+        app.renderTarget->DrawTextLayout(
+            D2D1::Point2F(chipX + dpi(app, 8.0f), my - cm.height * 0.5f),
+            chipLayout, app.brush);
+    }
+    labelLayouts[0]->Release();
+    labelLayouts[1]->Release();
     chipLayout->Release();
 
-    // Hint lines, centered under the button
+    // Hint lines, centered under the buttons, wrapping in a narrow pane
     const char* hintKeys[2] = { "empty.hint1", "empty.hint2" };
-    float hintY = btn.bottom + dpi(app, 18.0f);
+    float hintY = rects[1].bottom + dpi(app, 18.0f);
+    float hintW = paneW - dpi(app, 32.0f);
     for (const char* key : hintKeys) {
         const wchar_t* hint = tr(app, key);
         IDWriteTextLayout* layout = nullptr;
         app.dwriteFactory->CreateTextLayout(hint, (UINT32)wcslen(hint),
-                                            format, 2000.0f, 100.0f, &layout);
+                                            format, hintW, 1000.0f, &layout);
         if (layout) {
+            layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+            DWRITE_TRIMMING noTrim = { DWRITE_TRIMMING_GRANULARITY_NONE, 0, 0 };
+            layout->SetTrimming(&noTrim, nullptr);
             DWRITE_TEXT_METRICS hm{};
             layout->GetMetrics(&hm);
             D2D1_COLOR_F muted = app.theme.text;
             muted.a = 0.5f;
             app.brush->SetColor(muted);
             app.renderTarget->DrawTextLayout(
-                D2D1::Point2F(cx - hm.width * 0.5f, hintY), layout,
+                D2D1::Point2F(cx - hintW * 0.5f, hintY), layout,
                 app.brush);
             hintY += hm.height + dpi(app, 4.0f);
             layout->Release();
