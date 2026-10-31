@@ -39,6 +39,8 @@ void editorPositionImeWindow(App& app, HWND hwnd);
 void handleEditorMouseDown(App& app, HWND hwnd, int x, int y);
 void handleEditorMouseUp(App& app, HWND hwnd, int x, int y);
 void handleEditorMouseMove(App& app, HWND hwnd, int x, int y);
+// A held finger extends the original word, without arming a text drag.
+void editorTouchSelection(App& app, int x, int y, bool begin);
 void handleEditorMouseWheel(App& app, HWND hwnd, float delta);
 // A dragged selection (#289): TIMER_EDITOR_DRAG_SCROLL scrolls the editor
 // while the pointer is past its top or bottom edge; Esc, a lost capture or

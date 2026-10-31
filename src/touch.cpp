@@ -3,6 +3,7 @@
 #include "touch.h"
 
 #include "editor.h"
+#include "editrail.h"
 #include "input.h"
 #include "overlays.h"
 #include "sheet_ui.h"
@@ -339,7 +340,8 @@ bool touchMove(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
         scrollTo(app, t.target, t.list, x, y);
     } else if (t.phase == Phase::Holding) {
         // The selection grows word by word, as a double-click's drag does
-        handleMouseMove(app, hwnd, MAKELPARAM(pt.x, pt.y));
+        if (t.target == TouchTarget::Editor) editorTouchSelection(app, pt.x, pt.y, false);
+        else handleMouseMove(app, hwnd, MAKELPARAM(pt.x, pt.y));
     }
     t.last = pt;
     return true;
@@ -361,9 +363,16 @@ bool touchUp(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms, bool canc
         // The selection ends where the finger lifts, and the menu opens
         // there (in the editor, its own menu)
         const LPARAM point = MAKELPARAM(pt.x, pt.y);
-        handleMouseMove(app, hwnd, point);
-        handleMouseUp(app, hwnd, 0, point);
-        if (!canceled) {
+        if (target == TouchTarget::Editor) {
+            if (!canceled) {
+                editorTouchSelection(app, pt.x, pt.y, false);
+                openEditCtxMenu(app, hwnd, (float)pt.x, (float)pt.y, true);
+            }
+        } else {
+            handleMouseMove(app, hwnd, point);
+            handleMouseUp(app, hwnd, 0, point);
+        }
+        if (!canceled && target != TouchTarget::Editor) {
             POINT screen = pt;
             ClientToScreen(hwnd, &screen);
             handleContextMenu(app, hwnd, MAKELPARAM(screen.x, screen.y));
@@ -385,6 +394,10 @@ void touchHold(App& app, HWND hwnd) {
     auto& t = app.touch;
     if (!t.active || t.phase != Phase::Pending || t.multi || t.braking) return;
     t.phase = Phase::Holding;
+    if (t.target == TouchTarget::Editor) {
+        editorTouchSelection(app, t.start.x, t.start.y, true);
+        return;
+    }
     // The word under the finger, selected as a double-click selects it:
     // the click handlers see a second click at the same place
     const LPARAM point = MAKELPARAM(t.start.x, t.start.y);

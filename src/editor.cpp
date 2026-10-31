@@ -3276,6 +3276,27 @@ static bool editorSelectionContainsPoint(App& app, size_t line, float x, float y
     return false;
 }
 
+void editorTouchSelection(App& app, int x, int y, bool begin) {
+    if (begin) {
+        focusSourceEditor(app);
+        app.editorExtraCarets.clear();
+    }
+    size_t first, last;
+    editorWordAt(app, editorPosFromClick(app, x, y), first, last);
+    auto& t = app.touch;
+    if (begin) {
+        t.editorWordStart = first;
+        t.editorWordEnd = last;
+    }
+    app.editorSelStart = std::min(first, t.editorWordStart);
+    app.editorSelEnd = std::max(last, t.editorWordEnd);
+    app.editorCursorPos = first < t.editorWordStart ? app.editorSelStart : app.editorSelEnd;
+    app.editorHasSelection = app.editorSelStart != app.editorSelEnd;
+    app.editorCaretUpstreamPos = std::wstring::npos;
+    app.editorDesiredCol = -1;
+    InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
 void editorPrepareContextMenuAt(App& app, int x, int y) {
     if (editorLiveOn(app)) return;  // Live placed its caret already
     focusSourceEditor(app);

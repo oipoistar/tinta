@@ -448,8 +448,8 @@ static const EDiagItem kEDiag[] = {
     {L"\u21AA", "ectx.d.puml_act", L"puml activity"},
 };
 
-void openEditCtxMenu(App& app, HWND hwnd, float x, float y) {
-    editorPrepareContextMenuAt(app, (int)x, (int)y);
+void openEditCtxMenu(App& app, HWND hwnd, float x, float y, bool preserveSelection) {
+    if (!preserveSelection) editorPrepareContextMenuAt(app, (int)x, (int)y);
     app.editCtxOpen = true;
     app.editCtxRailOnly = false;
     app.editCtxX = x;

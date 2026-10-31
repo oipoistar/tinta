@@ -28,7 +28,7 @@ void renderEditPaneChrome(App& app);
 void renderPreviewCaretBlock(App& app, float previewWidth);
 
 // Raw editor insert menu (design t9)
-void openEditCtxMenu(App& app, HWND hwnd, float x, float y);
+void openEditCtxMenu(App& app, HWND hwnd, float x, float y, bool preserveSelection = false);
 // The rail's table / diagram buttons open the same submenu standalone:
 // sub 1 = table size grid, 2 = diagram templates
 void openEditRailFlyout(App& app, HWND hwnd, int sub);

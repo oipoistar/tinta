@@ -116,6 +116,46 @@ void controlRoutingScenario(App& app) {
           "dismissing the editor menu consumes the click over the preview");
 }
 
+void editorHoldScenario(App& app) {
+    app.editorScrollY = 0;
+    editFrame(app);
+    const auto original = app.editorText;
+    const bool dirty = app.editorDirty;
+    auto point = [&](const std::wstring& word) {
+        const size_t at = app.editorText.find(word);
+        check(at != std::wstring::npos, "editor hold fixture word exists");
+        app.editorCursorPos = at + 1;
+        D2D1_POINT_2F p{};
+        check(editorCaretPoint(app, p), "editor hold word has a screen position");
+        return POINT{(LONG)(p.x + dpi(app, 1)), (LONG)(p.y + dpi(app, 6))};
+    };
+    const POINT alpha = point(L"alpha"), beta = point(L"beta"), gamma = point(L"gamma");
+    const POINT chinese = point(L"\u4e2d\u6587\u9009\u62e9\u6d4b\u8bd5");
+    auto selection = [&]() {
+        return app.editorText.substr(app.editorSelStart, app.editorSelEnd - app.editorSelStart);
+    };
+    check(touchDown(app, app.hwnd, 50, beta, ms += 1000), "editor held press is taken");
+    touchHold(app, app.hwnd);
+    check(selection() == L"beta" && !app.editorTextDrag.armed, "editor hold selects a word without arming text drag");
+    touchMove(app, app.hwnd, 50, gamma, ms += 100);
+    check(selection() == L"beta gamma", "editor hold grows forward by whole words");
+    touchMove(app, app.hwnd, 50, alpha, ms += 100);
+    check(selection() == L"alpha beta", "editor hold reverses around its original word");
+    touchMove(app, app.hwnd, 50, chinese, ms += 100);
+    check(selection() == L"beta gamma\n\u4e2d\u6587\u9009\u62e9\u6d4b\u8bd5", "editor hold extends across lines and CJK runs");
+    const auto grown = selection();
+    touchUp(app, app.hwnd, 50, chinese, ms += 50, false);
+    check(app.editCtxOpen && selection() == grown && !app.editorSelecting,
+          "editor lift opens its menu and preserves the expanded selection");
+    closeEditCtxMenu(app);
+    check(touchDown(app, app.hwnd, 51, beta, ms += 1000), "a hold on selected source is taken");
+    touchHold(app, app.hwnd);
+    touchCancel(app, app.hwnd);
+    check(!app.editCtxOpen && selection() == L"beta" && !app.editorTextDrag.armed,
+          "canceling an editor hold keeps its word without moving text or opening a menu");
+    check(app.editorText == original && app.editorDirty == dirty, "touch selection never edits the source");
+}
+
 void scenario(App& app, const char* path, int width, float scale) {
     const std::string where = " (" + std::to_string(width) + ", " + std::to_string(scale).substr(0, 3) + "x)";
     app.contentScale = scale;
@@ -360,6 +400,7 @@ void scenario(App& app, const char* path, int width, float scale) {
               app.editorCursorPos == caretBeforeJump,
           "preview link navigation does not edit source or move its caret" + where);
     controlRoutingScenario(app);
+    editorHoldScenario(app);
     exitEditMode(app);
 }
 }  // namespace

@@ -1,5 +1,13 @@
 # Touch gestures (#286)
 
+alpha beta gamma
+中文选择测试
+
+In the source editor, hold **beta**, slide to gamma or back to alpha,
+then lift: the whole words stay selected when the menu opens. Sliding
+down to the Chinese line extends across the line break. Canceling a
+hold keeps its selection and never moves the text.
+
 On a touchscreen a finger dragged across this page scrolls it instead of
 selecting text, and a flick carries the page on after the finger lifts.
 A tap follows a link: [jump to the end](#the-end). A double tap selects a
