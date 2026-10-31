@@ -27,6 +27,17 @@
 
 namespace {
 namespace fs = std::filesystem;
+
+// The test window hands a lost capture to the sheet as the app's window
+// procedure does (main_d2d.cpp). Releasing capture on a mouse-up sends
+// WM_CAPTURECHANGED there and then: a press that took its own release for
+// a lost capture put moved cards back and dropped new arrows.
+App* g_captureApp = nullptr;
+WNDPROC g_staticProc = nullptr;
+LRESULT CALLBACK captureProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_CAPTURECHANGED && g_captureApp && (HWND)lParam != hwnd) sheetCaptureLost(*g_captureApp, hwnd);
+    return CallWindowProcW(g_staticProc, hwnd, msg, wParam, lParam);
+}
 using namespace sheet;
 using namespace sheetui;
 
@@ -72,13 +83,17 @@ void doubleClick(App& app, D2D1_POINT_2F p) {
     click(app, p);
 }
 
+// A press soon after another on the same spot is a double-click, in the
+// sheet as in Windows; a wait keeps the next press a press of its own
+void pauseClicks() { Sleep(GetDoubleClickTime() + 30); }
+
 void drag(App& app, D2D1_POINT_2F from, D2D1_POINT_2F to, KeyMods mods = {}) {
-    // A press right after a click on the same spot is a double-click
-    Sleep(GetDoubleClickTime() + 30);
+    pauseClicks();
     paint(app);
     withKeysHeld(mods, [&] {
         handleMouseMove(app, app.hwnd, at(from));
         handleMouseDown(app, app.hwnd, MK_LBUTTON, at(from));
+        check(GetCapture() == app.hwnd, "a press on the sheet holds the mouse");
         for (int i = 1; i <= 8; ++i) {
             D2D1_POINT_2F p = D2D1::Point2F(from.x + (to.x - from.x) * i / 8, from.y + (to.y - from.y) * i / 8);
             handleMouseMove(app, app.hwnd, at(p));
@@ -263,6 +278,34 @@ void pointer(App& app, SheetDoc& doc, const fs::path& dir) {
     keystroke(app, 'Z', {true, false, false});
     const Node& back = doc.model.nodes[nodeIndex(doc.model, "budget")];
     check(back.x == budgetBefore.x && back.y == budgetBefore.y, "undo puts it back");
+
+    // The corner resizes the selected card, on the grid; undo puts it back.
+    // The drag above pressed on this same spot.
+    {
+        pauseClicks();
+        click(app, centreOf(app, doc, "budget"));
+        Node start = doc.model.nodes[nodeIndex(doc.model, "budget")];
+        D2D1_POINT_2F corner = toScreen(app, doc, start.x + start.width, start.y + start.height);
+        drag(app, corner, D2D1::Point2F(corner.x + 60, corner.y + 40));
+        const Node& grown = doc.model.nodes[nodeIndex(doc.model, "budget")];
+        check(grown.width > start.width && grown.height > start.height && grown.x == start.x && grown.y == start.y,
+              "a drag on the corner resizes the card and keeps it in place");
+        check(std::fmod(grown.x + grown.width, kGrid) < 0.01f && std::fmod(grown.y + grown.height, kGrid) < 0.01f,
+              "the dragged corner lands on the grid");
+        keystroke(app, 'Z', {true, false, false});
+        const Node& undone = doc.model.nodes[nodeIndex(doc.model, "budget")];
+        check(undone.width == start.width && undone.height == start.height, "undo restores its size");
+    }
+    // A box dragged over open ground selects the cards it touches
+    {
+        const Node& kickoff = doc.model.nodes[nodeIndex(doc.model, "kickoff")];
+        const Node& research = doc.model.nodes[nodeIndex(doc.model, "research")];
+        doc.selected.clear();
+        drag(app, toScreen(app, doc, kickoff.x - 30, kickoff.y - 30),
+             toScreen(app, doc, research.x + research.width + 10, research.y + research.height + 10));
+        std::set<std::string> picked(doc.selected.begin(), doc.selected.end());
+        check(picked == std::set<std::string>({"kickoff", "research"}), "a box selects the cards it touches");
+    }
 
     // A card dropped into a lane takes the lane's value into its note
     const Node& doing = doc.model.nodes[nodeIndex(doc.model, "g-doing")];
@@ -624,6 +667,8 @@ int runSheetTests(const char* fixtureDir) {
     App& app = *state;
     app.hwnd = CreateWindowExW(0, L"STATIC", L"Sheet tests", WS_POPUP, 0, 0, 1050, 800, nullptr, nullptr, nullptr, nullptr);
     if (!app.hwnd || !initD2D(app) || !createRenderTarget(app)) return 2;
+    g_captureApp = &app;
+    g_staticProc = (WNDPROC)SetWindowLongPtrW(app.hwnd, GWLP_WNDPROC, (LONG_PTR)captureProc);
     app.width = 1050;
     app.height = 800;
     updateTextFormats(app);

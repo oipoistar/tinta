@@ -37,11 +37,20 @@ folder of its notes, with Obsidian's `.canvas` opening the same way.
     the card and the file it made, redo brings both back; Tab grows a joined
     child to the right; the arrow keys walk back;
   - the pointer: click and Shift+click select, a drag moves a card onto the
-    grid and undo puts it back, a card dropped into a lane gets the lane's
+    grid and undo puts it back, a drag on a selected card's corner resizes
+    it in place and undo restores it, a box from open ground selects the
+    cards it touches, a card dropped into a lane gets the lane's
     `status` in its note, Sort into lanes follows a note changed on disk, a
     drag from a side dot joins two cards with a floating arrow, a click on a
     ghost and the menu's Turn links into arrows make arrows, Ctrl+G groups
     and names;
+  - the test window passes `WM_CAPTURECHANGED` to the sheet as Tinta's
+    window does, and every drag checks that the press holds the mouse.
+    Testing the build showed moved cards snapping back and new arrows
+    vanishing: the release let go of the mouse before the sheet had taken
+    its gesture, and the capture change in between counted as a lost drag.
+    With the old order seven of these checks fail (move, resize, box,
+    lane drop, arrow).
   - commands: find matches titles and note text and steps through them,
     P presents and steps, S spotlights, Copy as Mermaid, a pasted flowchart
     becomes three notes and two arrows, Ctrl+L tidies without overlaps,
@@ -82,6 +91,13 @@ From an isolated portable copy (`out/sheets-playground/runner/`):
   and the sheet saved the card. An earlier run that missed the double-click
   typed into the sheet instead: `E` with nothing selected opens the sheet's
   own text in the editor, as E does for any document.
+- After the capture fix, posted drags in a window on a fresh copy of the
+  fixture (`out/drag-check/`): Budget dragged by its middle, an arrow from
+  Kickoff's side dot onto Design, Research resized by its corner, a box over
+  Kickoff and Research and then `3`. The `.smd` saved on close held all
+  four: Budget at 1040,300, the new arrow, Research 440 x 480 at the same
+  place, both boxed cards in colour 3. That run's PrintWindow capture came
+  back blank, so the saved file was the check.
 
 ## Performance and size
 

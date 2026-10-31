@@ -2964,11 +2964,14 @@ bool sheetMouseUp(App& app, HWND hwnd, int x, int y) {
     SheetDoc* docPtr = activeSheet(app);
     if (!docPtr || !docPtr->pressed) return false;
     SheetDoc& doc = *docPtr;
+    // The gesture is taken before the mouse is let go: releasing the
+    // capture sends WM_CAPTURECHANGED at once, and a gesture still under
+    // way there counts as lost (sheetCaptureLost puts it back)
+    SheetDoc::Gesture gesture = doc.gesture;
+    doc.gesture = SheetDoc::Gesture::None;
     doc.pressed = false;
     if (GetCapture() == hwnd) ReleaseCapture();
     float fx = (float)x, fy = (float)y;
-    SheetDoc::Gesture gesture = doc.gesture;
-    doc.gesture = SheetDoc::Gesture::None;
     doc.guidesX.clear();
     doc.guidesY.clear();
     switch (gesture) {

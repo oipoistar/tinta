@@ -2880,6 +2880,9 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         frontmatterMouseUp(app, (float)GET_X_LPARAM(lParam), (float)GET_Y_LPARAM(lParam));
         return;
     }
+    // The release of a press the sheet took, before anything lets go of the
+    // mouse: a lost capture puts a moved card back and drops a new arrow
+    if (sheetActive(app) && sheetMouseUp(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return;
     // A tab drag ends on release (its press already consumed the click)
     // A dragged editor selection lands, or a click on it places the caret,
     // while the press still holds the mouse: losing it cancels the drag
@@ -2901,9 +2904,6 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         app.swallowNextMouseUp = false;
         return;
     }
-
-    // The release of a press the sheet took
-    if (sheetActive(app) && sheetMouseUp(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return;
 
     // Lightbox: a plain click closes, a pan drag just ends
     if (app.showLightbox) {
