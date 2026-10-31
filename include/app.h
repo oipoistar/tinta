@@ -284,6 +284,8 @@ struct Settings {
     // Editor markdown assists (list continuation, Tab indent, Ctrl+B/I)
     // master switch
     bool editorAssists = true;
+    // Markdown in the source editor in colour (#268, source_style.h)
+    bool editorHighlight = true;
     // Live: the page typed in where it reads, instead of the source beside
     // its preview (docs/live-editor.md)
     bool editorLive = false;
@@ -1420,6 +1422,7 @@ struct App {
     // Unified editor (design t11): one raw buffer, live render beside it;
     // the left tool rail slides in with edit mode carrying the controls
     bool editorAssists = true;
+    bool editorHighlight = true;     // #268
     bool showWordCount = true;       // #240
     bool closeKeepsDrafts = false;   // #252
     fm::Settings frontmatter;
@@ -1449,6 +1452,9 @@ struct App {
     // editorText, so the caret never sits before it, and saves write it back.
     bool editorBom = false;
     std::vector<size_t> editorLineStarts;
+    // Counts every change to the source's text: what is worked out from it
+    // (the highlighting's line kinds) knows when to work it out again
+    unsigned long long editorTextRevision = 0;
     float editorScrollX = 0.0f;  // horizontal scroll, non-wrap mode only (#77)
 
     // Editor view options (persisted)

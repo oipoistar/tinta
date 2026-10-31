@@ -316,6 +316,7 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
     };
     int language = 0;
     SyntaxState syntax;
+    std::vector<InlineSpan> spans;
     size_t start = 0, lineIndex = 0;
     bool inFence = false, inMath = false, inFront = from == 0 && t.compare(0, 3, L"---") == 0;
     size_t fenceStart = 0, frontEnd = 0;
@@ -444,91 +445,65 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
                     }
                 }
             }
-            // Inline spans, past the line's mark: a task's box is no link
+            // Inline spans, past the line's mark: a task's box is no link. On
+            // the page their marks go; links, notes and footnotes take the
+            // link colour, code its face, a picture's words go faint
             LineMark lineMarks = lineMark(t, start);
-            for (size_t i = lineMarks.kind == LineMark::None ? 0 : lineMarks.indent + lineMarks.length; i < lineText.size(); ++i) {
-                wchar_t c = lineText[i];
-                size_t at = start + i;
-                if (c == L'\\' && i + 1 < lineText.size()) {
-                    ++i;
-                } else if (c == L'`') {
-                    size_t ticks = 1;
-                    while (i + ticks < lineText.size() && lineText[i + ticks] == L'`') ++ticks;
-                    size_t close = lineText.find(std::wstring(ticks, L'`'), i + ticks);
-                    if (close == std::wstring_view::npos) break;
-                    code(at, close - i + ticks);
-                    cache.backs.push_back({at + ticks, close - i - ticks, look.inlineCodeBack, false});
-                    mark(at, ticks, MarkObject::Hidden);
-                    mark(start + close, ticks, MarkObject::Hidden);
-                    i = close + ticks - 1;
-                } else if (c == L'$' && i + 1 < lineText.size() && lineText[i + 1] != L' ' && lineText[i + 1] != L'$') {
-                    size_t close = lineText.find(L'$', i + 1);
-                    if (close == std::wstring_view::npos || lineText[close - 1] == L' ') continue;
-                    code(at, close - i + 1);
-                    layout->SetDrawingEffect(cache.markBrush.Get(), range(at, 1));
-                    layout->SetDrawingEffect(cache.markBrush.Get(), range(start + close, 1));
-                    i = close;
-                } else if (c == L'[' && i + 1 < lineText.size() && lineText[i + 1] == L'[') {
-                    // [[a note]] or [[a note|shown as]]: the name in the link colour
-                    size_t close = lineText.find(L"]]", i + 2);
-                    if (close == std::wstring_view::npos) continue;
-                    size_t bar = lineText.find(L'|', i + 2);
-                    size_t shown = bar != std::wstring_view::npos && bar < close ? bar + 1 : i + 2;
-                    layout->SetDrawingEffect(cache.linkBrush.Get(), range(start + shown, close - shown));
-                    mark(at, shown - i, MarkObject::Hidden);
-                    mark(start + close, 2, MarkObject::Hidden);
-                    i = close + 1;
-                } else if (c == L'[' && i + 1 < lineText.size() && lineText[i + 1] == L'^') {
-                    // A footnote's mark
-                    size_t close = lineText.find(L']', i + 2);
-                    if (close == std::wstring_view::npos) continue;
-                    layout->SetDrawingEffect(cache.linkBrush.Get(), range(at, close - i + 1));
-                    i = close;
-                } else if (c == L'[' || (c == L'!' && i + 1 < lineText.size() && lineText[i + 1] == L'[')) {
-                    // [text](address) and ![alt](address): the text in the link colour
-                    size_t open = c == L'!' ? i + 1 : i;
-                    size_t middle = lineText.find(L"](", open + 1);
-                    if (middle == std::wstring_view::npos) continue;
-                    size_t close = lineText.find(L')', middle + 2);
-                    if (close == std::wstring_view::npos) continue;
-                    layout->SetDrawingEffect(c == L'!' ? cache.markBrush.Get() : cache.linkBrush.Get(),
-                                             range(start + open + 1, middle - open - 1));
-                    if (c == L'!') layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range(start + open + 1, middle - open - 1));
-                    mark(at, open - i + 1, MarkObject::Hidden);
-                    mark(start + middle, close - middle + 1, MarkObject::Hidden);
-                    i = close;
-                } else if ((c == L'*' || c == L'_') && i + 1 < lineText.size() && lineText[i + 1] == c) {
-                    std::wstring pair(2, c);
-                    size_t close = lineText.find(pair, i + 2);
-                    if (close == std::wstring_view::npos || close == i + 2) continue;
-                    layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range(at, close - i + 2));
-                    mark(at, 2, MarkObject::Hidden);
-                    mark(start + close, 2, MarkObject::Hidden);
-                    i = close + 1;
-                } else if ((c == L'*' || c == L'_') && i + 1 < lineText.size() && lineText[i + 1] != L' ' &&
-                           (i == 0 || !iswalnum(lineText[i - 1]))) {
-                    size_t close = lineText.find(c, i + 1);
-                    if (close == std::wstring_view::npos || close == i + 1 || lineText[close - 1] == L' ') continue;
-                    layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range(at, close - i + 1));
-                    mark(at, 1, MarkObject::Hidden);
-                    mark(start + close, 1, MarkObject::Hidden);
-                    i = close;
-                } else if ((c == L'~' || c == L'=') && i + 1 < lineText.size() && lineText[i + 1] == c) {
-                    std::wstring pair(2, c);
-                    size_t close = lineText.find(pair, i + 2);
-                    if (close == std::wstring_view::npos || close == i + 2) continue;
-                    if (c == L'~') layout->SetStrikethrough(TRUE, range(at + 2, close - i - 2));
-                    else cache.backs.push_back({at + 2, close - i - 2, look.mark, false});
-                    mark(at, 2, MarkObject::Hidden);
-                    mark(start + close, 2, MarkObject::Hidden);
-                    i = close + 1;
-                } else if ((c == L'h' || c == L'w') && (i == 0 || lineText[i - 1] == L' ' || lineText[i - 1] == L'(') &&
-                           (lineText.compare(i, 7, L"http://") == 0 || lineText.compare(i, 8, L"https://") == 0 ||
-                            lineText.compare(i, 4, L"www.") == 0)) {
-                    size_t stop = i;
-                    while (stop < lineText.size() && lineText[stop] != L' ' && lineText[stop] != L')') ++stop;
-                    layout->SetDrawingEffect(cache.linkBrush.Get(), range(at, stop - i));
-                    i = stop - 1;
+            spans.clear();
+            inlineSpans(lineText, lineMarks.kind == LineMark::None ? 0 : lineMarks.indent + lineMarks.length, spans);
+            for (const InlineSpan& span : spans) {
+                size_t at = start + span.at, n = span.length;
+                switch (span.kind) {
+                    case INL_CODE_MARK:
+                        code(at, n);
+                        mark(at, n, MarkObject::Hidden);
+                        break;
+                    case INL_CODE:
+                        code(at, n);
+                        cache.backs.push_back({at, n, look.inlineCodeBack, false});
+                        break;
+                    case INL_MATH_MARK:
+                        code(at, n);
+                        layout->SetDrawingEffect(cache.markBrush.Get(), range(at, n));
+                        break;
+                    case INL_MATH:
+                        code(at, n);
+                        break;
+                    case INL_WIKI:
+                    case INL_FOOTNOTE:
+                    case INL_LINK:
+                    case INL_ADDRESS:
+                        layout->SetDrawingEffect(cache.linkBrush.Get(), range(at, n));
+                        break;
+                    case INL_IMAGE:
+                        layout->SetDrawingEffect(cache.markBrush.Get(), range(at, n));
+                        layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range(at, n));
+                        break;
+                    case INL_WIKI_MARK:
+                    case INL_LINK_MARK:
+                    case INL_IMAGE_MARK:
+                    case INL_STRIKE_MARK:
+                    case INL_HIGHLIGHT_MARK:
+                        mark(at, n, MarkObject::Hidden);
+                        break;
+                    case INL_STRONG_MARK:
+                    case INL_STRONG:
+                        layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range(at, n));
+                        if (span.kind == INL_STRONG_MARK) mark(at, n, MarkObject::Hidden);
+                        break;
+                    case INL_EM_MARK:
+                    case INL_EM:
+                        layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range(at, n));
+                        if (span.kind == INL_EM_MARK) mark(at, n, MarkObject::Hidden);
+                        break;
+                    case INL_STRIKE:
+                        layout->SetStrikethrough(TRUE, range(at, n));
+                        break;
+                    case INL_HIGHLIGHT:
+                        cache.backs.push_back({at, n, look.mark, false});
+                        break;
+                    default:
+                        break;
                 }
             }
         }

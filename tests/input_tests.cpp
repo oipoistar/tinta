@@ -206,6 +206,7 @@ int runTouchTests(const char* file);
 int runByteOrderMarkTests(const char* file, const char* frontMatterFile);
 int runSheetTests(const char* fixtureDir);
 int runLiveTests(const char* fixtureDir);
+int runSourceHighlightTests(const char* fixture);
 
 int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--deleted-tab-tests") return runDeletedTabTests();
@@ -224,6 +225,7 @@ int main(int argc, char** argv) {
         return runByteOrderMarkTests(argv[2], argv[3]);
     if (argc == 3 && std::string(argv[1]) == "--sheet-tests") return runSheetTests(argv[2]);
     if (argc == 3 && std::string(argv[1]) == "--live-tests") return runLiveTests(argv[2]);
+    if (argc == 3 && std::string(argv[1]) == "--source-highlight-tests") return runSourceHighlightTests(argv[2]);
     if (argc == 2 && std::string(argv[1]) == "--window-drag-tests") return runWindowDragTests();
     if (argc == 2 && std::string(argv[1]) == "--table-layout-tests") return runTableLayoutTests();
     if (argc == 2 && std::string(argv[1]) == "--highlight-layout-tests") return runHighlightLayoutTests();

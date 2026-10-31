@@ -2592,8 +2592,9 @@ void settingsChip(App& app, float& x, float y, const wchar_t* label, bool active
 D2D1_RECT_F settingsPanelRect(const App& app) {
     float w = std::min(dpi(app, app.settingsSection == 3 ? 980.0f : 760.0f), app.width - dpi(app, app.settingsSection == 3 ? 32.0f : 80.0f));
     // Leave room for the last row and localized footer in every section.
-    // Appearance holds a sixth row since notifications joined (#273)
-    const float tall = app.settingsSection == 3 || app.settingsSection == 1 ? 650.0f : 590.0f;
+    // Appearance holds a sixth row since notifications joined (#273), the
+    // editor an eighth since Markdown in colour did (#268)
+    const float tall = app.settingsSection == 3 || app.settingsSection == 1 ? 650.0f : app.settingsSection == 2 ? 660.0f : 590.0f;
     float h = std::min(dpi(app, tall), app.height - dpi(app, 64.0f));
     float x = (app.width - w) / 2;
     float y = (app.height - h) / 2 + (1 - app.settingsAnimation) * dpi(app, 30.0f);
@@ -3038,6 +3039,13 @@ void renderSettingsOverlay(App& app) {
         settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
                        cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.editorAssists, SET_TOGGLE_ASSISTS, anim);
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        cardLabel(tr(app, "settings.highlight"),
+                  tr(app, "settings.highlight.hint"), dpi(app, 60.0f));
+        settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
+                       cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
+                       app.editorHighlight, SET_TOGGLE_HIGHLIGHT, anim);
         cy += rowCardH + cardGap;
         card(rowCardH);
         cardLabel(tr(app, "settings.word_count"),

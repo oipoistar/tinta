@@ -1872,6 +1872,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.editHintsShown =
                     std::max(settings.editHintsShown, app->editHintsShown);
                 settings.editorAssists = app->editorAssists;
+                settings.editorHighlight = app->editorHighlight;
                 // showWordCount, closeKeepsDrafts and printMarginMm persist
                 // when changed and stay as on disk here, like openInTabs below
                 settings.followSystemTheme = app->followSystemTheme;
@@ -2006,6 +2007,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     // Persisted when toggled and kept as on disk at exit, like openInTabs
     app.showNotifications = savedSettings.showNotifications;
     app.editorAssists = savedSettings.editorAssists;
+    app.editorHighlight = savedSettings.editorHighlight;
     app.editorLive = savedSettings.editorLive;
     app.editorLiveAnim = app.editorLive ? 1.0f : 0.0f;
     app.showWordCount = savedSettings.showWordCount;

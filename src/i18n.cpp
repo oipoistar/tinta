@@ -320,6 +320,8 @@ const Entry kEntries[] = {
     { "fm.items", L"%d item|%d items", L"%d \u9879", L"%d \u4EF6", L"%d\uAC1C" },
     { "settings.editor_assists", L"Markdown assists in the raw editor", L"\u539F\u59CB\u7F16\u8F91\u5668\u7684 Markdown \u8F85\u52A9", L"Raw \u30A8\u30C7\u30A3\u30BF\u306E Markdown \u30A2\u30B7\u30B9\u30C8", L"\uC6D0\uC2DC \uD3B8\uC9D1\uAE30\uC758 \uB9C8\uD06C\uB2E4\uC6B4 \uB3C4\uC6B0\uBBF8" },
     { "settings.editor_assists.hint", L"Lists continue on Enter, Tab indents, Ctrl+B/I wrap", L"\u56DE\u8F66\u7EED\u5199\u5217\u8868\uFF0CTab \u7F29\u8FDB\uFF0CCtrl+B/I \u5305\u88F9", L"Enter \u3067\u30EA\u30B9\u30C8\u7D99\u7D9A\u3001Tab \u3067\u30A4\u30F3\u30C7\u30F3\u30C8\u3001Ctrl+B/I \u3067\u88C5\u98FE", L"Enter\uB85C \uBAA9\uB85D \uACC4\uC18D, Tab \uB4E4\uC5EC\uC4F0\uAE30, Ctrl+B/I \uAC10\uC2F8\uAE30" },
+    { "settings.highlight", L"Markdown in colour in the raw editor", L"\u539F\u59CB\u7F16\u8F91\u5668\u4E2D\u7684 Markdown \u7740\u8272", L"Raw \u30A8\u30C7\u30A3\u30BF\u306E Markdown \u8272\u5206\u3051", L"\uC6D0\uC2DC \uD3B8\uC9D1\uAE30\uC758 \uB9C8\uD06C\uB2E4\uC6B4 \uC0C9\uC0C1 \uD45C\uC2DC" },
+    { "settings.highlight.hint", L"Headings, links, code and marks in colour; code blocks in their language", L"\u6807\u9898\u3001\u94FE\u63A5\u3001\u4EE3\u7801\u548C\u6807\u8BB0\u7740\u8272\uFF1B\u4EE3\u7801\u5757\u6309\u5176\u8BED\u8A00\u7740\u8272", L"\u898B\u51FA\u3057\u30FB\u30EA\u30F3\u30AF\u30FB\u30B3\u30FC\u30C9\u30FB\u8A18\u53F7\u3092\u8272\u5206\u3051\u3057\u3001\u30B3\u30FC\u30C9\u30D6\u30ED\u30C3\u30AF\u306F\u8A00\u8A9E\u306B\u5408\u308F\u305B\u3066\u8868\u793A", L"\uC81C\uBAA9, \uB9C1\uD06C, \uCF54\uB4DC, \uAE30\uD638\uB97C \uC0C9\uC73C\uB85C \uAD6C\uBD84\uD558\uACE0 \uCF54\uB4DC \uBE14\uB85D\uC740 \uD574\uB2F9 \uC5B8\uC5B4\uB85C \uD45C\uC2DC" },
     { "rail.export", L"Export via Pandoc", L"\u901A\u8FC7 Pandoc \u5BFC\u51FA", L"Pandoc \u3067\u30A8\u30AF\u30B9\u30DD\u30FC\u30C8", L"Pandoc\uB85C \uB0B4\uBCF4\uB0B4\uAE30" },
     { "toast.pandoc_ok", L"Exported", L"\u5DF2\u5BFC\u51FA", L"\u30A8\u30AF\u30B9\u30DD\u30FC\u30C8\u5B8C\u4E86", L"\uB0B4\uBCF4\uB0B4\uAE30 \uC644\uB8CC" },
     { "toast.pandoc_fail", L"Pandoc export failed", L"Pandoc \u5BFC\u51FA\u5931\u8D25", L"Pandoc \u30A8\u30AF\u30B9\u30DD\u30FC\u30C8\u306B\u5931\u6557", L"Pandoc \uB0B4\uBCF4\uB0B4\uAE30 \uC2E4\uD328" },
@@ -3106,6 +3108,14 @@ const BuiltinTranslation kBuiltinTranslations[] = {
       L"Das Men\u00FC am Cursor, in Live oder auf einer Karte",
       L"Le menu au curseur, en Live ou sur une carte",
       L"Il menu al cursore, in Live o su una scheda" },
+    { "settings.highlight",
+      L"Markdown farbig im Quelltext-Editor",
+      L"Markdown en couleur dans l'\u00E9diteur brut",
+      L"Markdown a colori nell'editor del sorgente" },
+    { "settings.highlight.hint",
+      L"\u00DCberschriften, Links, Code und Zeichen farbig; Codebl\u00F6cke in ihrer Sprache",
+      L"Titres, liens, code et marques en couleur ; blocs de code selon leur langage",
+      L"Titoli, link, codice e segni a colori; blocchi di codice nel loro linguaggio" },
 };
 
 void seedBuiltinOverrides() {

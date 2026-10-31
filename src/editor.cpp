@@ -17,6 +17,7 @@
 #include "i18n.h"
 #include "input.h"
 #include "sidepanels.h"
+#include "source_style.h"
 
 #include "export.h"
 #include "sheet_ui.h"
@@ -114,6 +115,8 @@ static IDWriteTextLayout* cachedEditorLineLayout(App& app, size_t lineStart, siz
         app.editorLineLayoutCache.erase(it);
     }
     IDWriteTextLayout* layout = createEditorLineLayout(app, lineStart, lineLen);
+    // Drawn lines in colour (#268); hit tests lay lines out plain, at the same widths
+    sourceHighlightLine(app, layout, lineStart, lineLen);
     app.editorLineLayoutCache[lineStart] = {
         layout, lineLen, ++app.editorLayoutUseClock};
 
@@ -210,6 +213,7 @@ static void rebuildEditorRowMetrics(App& app);
 
 void rebuildLineStarts(App& app) {
     app.editorCaretUpstreamPos = std::wstring::npos;
+    ++app.editorTextRevision;
     app.clearEditorLineLayoutCache();
     app.editorLineStarts.clear();
     app.editorLineStarts.push_back(0);
@@ -1779,6 +1783,7 @@ void exitEditMode(App& app) {
     app.clearEditorLineLayoutCache();
     app.editorText.clear();
     app.editorLineStarts.clear();
+    ++app.editorTextRevision;
     app.editorExtraCarets.clear();
     app.undoStack.clear();
     app.redoStack.clear();
@@ -4490,6 +4495,7 @@ static void renderEditorWrapped(App& app, float editorWidth) {
 
 void renderEditor(App& app, float editorWidth) {
     if (!app.editorTextFormat || app.editorLineStarts.empty()) return;
+    sourceHighlightFrame(app);
 
     if (editorWrapOn(app)) {
         renderEditorWrapped(app, editorWidth);

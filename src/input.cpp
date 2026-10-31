@@ -751,6 +751,12 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             app.editorAssists = !app.editorAssists;
             persistEditorMode(app);
             break;
+        case SET_TOGGLE_HIGHLIGHT:
+            // The source's lines are laid out again, in colour or plain (#268)
+            app.editorHighlight = !app.editorHighlight;
+            app.clearEditorLineLayoutCache();
+            persistEditorMode(app);
+            break;
         case SET_TOGGLE_WORDCOUNT:
             app.showWordCount = !app.showWordCount;
             app.editorDocCountsStale = true;

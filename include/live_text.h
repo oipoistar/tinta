@@ -15,6 +15,7 @@
 
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct LiveText {
@@ -162,6 +163,30 @@ bool fenceAround(const std::wstring& text, size_t at, size_t& from, size_t& to);
 enum Block { BLOCK_TEXT, BLOCK_H1, BLOCK_H2, BLOCK_H3, BLOCK_QUOTE, BLOCK_BULLETS, BLOCK_NUMBERS, BLOCK_TASKS, BLOCK_CODE,
              BLOCK_OTHER };
 int blockAt(const std::wstring& text, size_t at);
+
+// The Markdown inside a line, as the page draws it. Live's drawing and the
+// source editor's colours both read lines through this, so they agree on
+// what is code, a link or bold
+enum InlineKind {
+    INL_ESCAPE,                         // a backslash, keeping the character after it as typed
+    INL_CODE_MARK, INL_CODE,            // `code`: its backticks, then its code
+    INL_MATH_MARK, INL_MATH,            // $x$
+    INL_WIKI_MARK, INL_WIKI,            // [[name|words]]: the brackets and the name, the words shown
+    INL_FOOTNOTE,                       // [^1]
+    INL_LINK_MARK, INL_LINK,            // [words](address): [ and ](address), the words
+    INL_IMAGE_MARK, INL_IMAGE,          // ![words](address)
+    INL_STRONG_MARK, INL_STRONG,        // **bold**
+    INL_EM_MARK, INL_EM,                // *italic*
+    INL_STRIKE_MARK, INL_STRIKE,        // ~~struck~~
+    INL_HIGHLIGHT_MARK, INL_HIGHLIGHT,  // ==marked==
+    INL_ADDRESS,                        // an address written out
+};
+struct InlineSpan {
+    int kind;
+    size_t at, length;                  // in the line
+};
+// The spans of a line from `from` on (past its list, quote or heading mark), in order
+void inlineSpans(std::wstring_view line, size_t from, std::vector<InlineSpan>& spans);
 
 // --- Edits -------------------------------------------------------------------
 // Each is one undo step (typing within a pause is one); the caret ends

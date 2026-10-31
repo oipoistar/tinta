@@ -104,6 +104,7 @@ void parkActiveEditBuffer(App& app) {
     app.clearEditorLineLayoutCache();
     app.editorText.clear();
     app.editorLineStarts.clear();
+    ++app.editorTextRevision;
     app.editorExtraCarets.clear();
     app.undoStack.clear();
     app.redoStack.clear();

@@ -341,6 +341,92 @@ int blockAt(const std::wstring& t, size_t at) {
     }
 }
 
+void inlineSpans(std::wstring_view line, size_t from, std::vector<InlineSpan>& spans) {
+    const size_t npos = std::wstring_view::npos;
+    auto add = [&](int kind, size_t at, size_t length) { spans.push_back({kind, at, length}); };
+    for (size_t i = from; i < line.size(); ++i) {
+        wchar_t c = line[i];
+        if (c == L'\\' && i + 1 < line.size()) {
+            add(INL_ESCAPE, i, 1);
+            ++i;
+        } else if (c == L'`') {
+            // Code to the same run of backticks; with none, the rest is not read
+            size_t ticks = 1;
+            while (i + ticks < line.size() && line[i + ticks] == L'`') ++ticks;
+            size_t close = line.find(std::wstring(ticks, L'`'), i + ticks);
+            if (close == npos) break;
+            add(INL_CODE_MARK, i, ticks);
+            add(INL_CODE, i + ticks, close - i - ticks);
+            add(INL_CODE_MARK, close, ticks);
+            i = close + ticks - 1;
+        } else if (c == L'$' && i + 1 < line.size() && line[i + 1] != L' ' && line[i + 1] != L'$') {
+            size_t close = line.find(L'$', i + 1);
+            if (close == npos || line[close - 1] == L' ') continue;
+            add(INL_MATH_MARK, i, 1);
+            add(INL_MATH, i + 1, close - i - 1);
+            add(INL_MATH_MARK, close, 1);
+            i = close;
+        } else if (c == L'[' && i + 1 < line.size() && line[i + 1] == L'[') {
+            // [[a note]] or [[a note|shown as]]
+            size_t close = line.find(L"]]", i + 2);
+            if (close == npos) continue;
+            size_t bar = line.find(L'|', i + 2);
+            size_t shown = bar != npos && bar < close ? bar + 1 : i + 2;
+            add(INL_WIKI_MARK, i, shown - i);
+            add(INL_WIKI, shown, close - shown);
+            add(INL_WIKI_MARK, close, 2);
+            i = close + 1;
+        } else if (c == L'[' && i + 1 < line.size() && line[i + 1] == L'^') {
+            size_t close = line.find(L']', i + 2);
+            if (close == npos) continue;
+            add(INL_FOOTNOTE, i, close - i + 1);
+            i = close;
+        } else if (c == L'[' || (c == L'!' && i + 1 < line.size() && line[i + 1] == L'[')) {
+            // [text](address) and ![alt](address): "](address)" is one mark
+            size_t open = c == L'!' ? i + 1 : i;
+            size_t middle = line.find(L"](", open + 1);
+            if (middle == npos) continue;
+            size_t close = line.find(L')', middle + 2);
+            if (close == npos) continue;
+            int mark = c == L'!' ? INL_IMAGE_MARK : INL_LINK_MARK;
+            add(mark, i, open - i + 1);
+            add(c == L'!' ? INL_IMAGE : INL_LINK, open + 1, middle - open - 1);
+            add(mark, middle, close - middle + 1);
+            i = close;
+        } else if ((c == L'*' || c == L'_') && i + 1 < line.size() && line[i + 1] == c) {
+            std::wstring pair(2, c);
+            size_t close = line.find(pair, i + 2);
+            if (close == npos || close == i + 2) continue;
+            add(INL_STRONG_MARK, i, 2);
+            add(INL_STRONG, i + 2, close - i - 2);
+            add(INL_STRONG_MARK, close, 2);
+            i = close + 1;
+        } else if ((c == L'*' || c == L'_') && i + 1 < line.size() && line[i + 1] != L' ' && (i == 0 || !iswalnum(line[i - 1]))) {
+            size_t close = line.find(c, i + 1);
+            if (close == npos || close == i + 1 || line[close - 1] == L' ') continue;
+            add(INL_EM_MARK, i, 1);
+            add(INL_EM, i + 1, close - i - 1);
+            add(INL_EM_MARK, close, 1);
+            i = close;
+        } else if ((c == L'~' || c == L'=') && i + 1 < line.size() && line[i + 1] == c) {
+            std::wstring pair(2, c);
+            size_t close = line.find(pair, i + 2);
+            if (close == npos || close == i + 2) continue;
+            int mark = c == L'~' ? INL_STRIKE_MARK : INL_HIGHLIGHT_MARK;
+            add(mark, i, 2);
+            add(c == L'~' ? INL_STRIKE : INL_HIGHLIGHT, i + 2, close - i - 2);
+            add(mark, close, 2);
+            i = close + 1;
+        } else if ((c == L'h' || c == L'w') && (i == 0 || line[i - 1] == L' ' || line[i - 1] == L'(') &&
+                   (line.compare(i, 7, L"http://") == 0 || line.compare(i, 8, L"https://") == 0 || line.compare(i, 4, L"www.") == 0)) {
+            size_t stop = i;
+            while (stop < line.size() && line[stop] != L' ' && line[stop] != L')') ++stop;
+            add(INL_ADDRESS, i, stop - i);
+            i = stop - 1;
+        }
+    }
+}
+
 // --- Edits -------------------------------------------------------------------
 
 void pushUndo(LiveText& e, bool coalesce) {
