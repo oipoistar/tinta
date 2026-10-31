@@ -99,7 +99,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Portable mode** - Create a `settings.ini` next to `tinta.exe` (an empty file works) and the whole configuration — settings, custom themes, languages, drafts — lives beside the executable and travels with it; without one, everything stays in `%APPDATA%\Tinta`
 - **Localized interface** - English, Simplified Chinese, Japanese, Korean, German, French, and Italian UI; follows Windows or a chosen language
 - **Text selection & copy** - Select text and copy to clipboard
-- **Touch** - On a touchscreen a finger scrolls the page, the editor and the side panels, and a flick carries on; a tap clicks, a double tap selects a word, and a press held on a word selects it, extends as the finger slides, and opens the context menu where it lifts. The mouse and pen work as before
+- **Touch** - On a touchscreen a finger scrolls the page, the editor, the side panels and Help, and a flick carries on until a finger catches it; a tap clicks, a double tap selects a word, and a press held on a word selects it, extends word by word as the finger slides, and opens the context menu where it lifts (in the preview beside the editor, Copy and Select all). The application menu has **Exit editing** for leaving the editor without a keyboard, and a tap beside Help closes it. The mouse and pen work as before
 - **Zoom support** - Ctrl+scroll to zoom in/out
 - **Drag & drop** - Drop any Markdown or Mermaid file to view it
 - **Minimal footprint** - Small binary, minimal dependencies
