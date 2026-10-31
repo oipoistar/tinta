@@ -44,6 +44,7 @@ struct Entry {
 // Note: kept as a plain array (not unordered_map) on purpose. ~80 entries,
 // linear scan is cache-friendly and avoids a static-init ordering fiasco.
 const Entry kEntries[] = {
+    { "ctx.end_edit", L"Exit editing", L"\u9000\u51fa\u7f16\u8f91", nullptr, nullptr },
     { "fm.type.text", L"text", L"\u6587\u672C", L"\u6587\u5B57\u5217", L"\uD14D\uC2A4\uD2B8" },
     { "fm.type.date", L"date", L"\u65E5\u671F", L"\u65E5\u4ED8", L"\uB0A0\uC9DC" },
     { "fm.type.list", L"list", L"\u5217\u8868", L"\u30EA\u30B9\u30C8", L"\uBAA9\uB85D" },

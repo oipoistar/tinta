@@ -44,6 +44,10 @@ int main() {
     app.editMode = true;
     app.editorText = L"unsaved text";
     app.editorDirty = true;
+    check(contextMenuItemEnabled(app, CTX_END_EDIT), "an editor can exit through the application menu");
+    bool exitEntry = false;
+    for (const auto& entry : contextMenuEntries(app)) exitEntry |= entry.action == CTX_END_EDIT;
+    check(exitEntry, "the editor application menu includes Exit editing");
     check(!contextMenuItemEnabled(app, CTX_COPY_PATH), "untitled editor cannot copy a path");
     check(contextMenuItemEnabled(app, CTX_SAVE) && contextMenuItemEnabled(app, CTX_SAVE_AS),
           "untitled editor can save and save as");
@@ -52,6 +56,10 @@ int main() {
     check(appMenuButtonAt(app, 46, 20), "editor logo uses the full rail width");
     check(!appMenuButtonAt(app, 55, 20), "tabs are outside the logo button");
     app.editMode = false;
+    check(!contextMenuItemEnabled(app, CTX_END_EDIT), "reader cannot exit an inactive editor");
+    exitEntry = false;
+    for (const auto& entry : contextMenuEntries(app)) exitEntry |= entry.action == CTX_END_EDIT;
+    check(!exitEntry, "Exit editing is absent in the reader application menu");
     check(!appMenuButtonAt(app, 46, 20), "reading logo does not steal title dragging");
     app.confirmExitPending = true;
     check(!appMenuAvailable(app), "menu cannot bypass the unsaved-changes dialog");

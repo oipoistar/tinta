@@ -127,6 +127,7 @@ enum ContextMenuItem {
     CTX_EXIT,
     CTX_COPY_PATH,
     CTX_AS_SHEET,
+    CTX_END_EDIT,
     CTX_ITEM_COUNT
 };
 struct ContextMenuEntry {

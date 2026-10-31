@@ -1797,6 +1797,10 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
         case CTX_SAVE_AS:
             saveFileAs(app, hwnd);
             break;
+        case CTX_END_EDIT:
+            closeEditCtxMenu(app);
+            exitEditMode(app);
+            break;
         case CTX_EXIT:
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
             break;

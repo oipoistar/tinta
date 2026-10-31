@@ -37,7 +37,13 @@ const std::vector<ContextMenuEntry>& contextMenuEntries(const App& app) {
         {CTX_HELP, "ctx.help", L"", true},
         {CTX_EXIT, "ctx.exit", L"Alt+F4", false},
     };
-    return app.applicationMenu ? application : (app.editMode ? preview : document);
+    static const std::vector<ContextMenuEntry> editingApplication = [] {
+        auto entries = application;
+        entries.insert(entries.begin() + 4, {CTX_END_EDIT, "ctx.end_edit", L"", true});
+        return entries;
+    }();
+    return app.applicationMenu ? (app.editMode ? editingApplication : application)
+                               : (app.editMode ? preview : document);
 }
 
 float contextMenuPadding(const App& app) { return dpi(app, 6.0f); }
@@ -83,6 +89,7 @@ bool contextMenuItemEnabled(const App& app, int item) {
             return !app.editMode && !app.currentFile.empty() &&
                    app.hasSelection && app.selAnchor != app.selFocus;
         case CTX_SAVE: return app.editMode;
+        case CTX_END_EDIT: return app.editMode;
         case CTX_SAVE_AS: return app.editMode || !app.currentFile.empty();
         case CTX_PRINT: case CTX_EXPORT: case CTX_EDIT:
         case CTX_SELECT_ALL: case CTX_SEARCH: case CTX_TOC:
