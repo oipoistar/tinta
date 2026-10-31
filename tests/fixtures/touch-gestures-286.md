@@ -26,6 +26,13 @@ buttons, including while a header cell is being edited. The buttons must
 remain on top and operate without opening the cell underneath. Ordinary
 cell taps should still open the inline editor.
 
+For control routing, enter **Edit** with split preview, open Find/Replace,
+and narrow the window until Replace / All move below the replacement
+field. Both buttons must remain tappable. Open the source context menu
+near the split: its table submenu must work over the preview, and tapping
+outside must only dismiss it. In reading mode, drag either Contents
+resize edge with a finger; the edge must resize rather than scroll.
+
 | Bed 1 | Bed 2 | Bed 3 | Bed 4 | Bed 5 | Bed 6 | Bed 7 | Bed 8 | Bed 9 | Bed 10 | Bed 11 | Bed 12 | Bed 13 | Bed 14 | Bed 15 | Bed 16 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `12` cm | `24` cm | `36` cm | **Chard** | `60` cm | `72` cm | `84` cm | **Beans** | `108` cm | `120` cm | `132` cm | **Chard** | `156` cm | `168` cm | `180` cm | **Beans** |

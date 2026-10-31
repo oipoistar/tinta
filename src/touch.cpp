@@ -33,7 +33,7 @@ bool isExtra(const App::TouchGesture& t, UINT32 pointer) {
 bool overlayUp(const App& app) {
     return app.showSettings || app.showThemeEditor || app.showShortcutEditor ||
            app.showThemeChooser || app.showHelp || app.showPrintPreview || app.showLightbox ||
-           app.showContextMenu || app.showTabMenu || app.showTabSwitcher ||
+           app.showContextMenu || app.editCtxOpen || app.showTabMenu || app.showTabSwitcher ||
            app.confirmExitPending || app.createRefPending ||
            (app.annotEditorOpen && !app.editMode) || app.signalTrayOpen || app.gotoLineOpen ||
            app.appMenuPressed || startPageActive(app);
@@ -55,9 +55,9 @@ bool onSidePanel(const App& app, float x) {
 
 bool onSearchBar(const App& app, float x, float y) {
     if (!app.showSearch) return false;
-    D2D1_RECT_F bar = searchBarRect(app);
+    D2D1_RECT_F bar = searchBarDrawRect(app);
     // The replace row sits under the find row
-    if (app.searchReplaceMode) bar.bottom += bar.bottom - bar.top;
+    if (app.editMode && app.searchReplaceMode) bar.bottom = searchReplaceRowRect(app).bottom;
     const float margin = dpi(app, 8.0f);
     return x >= bar.left - margin && x <= bar.right + margin && y >= bar.top - margin &&
            y <= bar.bottom + margin;
@@ -248,6 +248,7 @@ TouchTarget touchTargetAt(const App& app, POINT pt, PanelList& list) {
     const float x = static_cast<float>(pt.x), y = static_cast<float>(pt.y);
     if (overlayUp(app) || x < 0 || y < chromeTopHeight(app) || x >= app.width || y >= app.height)
         return TouchTarget::None;
+    if (sidePanelResizeAt(app, x, y) != SidePanel::None) return TouchTarget::None;
     // A side panel's list; its scrollbar drags as with the mouse
     for (PanelList which : {PanelList::Search, PanelList::Contents, PanelList::Browser}) {
         PanelListView view;

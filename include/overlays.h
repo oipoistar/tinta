@@ -167,6 +167,9 @@ float promptKeycap(App& app, const wchar_t* label, float rightX, float cy);
 void panelFooterText(App& app, const wchar_t* text, const D2D1_RECT_F& rect);
 // The search bar's rect once slid in, and its results-panel button
 D2D1_RECT_F searchBarRect(const App& app);
+// Geometry at the current animation position, shared by paint and touch routing.
+D2D1_RECT_F searchBarDrawRect(const App& app);
+D2D1_RECT_F searchReplaceRowRect(const App& app);
 D2D1_RECT_F searchResultsButtonRect(const App& app);
 // Opens at (x, y) client coordinates, clamped so the menu stays on screen
 void openContextMenu(App& app, float x, float y, bool application = false);

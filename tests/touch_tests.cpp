@@ -5,11 +5,13 @@
 // unchanged.
 #include "d2d_init.h"
 #include "editor.h"
+#include "editrail.h"
 #include "input.h"
 #include "overlays.h"
 #include "render.h"
 #include "selection.h"
 #include "settings.h"
+#include "sidepanels.h"
 #include "touch.h"
 #include "utils.h"
 
@@ -69,6 +71,49 @@ void editFrame(App& app) {
     renderEditor(app, editorPaneWidth(app));
     check(SUCCEEDED(app.renderTarget->EndDraw()), "the editor paints");
     syncPreviewToEditor(app);
+}
+
+void controlRoutingScenario(App& app) {
+    PanelList list;
+    app.showSearch = app.searchReplaceMode = true;
+    for (float animation : {0.4f, 1.0f}) {
+        app.searchAnimation = animation;
+        app.renderTarget->BeginDraw();
+        renderSearchOverlay(app);
+        check(SUCCEEDED(app.renderTarget->EndDraw()), "replace bar paints");
+        check(!app.searchReplaceHits.empty(), "replace controls have painted hit regions");
+        for (const auto& hit : app.searchReplaceHits) {
+            const auto& r = hit.first;
+            POINT p{(LONG)((r.left + r.right) / 2), (LONG)((r.top + r.bottom) / 2)};
+            check(touchTargetAt(app, p, list) == TouchTarget::None,
+                  "every painted replace control keeps mouse emulation, including stacked buttons");
+        }
+    }
+    app.showSearch = app.searchReplaceMode = false;
+    const POINT preview{(LONG)(documentViewportX(app) + dpi(app, 12)), app.height / 2};
+    openEditCtxMenu(app, app.hwnd, (float)preview.x, (float)preview.y);
+    app.renderTarget->BeginDraw();
+    renderEditCtxMenu(app);
+    check(SUCCEEDED(app.renderTarget->EndDraw()), "editor menu paints across the pane boundary");
+    POINT submenu{-1, -1};
+    for (const auto& hit : app.editCtxHits) {
+        if (hit.second == 110) submenu = {(LONG)((hit.first.left + hit.first.right) / 2),
+                                        (LONG)((hit.first.top + hit.first.bottom) / 2)};
+    }
+    check(submenu.x >= documentViewportX(app), "the table menu entry is over the preview");
+    check(!touchDown(app, app.hwnd, 60, submenu, ms += 1000), "an editor menu touch goes to mouse emulation");
+    const auto source = app.editorText;
+    const auto caret = app.editorCursorPos;
+    handleMouseMove(app, app.hwnd, MAKELPARAM(submenu.x, submenu.y));
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, MAKELPARAM(submenu.x, submenu.y));
+    handleMouseUp(app, app.hwnd, 0, MAKELPARAM(submenu.x, submenu.y));
+    check(app.editCtxOpen && app.editCtxSub == 1 && app.editorText == source && app.editorCursorPos == caret,
+          "the menu opens its submenu over the preview without changing source or caret");
+    const POINT outside{app.width - (LONG)dpi(app, 24), (LONG)(chromeTopHeight(app) + dpi(app, 20))};
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, MAKELPARAM(outside.x, outside.y));
+    handleMouseUp(app, app.hwnd, 0, MAKELPARAM(outside.x, outside.y));
+    check(!app.editCtxOpen && !app.selecting && app.editorText == source && app.editorCursorPos == caret,
+          "dismissing the editor menu consumes the click over the preview");
 }
 
 void scenario(App& app, const char* path, int width, float scale) {
@@ -240,6 +285,14 @@ void scenario(App& app, const char* path, int width, float scale) {
     app.tocFilter.clear();
     app.tocSpyOverride = -1;
     const D2D1_RECT_F rows = tocListRect(app);
+    const bool wasLeft = app.tocOnLeft;
+    for (bool left : {false, true}) {
+        app.tocOnLeft = left;
+        const POINT edge{(LONG)sidePanelResizeEdge(app, SidePanel::Contents), app.height / 2};
+        check(touchTargetAt(app, edge, list) == TouchTarget::None,
+              "both Contents resize edges keep mouse emulation instead of panning the list");
+    }
+    app.tocOnLeft = wasLeft;
     const POINT inList{(LONG)(rows.left + dpi(app, 40)), (LONG)(rows.bottom - dpi(app, 60))};
     check(touchTargetAt(app, inList, list) == TouchTarget::List && list == PanelList::Contents,
           "a finger on the Contents drives its list" + where);
@@ -306,6 +359,7 @@ void scenario(App& app, const char* path, int width, float scale) {
     check(app.editorText == sourceBeforeJump && app.editorDirty == dirtyBeforeJump &&
               app.editorCursorPos == caretBeforeJump,
           "preview link navigation does not edit source or move its caret" + where);
+    controlRoutingScenario(app);
     exitEditMode(app);
 }
 }  // namespace

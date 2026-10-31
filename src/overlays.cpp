@@ -53,12 +53,11 @@ void renderSearchOverlay(App& app) {
     float anim = app.searchAnimation;
 
     // Search bar dimensions
-    D2D1_RECT_F rest = searchBarRect(app);
+    D2D1_RECT_F rest = searchBarDrawRect(app);
     float barWidth = rest.right - rest.left;
     float barHeight = rest.bottom - rest.top;
     float barX = rest.left;
-    float barY = chromeTopHeight(app) + dpi(app, 20.0f) * anim -
-                 barHeight * (1.0f - anim);  // Slide down from under the strip
+    float barY = rest.top;
 
     // Background with rounded corners
     D2D1_ROUNDED_RECT barRect = D2D1::RoundedRect(
@@ -169,9 +168,10 @@ void renderSearchOverlay(App& app) {
     // Replace row (#121): a second input under the bar plus Replace / All
     app.searchReplaceHits.clear();
     if (app.editMode && app.searchReplaceMode && searchTextFormat) {
-        float rowY = barY + barHeight + dpi(app, 6.0f);
+        const D2D1_RECT_F row = searchReplaceRowRect(app);
+        float rowY = row.top;
         bool stacked = barWidth < dpi(app, 390);
-        float rowH = dpi(app, stacked ? 88.0f : 44.0f);
+        float rowH = row.bottom - row.top;
         D2D1_ROUNDED_RECT rowRect = D2D1::RoundedRect(
             D2D1::RectF(barX, rowY, barX + barWidth, rowY + rowH),
             dpi(app, 8.0f), dpi(app, 8.0f));
@@ -2299,6 +2299,22 @@ D2D1_RECT_F searchBarRect(const App& app) {
     float barX = barLeft + (barCenterWidth - barWidth) / 2;
     float barY = chromeTopHeight(app) + dpi(app, 20.0f);
     return D2D1::RectF(barX, barY, barX + barWidth, barY + barHeight);
+}
+
+D2D1_RECT_F searchBarDrawRect(const App& app) {
+    D2D1_RECT_F bar = searchBarRect(app);
+    const float height = bar.bottom - bar.top;
+    bar.top = chromeTopHeight(app) + dpi(app, 20.0f) * app.searchAnimation -
+              height * (1.0f - app.searchAnimation);
+    bar.bottom = bar.top + height;
+    return bar;
+}
+
+D2D1_RECT_F searchReplaceRowRect(const App& app) {
+    D2D1_RECT_F row = searchBarDrawRect(app);
+    row.top = row.bottom + dpi(app, 6.0f);
+    row.bottom = row.top + dpi(app, row.right - row.left < dpi(app, 390) ? 88.0f : 44.0f);
+    return row;
 }
 
 // The reader's bar ends in a button that opens the results panel (#246)

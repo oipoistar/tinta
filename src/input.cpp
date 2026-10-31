@@ -1468,6 +1468,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         }
         if (liveMouseMove(app, hwnd, app.mouseX, app.mouseY)) return;
         handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
+        if (app.editCtxOpen) return;
         // The Read button owns the pointer while it shows (#245)
         if (app.readButtonHover) return;
         // Replace-bar controls override the pane cursor: hand over the
@@ -2162,6 +2163,13 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
 
     // The chooser acts on release; do not place an editor caret under it.
     if (app.showThemeChooser) return;
+
+    // The editor menu can cross the pane boundary. Its action or dismissal
+    // consumes both halves of the click, including over preview content.
+    if (app.editMode && editCtxMouseDown(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+        app.swallowNextMouseUp = true;
+        return;
+    }
 
     // A side panel list's scrollbar drags like the document's (#287)
     if (panelScrollbarBegin(app, hwnd, static_cast<float>(GET_X_LPARAM(lParam)),
