@@ -90,6 +90,9 @@ void editorApplyLiveEdits(App& app, const std::vector<LiveText::Change>& changes
 void editorUndoRedo(App& app, bool redo);
 // Puts the source's caret in view (back from Live)
 void editorRevealCaret(App& app);
+// Ctrl+V at the source's caret: a screenshot saves as a PNG beside the
+// document, a spreadsheet's range becomes a table unless `raw` (Shift)
+void editorPasteClipboard(App& app, HWND hwnd, bool raw);
 // The fenced templates the rail's flyout and Live's slash menu insert:
 // 0 flowchart, 1 sequence, 2 class, 3 state, 4 gantt, 5 pie, 6 an empty
 // Mermaid block, 7-9 PlantUML sequence, class and activity, 10 mind map

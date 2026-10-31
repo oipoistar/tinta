@@ -2009,5 +2009,7 @@ void renderSheet(App& app) {
         if (l) l->Release();
     }
     drawMenu(app, doc, p);
+    // A card's text menu, over everything
+    live::drawMenu(app, doc.edit);
     app.renderTarget->PopAxisAlignedClip();
 }

@@ -84,8 +84,7 @@ same way on a sheet and in its own tab.
   it without moving the caret.
 - **Ctrl+click** follows a link: a note opens in a tab, a heading scrolls
   into view and an address opens in the browser.
-- A right-click opens the insert menu at the click (cut, copy, paste, and
-  table, diagram, picture, code block, link and divider).
+- A right-click opens the menu (below) with the caret at the click.
 
 ## Making things
 
@@ -114,7 +113,52 @@ format already on the selection shows lit, and its button takes it off.
 
 **The rail.** The edit rail's text and block buttons (bold, italic,
 strikethrough, code, link, bullets, tasks, quote) act on the Live text. Its
-table, diagram and picture buttons insert at the caret as in Source.
+table and diagram buttons open the menu's table grid and diagrams beside
+it, and its picture button picks a picture to link at the caret.
+
+## The menu
+
+A right-click on the page opens the menu at the pointer, and the caret
+goes where the click was; a click inside the selection keeps the
+selection. The menu key and Shift+F10 open it under the caret. What the
+pointer is on decides what it offers:
+
+- **The formats**, along its top: bold, italic, strikethrough, code,
+  highlight and link, for the selection or the word under the pointer. A
+  format already there shows lit, and its button takes it off. Pointing at
+  a button shows its name and key. With lines selected the formats wait,
+  as the format bar does.
+- **Cut, Copy and Paste.** Paste makes a screenshot a picture saved beside
+  the document and a spreadsheet's range a table, as Ctrl+V does.
+- **A link:** Open link (Open note for `[[name]]`), Copy link address,
+  Edit link (its address selected to type over) and Remove link (its words
+  stay).
+- **A picture:** Replace image… and Copy image address.
+- **A task:** Mark as done, or as not done. **A list item:** Indent and
+  Outdent.
+- **A table:** Insert row above or below, Insert column left or right,
+  Delete row, Delete column and Align column (left, centre or right; the
+  same again takes it off). The header and its delimiter row stay.
+- **Code:** Copy code, its lines without the fences. Code and the
+  properties have no formats, Turn into or Insert.
+- **Turn into** makes the caret's line, or the selected lines, a
+  paragraph, a heading, a quote, a list or code, with the kind they are
+  now ticked. Their marks give way to the new kind's; quoted lines keep
+  their quote, list items their indents, and numbers count on at each
+  level. A table's rows stay table rows.
+- **Insert** makes what the slash menu makes: a table of a size picked on
+  a grid, a picture, a link, a footnote, a divider, code, maths, a
+  callout, a diagram, or the properties. A block goes below the caret's
+  line (below the table, when asked for in one); a link asked for over
+  selected words makes them its words.
+- **Select all.**
+
+Submenus open beside their rows when the pointer rests on them, and stay
+open while the pointer heads for them across other rows. The keys work
+the menu too: Up and Down go through its rows, Right opens a submenu and
+Left or Esc goes back, Enter picks, and a letter goes to the next row it
+starts. On the formats Left and Right go along the buttons; on the grid
+the arrows size the table.
 
 ## The pill
 
@@ -133,6 +177,8 @@ A card being typed in uses the same engine:
 - the same keys, pairs, lists, tables and fences;
 - the live drawing of the lines away from the caret;
 - the slash menu and the format bar;
+- the menu, from a right-click in the card or the menu key, where Open
+  note brings a note on the sheet into view;
 - the `[[` names, where Ctrl+Enter draws the arrow too;
 - task boxes that tick with a click.
 
@@ -147,8 +193,8 @@ what is typed, and naming a new note after its first line.
   under its Markdown while open; it catches up after a pause in the typing.
   A picture inside a longer block shows as its Markdown until the caret
   leaves.
-- Tables are typed in as their Markdown. The reading view's cell editor
-  stays Source's.
+- Tables are typed in as their Markdown, with rows and columns from the
+  menu. The reading view's cell editor stays Source's.
 - One caret. Source keeps its several carets and Ctrl+D.
 - No headings on Ctrl+1 to Ctrl+6, which switch tabs in Tinta. Use `/h1`,
   the format bar or `# `.

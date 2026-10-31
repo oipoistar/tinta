@@ -197,6 +197,150 @@ LineMark lineMark(const std::wstring& t, size_t begin) {
     return m;
 }
 
+size_t quoteLength(const std::wstring& t, size_t ls) {
+    size_t end = lineEnd(t, ls), i = ls;
+    while (i < end && t[i] == L' ') ++i;
+    size_t q = i;
+    while (q < end && t[q] == L'>') {
+        ++q;
+        if (q < end && t[q] == L' ') ++q;
+    }
+    return q > i ? q - ls : 0;
+}
+
+LinkSpan linkAt(const std::wstring& t, size_t at) {
+    const size_t npos = std::wstring_view::npos;
+    at = std::min(at, t.size());
+    size_t ls = lineStart(t, at);
+    std::wstring_view line = lineView(t, ls);
+    size_t col = at - ls;
+    LinkSpan l;
+    // [[name]] and [[name|words]]
+    for (size_t open = line.find(L"[["); open != npos;) {
+        size_t close = line.find(L"]]", open + 2);
+        if (close == npos) break;
+        if (col >= open && col <= close + 2) {
+            size_t bar = std::min(line.find(L'|', open + 2), close);
+            l.kind = LinkSpan::Wiki;
+            l.from = ls + open;
+            l.to = ls + close + 2;
+            l.addressFrom = ls + open + 2;
+            l.addressTo = ls + bar;
+            l.textFrom = bar < close ? ls + bar + 1 : l.addressFrom;
+            l.textTo = ls + close;
+            return l;
+        }
+        open = line.find(L"[[", close + 2);
+    }
+    // [words](address) and ![words](picture); a title after the address is not part of it
+    for (size_t open = line.find(L'['); open != npos; open = line.find(L'[', open + 1)) {
+        size_t close = line.find(L']', open + 1);
+        if (close == npos) break;
+        if (close + 1 >= line.size() || line[close + 1] != L'(') continue;
+        size_t end = line.find(L')', close + 2);
+        if (end == npos) continue;
+        bool image = open > 0 && line[open - 1] == L'!';
+        size_t from = image ? open - 1 : open;
+        if (col < from || col > end + 1) continue;
+        size_t space = line.find(L' ', close + 2);
+        l.kind = image ? LinkSpan::Image : LinkSpan::Inline;
+        l.from = ls + from;
+        l.to = ls + end + 1;
+        l.textFrom = ls + open + 1;
+        l.textTo = ls + close;
+        l.addressFrom = ls + close + 2;
+        l.addressTo = ls + std::min(space, end);
+        return l;
+    }
+    // An address written out, without the punctuation that ends a sentence after it
+    for (const wchar_t* scheme : {L"https://", L"http://"}) {
+        for (size_t s = line.find(scheme); s != npos; s = line.find(scheme, s + 1)) {
+            size_t e = line.find_first_of(L" )>\t", s);
+            if (e == npos) e = line.size();
+            while (e > s && std::wstring_view(L".,;:!?\"'").find(line[e - 1]) != npos) --e;
+            if (col < s || col > e) continue;
+            l.kind = LinkSpan::Address;
+            l.from = l.textFrom = l.addressFrom = ls + s;
+            l.to = l.textTo = l.addressTo = ls + e;
+            return l;
+        }
+    }
+    return l;
+}
+
+TableSpot tableAt(const std::wstring& t, size_t at) {
+    const size_t npos = std::wstring_view::npos;
+    TableSpot s;
+    at = std::min(at, t.size());
+    size_t ls = lineStart(t, at);
+    if (!tableRow(lineView(t, ls)) || fenceState(t, ls) != 0) return s;
+    size_t first = ls, last = ls;
+    while (first > 0) {
+        size_t above = lineStart(t, first - 1);
+        if (!tableRow(lineView(t, above))) break;
+        first = above;
+    }
+    for (size_t end = lineEnd(t, last); end < t.size() && tableRow(lineView(t, end + 1)); end = lineEnd(t, last)) last = end + 1;
+    // A table's second row is its delimiter row
+    size_t second = lineEnd(t, first) + 1;
+    if (first == last || second > t.size() || !delimiterRow(lineView(t, second))) return s;
+    s.in = true;
+    s.first = first;
+    s.last = last;
+    s.row = ls;
+    for (size_t r = first; r < ls; r = lineEnd(t, r) + 1) ++s.index;
+    std::vector<size_t> header = cellBounds(lineView(t, first));
+    s.columns = header.size() >= 2 ? (int)header.size() - 1 : 1;
+    std::vector<size_t> bounds = cellBounds(lineView(t, ls));
+    size_t col = at - ls;
+    while (s.column + 2 < (int)bounds.size() && bounds[s.column + 1] < col) ++s.column;
+    // The column's alignment, as its delimiter cell has it
+    std::wstring_view delimiter = lineView(t, second);
+    std::vector<size_t> cells = cellBounds(delimiter);
+    if (s.column + 1 < (int)cells.size()) {
+        std::wstring_view cell = delimiter.substr(cells[s.column] + 1, cells[s.column + 1] - cells[s.column] - 1);
+        size_t a = cell.find_first_not_of(L' '), b = cell.find_last_not_of(L' ');
+        if (a != npos) {
+            bool left = cell[a] == L':', right = cell[b] == L':';
+            s.align = left && right ? 2 : right ? 3 : left ? 1 : 0;
+        }
+    }
+    return s;
+}
+
+bool fenceAround(const std::wstring& t, size_t at, size_t& from, size_t& to) {
+    std::vector<size_t> starts{0};
+    for (size_t i = 0; i < t.size(); ++i) {
+        if (t[i] == L'\n') starts.push_back(i + 1);
+    }
+    std::vector<char> states;
+    fenceLines(t, starts, states);
+    size_t line = (size_t)(std::upper_bound(starts.begin(), starts.end(), std::min(at, t.size())) - starts.begin()) - 1;
+    if (!states[line]) return false;
+    size_t open = line;
+    while (open > 0 && states[open] != 1) --open;
+    size_t close = open + 1;
+    while (close < starts.size() && states[close] == 2) ++close;
+    from = open + 1 < starts.size() ? starts[open + 1] : t.size();
+    to = close < starts.size() ? starts[close] - 1 : t.size();
+    if (to < from) to = from;
+    return true;
+}
+
+int blockAt(const std::wstring& t, size_t at) {
+    size_t ls = lineStart(t, std::min(at, t.size()));
+    if (fenceState(t, ls) != 0) return BLOCK_CODE;
+    size_t q = quoteLength(t, ls);
+    LineMark m = lineMark(t, ls + q);
+    switch (m.kind) {
+        case LineMark::Heading: return m.number <= 3 ? BLOCK_H1 + m.number - 1 : BLOCK_OTHER;
+        case LineMark::Bullet: return BLOCK_BULLETS;
+        case LineMark::Number: return BLOCK_NUMBERS;
+        case LineMark::Task: return BLOCK_TASKS;
+        default: return q ? BLOCK_QUOTE : BLOCK_TEXT;
+    }
+}
+
 // --- Edits -------------------------------------------------------------------
 
 void pushUndo(LiveText& e, bool coalesce) {
@@ -255,18 +399,6 @@ void spliceKeep(LiveText& e, size_t at, size_t removed, const std::wstring& with
     e.caret = mapThrough(e.caret, at, removed, with.size());
     e.anchor = mapThrough(e.anchor, at, removed, with.size());
     splice(e, at, removed, with);
-}
-
-// How far a line's quote marks run ("> ", "> > "), from its start; 0: none
-size_t quoteLength(const std::wstring& t, size_t ls) {
-    size_t end = lineEnd(t, ls), i = ls;
-    while (i < end && t[i] == L' ') ++i;
-    size_t q = i;
-    while (q < end && t[q] == L'>') {
-        ++q;
-        if (q < end && t[q] == L' ') ++q;
-    }
-    return q > i ? q - ls : 0;
 }
 
 // A line's mark put on, swapped or taken off: the caret and the selection
@@ -917,6 +1049,195 @@ void moveLines(LiveText& e, bool up) {
     }
 }
 
+void turnInto(LiveText& e, int block) {
+    if (!e.multiline || block < BLOCK_TEXT || block > BLOCK_CODE) return;
+    size_t first = 0, last = 0;
+    selectedLines(e, first, last);
+    if (block == BLOCK_CODE) {
+        // The lines go between fences; lines in code already are left alone
+        if (fenceState(e.text, first) != 0 || fenceState(e.text, last) != 0) return;
+        size_t caret = e.caret, anchor = e.anchor;
+        pushUndo(e, false);
+        splice(e, lineEnd(e.text, last), 0, L"\n```");
+        splice(e, first, 0, L"```\n");
+        settle(e, caret + 4, anchor + 4);
+        return;
+    }
+    // Worked out top down (numbers count on at each indent), written bottom up
+    struct Change {
+        size_t at, removed;
+        std::wstring with;
+    };
+    std::vector<Change> changes;
+    std::vector<std::pair<size_t, int>> counts;  // a numbered list's indents and their next numbers
+    for (size_t at = first;; at = lineEnd(e.text, at) + 1) {
+        if (!(blank(lineView(e.text, at)) && first != last) && fenceState(e.text, at) == 0) {
+            size_t q = quoteLength(e.text, at);
+            LineMark m = lineMark(e.text, at + q);
+            size_t mark = m.kind == LineMark::None || m.kind == LineMark::Quote ? 0 : m.length;
+            switch (block) {
+                case BLOCK_TEXT:
+                    // A paragraph: its quote, indent and mark all go
+                    changes.push_back({at, q + m.indent + mark, L""});
+                    break;
+                case BLOCK_H1:
+                case BLOCK_H2:
+                case BLOCK_H3:
+                    changes.push_back({at + q, m.indent + mark, std::wstring((size_t)(block - BLOCK_H1 + 1), L'#') + L" "});
+                    break;
+                case BLOCK_QUOTE:
+                    if (!q) changes.push_back({at, 0, L"> "});
+                    break;
+                default: {
+                    // A task keeps its box as ticked; list items keep their indent
+                    if (block == BLOCK_TASKS && m.kind == LineMark::Task) break;
+                    std::wstring with = block == BLOCK_TASKS ? L"- [ ] " : L"- ";
+                    if (block == BLOCK_NUMBERS) {
+                        while (!counts.empty() && counts.back().first > m.indent) counts.pop_back();
+                        if (counts.empty() || counts.back().first < m.indent) counts.push_back({m.indent, 1});
+                        with = std::to_wstring(counts.back().second++) + L". ";
+                    }
+                    changes.push_back({at + q + m.indent, mark, with});
+                    break;
+                }
+            }
+        }
+        if (at >= last || lineEnd(e.text, at) >= e.text.size()) break;
+    }
+    if (changes.empty()) return;
+    pushUndo(e, false);
+    for (auto it = changes.rbegin(); it != changes.rend(); ++it) spliceMark(e, it->at, it->removed, it->with);
+    e.preferredX = -1;
+}
+
+namespace {
+
+// The caret at the end of a cell's text: the row's last cell for a short row
+void caretInCell(LiveText& e, size_t rowStart, const std::vector<size_t>& bounds, size_t k) {
+    if (bounds.size() < 2) {
+        settle(e, rowStart, rowStart);
+        return;
+    }
+    selectCell(e, rowStart, bounds, std::min(k, bounds.size() - 2));
+    e.anchor = e.caret;
+}
+
+// The start of a table's row, counted from its header
+size_t tableRowStart(const std::wstring& t, size_t first, int index) {
+    size_t row = first;
+    for (int i = 0; i < index && row < t.size(); ++i) row = lineEnd(t, row) + 1;
+    return std::min(row, t.size());
+}
+
+}  // namespace
+
+bool editTable(LiveText& e, size_t at, int edit) {
+    TableSpot s = tableAt(e.text, at);
+    if (!s.in) return false;
+    std::vector<size_t> rows;
+    for (size_t r = s.first;; r = lineEnd(e.text, r) + 1) {
+        rows.push_back(r);
+        if (r >= s.last) break;
+    }
+    const int k = s.column;
+    std::wstring_view header = lineView(e.text, s.first);
+    std::wstring pad(std::min(header.find_first_not_of(L' '), header.size()), L' ');
+    switch (edit) {
+        case TABLE_ROW_ABOVE:
+        case TABLE_ROW_BELOW: {
+            // Nothing goes above the header; under it, a row goes past the delimiter row
+            if (edit == TABLE_ROW_ABOVE && s.index < 2) return false;
+            std::wstring row = pad + L"|";
+            for (int c = 0; c < s.columns; ++c) row += L"  |";
+            pushUndo(e, false);
+            size_t start = s.row;
+            if (edit == TABLE_ROW_ABOVE) {
+                splice(e, s.row, 0, row + L"\n");
+            } else {
+                size_t end = lineEnd(e.text, s.index < 2 ? rows[1] : s.row);
+                splice(e, end, 0, L"\n" + row);
+                start = end + 1;
+            }
+            caretInCell(e, start, cellBounds(lineView(e.text, start)), (size_t)k);
+            return true;
+        }
+        case TABLE_DELETE_ROW: {
+            if (s.index < 2) return false;
+            const bool lastRow = s.row == s.last;
+            size_t end = lineEnd(e.text, s.row);
+            pushUndo(e, false);
+            // Its line and one line break go
+            if (end < e.text.size()) splice(e, s.row, end + 1 - s.row, L"");
+            else splice(e, s.row - 1, end + 1 - s.row, L"");
+            // The row below takes its place, or the one above when it was the last;
+            // with no rows left, the header
+            size_t row = lastRow ? lineStart(e.text, s.row - 1) : s.row;
+            if (delimiterRow(lineView(e.text, row))) row = s.first;
+            caretInCell(e, row, cellBounds(lineView(e.text, row)), (size_t)k);
+            return true;
+        }
+        case TABLE_COLUMN_LEFT:
+        case TABLE_COLUMN_RIGHT: {
+            const int c = edit == TABLE_COLUMN_LEFT ? k : k + 1;
+            pushUndo(e, false);
+            for (size_t i = rows.size(); i-- > 0;) {
+                size_t r = rows[i];
+                std::wstring_view line = lineView(e.text, r);
+                std::vector<size_t> bounds = cellBounds(line);
+                if (bounds.empty()) continue;
+                std::wstring cell = i == 1 ? L" --- |" : L"  |";
+                if (c + 1 < (int)bounds.size()) splice(e, r + bounds[c] + 1, 0, cell);  // after the pipe that opens cell c
+                else if (bounds.back() >= line.size()) splice(e, r + line.size(), 0, L" |" + cell);  // a row with no last pipe
+                else splice(e, r + bounds.back() + 1, 0, cell);
+            }
+            size_t row = tableRowStart(e.text, s.first, s.index);
+            caretInCell(e, row, cellBounds(lineView(e.text, row)), (size_t)c);
+            return true;
+        }
+        case TABLE_DELETE_COLUMN: {
+            if (s.columns <= 1) return false;
+            pushUndo(e, false);
+            for (size_t i = rows.size(); i-- > 0;) {
+                std::vector<size_t> bounds = cellBounds(lineView(e.text, rows[i]));
+                if (k + 1 < (int)bounds.size()) splice(e, rows[i] + bounds[k], bounds[k + 1] - bounds[k], L"");
+            }
+            size_t row = tableRowStart(e.text, s.first, s.index);
+            caretInCell(e, row, cellBounds(lineView(e.text, row)), (size_t)k);
+            return true;
+        }
+        case TABLE_ALIGN_LEFT:
+        case TABLE_ALIGN_CENTER:
+        case TABLE_ALIGN_RIGHT: {
+            std::vector<size_t> bounds = cellBounds(lineView(e.text, rows[1]));
+            if (k + 1 >= (int)bounds.size()) return false;
+            // The alignment it has already goes back to none
+            int want = edit - TABLE_ALIGN_LEFT + 1;
+            const wchar_t* cell = want == s.align ? L" --- " : want == 1 ? L" :--- " : want == 2 ? L" :---: " : L" ---: ";
+            pushUndo(e, false);
+            spliceKeep(e, rows[1] + bounds[k] + 1, bounds[k + 1] - bounds[k] - 1, cell);
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+void unlink(LiveText& e, size_t at) {
+    LinkSpan l = linkAt(e.text, at);
+    if (l.kind != LinkSpan::Inline && l.kind != LinkSpan::Wiki) return;
+    std::wstring words = e.text.substr(l.textFrom, l.textTo - l.textFrom);
+    pushUndo(e, false);
+    splice(e, l.from, l.to - l.from, words);
+    settle(e, l.from + words.size(), l.from + words.size());
+}
+
+void relink(LiveText& e, size_t at, const std::wstring& address) {
+    LinkSpan l = linkAt(e.text, at);
+    if (l.kind == LinkSpan::None || l.kind == LinkSpan::Address || address.empty()) return;
+    pushUndo(e, false);
+    spliceKeep(e, l.addressFrom, l.addressTo - l.addressFrom, address);
+}
+
 std::wstring forEditing(std::string utf8) {
     if (utf8.size() >= 3 && (unsigned char)utf8[0] == 0xEF && (unsigned char)utf8[1] == 0xBB && (unsigned char)utf8[2] == 0xBF) {
         utf8.erase(0, 3);
@@ -1030,7 +1351,7 @@ std::vector<LiveText::Choice> slashChoices(App& app, const std::wstring& typed) 
     return out;
 }
 
-void applyInsert(LiveText& e, int insert, const std::wstring& image) {
+void applyInsert(LiveText& e, int insert, const std::wstring& image, int columns, int rows) {
     size_t slash = e.popup == LiveText::Popup::Slash && e.popupFrom > 0 ? e.popupFrom - 1 : e.selStart();
     size_t caret = std::max(e.caret, slash);
     pushUndo(e, false);
@@ -1124,9 +1445,21 @@ void applyInsert(LiveText& e, int insert, const std::wstring& image) {
         case INS_PIE: diagram(5); break;
         case INS_PLANTUML: diagram(7); break;
         case INS_MINDMAP: diagram(10); break;
-        case INS_TABLE:
-            block(std::wstring(L"| ") + kCaret + L"Column" + kEnd + L" | Column |\n| --- | --- |\n|  |  |");
+        case INS_TABLE: {
+            // Its header to type first, the first cell's word selected
+            columns = std::clamp(columns, 1, 12);
+            rows = std::clamp(rows, 0, 50);
+            std::wstring tpl = std::wstring(L"| ") + kCaret + L"Column" + kEnd + L" |";
+            for (int c = 1; c < columns; ++c) tpl += L" Column |";
+            tpl += L"\n|";
+            for (int c = 0; c < columns; ++c) tpl += L" --- |";
+            for (int r = 0; r < rows; ++r) {
+                tpl += L"\n|";
+                for (int c = 0; c < columns; ++c) tpl += L"  |";
+            }
+            block(tpl);
             break;
+        }
         case INS_INLINE_MATH: place(std::wstring(L"$") + kCaret + L"$", slash); break;
         case INS_LINK: place(std::wstring(L"[") + kCaret + L"]()", slash); break;
         case INS_IMAGE:

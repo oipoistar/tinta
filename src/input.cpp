@@ -907,6 +907,9 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
         printPreviewSetPage(app, app.printPreviewPage + (delta < 0 ? 1 : -1));
         return;
     }
+    // A text menu goes with the page it was opened over
+    liveCloseMenu(app);
+    if (sheetActive(app)) sheetCloseTextMenu(app);
     // A turn that only closes a menu does nothing else over the tab strip
     const bool menuWasOpen = app.showContextMenu || app.showTabMenu;
     if (app.showContextMenu) {
@@ -1144,6 +1147,11 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     bool mouseMoved = app.mouseX != GET_X_LPARAM(lParam) || app.mouseY != GET_Y_LPARAM(lParam);
     app.mouseX = GET_X_LPARAM(lParam);
     app.mouseY = GET_Y_LPARAM(lParam);
+    // An open text menu lights its rows and has the arrow wherever the pointer goes
+    if (liveMenuMouseMove(app, hwnd, app.mouseX, app.mouseY) ||
+        (sheetActive(app) && sheetTextMenuMouseMove(app, hwnd, app.mouseX, app.mouseY))) {
+        return;
+    }
     // A press that began on a sheet keeps the pointer, over the strip too
     if (sheetActive(app) && sheetPressed(app)) {
         sheetMouseMove(app, hwnd, app.mouseX, app.mouseY);
@@ -1444,6 +1452,11 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
 
     // Edit mode: handle separator drag, editor selection, cursor shape
     if (app.editMode) {
+        // The rail's export flyout hangs over the page: it lights its rows first
+        if (app.editCtxOpen && editorLiveOn(app) && editCtxMouseMove(app, app.mouseX, app.mouseY)) {
+            SetCursor(cursorArrow);
+            return;
+        }
         if (liveMouseMove(app, hwnd, app.mouseX, app.mouseY)) return;
         handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
         // The Read button owns the pointer while it shows (#245)
@@ -1867,8 +1880,10 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
         ScreenToClient(hwnd, &pt);
     }
 
-    // A sheet has its own menu for its cards, arrows, groups and ground
-    if (sheetActive(app) && (float)pt.y >= chromeTopHeight(app) && sheetContextMenu(app, hwnd, pt.x, pt.y)) return;
+    // A sheet has its own menu for its cards, arrows, groups and ground, and
+    // a card being typed in has the text's
+    if (sheetActive(app) && (fromKeyboard || (float)pt.y >= chromeTopHeight(app)) &&
+        sheetContextMenu(app, hwnd, pt.x, pt.y, fromKeyboard)) return;
 
     // A right-click on a tab opens the tab menu (works in edit mode and
     // above panels too — the strip stays interactive there)
@@ -1882,15 +1897,14 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
         return;  // strip right-clicks never reach the document menu
     }
 
-    // Preserve the selection on an inside right-click (#230); otherwise
-    // move the caret so INSERT entries drop their Markdown at that point.
-    if (editorLiveOn(app) && !app.confirmExitPending && !fromKeyboard &&
-        (float)pt.x >= documentViewportX(app)) {
-        livePrepareContextMenu(app, hwnd, pt.x, pt.y);
-        openEditCtxMenu(app, hwnd, (float)pt.x, (float)pt.y);
-        InvalidateRect(hwnd, nullptr, FALSE);
+    // Live has its own menu on the page: the formats, the clipboard, what is
+    // under the pointer, Turn into and Insert; the menu key opens it at the caret
+    if (editorLiveOn(app) && !app.confirmExitPending && (fromKeyboard || (float)pt.x >= documentViewportX(app))) {
+        liveContextMenu(app, hwnd, pt.x, pt.y, fromKeyboard);
         return;
     }
+    // Preserve the selection on an inside right-click (#230); otherwise
+    // move the caret so INSERT entries drop their Markdown at that point.
     if (app.editMode && !app.confirmExitPending &&
         !fromKeyboard && (float)pt.x >= editRailWidth(app) &&
         (float)pt.x < editorPaneWidth(app)) {
@@ -1970,6 +1984,12 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         InvalidateRect(hwnd, nullptr, FALSE);
     }
     tabHoverCardDismiss(app, hwnd);
+    // An open text menu (Live's, or a sheet card's) takes the press: a row
+    // runs, and anywhere else puts the menu away
+    if (liveMenuMouseDown(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)) ||
+        (sheetActive(app) && sheetTextMenuMouseDown(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)))) {
+        return;
+    }
     // Settings owns the entire click, including the title strip behind it.
     // Sliders drag from the press; dismissal and other actions use release.
     if (app.showSettings) {
@@ -2175,6 +2195,8 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             handleEditorMouseDown(app, hwnd, x, y);
             return;
         }
+        // The rail's export flyout hangs over the page: its rows come first
+        if (app.editCtxOpen && editorLiveOn(app) && editCtxMouseDown(app, hwnd, x, y)) return;
         // Live: a press on the page puts the caret there
         if (liveMouseDown(app, hwnd, x, y)) return;
         // Quick-note empty state: the Open button in the preview pane
@@ -3787,6 +3809,19 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         }
         InvalidateRect(hwnd, nullptr, FALSE);
         return false;
+    }
+    // An open text menu (Live's, or a sheet card's) takes every key
+    if (!app.confirmExitPending &&
+        (liveMenuKey(app, hwnd, wParam) || (sheetActive(app) && sheetTextMenuKey(app, hwnd, wParam)))) {
+        return true;
+    }
+    // The menu key and Shift+F10 open Live's menu under the caret (the menu
+    // key's release, which would ask for it again, is the window's to drop)
+    if ((wParam == VK_APPS || (wParam == VK_F10 && (GetKeyState(VK_SHIFT) & 0x8000))) && editorLiveOn(app) &&
+        !app.confirmExitPending && !app.showSettings && !app.showHelp && !app.showThemeChooser && !app.showThemeEditor &&
+        !app.showShortcutEditor) {
+        liveContextMenu(app, hwnd, 0, 0, true);
+        return true;
     }
     // Shortcut editor: an armed row captures the next key; Esc cancels
     // the capture, then closes back to settings

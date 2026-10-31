@@ -654,10 +654,9 @@ void draw(App& app, const LiveText& e, IDWriteTextLayout* layout, const LayoutCa
 
 // --- The popup and the format bar ---------------------------------------------
 
-namespace {
-
 // A row's badge in the slash menu: a few letters, or a little drawing
-void badge(App& app, int insert, const D2D1_RECT_F& r, const paint::Surface& s) {
+void drawBadge(App& app, int insert, const D2D1_RECT_F& r) {
+    paint::Surface s = paint::surface(app);
     paint::fillRound(app, r, dpi(app, 5.0f), paint::alpha(s.text, 0.07f));
     float cx = (r.left + r.right) * 0.5f, cy = (r.top + r.bottom) * 0.5f, u = dpi(app, 1.0f);
     D2D1_COLOR_F ink = paint::alpha(s.text, 0.75f);
@@ -696,6 +695,17 @@ void badge(App& app, int insert, const D2D1_RECT_F& r, const paint::Surface& s) 
             L(-2, 0, 4, 0);
             L(1, 3.5f, 5.5f, 3.5f);
             return;
+        case kBadgeAlignLeft:
+        case kBadgeAlignCenter:
+        case kBadgeAlignRight: {
+            // Lines of a paragraph set as the column is
+            const float widths[] = {11, 7, 9};
+            for (int i = 0; i < 3; ++i) {
+                float w = widths[i], x0 = insert == kBadgeAlignLeft ? -5.5f : insert == kBadgeAlignRight ? 5.5f - w : -w * 0.5f;
+                L(x0, -4.0f + 4.0f * (float)i, x0 + w, -4.0f + 4.0f * (float)i);
+            }
+            return;
+        }
         default:
             break;
     }
@@ -726,6 +736,7 @@ void badge(App& app, int insert, const D2D1_RECT_F& r, const paint::Surface& s) 
         case INS_PLANTUML: glyph = L"UML"; tiny = true; break;
         case INS_FOOTNOTE: glyph = L"\x00B9"; break;
         case INS_PROPERTIES: glyph = L"\x2261"; break;
+        case kBadgeText: glyph = L"T"; break;
         default: break;
     }
     IDWriteTextLayout* l = paint::makeLayout(app, glyph, paint::textFormat(app, paint::uiFace(), dpi(app, tiny ? 9.5f : 12.0f),
@@ -737,11 +748,15 @@ void badge(App& app, int insert, const D2D1_RECT_F& r, const paint::Surface& s) 
     l->Release();
 }
 
-// Whether a format is on the selection already
 bool formatOn(const LiveText& e, int format) {
-    if (!e.hasSelection()) return false;
-    size_t a = e.selStart(), b = e.selEnd();
     const std::wstring& t = e.text;
+    size_t a = e.selStart(), b = e.selEnd();
+    if (a == b && format < FMT_H1) {
+        // No selection: the word at the caret, as the format keys take it
+        while (a > 0 && isWordChar(t[a - 1])) --a;
+        while (b < t.size() && isWordChar(t[b])) ++b;
+        if (a == b) return false;
+    }
     auto wrapped = [&](const std::wstring& m) {
         size_t n = m.size();
         if (a >= n && t.compare(a - n, n, m) == 0 && t.compare(b, n, m) == 0) {
@@ -765,8 +780,6 @@ bool formatOn(const LiveText& e, int format) {
         default: return false;
     }
 }
-
-}  // namespace
 
 void applyFormat(LiveText& e, int format) {
     switch (format) {
@@ -817,7 +830,7 @@ void drawPopup(App& app, LiveText& e, D2D1_POINT_2F caretTop, float caretBottom,
             float b = dpi(app, 22.0f);
             D2D1_RECT_F mark = D2D1::RectF(row.left + dpi(app, 5.0f), (row.top + row.bottom - b) * 0.5f, row.left + dpi(app, 5.0f) + b,
                                            (row.top + row.bottom + b) * 0.5f);
-            badge(app, item.insert, mark, s);
+            drawBadge(app, item.insert, mark);
             textLeft = mark.right + dpi(app, 9.0f);
         }
         IDWriteTextLayout* dl = paint::makeLayout(app, item.detail, detailFormat, 400, rowH);
@@ -842,9 +855,48 @@ void drawPopup(App& app, LiveText& e, D2D1_POINT_2F caretTop, float caretBottom,
     }
 }
 
+void drawFormatButton(App& app, int f, const D2D1_RECT_F& r, bool on, bool hover, bool enabled) {
+    paint::Surface s = paint::surface(app);
+    on = on && enabled;
+    if (on) paint::fillRound(app, r, dpi(app, 5.0f), paint::alpha(s.accent, 0.22f));
+    else if (hover && enabled) paint::fillRound(app, r, dpi(app, 5.0f), paint::alpha(s.text, 0.08f));
+    D2D1_COLOR_F ink = on ? s.accent : paint::alpha(s.text, enabled ? 0.85f : 0.3f);
+    float cx = (r.left + r.right) * 0.5f, cy = (r.top + r.bottom) * 0.5f, u = dpi(app, 1.0f);
+    if (f == FMT_LINK) {
+        paint::strokeRound(app, D2D1::RectF(cx - 7.5f * u, cy - 3 * u, cx + 0.5f * u, cy + 3 * u), 3 * u, ink, 1.5f * u);
+        paint::strokeRound(app, D2D1::RectF(cx - 0.5f * u, cy - 3 * u, cx + 7.5f * u, cy + 3 * u), 3 * u, ink, 1.5f * u);
+        return;
+    }
+    const wchar_t* glyph = L"";
+    const wchar_t* face = paint::uiFace();
+    DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_SEMI_BOLD;
+    switch (f) {
+        case FMT_BOLD: glyph = L"B"; weight = DWRITE_FONT_WEIGHT_BOLD; break;
+        case FMT_ITALIC: glyph = L"I"; face = L"Georgia"; weight = DWRITE_FONT_WEIGHT_NORMAL; break;
+        case FMT_STRIKE: glyph = L"S"; weight = DWRITE_FONT_WEIGHT_NORMAL; break;
+        case FMT_CODE: glyph = L"</>"; face = L"Consolas"; weight = DWRITE_FONT_WEIGHT_NORMAL; break;
+        case FMT_MARK: glyph = L"A"; weight = DWRITE_FONT_WEIGHT_NORMAL; break;
+        case FMT_H1: glyph = L"H1"; break;
+        case FMT_H2: glyph = L"H2"; break;
+        default: glyph = L"H3"; break;
+    }
+    float px = dpi(app, f == FMT_CODE ? 11.5f : f >= FMT_H1 ? 12.5f : 14.0f);
+    float side = r.bottom - r.top;
+    IDWriteTextLayout* l = paint::makeLayout(app, glyph, paint::textFormat(app, face, px, weight, false), side * 2, side);
+    if (!l) return;
+    if (f == FMT_ITALIC) l->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, {0, 1});
+    DWRITE_TEXT_METRICS m = paint::metrics(l);
+    if (f == FMT_MARK) {
+        paint::fillRound(app, D2D1::RectF(cx - 7 * u, cy + 3 * u, cx + 7 * u, cy + 7 * u), 1.5f * u, themeHighlightBackground(app.theme));
+    }
+    paint::drawText(app, l, cx - m.width * 0.5f, cy - m.height * 0.5f - (f == FMT_MARK ? 1.5f * u : 0), ink);
+    if (f == FMT_STRIKE) paint::line(app, D2D1::Point2F(cx - 6 * u, cy), D2D1::Point2F(cx + 6 * u, cy), ink, 1.3f * u);
+    l->Release();
+}
+
 void drawFormatBar(App& app, LiveText& e, D2D1_POINT_2F top, float bottom, const D2D1_RECT_F& bounds) {
     e.barHits.clear();
-    if (!e.hasSelection() || e.selectingWithMouse || e.popup != LiveText::Popup::None || !e.multiline) return;
+    if (!e.hasSelection() || e.selectingWithMouse || e.popup != LiveText::Popup::None || !e.multiline || e.menu.open) return;
     if (e.text.find(L'\n', e.selStart()) < e.selEnd()) return;  // one line's words, not a passage
     paint::Surface s = paint::surface(app);
     const float b = dpi(app, 30.0f), pad = dpi(app, 4.0f), gap = dpi(app, 7.0f);
@@ -867,42 +919,7 @@ void drawFormatBar(App& app, LiveText& e, D2D1_POINT_2F top, float bottom, const
             bx += gap;
         }
         D2D1_RECT_F r = D2D1::RectF(bx, box.top + pad, bx + b, box.top + pad + b);
-        bool on = formatOn(e, f);
-        if (on) paint::fillRound(app, r, dpi(app, 5.0f), paint::alpha(s.accent, 0.22f));
-        else if (e.hoverHit == 1000 + f) paint::fillRound(app, r, dpi(app, 5.0f), paint::alpha(s.text, 0.08f));
-        D2D1_COLOR_F ink = on ? s.accent : paint::alpha(s.text, 0.85f);
-        float cx = (r.left + r.right) * 0.5f, cy = (r.top + r.bottom) * 0.5f, u = dpi(app, 1.0f);
-        if (f == FMT_LINK) {
-            paint::strokeRound(app, D2D1::RectF(cx - 7.5f * u, cy - 3 * u, cx + 0.5f * u, cy + 3 * u), 3 * u, ink, 1.5f * u);
-            paint::strokeRound(app, D2D1::RectF(cx - 0.5f * u, cy - 3 * u, cx + 7.5f * u, cy + 3 * u), 3 * u, ink, 1.5f * u);
-        } else {
-            const wchar_t* glyph = L"";
-            const wchar_t* face = paint::uiFace();
-            DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_SEMI_BOLD;
-            switch (f) {
-                case FMT_BOLD: glyph = L"B"; weight = DWRITE_FONT_WEIGHT_BOLD; break;
-                case FMT_ITALIC: glyph = L"I"; face = L"Georgia"; weight = DWRITE_FONT_WEIGHT_NORMAL; break;
-                case FMT_STRIKE: glyph = L"S"; weight = DWRITE_FONT_WEIGHT_NORMAL; break;
-                case FMT_CODE: glyph = L"</>"; face = L"Consolas"; weight = DWRITE_FONT_WEIGHT_NORMAL; break;
-                case FMT_MARK: glyph = L"A"; weight = DWRITE_FONT_WEIGHT_NORMAL; break;
-                case FMT_H1: glyph = L"H1"; break;
-                case FMT_H2: glyph = L"H2"; break;
-                default: glyph = L"H3"; break;
-            }
-            float px = dpi(app, f == FMT_CODE ? 11.5f : f >= FMT_H1 ? 12.5f : 14.0f);
-            IDWriteTextLayout* l = paint::makeLayout(app, glyph, paint::textFormat(app, face, px, weight, false), b, b);
-            if (l) {
-                if (f == FMT_ITALIC) l->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, {0, 1});
-                DWRITE_TEXT_METRICS m = paint::metrics(l);
-                if (f == FMT_MARK) {
-                    paint::fillRound(app, D2D1::RectF(cx - 7 * u, cy + 3 * u, cx + 7 * u, cy + 7 * u), 1.5f * u,
-                                     themeHighlightBackground(app.theme));
-                }
-                paint::drawText(app, l, cx - m.width * 0.5f, cy - m.height * 0.5f - (f == FMT_MARK ? 1.5f * u : 0), ink);
-                if (f == FMT_STRIKE) paint::line(app, D2D1::Point2F(cx - 6 * u, cy), D2D1::Point2F(cx + 6 * u, cy), ink, 1.3f * u);
-                l->Release();
-            }
-        }
+        drawFormatButton(app, f, r, formatOn(e, f), e.hoverHit == 1000 + f);
         e.barHits.push_back({r, 1000 + f});
         bx += b;
     }

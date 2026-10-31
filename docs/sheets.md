@@ -129,7 +129,10 @@ so does an Untitled in an Obsidian vault, where other notes may link to it.
    their bar. A line that starts `#word`, which Markdown does not take for
    a heading, gets a mark where the space belongs. `/` opens the slash menu
    of blocks to insert, words selected on one line show the format bar, and
-   lists, tables and fences go on as in Live.
+   lists, tables and fences go on as in Live. A right-click in the card
+   (or the menu key) opens Live's menu on its text: the formats, the
+   clipboard, Turn into, Insert, and a table's rows and columns; elsewhere
+   a right-click opens the sheet's own menu.
 4. **`[[` names.** Typing `[[` in a card lists the notes on the sheet and
    in its folder; the arrow keys choose, Enter writes the link and
    Ctrl+Enter draws the arrow too.

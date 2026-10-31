@@ -194,6 +194,9 @@ struct SheetDoc {
     // The selection bar over the selected cards (client pixels)
     D2D1_RECT_F selectionBar{};
 
+    // A link the card's text menu asked to follow, once the edit is in
+    std::string followLink;
+
     // Context menu
     struct MenuItem {
         int action = 0;
@@ -238,7 +241,14 @@ bool sheetMouseUp(App& app, HWND hwnd, int x, int y);
 bool sheetMiddleDown(App& app, HWND hwnd, int x, int y);
 bool sheetMiddleUp(App& app, HWND hwnd, int x, int y);
 bool sheetMouseWheel(App& app, HWND hwnd, float delta, bool horizontal, int x, int y);
-bool sheetContextMenu(App& app, HWND hwnd, int x, int y);
+// A right-click: on a card being typed in the text's menu (live_text.h,
+// also from the menu key), elsewhere the sheet's
+bool sheetContextMenu(App& app, HWND hwnd, int x, int y, bool byKeys = false);
+// A card's text menu while it is open: it takes every press, move and key
+bool sheetTextMenuMouseDown(App& app, HWND hwnd, int x, int y);
+bool sheetTextMenuMouseMove(App& app, HWND hwnd, int x, int y);
+bool sheetTextMenuKey(App& app, HWND hwnd, WPARAM key);
+void sheetCloseTextMenu(App& app);
 // handled: whether the sheet took the key; the return value is what
 // handleKeyDown returns (true keeps the key's character from being typed)
 bool sheetKeyDown(App& app, HWND hwnd, WPARAM key, bool& handled);

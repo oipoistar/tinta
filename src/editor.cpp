@@ -2901,69 +2901,9 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                     InvalidateRect(hwnd, nullptr, FALSE);
                 }
                 return;
-            case 'V': {
-                if (!app.editorExtraCarets.empty()) {
-                    editorPasteAtCarets(app, hwnd, editorGetClipboard(hwnd));
-                    return;
-                }
-                std::wstring paste = editorGetClipboard(hwnd);
-                // A bitmap without text (a screenshot) saves as PNG beside
-                // the document and pastes as its markdown link
-                if (paste.empty() && !app.currentFile.empty() &&
-                    IsClipboardFormatAvailable(CF_BITMAP)) {
-                    namespace fs = std::filesystem;
-                    fs::path doc(toWide(app.currentFile));
-                    std::wstring stem = doc.stem().wstring();
-                    std::wstring name;
-                    fs::path target;
-                    for (int i = 1; i < 100; i++) {
-                        wchar_t suffix[24];
-                        swprintf_s(suffix, _countof(suffix),
-                                   L"-img-%02d.png", i);
-                        std::wstring candidate = stem + suffix;
-                        fs::path p = doc.parent_path() / candidate;
-                        std::error_code ec;
-                        if (!fs::exists(p, ec)) {
-                            name = candidate;
-                            target = p;
-                            break;
-                        }
-                    }
-                    if (!name.empty() &&
-                        clipboardImageToPngFile(app, hwnd,
-                                                target.wstring())) {
-                        std::wstring linkName = name;
-                        size_t sp = 0;  // spaces break the link target
-                        while ((sp = linkName.find(L' ', sp)) !=
-                               std::wstring::npos) {
-                            linkName.replace(sp, 1, L"%20");
-                            sp += 3;
-                        }
-                        paste = L"![image](" + linkName + L")";
-                    }
-                }
-                if (!paste.empty()) {
-                    if (app.editorHasSelection) editorDeleteSelection(app);
-                    // Excel range copies arrive as TSV: paste them as a
-                    // markdown table (#181). Ctrl+Shift+V pastes raw.
-                    if (!(GetKeyState(VK_SHIFT) & 0x8000) &&
-                        tsvLooksLikeTable(paste)) {
-                        paste = padTableForInsert(
-                            app, tsvToMarkdownTable(paste), app.editorCursorPos);
-                        signalPushKey(app, SIG_SUCCESS, SIGI_CHECK,
-                                      "toast.paste_table");
-                    }
-                    size_t before = app.editorCursorPos;
-                    app.editorText.insert(app.editorCursorPos, paste);
-                    app.editorCursorPos += paste.size();
-                    pushUndo(app, App::EditAction::Insert, before, paste, before, app.editorCursorPos);
-                    rebuildLineStarts(app);
-                    scheduleReparse(app);
-                    editorEnsureCursorVisible(app);
-                    InvalidateRect(hwnd, nullptr, FALSE);
-                }
+            case 'V':
+                editorPasteClipboard(app, hwnd, (GetKeyState(VK_SHIFT) & 0x8000) != 0);
                 return;
-            }
             case 'P':
                 // Print preview of the document as currently edited, saved
                 // or not (openPrintPreview re-parses; Ctrl+E is the pane)
@@ -3437,6 +3377,67 @@ void editorClipboardCopy(App& app, HWND hwnd) {
     } else if (app.editorHasSelection) {
         editorCopyToClipboard(app, hwnd, editorGetSelectedText(app));
     }
+}
+
+void editorPasteClipboard(App& app, HWND hwnd, bool raw) {
+    if (!app.editorExtraCarets.empty()) {
+        editorPasteAtCarets(app, hwnd, editorGetClipboard(hwnd));
+        return;
+    }
+    std::wstring paste = editorGetClipboard(hwnd);
+    // A bitmap without text (a screenshot) saves as PNG beside
+    // the document and pastes as its markdown link
+    if (paste.empty() && !app.currentFile.empty() &&
+        IsClipboardFormatAvailable(CF_BITMAP)) {
+        namespace fs = std::filesystem;
+        fs::path doc(toWide(app.currentFile));
+        std::wstring stem = doc.stem().wstring();
+        std::wstring name;
+        fs::path target;
+        for (int i = 1; i < 100; i++) {
+            wchar_t suffix[24];
+            swprintf_s(suffix, _countof(suffix),
+                       L"-img-%02d.png", i);
+            std::wstring candidate = stem + suffix;
+            fs::path p = doc.parent_path() / candidate;
+            std::error_code ec;
+            if (!fs::exists(p, ec)) {
+                name = candidate;
+                target = p;
+                break;
+            }
+        }
+        if (!name.empty() &&
+            clipboardImageToPngFile(app, hwnd,
+                                    target.wstring())) {
+            std::wstring linkName = name;
+            size_t sp = 0;  // spaces break the link target
+            while ((sp = linkName.find(L' ', sp)) !=
+                   std::wstring::npos) {
+                linkName.replace(sp, 1, L"%20");
+                sp += 3;
+            }
+            paste = L"![image](" + linkName + L")";
+        }
+    }
+    if (paste.empty()) return;
+    if (app.editorHasSelection) editorDeleteSelection(app);
+    // Excel range copies arrive as TSV: paste them as a
+    // markdown table (#181). Ctrl+Shift+V pastes raw.
+    if (!raw && tsvLooksLikeTable(paste)) {
+        paste = padTableForInsert(
+            app, tsvToMarkdownTable(paste), app.editorCursorPos);
+        signalPushKey(app, SIG_SUCCESS, SIGI_CHECK,
+                      "toast.paste_table");
+    }
+    size_t before = app.editorCursorPos;
+    app.editorText.insert(app.editorCursorPos, paste);
+    app.editorCursorPos += paste.size();
+    pushUndo(app, App::EditAction::Insert, before, paste, before, app.editorCursorPos);
+    rebuildLineStarts(app);
+    scheduleReparse(app);
+    editorEnsureCursorVisible(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 void editorClipboardPaste(App& app, HWND hwnd) {

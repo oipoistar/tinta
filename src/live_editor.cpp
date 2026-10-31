@@ -86,6 +86,10 @@ struct LiveEditor {
     std::wstring namesDir;
     std::vector<std::wstring> names;
     unsigned long long namesMs = 0;
+    // The menu: the document it was opened on, and a link it asked to
+    // follow once its edit is in the source
+    std::string menuFile;
+    std::string followLink;
 };
 
 LiveEditor& state(const App& app) {
@@ -177,6 +181,7 @@ void sync(App& app, LiveEditor& L) {
         noteChange(L, a, L.e.text.size() - a - b, t.size() - a - b);
         L.e.text = t;
         live::closePopup(L.e);
+        live::closeMenu(L.e);
     }
     L.e.caret = std::min(app.editorCursorPos, t.size());
     L.e.anchor = app.editorHasSelection ? std::min(app.editorSelStart, t.size()) : L.e.caret;
@@ -543,40 +548,12 @@ void settleScroll(App& app, LiveEditor& L) {
 
 // --- Links, task boxes, names, images --------------------------------------------
 
+// The link around a place in the text, as followDocumentLink takes it
 std::string rawLinkAt(const std::wstring& t, size_t at) {
-    size_t ls = live::lineStart(t, at), le = live::lineEnd(t, at);
-    std::wstring line = t.substr(ls, le - ls);
-    size_t col = at - ls;
-    for (size_t open = line.find(L"[["); open != std::wstring::npos; open = line.find(L"[[", open + 2)) {
-        size_t close = line.find(L"]]", open + 2);
-        if (close == std::wstring::npos) break;
-        if (col >= open && col <= close + 2) {
-            std::wstring name = line.substr(open + 2, close - open - 2);
-            size_t bar = name.find(L'|');
-            if (bar != std::wstring::npos) name.resize(bar);
-            return "wiki:" + toUtf8(name);
-        }
-    }
-    for (size_t open = line.find(L'['); open != std::wstring::npos; open = line.find(L'[', open + 1)) {
-        size_t middle = line.find(L"](", open + 1);
-        if (middle == std::wstring::npos) break;
-        size_t close = line.find(L')', middle + 2);
-        if (close == std::wstring::npos) break;
-        if (col >= open && col <= close) {
-            std::wstring url = line.substr(middle + 2, close - middle - 2);
-            size_t space = url.find(L' ');
-            if (space != std::wstring::npos) url.resize(space);
-            return toUtf8(url);
-        }
-    }
-    for (const wchar_t* scheme : {L"https://", L"http://"}) {
-        for (size_t s = line.find(scheme); s != std::wstring::npos; s = line.find(scheme, s + 1)) {
-            size_t e = line.find_first_of(L" )>", s);
-            if (e == std::wstring::npos) e = line.size();
-            if (col >= s && col <= e) return toUtf8(line.substr(s, e - s));
-        }
-    }
-    return {};
+    live::LinkSpan l = live::linkAt(t, at);
+    if (l.kind == live::LinkSpan::None) return {};
+    std::string address = toUtf8(t.substr(l.addressFrom, l.addressTo - l.addressFrom));
+    return l.kind == live::LinkSpan::Wiki ? "wiki:" + address : address;
 }
 
 bool inside(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; }
@@ -675,6 +652,18 @@ std::wstring pickImage(App& app, HWND hwnd) {
     return out;
 }
 
+// The clipboard holds more than text: a screenshot saves beside the document
+// and a spreadsheet's range becomes a table, as the source's Ctrl+V makes
+// them at the caret the page shares with it; the page takes the change
+bool pasteMore(App& app, HWND hwnd, LiveEditor& L) {
+    std::wstring clip = IsClipboardFormatAvailable(CF_UNICODETEXT) ? readClipboardText(hwnd) : std::wstring();
+    bool range = clip.find(L'\t') != std::wstring::npos && clip.find(L'\n') != std::wstring::npos;
+    if (!clip.empty() && !range) return false;
+    editorPasteClipboard(app, hwnd, false);
+    sync(app, L);
+    return true;
+}
+
 live::Host hostFor(App& app, HWND hwnd, LiveEditor& L) {
     live::Host host;
     host.caretPoint = [&L](float& x, float& y, float& height) {
@@ -690,6 +679,9 @@ live::Host hostFor(App& app, HWND hwnd, LiveEditor& L) {
         editorUndoRedo(app, redo);
         sync(app, L);  // the text and the caret as the source's undo left them
     };
+    // A link is followed once the menu's edit is in the source
+    host.openLink = [&L](const std::string& url) { L.followLink = url; };
+    host.paste = [&app, hwnd, &L]() { return pasteMore(app, hwnd, L); };
     return host;
 }
 
@@ -719,9 +711,30 @@ bool onQuickNoteButton(const App& app, int x, int y) {
 
 LiveEditor& begin(App& app) {
     LiveEditor& L = state(app);
+    // A menu stays with the document it was opened on
+    if (L.e.menu.open && L.menuFile != app.currentFile) live::closeMenu(L.e);
     sync(app, L);
     place(app, L);
     return L;
+}
+
+// The menu's page: the window beside the rail, below the tab strip
+D2D1_RECT_F menuBounds(const App& app) {
+    return D2D1::RectF(0, chromeTopHeight(app), (float)app.width - documentViewportX(app), (float)app.height);
+}
+
+// After the menu took the pointer or a key: an edit goes into the source,
+// then a link it asked for is followed
+void afterMenu(App& app, HWND hwnd, LiveEditor& L, live::MenuResult result) {
+    if (result == live::MenuResult::Ran) {
+        finish(app, hwnd, L);
+        if (!L.followLink.empty()) {
+            std::string url;
+            url.swap(L.followLink);
+            followDocumentLink(app, hwnd, url);
+        }
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
 
 }  // namespace
@@ -849,6 +862,7 @@ void setEditorLive(App& app, HWND hwnd, bool live) {
     L.placed = false;
     L.dragging = false;
     live::closePopup(L.e);
+    live::closeMenu(L.e);
     if (live) {
         L.wantCaretY = caretY;
         editorReparse(app, true);
@@ -985,6 +999,21 @@ bool liveRailCommand(App& app, HWND hwnd, int id) {
         case 10: live::toggleLineMark(L.e, live::LineMark::Bullet); break;
         case 11: live::toggleLineMark(L.e, live::LineMark::Task); break;
         case 12: live::toggleLineMark(L.e, live::LineMark::Quote); break;
+        case 20:
+        case 21: {
+            // The table grid and the diagrams open beside their buttons, as the menu's submenus
+            float y = chromeTopHeight(app) + dpi(app, 60.0f);
+            for (const auto& hit : app.editRailHits) {
+                if (hit.second == id) y = hit.first.top;
+            }
+            closeEditCtxMenu(app);
+            live::openMenuPanel(app, L.e, editRailWidth(app) - documentViewportX(app) + dpi(app, 6.0f), y,
+                                id == 20 ? live::SUB_TABLE : live::SUB_DIAGRAM, menuBounds(app), hostFor(app, hwnd, L));
+            L.menuFile = app.currentFile;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return true;
+        }
+        case 22: live::menuCommand(app, hwnd, L.e, live::CMD_INSERT + live::INS_IMAGE, hostFor(app, hwnd, L)); break;
         default: return false;
     }
     finish(app, hwnd, L);
@@ -1120,14 +1149,87 @@ bool liveMouseUp(App& app, HWND hwnd, int, int) {
     return true;
 }
 
-void livePrepareContextMenu(App& app, HWND hwnd, int x, int y) {
+// --- The menu ---------------------------------------------------------------------
+
+bool liveMenuOpen(const App& app) { return editorLiveOn(app) && state(app).e.menu.open; }
+
+void liveContextMenu(App& app, HWND hwnd, int x, int y, bool byKeys) {
+    closeEditCtxMenu(app);
     LiveEditor& L = begin(app);
-    float gx = (float)x - documentViewportX(app) + app.scrollX, gy = (float)y + app.scrollY;
-    size_t at = positionAtShown(app, L, gx, gy, 0);
-    if (L.e.hasSelection() && at >= L.e.selStart() && at <= L.e.selEnd()) return;
-    L.e.caret = L.e.anchor = at;
-    finish(app, hwnd, L);
+    live::closePopup(L.e);
+    const float vx = documentViewportX(app);
+    size_t at = L.e.caret;
+    float px = 0, top = 0, bottom = 0;
+    if (!byKeys) {
+        // The caret goes where the click was, unless that is in the selection
+        px = (float)x - vx;
+        top = bottom = (float)y;
+        at = positionAtShown(app, L, px + app.scrollX, (float)y + app.scrollY, 0);
+        if (!(L.e.hasSelection() && at >= L.e.selStart() && at <= L.e.selEnd())) {
+            L.e.caret = L.e.anchor = at;
+            L.e.preferredX = -1;
+            finish(app, hwnd, L);
+        }
+    } else {
+        // From the keys: under the caret
+        float cx = 0, cy = 0, ch = 0;
+        if (L.placed && live::caretPoint(L.layout, L.from, L.e.caret, cx, cy, ch)) {
+            px = L.textX + cx - app.scrollX;
+            top = L.textY + cy - app.scrollY;
+            bottom = top + ch;
+        } else {
+            px = dpi(app, 40.0f);
+            top = bottom = chromeTopHeight(app) + dpi(app, 40.0f);
+        }
+    }
+    live::openMenu(app, L.e, px, top, bottom, at, menuBounds(app), hostFor(app, hwnd, L), byKeys);
+    L.menuFile = app.currentFile;
+    InvalidateRect(hwnd, nullptr, FALSE);
 }
+
+bool liveMenuMouseDown(App& app, HWND hwnd, int x, int y) {
+    if (!liveMenuOpen(app)) return false;
+    LiveEditor& L = begin(app);
+    live::MenuResult result = live::menuPress(app, hwnd, L.e, (float)x - documentViewportX(app), (float)y, hostFor(app, hwnd, L));
+    app.swallowNextMouseUp = true;
+    afterMenu(app, hwnd, L, result);
+    return true;
+}
+
+bool liveMenuMouseMove(App& app, HWND hwnd, int x, int y) {
+    if (!liveMenuOpen(app)) return false;
+    LiveEditor& L = state(app);
+    if (live::menuHover(app, L.e, (float)x - documentViewportX(app), (float)y)) InvalidateRect(hwnd, nullptr, FALSE);
+    static HCURSOR arrow = LoadCursor(nullptr, IDC_ARROW);
+    SetCursor(arrow);
+    return true;
+}
+
+bool liveMenuKey(App& app, HWND hwnd, WPARAM key) {
+    if (!liveMenuOpen(app)) return false;
+    LiveEditor& L = begin(app);
+    afterMenu(app, hwnd, L, live::menuKey(app, hwnd, L.e, key, hostFor(app, hwnd, L)));
+    return true;
+}
+
+void liveCloseMenu(App& app) {
+    LiveEditor& L = state(app);
+    if (!L.e.menu.open) return;
+    live::closeMenu(L.e);
+    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
+void renderLiveMenu(App& app) {
+    if (!liveMenuOpen(app)) return;
+    LiveEditor& L = state(app);
+    D2D1_MATRIX_3X2_F saved;
+    app.renderTarget->GetTransform(&saved);
+    app.renderTarget->SetTransform(D2D1::Matrix3x2F::Translation(documentViewportX(app), 0) * saved);
+    live::drawMenu(app, L.e);
+    app.renderTarget->SetTransform(saved);
+}
+
+const LiveText& liveText(const App& app) { return state(app).e; }
 
 bool livePageGeometry(const App& app, float& top, float& bottom, float& shift) {
     const LiveEditor& L = state(app);

@@ -7,6 +7,8 @@
 
 #include "app.h"
 
+struct LiveText;
+
 // Switches Source and Live (the rail's pill, Ctrl+/); the caret stays on
 // its character and at its height in the window
 void setEditorLive(App& app, HWND hwnd, bool live);
@@ -24,8 +26,21 @@ bool liveMouseMove(App& app, HWND hwnd, int x, int y);
 bool liveMouseUp(App& app, HWND hwnd, int x, int y);
 // The mouse went elsewhere mid-drag (WM_CAPTURECHANGED, WM_CANCELMODE)
 void liveCaptureLost(App& app);
-// A right-click: the caret goes there unless it is in the selection
-void livePrepareContextMenu(App& app, HWND hwnd, int x, int y);
+// The menu on the page (live_text.h): a right-click opens it at the click,
+// with the caret moved there unless the click is in the selection; the
+// menu key and Shift+F10 open it under the caret
+void liveContextMenu(App& app, HWND hwnd, int x, int y, bool byKeys);
+bool liveMenuOpen(const App& app);
+// While it is open it takes every press, move and key: true when it did
+bool liveMenuMouseDown(App& app, HWND hwnd, int x, int y);
+bool liveMenuMouseMove(App& app, HWND hwnd, int x, int y);
+bool liveMenuKey(App& app, HWND hwnd, WPARAM key);
+// Put away by the wheel, the window losing focus or being resized
+void liveCloseMenu(App& app);
+// Drawn over the page and the rail, last
+void renderLiveMenu(App& app);
+// The page's text engine, as the tests read it
+const LiveText& liveText(const App& app);
 // A rail button on the Live text; false for the ones that insert through the source
 bool liveRailCommand(App& app, HWND hwnd, int id);
 // The caret on the screen, for the IME's windows

@@ -449,6 +449,7 @@ void commitEdit(App& app, SheetDoc& doc, bool stay) {
     }
     doc.editing = SheetDoc::Edit::None;
     live::closePopup(doc.edit);
+    live::closeMenu(doc.edit);
     if (what == SheetDoc::Edit::Find) {
         invalidate(app);
         return;
@@ -531,6 +532,8 @@ live::Host editHost(App& app, SheetDoc& doc) {
             // Ctrl+Enter draws the arrow too; the link is in the text already
             if (ctrl && !pick.id.empty()) addEdge(app, doc, doc.editId, pick.id, {}, false);
         };
+        // The menu's Open link is followed once its edit is in
+        host.openLink = [&doc](const std::string& url) { doc.followLink = url; };
     }
     return host;
 }
@@ -577,6 +580,74 @@ bool editKey(App& app, HWND hwnd, SheetDoc& doc, WPARAM key) {
     }
     editChanged(app, doc);
     return true;
+}
+
+// A link the card's menu asked for: a note on the sheet comes into view, one
+// beside it opens in a tab, an address in the browser
+void followCardLink(App& app, HWND hwnd, SheetDoc& doc) {
+    std::string url;
+    url.swap(doc.followLink);
+    if (url.rfind("wiki:", 0) == 0) {
+        std::wstring name = toWide(url.substr(5));
+        name.resize(std::min(name.find(L'#'), name.size()));
+        for (const Node& n : doc.model.nodes) {
+            if (n.type != NodeType::File || _wcsicmp(stemOf(absolutePath(doc, n.file)).c_str(), name.c_str()) != 0) continue;
+            std::string id = n.id;
+            commitEdit(app, doc);
+            int i = nodeIndex(doc.model, id);
+            if (i >= 0) {
+                selectOnly(doc, id);
+                fitBox(app, doc, boxOf(doc.model.nodes[i]), true, 1.0f);
+            }
+            return;
+        }
+        std::wstring path = doc.cardDir + L"\\" + name + L".md";
+        if (!name.empty() && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            sheetLeave(app);
+            tabOpenPath(app, hwnd, toUtf8(path));
+        }
+        return;
+    }
+    if (url.find("://") != std::string::npos || url.rfind("mailto:", 0) == 0) openUrl(url);
+}
+
+// The card's text menu at a click, or from the keys under the caret
+void openTextMenu(App& app, SheetDoc& doc, int x, int y, bool byKeys) {
+    D2D1_RECT_F rect{};
+    float sc = 1;
+    if (!editRect(app, doc, rect, sc)) return;
+    LiveText& e = doc.edit;
+    live::closePopup(e);
+    size_t at = e.caret;
+    float px = (float)x, top = (float)y, bottom = (float)y;
+    if (byKeys) {
+        float cx = 0, cy = 0, ch = 0;
+        px = rect.left;
+        top = bottom = rect.top;
+        if (caretPoint(app, doc, cx, cy, ch)) {
+            px = rect.left + cx * sc;
+            top = rect.top + (cy - e.scrollY) * sc;
+            bottom = top + ch * sc;
+        }
+    } else {
+        // The caret goes where the click was, unless that is in the selection
+        at = positionAt(app, doc, ((float)x - rect.left) / sc, ((float)y - rect.top) / sc + e.scrollY);
+        if (!(e.hasSelection() && at >= e.selStart() && at <= e.selEnd())) {
+            e.caret = e.anchor = at;
+            e.preferredX = -1;
+        }
+    }
+    live::openMenu(app, e, px, top, bottom, at, viewRect(app), editHost(app, doc), byKeys);
+    editChanged(app, doc);
+}
+
+// After the card's text menu took a press or a key
+void textMenuDone(App& app, HWND hwnd, SheetDoc& doc, live::MenuResult result) {
+    if (result == live::MenuResult::Ran) {
+        editChanged(app, doc);
+        if (!doc.followLink.empty()) followCardLink(app, hwnd, doc);
+    }
+    invalidate(app);
 }
 
 }  // namespace
@@ -2525,6 +2596,8 @@ void sheetSetCursor(App& app, int x, int y) {
                  : (e & (1 | 4)) ? IDC_SIZEWE : IDC_SIZENS;
     } else if (doc->gesture == SheetDoc::Gesture::Connect) {
         cursor = IDC_CROSS;
+    } else if (doc->edit.menu.open) {
+        cursor = IDC_ARROW;
     } else if (doc->menuOpen || doc->hoverUi > 0) {
         cursor = IDC_HAND;
     } else {
@@ -3124,6 +3197,8 @@ bool sheetMiddleDown(App& app, HWND hwnd, int x, int y) {
     if (!doc) return false;
     D2D1_RECT_F v = viewRect(app);
     if (x < v.left || y < v.top) return false;
+    // A card's text menu stays where the card was; the pan puts it away
+    live::closeMenu(doc->edit);
     doc->gesture = SheetDoc::Gesture::Pan;
     doc->middlePan = true;
     doc->pressed = true;
@@ -3207,9 +3282,19 @@ bool sheetMouseWheel(App& app, HWND hwnd, float delta, bool horizontal, int x, i
     return true;
 }
 
-bool sheetContextMenu(App& app, HWND hwnd, int x, int y) {
+bool sheetContextMenu(App& app, HWND hwnd, int x, int y, bool byKeys) {
     SheetDoc* doc = activeSheet(app);
     if (!doc) return false;
+    // A card being typed in has the text's menu, the one Live has
+    if (doc->editing == SheetDoc::Edit::Card && !doc->presenting) {
+        D2D1_RECT_F rect{};
+        float sc = 1;
+        if (editRect(app, *doc, rect, sc) &&
+            (byKeys || ((float)x >= rect.left && (float)x <= rect.right && (float)y >= rect.top && (float)y <= rect.bottom))) {
+            openTextMenu(app, *doc, x, y, byKeys);
+            return true;
+        }
+    }
     D2D1_RECT_F v = viewRect(app);
     if (x < v.left || y < v.top) return false;
     if (doc->editing != SheetDoc::Edit::None && doc->editing != SheetDoc::Edit::Find) commitEdit(app, *doc);
@@ -3217,6 +3302,38 @@ bool sheetContextMenu(App& app, HWND hwnd, int x, int y) {
     openMenu(app, *doc, (float)x, (float)y);
     (void)hwnd;
     return true;
+}
+
+bool sheetTextMenuMouseDown(App& app, HWND hwnd, int x, int y) {
+    SheetDoc* doc = activeSheet(app);
+    if (!doc || !doc->edit.menu.open) return false;
+    live::MenuResult result = live::menuPress(app, hwnd, doc->edit, (float)x, (float)y, editHost(app, *doc));
+    app.swallowNextMouseUp = true;
+    textMenuDone(app, hwnd, *doc, result);
+    return true;
+}
+
+bool sheetTextMenuMouseMove(App& app, HWND hwnd, int x, int y) {
+    SheetDoc* doc = activeSheet(app);
+    if (!doc || !doc->edit.menu.open) return false;
+    if (live::menuHover(app, doc->edit, (float)x, (float)y)) invalidate(app);
+    SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+    (void)hwnd;
+    return true;
+}
+
+bool sheetTextMenuKey(App& app, HWND hwnd, WPARAM key) {
+    SheetDoc* doc = activeSheet(app);
+    if (!doc || !doc->edit.menu.open) return false;
+    textMenuDone(app, hwnd, *doc, live::menuKey(app, hwnd, doc->edit, key, editHost(app, *doc)));
+    return true;
+}
+
+void sheetCloseTextMenu(App& app) {
+    SheetDoc* doc = activeSheet(app);
+    if (!doc || !doc->edit.menu.open) return;
+    live::closeMenu(doc->edit);
+    invalidate(app);
 }
 
 bool sheetDropFiles(App& app, HWND hwnd, const std::vector<std::wstring>& files, int x, int y) {

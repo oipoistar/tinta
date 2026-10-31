@@ -98,6 +98,7 @@ set(SOURCES
     src/sheet_input.cpp
     src/live_text.cpp
     src/live_draw.cpp
+    src/live_menu.cpp
     src/live_editor.cpp
     src/ui_paint.cpp
 )

@@ -940,6 +940,49 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
     keystroke(app, VK_ESCAPE);
     check(noteText(doc, delta).find("## **Next**") != std::string::npos, "the note holds the heading");
 
+    // A right-click in a card being typed in opens the text's menu, the one Live has
+    doc.selected = {delta};
+    startEdit(app, doc, SheetDoc::Edit::Card, delta);
+    paint(app);
+    D2D1_RECT_F box{};
+    float boxScale = 1;
+    check(editRect(app, doc, box, boxScale), "the card's text box is placed");
+    D2D1_POINT_2F inBox = D2D1::Point2F(box.left + dpi(app, 14.0f), box.top + dpi(app, 10.0f));
+    move(app, inBox);
+    sheetContextMenu(app, app.hwnd, (int)inBox.x, (int)inBox.y);
+    check(doc.edit.menu.open && !doc.menuOpen && doc.editing == SheetDoc::Edit::Card,
+          "a right-click in a card being typed in opens the text's menu and keeps the card open");
+    auto menuRow = [&](size_t panel, const std::wstring& label, D2D1_POINT_2F& p) {
+        paint(app);
+        if (panel >= doc.edit.menu.panels.size()) return false;
+        const auto& P = doc.edit.menu.panels[panel];
+        for (size_t i = 0; i < P.rows.size() && i < P.rowBoxes.size(); ++i) {
+            if (P.rows[i].label != label) continue;
+            p = D2D1::Point2F((P.rowBoxes[i].left + P.rowBoxes[i].right) * 0.5f, (P.rowBoxes[i].top + P.rowBoxes[i].bottom) * 0.5f);
+            return true;
+        }
+        return false;
+    };
+    const std::wstring typed = doc.edit.text;
+    D2D1_POINT_2F turnInto{}, heading{};
+    check(menuRow(0, tr(app, "live.menu.turn_into"), turnInto), "the card's menu has Turn into");
+    move(app, turnInto);
+    check(menuRow(1, tr(app, "live.insert.h3"), heading), "Turn into opens beside it with Heading 3");
+    frame(app, out / "ten-text-menu.png");
+    move(app, heading);
+    click(app, heading);
+    size_t line = live::lineStart(doc.edit.text, doc.edit.caret);
+    check(!doc.edit.menu.open && doc.edit.text.compare(line, 4, L"### ") == 0,
+          "Turn into makes the card's line a heading: " + toUtf8(doc.edit.text));
+    keystroke(app, 'Z', {true, false, false});
+    check(doc.edit.text == typed, "undo takes it back in the card");
+    // The menu key opens it under the caret; Esc puts it away and the card stays open
+    handleContextMenu(app, app.hwnd, MAKELPARAM(-1, -1));
+    check(doc.edit.menu.open && doc.edit.menu.keys, "the menu key opens the card's text menu");
+    keystroke(app, VK_ESCAPE);
+    check(!doc.edit.menu.open && doc.editing == SheetDoc::Edit::Card, "Esc closes the menu and leaves the card being typed in");
+    keystroke(app, VK_ESCAPE);
+
     // Peek: far out, a card rested on opens in a lens
     flyTo(doc, 760, 120, 0.2f, 0);
     doc.selected.clear();

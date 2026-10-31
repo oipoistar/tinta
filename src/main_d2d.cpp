@@ -1097,6 +1097,8 @@ static void renderChromeAndEnd(App& app) {
         renderEditCtxMenu(app);
         renderEditorReadingButton(app);
         renderEditorWordCount(app);
+        // Live's menu over the page's buttons and counts
+        renderLiveMenu(app);
     }
     // A resting pointer's tab: full name and folder below the strip
     renderTabHoverCard(app);
@@ -1293,6 +1295,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 closeContextMenu(*app);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
+            if (app) liveCloseMenu(*app);
+            if (app && sheetActive(*app)) sheetCloseTextMenu(*app);
             break;
 
         case WM_NCLBUTTONDOWN:
@@ -1300,6 +1304,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 closeContextMenu(*app);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
+            if (app) liveCloseMenu(*app);
+            if (app && sheetActive(*app)) sheetCloseTextMenu(*app);
             if (app && !app->zenMode &&
                 (wParam == HTMINBUTTON || wParam == HTMAXBUTTON ||
                  wParam == HTCLOSE)) {
@@ -1424,6 +1430,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (app && app->d2dFactory) {
                 sidePanelResizeEnd(*app, hwnd, true);
                 closeContextMenu(*app);  // its anchor belongs to the old viewport
+                liveCloseMenu(*app);
+                if (sheetActive(*app)) sheetCloseTextMenu(*app);
                 // The preview's geometry is stale after a resize: restore
                 // the document at the new size and close the overlay
                 if (app->showPrintPreview) {
@@ -1609,6 +1617,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_KEYUP:
             if (app) sheetKeyUp(*app, hwnd, wParam);
+            // Live took the menu key on its way down: no second request for the menu
+            if (app && wParam == VK_APPS && editorLiveOn(*app)) return 0;
             break;
 
         case WM_XBUTTONUP:

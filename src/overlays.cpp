@@ -1999,6 +1999,7 @@ void renderHelpOverlay(App& app) {
         {L"Ctrl+S",       tr(app, "help.edit.save")},
         {L"Ctrl+/",       tr(app, "help.edit.live")},
         {L"/",            tr(app, "help.edit.slash")},
+        {L"Shift+F10",    tr(app, "help.edit.menu")},
         {L"[[",           tr(app, "help.sheet.link")},
         {L"Ctrl+K",       tr(app, "help.edit.link")},
         {L"Ctrl+E",       tr(app, "help.edit.preview")},

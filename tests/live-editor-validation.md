@@ -44,9 +44,9 @@ cards are typed in with the same engine (`include/live_text.h`).
     `[[Plans]]`;
   - the pointer: a click on a rendered word puts the caret in it, a click
     on a task box ticks it and leaves the caret, Up and Down walk from
-    block to block, a right-click opens the insert menu with the caret at
-    the click, a caret moved elsewhere (find, go to line) is brought into
-    view;
+    block to block, a right-click opens Live's menu (not the source's) with
+    the caret at the click, a caret moved elsewhere (find, go to line) is
+    brought into view;
   - switching: Ctrl+/ shows Source with the caret on the same character
     and saves the choice, Ctrl+/ shows Live again, the pill's Source side
     switches back;
@@ -140,6 +140,89 @@ and captured with PrintWindow (`out/live-playground/shots/`):
 - closing the window asked about the changes and Y saved them; the file
   held the typing and the table as made.
 
+## The menu
+
+Reported after the first version: Live's right-click menu made no sense and
+did nothing. It was Source's insert menu. Its rows showed Markdown, its
+Cut and Copy followed the source's state, and the page took every move and
+click over it: no row lit, a click put the caret under the menu, and the
+menu stayed open. The rail's table and diagram flyouts in Live had the same
+fault. Reproduced in the built app before the fix (`shots-menu/menu-1-open`
+to `menu-4-click`, since overwritten).
+
+Live now has its own menu, in the shared engine (`src/live_menu.cpp`), so
+sheet cards have it too (`docs/live-editor.md`, "The menu"). While it is
+open it takes the window's presses, moves and keys before anything else.
+
+- `fixtures/live/Menu tour.md`: a title; a paragraph with a link that has
+  a title, a `[[note]]` and an address written out; a list with a nested
+  item and a task; a table with centred and right-aligned columns; a
+  JavaScript fence; a quote; a picture; a last line.
+- `live_editor` checks, through the window's own handlers:
+  - a paragraph's menu: the formats first, Cut waiting for a selection,
+    Paste, Turn into, Insert, Select all, and no link or table rows; the
+    row under the pointer lights; B lights with its name and key, makes
+    the word under the pointer bold and puts the menu away;
+  - Turn into opens beside its row with Text ticked; crossing Insert's row
+    on the way keeps it open, resting on Insert opens Insert's; Heading 2
+    makes the paragraph a heading;
+  - Insert, Table: the grid takes its size from the pointer (4 x 2) and
+    makes that table after the line;
+  - a link: Open link, Copy link address (the address without its title,
+    on the clipboard), Edit link (the address selected), Remove link (its
+    words stay); a `[[note]]`: Open note and Remove link, no address;
+  - a task ticks; a top-level item cannot go out; a nested one does;
+  - a table: rows below, a column right in every row (the delimiter row
+    gets `---`), a column deleted, the last row deleted; the header has no
+    row above and stays; Align, Center centres its column;
+  - code, opened at the caret: Copy code copies the fence's lines, and
+    there are no formats, Turn into or Insert;
+  - the keys: Shift+F10 and the menu key (its press, and the window
+    request) open it under the caret with a row lit; End, Up, Right, Up,
+    Up, Right, Down and Enter make a sequence diagram; Up from the
+    clipboard reaches the formats, Right goes along them; a letter lights
+    its row; Esc and the menu key again put it away;
+  - a click off the menu puts it away and leaves the caret;
+  - the rail's table and diagram buttons open the grid and the diagrams
+    beside the rail and make a table and a pie chart at the caret; the
+    rail's export flyout (Source's) lights its rows over the page;
+  - both themes at 1050 and 650 px with Turn into open, every panel inside
+    the window; every pick undone leaves the tour as it was.
+- The engine's edits are checked on texts of their own: a link's words
+  and address without its title, a picture's, a note's name and shown
+  words, an address without the full stop after it, no link in a task box;
+  a column into a short row and out with one undo, the only row deleted
+  with the caret going to the header, a row from the header going under
+  the delimiter row, an alignment set and taken off; numbers counting at
+  each indent, Text taking a quote and a heading off, code getting
+  fences, code lines staying code, tasks keeping their ticks; Open link and
+  Open note handing the host the address or the note's name; Insert's Link
+  over words; a divider asked for in a table going under it; no Open for a
+  host that cannot follow links; the formats faint over lines.
+- `sheet_canvas`: a right-click in a card being typed in opens the text's
+  menu and keeps the card open; Turn into, Heading 3 makes the card's line
+  a heading and undo takes it back; the menu key opens it and Esc closes
+  it with the card still open.
+- `i18n`: 29 new strings (28 for the menu, and the help row for Shift+F10)
+  in all eight languages.
+- The frames (`menu-*.png`, `ten-text-menu.png`) were looked at: the
+  paragraph's menu, B's name and key, Turn into with Text ticked, the
+  Insert submenu with the grid at 4 x 2, a link's, a table's and the
+  align submenu, the keys' cascade to the diagrams, the rail's grid, and
+  the menu flipping above the pointer near the window's foot and to the
+  left at its right edge, on a card too.
+
+In the built app (`out/live-playground/`, posted messages, PrintWindow):
+a right-click on the first paragraph opened the menu there; resting on
+Turn into opened it with Text ticked; Heading 2 lit under the pointer and a
+click made the paragraph a heading. The menu key's press, posted, opened
+nothing at first: Windows did not turn the posted release into a menu
+request. The window now takes the menu key on its press, as it does
+Shift+F10, and drops its release. Then the menu key opened it under the
+caret, and End, Up and three Rights led to Insert's table grid at 4 x 3.
+Enter made the table with its first header cell selected. Closing
+discarded the changes, and the file was as it was.
+
 ## Performance and size
 
 - 247 KB document: switching to Live 356 ms (parsing and laying out the
@@ -149,6 +232,10 @@ and captured with PrintWindow (`out/live-playground/shots/`):
 - `tinta.exe` grows by 141 KB (3,691,520 to 3,835,904 bytes) for Live,
   the engine, the strings in eight languages and the shared drawing
   helpers; the sheets' own text box code went into the engine.
+- The menu adds 52 KB (to 3,889,152 bytes): about 24 KB for the menu
+  itself, the engine's table, link and Turn into edits, and the strings.
+  Its rows were first built inline at each call, 8.7 KB more; one
+  out-of-line call per row took that back.
 
 ## Limitations
 
