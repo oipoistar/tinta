@@ -6,6 +6,7 @@
 #pragma once
 
 #include "app.h"
+#include "live_text.h"
 #include "sheet.h"
 
 #include <d2d1.h>
@@ -17,25 +18,9 @@
 #include <vector>
 
 // A text box inside the sheet: a card's note, a label, an address, the
-// find field. Multi-line for notes; single-line ones commit on Enter.
-struct SheetTextEdit {
-    std::wstring text;
-    size_t caret = 0, anchor = 0;
-    bool multiline = true;
-    float preferredX = -1.0f;  // for Up/Down, in layout units
-    struct Snapshot { std::wstring text; size_t caret = 0, anchor = 0; };
-    std::vector<Snapshot> undo, redo;
-    unsigned long long lastTypeMs = 0;  // typing within a pause is one undo step
-    float scrollY = 0.0f;               // layout units the text is scrolled by
-    bool changed = false;               // since the last write
-    bool selectingWithMouse = false;
-    size_t clickCount = 0;
-    unsigned long long lastClickMs = 0;
-
-    bool hasSelection() const { return caret != anchor; }
-    size_t selStart() const { return caret < anchor ? caret : anchor; }
-    size_t selEnd() const { return caret < anchor ? anchor : caret; }
-};
+// find field, typed in with the Live editor's engine. A card's note is
+// live Markdown; the others are one line and commit on Enter.
+using SheetTextEdit = LiveText;
 
 // What the sheet knows about a node beyond its JSON: its note, the
 // figures its card shows and its content drawn for the current zoom
@@ -140,6 +125,7 @@ struct SheetDoc {
     Edit editing = Edit::None;
     std::string editId;
     SheetTextEdit edit;
+    live::LayoutCache editCache;          // its layout, made again as it changes
     std::string editOriginal;            // what the file or field held when editing began
     unsigned long long editSavedMs = 0;
 
@@ -204,17 +190,6 @@ struct SheetDoc {
     unsigned long long peekBitmapKey = 0;
     unsigned peekBitmapGeneration = 0;
     float peekContentHeight = 0, peekBitmapHeight = 0, peekBitmapScale = 1;
-
-    // [[ completion while a card is typed in
-    struct Completion {
-        std::wstring name;              // what goes between the brackets
-        std::string nodeId;             // the card it names, if on the sheet
-    };
-    bool completing = false;
-    size_t completeFrom = 0;            // where the name starts, after [[
-    std::vector<Completion> completions;
-    int completeIndex = 0;
-    std::vector<std::pair<D2D1_RECT_F, int>> completeHits;
 
     // The selection bar over the selected cards (client pixels)
     D2D1_RECT_F selectionBar{};
@@ -379,6 +354,7 @@ int nodeAt(const SheetDoc& doc, float x, float y, bool groupsToo = true);
 sheet::Box groupLabelBox(App& app, const SheetDoc& doc, const sheet::Node& group);
 // The text box's layout while editing (owned by the edit state; do not release)
 IDWriteTextLayout* editLayout(App& app, SheetDoc& doc, float width);
+live::Look editLook(App& app, const SheetDoc& doc);
 float editFontSize(const SheetDoc& doc);
 float cardPadding();
 // Below this many pixels a sheet unit, a card shows its title, not its note
@@ -425,10 +401,8 @@ bool hintRetired(int hint);
 void setHintsShown(bool shown);
 bool hintsShown();
 
-// Jump labels and [[ completion
+// Jump labels
 void startJump(App& app, SheetDoc& doc, bool join);
-void updateCompletions(App& app, SheetDoc& doc);
-void acceptCompletion(App& app, SheetDoc& doc, int index, bool arrow);
 
 // Peek: the lens's content, drawn before the frame like the cards'
 void renderPeekBitmap(App& app, SheetDoc& doc);

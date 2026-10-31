@@ -284,6 +284,9 @@ struct Settings {
     // Editor markdown assists (list continuation, Tab indent, Ctrl+B/I)
     // master switch
     bool editorAssists = true;
+    // Live: the page typed in where it reads, instead of the source beside
+    // its preview (docs/live-editor.md)
+    bool editorLive = false;
     // Word and character count beside the editor's Read button (#240)
     bool showWordCount = true;
     // Closing a window with unsaved edits skips the dialog and leaves them
@@ -1269,6 +1272,15 @@ struct App {
         float renderedY;
     };
     std::vector<ScrollAnchor> scrollAnchors;
+    // Every top-level block the layout placed, in order: its first source
+    // offset (SIZE_MAX when it has no text) and the stretch of the page it
+    // takes, its spacing included. Live finds its blocks on the page here.
+    struct BlockSpan {
+        size_t sourceOffset;
+        float top, bottom;
+    };
+    std::vector<BlockSpan> blockSpans;
+    unsigned layoutSerial = 0;  // counts layouts begun
     std::vector<size_t> editorLineByteOffsets;  // UTF-8 byte offset per editor line
 
     size_t searchMatchCursor = 0;
@@ -1442,6 +1454,10 @@ struct App {
     // Editor view options (persisted)
     bool editorShowPreview = true;
     bool editorWordWrap = false;
+    // Live (docs/live-editor.md): the page typed in where it reads; the
+    // rail's Source | Live pill slides its knob over editorLiveAnim
+    bool editorLive = false;
+    float editorLiveAnim = 0.0f;
 
     // Soft-wrap metrics: cumulative visual rows before each logical line
     // (editorRowStarts.size() == lines + 1). Only maintained while
@@ -1556,6 +1572,8 @@ struct App {
         }
         layoutTextRuns.clear();
         layoutRects.clear();
+        blockSpans.clear();
+        ++layoutSerial;
         frontmatterOverflow.clear();
         layoutLines.clear();
         layoutShapes.clear();
@@ -1676,8 +1694,13 @@ inline float editSeamWidth(const App& app) {
     return dpi(app, 16.0f);
 }
 
+// Live (docs/live-editor.md): the page is typed in where it reads
+inline bool editorLiveOn(const App& app) {
+    return app.editMode && app.editorLive && !app.editorReadingPreview;
+}
+
 inline float editorPaneWidth(const App& app) {
-    if (app.editorReadingPreview) return 0;
+    if (app.editorReadingPreview || editorLiveOn(app)) return 0;
     return app.editorShowPreview
         ? app.width * app.editorSplitRatio - editSeamWidth(app) * 0.5f
         : static_cast<float>(app.width);
@@ -1764,6 +1787,9 @@ inline float documentViewportX(const App& app) {
         }
         return x;
     }
+    // Live: the page beside the rail, at the rail's full width so sliding
+    // it in does not lay the page out again
+    if (editorLiveOn(app)) return dpi(app, 48.0f);
     // Preview hidden: zero-width viewport at the right edge — document
     // rendering flows through unchanged and clips to nothing
     if (!app.editorShowPreview) {
@@ -1773,7 +1799,7 @@ inline float documentViewportX(const App& app) {
 }
 
 inline bool editorPreviewVisible(const App& app) {
-    return app.editMode && (app.editorShowPreview || app.editorReadingPreview);
+    return app.editMode && (app.editorShowPreview || app.editorReadingPreview || app.editorLive);
 }
 
 // The split editor is up: the source with the preview docked beside it,
@@ -1783,7 +1809,7 @@ inline bool editorPreviewVisible(const App& app) {
 // chrome (#242). The seam and the pane chrome ask this; document
 // rendering keeps asking editorPreviewVisible, which is true in both.
 inline bool editSplitPreview(const App& app) {
-    return app.editMode && app.editorShowPreview && !app.editorReadingPreview;
+    return app.editMode && app.editorShowPreview && !app.editorReadingPreview && !app.editorLive;
 }
 
 // The Read / Edit pill floats over the bottom-left corner in edit mode

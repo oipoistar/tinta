@@ -142,7 +142,8 @@ void focusSourceEditor(App& app) {
     releaseSearchInput(app);
 }
 bool sourceEditorHasFocus(const App& app) {
-    return app.editMode && !app.editorReadingPreview && !app.tableEditActive && !(app.showSearch && app.searchActive);
+    return app.editMode && !app.editorReadingPreview && !editorLiveOn(app) && !app.tableEditActive &&
+           !(app.showSearch && app.searchActive);
 }
 void focusSearchInput(App& app, bool replace) {
     bool reacquire = !app.searchActive || app.tableEditActive;

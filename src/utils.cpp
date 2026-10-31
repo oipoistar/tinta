@@ -234,6 +234,19 @@ void signalClipboardBusy(App& app) {
     signalPushKey(app, SIG_WARN, SIGI_WARNING, "toast.clipboard_busy");
 }
 
+std::wstring readClipboardText(HWND hwnd) {
+    std::wstring text;
+    if (!openClipboard(hwnd)) return text;
+    if (HANDLE data = GetClipboardData(CF_UNICODETEXT)) {
+        if (const wchar_t* p = static_cast<const wchar_t*>(GlobalLock(data))) {
+            text = p;
+            GlobalUnlock(data);
+        }
+    }
+    CloseClipboard();
+    return text;
+}
+
 bool copyToClipboard(HWND hwnd, const std::wstring& text, bool* held) {
     if (text.empty()) return false;
     size_t size = (text.length() + 1) * sizeof(wchar_t);

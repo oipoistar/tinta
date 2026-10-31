@@ -121,12 +121,15 @@ so does an Untitled in an Obsidian vault, where other notes may link to it.
    Group, for several cards **Join in order** (arrows in rows, left to
    right, where there are none yet) and **Align**, for a card with arrows
    out Fold, and Remove.
-3. **Live writing.** In a card being typed in, the caret's line shows its
-   Markdown as typed and every other line shows it drawn: headings without
-   their #, bullets, task boxes, bold and italic, `[[links]]` and
-   `[links](...)` in the accent, quotes with their bar. A line that starts
-   `#word`, which Markdown does not take for a heading, gets a mark where
-   the space belongs.
+3. **Live writing.** A card is typed in with the engine of Tinta's Live
+   editor (`docs/live-editor.md`). The caret's line shows its Markdown as
+   typed and every other line shows it drawn: headings without their #,
+   bullets, task boxes (a click ticks them), bold and italic, code on its
+   background, `[[links]]` and `[links](...)` in the accent, quotes with
+   their bar. A line that starts `#word`, which Markdown does not take for
+   a heading, gets a mark where the space belongs. `/` opens the slash menu
+   of blocks to insert, words selected on one line show the format bar, and
+   lists, tables and fences go on as in Live.
 4. **`[[` names.** Typing `[[` in a card lists the notes on the sheet and
    in its folder; the arrow keys choose, Enter writes the link and
    Ctrl+Enter draws the arrow too.

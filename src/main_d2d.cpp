@@ -41,6 +41,7 @@
 #include <thread>
 #pragma comment(lib, "winhttp.lib")
 #include "input.h"
+#include "live_editor.h"
 #include "touch.h"
 #include "editor.h"
 #include "print.h"
@@ -184,15 +185,16 @@ void render(App& app) {
         app.startPageShowing = false;  // recents reload on the way back
         // The reading view (#236) is the reader's page: plain background,
         // content clipped to the window (#242)
-        app.renderTarget->Clear(app.editorReadingPreview ? app.theme.background
-                                                         : editDeskColor(app));
+        const bool livePage = editorLiveOn(app);
+        app.renderTarget->Clear(app.editorReadingPreview || livePage ? app.theme.background
+                                                                     : editDeskColor(app));
 
         float editorWidth = editorPaneWidth(app);
         float previewX = documentViewportX(app);
         float previewWidth = documentViewportWidth(app);
 
         // Render editor (left pane; full width when the preview is hidden)
-        if (!app.editorReadingPreview) renderEditor(app, editorWidth);
+        if (!app.editorReadingPreview && !livePage) renderEditor(app, editorWidth);
 
         // The docked pane's page and the seam hairline first, then the
         // document clips into its pane: the whole window in the reading
@@ -201,6 +203,7 @@ void render(App& app) {
         renderEditPaneChrome(app);
         {
             float paneLeft = app.editorReadingPreview ? 0.0f
+                             : livePage ? previewX
                              : app.editorShowPreview ? editSplitDividerX(app) + 1.0f
                                                      : (float)app.width;
             app.renderTarget->PushAxisAlignedClip(
@@ -214,7 +217,7 @@ void render(App& app) {
             D2D1::Matrix3x2F::Translation(previewX, 0) * originalTransform);
 
         // The caret block's accent wash under the document content
-        if (!app.editorReadingPreview) renderPreviewCaretBlock(app, previewWidth);
+        if (!app.editorReadingPreview && !livePage) renderPreviewCaretBlock(app, previewWidth);
 
         goto render_document;
     }
@@ -257,10 +260,16 @@ render_document:
     // Clamp scroll values
     float documentWidth = documentViewportWidth(app);
     float maxScrollX = std::max(0.0f, app.contentWidth - documentWidth);
-    float maxScrollY = std::max(0.0f, app.contentHeight - app.height);
+    const bool livePage = editorLiveOn(app);
+    float maxScrollY = std::max(0.0f, (livePage ? livePageHeight(app) : app.contentHeight) - app.height);
+    if (livePage) app.scrollbarContentHeight = std::max(app.scrollbarContentHeight, livePageHeight(app));
     app.scrollX = std::max(0.0f, std::min(app.scrollX, maxScrollX));
     app.scrollY = std::max(0.0f, std::min(app.scrollY, maxScrollY));
 
+    // Live draws the page itself: the layout around the blocks being typed in
+    if (livePage) {
+        renderLivePage(app);
+    } else {
     // Render cached layout (document coordinates -> screen)
     const float viewportTop = app.scrollY;
     const float viewportBottom = app.scrollY + app.height;
@@ -764,6 +773,8 @@ render_document:
         }
     }
 
+    }  // the document pass (Live drew its page instead)
+
     // Determine scrollbar visibility
     bool needsVScroll = app.verticalScrollbarVisible;
     bool needsHScroll = app.contentWidth > documentWidth;
@@ -888,7 +899,7 @@ render_document:
     // Draw selection highlights from the exact [selAnchor, selFocus) glyph
     // ranges. The copied text comes from the same range, so highlight and
     // clipboard always agree.
-    if ((app.selecting || app.hasSelection) && !app.textRects.empty() &&
+    if (!livePage && (app.selecting || app.hasSelection) && !app.textRects.empty() &&
         app.selAnchor != app.selFocus) {
         size_t selA = std::min(app.selAnchor, app.selFocus);
         size_t selB = std::max(app.selAnchor, app.selFocus);
@@ -910,7 +921,7 @@ render_document:
     }
 
     // Draw search match highlights (search live through visible textRects)
-    if (app.showSearch && !app.searchQuery.empty() && !app.textRects.empty() && !app.searchMatches.empty()) {
+    if (!livePage && app.showSearch && !app.searchQuery.empty() && !app.textRects.empty() && !app.searchMatches.empty()) {
         // Collect visible match rects by intersecting search matches with text rects
         struct VisibleMatch {
             D2D1_RECT_F rect;
@@ -989,7 +1000,7 @@ render_document:
         }
     }
 
-    renderFrontmatterOverflow(app);
+    if (!livePage) renderFrontmatterOverflow(app);
 
     // Back to screen coordinates: notifications, stats, and overlays
     // (including the folder browser panel itself) are not shifted
@@ -1983,6 +1994,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     // Persisted when toggled and kept as on disk at exit, like openInTabs
     app.showNotifications = savedSettings.showNotifications;
     app.editorAssists = savedSettings.editorAssists;
+    app.editorLive = savedSettings.editorLive;
+    app.editorLiveAnim = app.editorLive ? 1.0f : 0.0f;
     app.showWordCount = savedSettings.showWordCount;
     app.printMarginMm = savedSettings.printMarginMm;
     app.closeKeepsDrafts = savedSettings.closeKeepsDrafts;

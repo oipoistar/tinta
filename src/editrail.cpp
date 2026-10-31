@@ -118,6 +118,13 @@ static const RailBtn kInsertBtns[] = {
     {22, L"\U0001F5BC", 12.0f, DWRITE_FONT_WEIGHT_NORMAL,
      DWRITE_FONT_STYLE_NORMAL, L"Segoe UI", false, "rail.image", L""},
 };
+// Source | Live (docs/live-editor.md): the pill at the rail's top
+static const RailBtn kModeBtns[] = {
+    {30, L"#", 13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+     L"Consolas", false, "rail.source", L"Ctrl+/"},
+    {31, L"Aa", 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+     L"Segoe UI", false, "rail.live", L"Ctrl+/"},
+};
 // Foot: pandoc export, shown only when an executable was found
 static const RailBtn kFootBtns[] = {
     {23, L"\u2912", 13.0f, DWRITE_FONT_WEIGHT_NORMAL,
@@ -125,6 +132,9 @@ static const RailBtn kFootBtns[] = {
 };
 
 static const RailBtn* railBtnById(int id) {
+    for (const RailBtn& b : kModeBtns) {
+        if (b.id == id) return &b;
+    }
     for (const RailBtn& b : kTextBtns) {
         if (b.id == id) return &b;
     }
@@ -212,6 +222,41 @@ void renderEditRail(App& app) {
     sep(y);
     y += dpi(app, 9.0f);
 
+    // Source | Live: a pill whose knob slides to the way the document is
+    // typed in, the source as written or the page as it reads
+    {
+        float target = app.editorLive ? 1.0f : 0.0f;
+        if (app.editorLiveAnim != target) {
+            float step = 0.25f;
+            app.editorLiveAnim = target > app.editorLiveAnim ? std::min(target, app.editorLiveAnim + step)
+                                                             : std::max(target, app.editorLiveAnim - step);
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+        }
+        float eased = app.editorLiveAnim * app.editorLiveAnim * (3.0f - 2.0f * app.editorLiveAnim);
+        float pw = dpi(app, 30.0f), seg = dpi(app, 26.0f), pad = dpi(app, 2.0f);
+        float px = (railW - pw) * 0.5f;
+        D2D1_RECT_F pill = D2D1::RectF(px, y, px + pw, y + seg * 2 + pad * 2);
+        app.brush->SetColor(railA(text, 0.08f));
+        app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(pill, pw * 0.5f, pw * 0.5f), app.brush);
+        float knobTop = y + pad + seg * eased;
+        D2D1_RECT_F knob = D2D1::RectF(px + pad, knobTop, px + pw - pad, knobTop + seg);
+        app.brush->SetColor(accent);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(knob, (pw - pad * 2) * 0.5f, (pw - pad * 2) * 0.5f), app.brush);
+        for (int k = 0; k < 2; k++) {
+            const RailBtn& b = kModeBtns[k];
+            D2D1_RECT_F r = D2D1::RectF(px, y + pad + seg * k, px + pw, y + pad + seg * (k + 1));
+            bool on = (k == 1) == (eased > 0.5f);
+            bool hov = app.editRailHover == b.id;
+            railGlyph(app, b.glyph, b.size, b.weight, b.style, b.family, r,
+                      on ? onAccent : railA(text, hov ? 0.9f : 0.55f));
+            addHit(r, b.id);
+        }
+        y = pill.bottom + dpi(app, 9.0f);
+        sep(y);
+        y += dpi(app, 9.0f);
+    }
+
     // Tool groups: text style, blocks, insert
     float btn = dpi(app, 32.0f);
     float bx = (railW - btn) * 0.5f;
@@ -261,8 +306,6 @@ void renderEditRail(App& app) {
                   hov ? railA(text, 0.95f) : railA(text, 0.8f), b.strike);
         addHit(r, b.id);
     }
-    (void)onAccent;
-    (void)accent;
 
     app.renderTarget->SetTransform(prev);
     app.renderTarget->PopAxisAlignedClip();

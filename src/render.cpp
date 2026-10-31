@@ -3842,7 +3842,7 @@ bool layoutBegin(App& app) {
     // Pages print across their margins whatever the screen's column (#257).
     {
         int pct = app.zenMode ? app.zenWidthPct : app.readingWidthPct;
-        if (pct < 100 && !app.printLayout && (!app.editMode || app.editorReadingPreview)) {
+        if (pct < 100 && !app.printLayout && (!app.editMode || app.editorReadingPreview || editorLiveOn(app))) {
             float column = app.layoutMaxWidth * (float)pct / 100.0f;
             app.layoutIndent += (app.layoutMaxWidth - column) / 2.0f;
             app.layoutMaxWidth = column;
@@ -3883,7 +3883,9 @@ bool layoutStep(App& app, float targetY, int64_t budgetUs) {
             (app.scrollAnchors.empty() || app.scrollAnchors.back().sourceOffset < offset)) {
             app.scrollAnchors.push_back({offset, y});
         }
+        float top = y;
         layoutElement(app, child, y, app.layoutIndent, app.layoutMaxWidth);
+        app.blockSpans.push_back({offset, top, y});
         app.layoutNextBlock++;
     }
 
@@ -3894,6 +3896,8 @@ bool layoutStep(App& app, float targetY, int64_t budgetUs) {
     // The reading view's Edit pill does not zoom with the page: zoomed
     // out, the last line must still scroll clear of it (#250)
     if (app.editMode && app.editorReadingPreview) tail = std::max(tail, readPillClearance(app));
+    // Live types at the page's end: room to bring the last line up
+    if (editorLiveOn(app)) tail = std::max(tail, (float)app.height * 0.35f);
     app.contentHeight = y + tail;
     return app.layoutNextBlock >= children.size();
 }

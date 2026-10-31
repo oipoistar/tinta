@@ -33,19 +33,6 @@ namespace {
 
 bool keyDown(int vk) { return (GetKeyState(vk) & 0x8000) != 0; }
 
-std::wstring clipboardText(HWND hwnd) {
-    std::wstring text;
-    if (!openClipboard(hwnd)) return text;
-    if (HANDLE data = GetClipboardData(CF_UNICODETEXT)) {
-        if (const wchar_t* p = static_cast<const wchar_t*>(GlobalLock(data))) {
-            text = p;
-            GlobalUnlock(data);
-        }
-    }
-    CloseClipboard();
-    return text;
-}
-
 UINT cardsFormat() {
     static UINT format = RegisterClipboardFormatW(L"Tinta.SheetCards");
     return format;
@@ -81,90 +68,6 @@ void selectOnly(SheetDoc& doc, const std::string& id) {
     if (!id.empty()) doc.selected.push_back(id);
     doc.selectedEdge.clear();
 }
-
-// Drawn in place of Markdown's own characters on a card's lines away from
-// the caret: nothing at all, a bullet, a task box (ticked or not) or a
-// quote's bar. The text stays as typed; only its look changes.
-class MarkObject final : public IDWriteInlineObject {
-public:
-    enum Kind { Hidden, Bullet, Box, Checked, Quote };
-    MarkObject(Kind kind, float size, ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush, D2D1_COLOR_F text,
-               D2D1_COLOR_F accent)
-        : kind_(kind), size_(size), target_(target), brush_(brush), text_(text), accent_(accent) {}
-
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
-        if (riid == __uuidof(IUnknown) || riid == __uuidof(IDWriteInlineObject)) {
-            *out = static_cast<IDWriteInlineObject*>(this);
-            AddRef();
-            return S_OK;
-        }
-        *out = nullptr;
-        return E_NOINTERFACE;
-    }
-    ULONG STDMETHODCALLTYPE AddRef() override { return (ULONG)InterlockedIncrement(&refs_); }
-    ULONG STDMETHODCALLTYPE Release() override {
-        ULONG left = (ULONG)InterlockedDecrement(&refs_);
-        if (!left) delete this;
-        return left;
-    }
-
-    HRESULT STDMETHODCALLTYPE Draw(void*, IDWriteTextRenderer*, FLOAT x, FLOAT y, BOOL, BOOL, IUnknown*) override {
-        if (!target_ || !brush_ || kind_ == Hidden) return S_OK;
-        float u = size_;
-        float mid = y + u * 0.8f - u * 0.3f;  // halfway up a lowercase letter
-        auto color = [&](D2D1_COLOR_F c, float a) {
-            c.a = a;
-            brush_->SetColor(c);
-        };
-        if (kind_ == Bullet) {
-            color(text_, 0.7f);
-            target_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x + u * 0.2f, mid), u * 0.12f, u * 0.12f), brush_);
-        } else if (kind_ == Box || kind_ == Checked) {
-            D2D1_ROUNDED_RECT box = D2D1::RoundedRect(D2D1::RectF(x + u * 0.08f, mid - u * 0.36f, x + u * 0.8f, mid + u * 0.36f),
-                                                      u * 0.14f, u * 0.14f);
-            if (kind_ == Checked) {
-                color(accent_, 1.0f);
-                target_->FillRoundedRectangle(box, brush_);
-                color(D2D1::ColorF(1, 1, 1), 1.0f);
-                target_->DrawLine(D2D1::Point2F(x + u * 0.24f, mid), D2D1::Point2F(x + u * 0.4f, mid + u * 0.17f), brush_, u * 0.1f);
-                target_->DrawLine(D2D1::Point2F(x + u * 0.4f, mid + u * 0.17f), D2D1::Point2F(x + u * 0.66f, mid - u * 0.2f), brush_,
-                                  u * 0.1f);
-            } else {
-                color(text_, 0.6f);
-                target_->DrawRoundedRectangle(box, brush_, u * 0.07f);
-            }
-        } else if (kind_ == Quote) {
-            color(accent_, 0.6f);
-            target_->FillRectangle(D2D1::RectF(x + u * 0.08f, y - u * 0.2f, x + u * 0.2f, y + u * 1.25f), brush_);
-        }
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE GetMetrics(DWRITE_INLINE_OBJECT_METRICS* metrics) override {
-        // No taller than the line's own letters, so lines keep their height
-        static const float widths[] = {0.0f, 0.55f, 1.05f, 1.05f, 0.45f};
-        metrics->width = widths[kind_] * size_;
-        metrics->height = size_;
-        metrics->baseline = size_ * 0.8f;
-        metrics->supportsSideways = FALSE;
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE GetOverhangMetrics(DWRITE_OVERHANG_METRICS* overhangs) override {
-        *overhangs = {};
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE GetBreakConditions(DWRITE_BREAK_CONDITION* before, DWRITE_BREAK_CONDITION* after) override {
-        *before = *after = DWRITE_BREAK_CONDITION_NEUTRAL;
-        return S_OK;
-    }
-
-private:
-    volatile LONG refs_ = 1;
-    Kind kind_;
-    float size_;
-    ID2D1RenderTarget* target_;
-    ID2D1SolidColorBrush* brush_;
-    D2D1_COLOR_F text_, accent_;
-};
 
 }  // namespace
 
@@ -226,239 +129,48 @@ bool editRect(App& app, SheetDoc& doc, D2D1_RECT_F& rect, float& textScale) {
     }
 }
 
-IDWriteTextLayout* editLayout(App& app, SheetDoc& doc, float width) {
-    // One layout at a time, rebuilt when the text, the width, the kind or,
-    // in a card, the caret's line change
-    static Microsoft::WRL::ComPtr<IDWriteTextLayout> cached;
-    static std::wstring cachedText;
-    static float cachedWidth = -1;
-    static int cachedKind = -1;
-    static std::wstring cachedFace;
-    static size_t cachedLine = 0;
-    static Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> markBrush, linkBrush, glyphBrush;
-    static unsigned brushGeneration = 0;
+live::Look editLook(App& app, const SheetDoc& doc) {
+    live::Look look;
+    const D2DTheme& th = app.theme;
     bool card = doc.editing == SheetDoc::Edit::Card;
-    const wchar_t* face = card && app.theme.fontFamily && *app.theme.fontFamily ? app.theme.fontFamily : L"Segoe UI";
-    const std::wstring& t = doc.edit.text;
-    // The caret's line shows its Markdown as typed, the others show it drawn
-    size_t caretLine = card ? (size_t)std::count(t.begin(), t.begin() + (std::ptrdiff_t)std::min(doc.edit.caret, t.size()), L'\n') : 0;
-    if (cached && cachedText == t && std::fabs(cachedWidth - width) < 0.01f && cachedKind == (int)doc.editing &&
-        cachedFace == face && brushGeneration == app.renderTargetGeneration && cachedLine == caretLine) {
-        return cached.Get();
+    look.markdown = card;
+    look.face = card && th.fontFamily && *th.fontFamily ? th.fontFamily : L"Segoe UI";
+    look.headingFace = look.face;
+    look.codeFace = th.codeFontFamily && *th.codeFontFamily ? th.codeFontFamily : L"Consolas";
+    look.size = look.codeSize = editFontSize(doc);
+    // Headings bold and larger, in the note's own face
+    const float sizes[] = {1.6f, 1.35f, 1.18f, 1.08f, 1.0f, 1.0f};
+    for (int i = 0; i < 6; ++i) {
+        look.headingSize[i] = look.size * sizes[i];
+        look.heading[i] = th.text;
     }
-    cached.Reset();
-    IDWriteTextFormat* fmt = nullptr;
-    app.dwriteFactory->CreateTextFormat(face, nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                                        DWRITE_FONT_STRETCH_NORMAL, editFontSize(doc), L"en-us", &fmt);
-    if (!fmt) return nullptr;
-    useUiFontFallback(app, fmt);
-    if (!card) fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-    IDWriteTextLayout* layout = nullptr;
-    app.dwriteFactory->CreateTextLayout(t.c_str(), (UINT32)t.size(), fmt, std::max(1.0f, width), 100000.0f, &layout);
-    fmt->Release();
-    if (!layout) return nullptr;
-    cached.Attach(layout);
-    cachedText = t;
-    cachedWidth = width;
-    cachedKind = (int)doc.editing;
-    cachedFace = face;
-    cachedLine = caretLine;
-    if (!card) return cached.Get();
-    if (!markBrush || brushGeneration != app.renderTargetGeneration) {
-        markBrush.Reset();
-        linkBrush.Reset();
-        glyphBrush.Reset();
-        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &markBrush);
-        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &linkBrush);
-        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &glyphBrush);
-    }
-    brushGeneration = app.renderTargetGeneration;
-    if (!markBrush || !linkBrush || !glyphBrush) return cached.Get();
-    D2D1_COLOR_F muted = app.theme.text;
-    muted.a = 0.45f;
-    markBrush->SetColor(muted);
-    linkBrush->SetColor(app.theme.accent);
+    look.text = th.text;
+    look.accent = look.link = th.accent;
+    look.code = th.code;
+    look.codeBack = th.codeBackground;
+    look.inlineCodeBack = themeInlineCodeBackground(th);
+    look.quote = th.blockquoteBorder;
+    look.mark = themeHighlightBackground(th);
+    look.codeInset = 6.0f;
+    return look;
+}
 
-    // Headings bold and larger, **strong**, *emphasis*, `code` in the code
-    // face, links in the accent. On the caret's line the marks are muted;
-    // on the others they go, or turn into bullets, task boxes and bars.
-    const float size = editFontSize(doc);
-    const wchar_t* codeFace = app.theme.codeFontFamily && *app.theme.codeFontFamily ? app.theme.codeFontFamily : L"Consolas";
-    bool here = false;
-    auto mark = [&](size_t at, size_t length, MarkObject::Kind kind) {
-        if (!length) return;
-        DWRITE_TEXT_RANGE range{(UINT32)at, (UINT32)length};
-        if (here) {
-            layout->SetDrawingEffect(markBrush.Get(), range);
-            return;
-        }
-        MarkObject* object = new MarkObject(kind, size, app.renderTarget, glyphBrush.Get(), app.theme.text, app.theme.accent);
-        layout->SetInlineObject(object, range);
-        object->Release();
-    };
-    size_t start = 0, lineIndex = 0;
-    bool inFence = false;
-    while (start <= t.size()) {
-        size_t end = t.find(L'\n', start);
-        if (end == std::wstring::npos) end = t.size();
-        here = lineIndex == caretLine;
-        std::wstring_view lineText(t.data() + start, end - start);
-        size_t lead = lineText.find_first_not_of(L' ');
-        bool fence = lead != std::wstring::npos && lineText.substr(lead, 3) == L"```";
-        if (fence || inFence) {
-            layout->SetFontFamilyName(codeFace, {(UINT32)start, (UINT32)(end - start)});
-            if (fence) {
-                layout->SetDrawingEffect(markBrush.Get(), {(UINT32)start, (UINT32)(end - start)});
-                inFence = !inFence;
-            }
-        } else {
-            size_t hashes = 0;
-            while (hashes < lineText.size() && lineText[hashes] == L'#') ++hashes;
-            if (hashes >= 1 && hashes <= 6 && hashes < lineText.size() && lineText[hashes] == L' ') {
-                float sizes[] = {1.6f, 1.35f, 1.18f, 1.08f, 1.0f, 1.0f};
-                DWRITE_TEXT_RANGE range{(UINT32)start, (UINT32)(end - start)};
-                layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range);
-                layout->SetFontSize(size * sizes[hashes - 1], range);
-                mark(start, hashes + 1, MarkObject::Hidden);
-            } else if (lead != std::wstring::npos) {
-                // List, task and quote marks
-                std::wstring_view rest = lineText.substr(lead);
-                if (rest.size() >= 2 && rest[0] == L'>' && rest[1] == L' ') {
-                    mark(start + lead, 1, MarkObject::Quote);
-                    layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, {(UINT32)(start + lead), (UINT32)rest.size()});
-                } else if (rest.size() >= 2 && (rest[0] == L'-' || rest[0] == L'*' || rest[0] == L'+') && rest[1] == L' ') {
-                    bool task = rest.size() >= 5 && rest[2] == L'[' && rest[4] == L']' && (rest.size() == 5 || rest[5] == L' ');
-                    if (task) {
-                        mark(start + lead, 2, MarkObject::Hidden);
-                        mark(start + lead + 2, 3, rest[3] == L'x' || rest[3] == L'X' ? MarkObject::Checked : MarkObject::Box);
-                    } else {
-                        mark(start + lead, 1, MarkObject::Bullet);
-                    }
-                }
-            }
-            // Inline spans
-            for (size_t i = 0; i < lineText.size(); ++i) {
-                wchar_t c = lineText[i];
-                if (c == L'`') {
-                    size_t close = lineText.find(L'`', i + 1);
-                    if (close == std::wstring::npos) break;
-                    layout->SetFontFamilyName(codeFace, {(UINT32)(start + i), (UINT32)(close - i + 1)});
-                    mark(start + i, 1, MarkObject::Hidden);
-                    mark(start + close, 1, MarkObject::Hidden);
-                    i = close;
-                } else if (c == L'[' && i + 1 < lineText.size() && lineText[i + 1] == L'[') {
-                    // [[a note]] or [[a note|shown as]]: the name in the accent
-                    size_t close = lineText.find(L"]]", i + 2);
-                    if (close == std::wstring::npos) continue;
-                    size_t bar = lineText.find(L'|', i + 2);
-                    size_t shown = bar != std::wstring::npos && bar < close ? bar + 1 : i + 2;
-                    layout->SetDrawingEffect(linkBrush.Get(), {(UINT32)(start + shown), (UINT32)(close - shown)});
-                    mark(start + i, shown - i, MarkObject::Hidden);
-                    mark(start + close, 2, MarkObject::Hidden);
-                    i = close + 1;
-                } else if (c == L'[' && (i == 0 || lineText[i - 1] != L'!')) {
-                    // [text](address): the text in the accent
-                    size_t middle = lineText.find(L"](", i + 1);
-                    if (middle == std::wstring::npos) continue;
-                    size_t close = lineText.find(L')', middle + 2);
-                    if (close == std::wstring::npos) continue;
-                    layout->SetDrawingEffect(linkBrush.Get(), {(UINT32)(start + i + 1), (UINT32)(middle - i - 1)});
-                    mark(start + i, 1, MarkObject::Hidden);
-                    mark(start + middle, close - middle + 1, MarkObject::Hidden);
-                    i = close;
-                } else if (c == L'*' && i + 1 < lineText.size() && lineText[i + 1] == L'*') {
-                    size_t close = lineText.find(L"**", i + 2);
-                    if (close == std::wstring::npos) continue;
-                    layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, {(UINT32)(start + i), (UINT32)(close - i + 2)});
-                    mark(start + i, 2, MarkObject::Hidden);
-                    mark(start + close, 2, MarkObject::Hidden);
-                    i = close + 1;
-                } else if ((c == L'*' || c == L'_') && i + 1 < lineText.size() && lineText[i + 1] != L' ' &&
-                           (i == 0 || lineText[i - 1] == L' ')) {
-                    size_t close = lineText.find(c, i + 1);
-                    if (close == std::wstring::npos || close == i + 1) continue;
-                    layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, {(UINT32)(start + i), (UINT32)(close - i + 1)});
-                    mark(start + i, 1, MarkObject::Hidden);
-                    mark(start + close, 1, MarkObject::Hidden);
-                    i = close;
-                }
-            }
-        }
-        ++lineIndex;
-        if (end == t.size()) break;
-        start = end + 1;
-    }
-    return cached.Get();
+IDWriteTextLayout* editLayout(App& app, SheetDoc& doc, float width) {
+    // The caret's line shows its Markdown as typed, the others show it drawn
+    size_t caretLine = doc.editing == SheetDoc::Edit::Card ? live::caretLineOf(doc.edit, 0, doc.edit.text.size()) : (size_t)-1;
+    return live::layoutOf(app, doc.edit, 0, doc.edit.text.size(), width, editLook(app, doc), doc.editCache, caretLine);
 }
 
 }  // namespace sheetui
 
 namespace {
 
-void pushUndo(SheetTextEdit& e, bool coalesce) {
-    unsigned long long now = nowMs();
-    if (coalesce && !e.undo.empty() && now - e.lastTypeMs < 900) {
-        e.lastTypeMs = now;
-        return;
-    }
-    e.undo.push_back({e.text, e.caret, e.anchor});
-    if (e.undo.size() > 300) e.undo.erase(e.undo.begin());
-    e.redo.clear();
-    e.lastTypeMs = now;
-}
-
-void replaceSelection(SheetDoc& doc, const std::wstring& with, bool coalesce = false) {
-    SheetTextEdit& e = doc.edit;
-    pushUndo(e, coalesce);
-    size_t a = e.selStart(), b = e.selEnd();
-    std::wstring insert = with;
-    if (!e.multiline) {
-        for (auto& c : insert) {
-            if (c == L'\n' || c == L'\r' || c == L'\t') c = L' ';
-        }
-    }
-    e.text.replace(a, b - a, insert);
-    e.caret = e.anchor = a + insert.size();
-    e.changed = true;
-    e.preferredX = -1;
-    e.lastTypeMs = nowMs();
-}
-
-bool isWordChar(wchar_t c) { return iswalnum(c) || c == L'_' || c > 0x2E7F; }
-
-size_t wordLeft(const std::wstring& t, size_t at) {
-    while (at > 0 && !isWordChar(t[at - 1])) --at;
-    while (at > 0 && isWordChar(t[at - 1])) --at;
-    return at;
-}
-
-size_t wordRight(const std::wstring& t, size_t at) {
-    while (at < t.size() && !isWordChar(t[at])) ++at;
-    while (at < t.size() && isWordChar(t[at])) ++at;
-    return at;
-}
-
-size_t lineStart(const std::wstring& t, size_t at) {
-    size_t nl = at == 0 ? std::wstring::npos : t.rfind(L'\n', at - 1);
-    return nl == std::wstring::npos ? 0 : nl + 1;
-}
-
-size_t lineEnd(const std::wstring& t, size_t at) {
-    size_t nl = t.find(L'\n', at);
-    return nl == std::wstring::npos ? t.size() : nl;
-}
-
 // The caret's place in the box's layout units
 bool caretPoint(App& app, SheetDoc& doc, float& x, float& y, float& height) {
     D2D1_RECT_F rect{};
     float scale = 1;
     if (!editRect(app, doc, rect, scale)) return false;
-    IDWriteTextLayout* layout = editLayout(app, doc, (rect.right - rect.left) / scale);
-    if (!layout) return false;
-    DWRITE_HIT_TEST_METRICS m{};
-    layout->HitTestTextPosition((UINT32)doc.edit.caret, FALSE, &x, &y, &m);
-    height = m.height;
-    return true;
+    return live::caretPoint(editLayout(app, doc, (rect.right - rect.left) / scale), 0, doc.edit.caret, x, y, height);
 }
 
 size_t positionAt(App& app, SheetDoc& doc, float lx, float ly) {
@@ -467,11 +179,7 @@ size_t positionAt(App& app, SheetDoc& doc, float lx, float ly) {
     if (!editRect(app, doc, rect, scale)) return doc.edit.caret;
     IDWriteTextLayout* layout = editLayout(app, doc, (rect.right - rect.left) / scale);
     if (!layout) return doc.edit.caret;
-    BOOL trailing = FALSE, inside = FALSE;
-    DWRITE_HIT_TEST_METRICS m{};
-    layout->HitTestPoint(lx, ly, &trailing, &inside, &m);
-    size_t at = m.textPosition + (trailing ? m.length : 0);
-    return std::min(at, doc.edit.text.size());
+    return live::positionAt(layout, 0, doc.edit.text.size(), lx, ly);
 }
 
 // The card grows to hold what is typed into it, and the box keeps the caret in view
@@ -496,33 +204,6 @@ void fitEditor(App& app, SheetDoc& doc) {
         if (y + h > doc.edit.scrollY + visible) doc.edit.scrollY = y + h - visible;
         doc.edit.scrollY = std::max(0.0f, doc.edit.scrollY);
     }
-}
-
-std::string noteTextForWrite(const SheetDoc& doc, const std::wstring& text) {
-    std::string utf8 = toUtf8(text);
-    bool crlf = doc.editOriginal.find("\r\n") != std::string::npos;
-    if (crlf) {
-        std::string out;
-        out.reserve(utf8.size() + utf8.size() / 20);
-        for (char c : utf8) {
-            if (c == '\n') out += '\r';
-            out += c;
-        }
-        utf8 = out;
-    }
-    if (startsWithUtf8Bom(doc.editOriginal)) utf8.insert(0, "\xEF\xBB\xBF");
-    return utf8;
-}
-
-std::wstring textForEdit(std::string text) {
-    if (startsWithUtf8Bom(text)) text.erase(0, 3);
-    std::wstring wide = toWide(text);
-    std::wstring out;
-    out.reserve(wide.size());
-    for (wchar_t c : wide) {
-        if (c != L'\r') out += c;
-    }
-    return out;
 }
 
 }  // namespace
@@ -552,7 +233,7 @@ void startEdit(App& app, SheetDoc& doc, SheetDoc::Edit what, const std::string& 
             } else {
                 return;
             }
-            doc.edit.text = textForEdit(doc.editOriginal);
+            doc.edit.text = live::forEditing(doc.editOriginal);
             doc.edit.caret = doc.edit.anchor = doc.edit.text.size();
             doc.edit.multiline = true;
             // Readable while typing: a card seen from far comes close
@@ -629,7 +310,7 @@ void commitEdit(App& app, SheetDoc& doc, bool stay) {
                 }
                 refreshCard(app, doc, n, true);
             } else if (doc.edit.changed || !stay) {
-                std::string text = noteTextForWrite(doc, doc.edit.text);
+                std::string text = live::forSaving(doc.edit.text, doc.editOriginal);
                 std::string current;
                 readFileUtf8(c.path, current);
                 if (text != current) {
@@ -767,7 +448,7 @@ void commitEdit(App& app, SheetDoc& doc, bool stay) {
         return;
     }
     doc.editing = SheetDoc::Edit::None;
-    doc.completing = false;
+    live::closePopup(doc.edit);
     if (what == SheetDoc::Edit::Find) {
         invalidate(app);
         return;
@@ -805,268 +486,97 @@ void cancelEdit(App& app, SheetDoc& doc) {
 
 namespace {
 
-// List items continue on Enter; an empty item ends the list
-void newlineWithList(SheetDoc& doc) {
-    SheetTextEdit& e = doc.edit;
-    size_t ls = lineStart(e.text, e.selStart());
-    std::wstring line = e.text.substr(ls, e.selStart() - ls);
-    size_t indent = line.find_first_not_of(L' ');
-    if (indent == std::wstring::npos) indent = line.size();
-    std::wstring rest = line.substr(indent);
-    std::wstring marker;
-    if (rest.size() >= 6 && (rest[0] == L'-' || rest[0] == L'*' || rest[0] == L'+') && rest[1] == L' ' && rest[2] == L'[' &&
-        rest[4] == L']' && rest[5] == L' ') {
-        marker = std::wstring(1, rest[0]) + L" [ ] ";
-    } else if (rest.size() >= 2 && (rest[0] == L'-' || rest[0] == L'*' || rest[0] == L'+' || rest[0] == L'>') && rest[1] == L' ') {
-        marker = rest.substr(0, 2);
-    } else {
-        size_t digits = 0;
-        while (digits < rest.size() && iswdigit(rest[digits])) ++digits;
-        if (digits > 0 && digits + 1 < rest.size() && (rest[digits] == L'.' || rest[digits] == L')') && rest[digits + 1] == L' ') {
-            marker = std::to_wstring(std::stoi(rest.substr(0, digits)) + 1) + rest[digits] + L" ";
-        }
-    }
-    if (!marker.empty()) {
-        // The item is only its marker: end the list instead
-        std::wstring bare = rest;
-        while (!bare.empty() && bare.back() == L' ') bare.pop_back();
-        std::wstring markTrim = marker;
-        while (!markTrim.empty() && markTrim.back() == L' ') markTrim.pop_back();
-        bool emptyItem = bare == markTrim || (markTrim.size() > 1 && bare.size() >= 1 && rest.size() <= marker.size() &&
-                                              bare.find_first_not_of(L"-*+>[] ") == std::wstring::npos);
-        if (emptyItem && e.selStart() == lineEnd(e.text, ls)) {
-            e.anchor = ls;
-            e.caret = e.selEnd();
-            replaceSelection(doc, L"");
-            return;
-        }
-    }
-    replaceSelection(doc, L"\n" + std::wstring(indent, L' ') + marker);
-}
+void addEdge(App& app, SheetDoc& doc, const std::string& from, const std::string& to, const std::string& label, bool write);
 
-void wrapSelection(SheetDoc& doc, const std::wstring& mark) {
-    SheetTextEdit& e = doc.edit;
-    size_t a = e.selStart(), b = e.selEnd();
-    std::wstring inner = e.text.substr(a, b - a);
-    replaceSelection(doc, mark + inner + mark);
-    if (inner.empty()) e.caret = e.anchor = a + mark.size();
-    else {
-        e.anchor = a + mark.size();
-        e.caret = e.anchor + inner.size();
-    }
-}
-
-void indentLines(SheetDoc& doc, bool out) {
-    SheetTextEdit& e = doc.edit;
-    size_t a = lineStart(e.text, e.selStart());
-    size_t b = lineEnd(e.text, e.selEnd());
-    std::wstring block = e.text.substr(a, b - a);
-    std::wstring result;
-    size_t at = 0;
-    int delta = 0;
-    while (at <= block.size()) {
-        size_t nl = block.find(L'\n', at);
-        std::wstring line = block.substr(at, nl == std::wstring::npos ? std::wstring::npos : nl - at);
-        if (out) {
-            size_t spaces = 0;
-            while (spaces < 2 && spaces < line.size() && line[spaces] == L' ') ++spaces;
-            line.erase(0, spaces);
-            delta -= (int)spaces;
-        } else {
-            line.insert(0, L"  ");
-            delta += 2;
-        }
-        result += line;
-        if (nl == std::wstring::npos) break;
-        result += L'\n';
-        at = nl + 1;
-    }
-    pushUndo(e, false);
-    e.text.replace(a, b - a, result);
-    e.anchor = a;
-    e.caret = a + result.size();
-    e.changed = true;
-    (void)delta;
-}
-
-bool editKeyText(App& app, HWND hwnd, SheetDoc& doc, WPARAM key) {
-    SheetTextEdit& e = doc.edit;
-    bool ctrl = keyDown(VK_CONTROL), shift = keyDown(VK_SHIFT);
-    bool card = doc.editing == SheetDoc::Edit::Card;
-    auto move = [&](size_t to) {
-        e.caret = std::min(to, e.text.size());
-        if (!shift) e.anchor = e.caret;
+// [[ names: the sheet's notes first, then the folder's waiting in the tray;
+// names starting with what was typed before names holding it
+std::vector<LiveText::Choice> noteNames(App& app, SheetDoc& doc, const std::wstring& typed) {
+    std::wstring q = toLower(typed);
+    std::vector<LiveText::Choice> starting, holding;
+    std::set<std::wstring> seen;
+    auto offer = [&](const std::wstring& name, const std::string& id) {
+        std::wstring key = toLower(name);
+        if (name.empty() || !seen.insert(key).second) return;
+        LiveText::Choice c;
+        c.label = name;
+        c.detail = tr(app, id.empty() ? "sheet.complete.folder" : "sheet.complete.sheet");
+        c.id = id;
+        if (key.rfind(q, 0) == 0) starting.push_back(c);
+        else if (key.find(q) != std::wstring::npos) holding.push_back(c);
     };
-    switch (key) {
-        case VK_ESCAPE:
-            if (doc.editing == SheetDoc::Edit::Find) {
-                doc.finding = false;
-                doc.found.clear();
-                cancelEdit(app, doc);
-            } else if (card) {
-                commitEdit(app, doc);
-            } else {
-                cancelEdit(app, doc);
-            }
-            return true;
-        case VK_RETURN:
-            if (doc.editing == SheetDoc::Edit::Find) {
-                if (!doc.found.empty()) {
-                    doc.foundIndex = (doc.foundIndex + (shift ? -1 : 1) + (int)doc.found.size()) % (int)doc.found.size();
-                    int i = nodeIndex(doc.model, doc.found[doc.foundIndex]);
-                    if (i >= 0) {
-                        selectOnly(doc, doc.model.nodes[i].id);
-                        fitBox(app, doc, boxOf(doc.model.nodes[i]), true, 1.0f);
-                    }
-                }
-                return true;
-            }
-            if (!card || ctrl) {
-                commitEdit(app, doc);
-                return true;
-            }
-            newlineWithList(doc);
-            break;
-        case VK_TAB:
-            if (!card) return true;
-            if (e.hasSelection() || shift || e.text.substr(lineStart(e.text, e.caret), 2).find_first_of(L"-*+0123456789") == 0) {
-                indentLines(doc, shift);
-            } else {
-                replaceSelection(doc, L"  ");
-            }
-            break;
-        case VK_BACK:
-            if (!e.hasSelection()) {
-                if (e.caret == 0) return true;
-                e.anchor = ctrl ? wordLeft(e.text, e.caret) : e.caret - 1;
-                // A surrogate pair goes as one
-                if (!ctrl && e.anchor > 0 && IS_LOW_SURROGATE(e.text[e.anchor]) && IS_HIGH_SURROGATE(e.text[e.anchor - 1])) --e.anchor;
-            }
-            replaceSelection(doc, L"", !ctrl);
-            break;
-        case VK_DELETE:
-            if (!e.hasSelection()) {
-                if (e.caret >= e.text.size()) return true;
-                e.anchor = ctrl ? wordRight(e.text, e.caret) : e.caret + 1;
-                if (!ctrl && e.anchor < e.text.size() && IS_LOW_SURROGATE(e.text[e.anchor])) ++e.anchor;
-            }
-            replaceSelection(doc, L"", !ctrl);
-            break;
-        case VK_LEFT:
-            if (!shift && e.hasSelection()) move(e.selStart());
-            else move(ctrl ? wordLeft(e.text, e.caret) : (e.caret > 0 ? e.caret - 1 : 0));
-            e.preferredX = -1;
-            break;
-        case VK_RIGHT:
-            if (!shift && e.hasSelection()) move(e.selEnd());
-            else move(ctrl ? wordRight(e.text, e.caret) : e.caret + 1);
-            e.preferredX = -1;
-            break;
-        case VK_HOME:
-            move(ctrl ? 0 : lineStart(e.text, e.caret));
-            break;
-        case VK_END:
-            move(ctrl ? e.text.size() : lineEnd(e.text, e.caret));
-            break;
-        case VK_UP:
-        case VK_DOWN: {
-            if (!card) return true;
-            float x = 0, y = 0, h = 0;
-            if (!caretPoint(app, doc, x, y, h)) break;
-            if (e.preferredX < 0) e.preferredX = x;
-            float target = key == VK_UP ? y - h * 0.5f : y + h * 1.5f;
-            if (target < 0) {
-                move(0);
-            } else {
-                move(positionAt(app, doc, e.preferredX, target));
-            }
-            break;
-        }
-        case 'A':
-            if (!ctrl) return false;
-            e.anchor = 0;
-            e.caret = e.text.size();
-            break;
-        case 'C':
-        case 'X':
-            if (!ctrl) return false;
-            if (e.hasSelection()) {
-                copyToClipboard(hwnd, e.text.substr(e.selStart(), e.selEnd() - e.selStart()));
-                if (key == 'X') replaceSelection(doc, L"");
-            }
-            break;
-        case 'V':
-            if (!ctrl) return false;
-            {
-                std::wstring paste = clipboardText(hwnd);
-                std::wstring clean;
-                for (wchar_t c : paste) {
-                    if (c != L'\r') clean += c;
-                }
-                if (!clean.empty()) replaceSelection(doc, clean);
-            }
-            break;
-        case 'Z':
-        case 'Y': {
-            if (!ctrl) return false;
-            bool redo = key == 'Y' || shift;
-            auto& from = redo ? e.redo : e.undo;
-            auto& to = redo ? e.undo : e.redo;
-            if (from.empty()) break;
-            to.push_back({e.text, e.caret, e.anchor});
-            e.text = from.back().text;
-            e.caret = from.back().caret;
-            e.anchor = from.back().anchor;
-            from.pop_back();
-            e.changed = true;
-            e.lastTypeMs = 0;
-            break;
-        }
-        case 'B':
-            if (!ctrl || !card) return false;
-            wrapSelection(doc, L"**");
-            break;
-        case 'I':
-            if (!ctrl || !card) return false;
-            wrapSelection(doc, L"*");
-            break;
-        default:
-            // Typing keys come back as characters
-            return false;
+    for (const Node& n : doc.model.nodes) {
+        if (n.type != NodeType::File || n.id == doc.editId) continue;
+        std::wstring path = absolutePath(doc, n.file);
+        size_t dot = path.find_last_of(L'.');
+        std::wstring ext = dot == std::wstring::npos ? std::wstring() : toLower(path.substr(dot));
+        if (ext != L".md" && ext != L".markdown") continue;
+        offer(stemOf(path), n.id);
     }
+    for (const std::wstring& path : doc.unplaced) offer(stemOf(path), std::string());
+    starting.insert(starting.end(), holding.begin(), holding.end());
+    return starting;
+}
+
+// What the box answers for the engine: where its caret is, the text at a
+// point, a card's [[ names and what picking one does
+live::Host editHost(App& app, SheetDoc& doc) {
+    live::Host host;
+    host.caretPoint = [&app, &doc](float& x, float& y, float& h) { return caretPoint(app, doc, x, y, h); };
+    // Up from the first line goes to the start
+    host.positionAt = [&app, &doc](float x, float y, int) { return y < 0 ? (size_t)0 : positionAt(app, doc, x, y); };
+    if (doc.editing == SheetDoc::Edit::Card) {
+        host.names = [&app, &doc](const std::wstring& typed) { return noteNames(app, doc, typed); };
+        host.picked = [&app, &doc](const LiveText::Choice& pick, bool ctrl) {
+            hintDone(HINT_LINK);
+            // Ctrl+Enter draws the arrow too; the link is in the text already
+            if (ctrl && !pick.id.empty()) addEdge(app, doc, doc.editId, pick.id, {}, false);
+        };
+    }
+    return host;
+}
+
+void editChanged(App& app, SheetDoc& doc) {
     if (doc.editing == SheetDoc::Edit::Find) updateFind(app, doc);
     fitEditor(app, doc);
     app.cursorBlinkOn = true;
     invalidate(app);
-    return true;
 }
 
 bool editKey(App& app, HWND hwnd, SheetDoc& doc, WPARAM key) {
-    // An open [[ list takes the keys that choose from it
-    if (doc.completing && doc.editing == SheetDoc::Edit::Card) {
-        int count = std::max(1, (int)doc.completions.size());
-        switch (key) {
-            case VK_UP:
-            case VK_DOWN:
-                doc.completeIndex = (doc.completeIndex + (key == VK_DOWN ? 1 : count - 1)) % count;
-                invalidate(app);
-                return true;
-            case VK_RETURN:
-            case VK_TAB:
-                acceptCompletion(app, doc, doc.completeIndex, key == VK_RETURN && keyDown(VK_CONTROL));
-                return true;
-            case VK_ESCAPE:
-                doc.completing = false;
-                invalidate(app);
-                return true;
-            default:
-                break;
+    bool shift = keyDown(VK_SHIFT);
+    if (doc.editing == SheetDoc::Edit::Find && key == VK_RETURN) {
+        // Enter steps through the matches, Shift+Enter back
+        if (!doc.found.empty()) {
+            doc.foundIndex = (doc.foundIndex + (shift ? -1 : 1) + (int)doc.found.size()) % (int)doc.found.size();
+            int i = nodeIndex(doc.model, doc.found[doc.foundIndex]);
+            if (i >= 0) {
+                selectOnly(doc, doc.model.nodes[i].id);
+                fitBox(app, doc, boxOf(doc.model.nodes[i]), true, 1.0f);
+            }
         }
+        invalidate(app);
+        return true;
     }
-    bool taken = editKeyText(app, hwnd, doc, key);
-    if (doc.editing == SheetDoc::Edit::Card) updateCompletions(app, doc);
-    else doc.completing = false;
-    return taken;
+    switch (live::key(app, hwnd, doc.edit, key, keyDown(VK_CONTROL), shift, editHost(app, doc))) {
+        case live::Result::Unhandled:
+            return false;  // typing keys come back as characters
+        case live::Result::Cancel:
+            // What was typed into a note is kept; a label or the find bar goes back
+            if (doc.editing == SheetDoc::Edit::Find) {
+                doc.finding = false;
+                doc.found.clear();
+            }
+            if (doc.editing == SheetDoc::Edit::Card) commitEdit(app, doc);
+            else cancelEdit(app, doc);
+            return true;
+        case live::Result::Commit:
+            commitEdit(app, doc);
+            return true;
+        case live::Result::Handled:
+            break;
+    }
+    editChanged(app, doc);
+    return true;
 }
 
 }  // namespace
@@ -1547,7 +1057,7 @@ bool pasteFromClipboard(App& app, HWND hwnd, SheetDoc& doc, float x, float y) {
             return true;
         }
     }
-    std::wstring text = clipboardText(hwnd);
+    std::wstring text = readClipboardText(hwnd);
     std::wstring trimmed = text;
     while (!trimmed.empty() && iswspace(trimmed.back())) trimmed.pop_back();
     while (!trimmed.empty() && iswspace(trimmed.front())) trimmed.erase(trimmed.begin());
@@ -1755,80 +1265,6 @@ void openAlignMenu(App& app, SheetDoc& doc) {
 }  // namespace
 
 namespace sheetui {
-
-// --- [[ completion ------------------------------------------------------------
-
-void updateCompletions(App& app, SheetDoc& doc) {
-    (void)app;
-    doc.completing = false;
-    if (doc.editing != SheetDoc::Edit::Card || doc.edit.hasSelection()) return;
-    const std::wstring& t = doc.edit.text;
-    size_t caret = std::min(doc.edit.caret, t.size());
-    if (caret < 2) return;
-    // The last [[ before the caret, with only a name typed after it
-    size_t open = t.rfind(L"[[", caret - 2);
-    if (open == std::wstring::npos) return;
-    std::wstring query = t.substr(open + 2, caret - open - 2);
-    if (query.find_first_of(L"[]\n|#") != std::wstring::npos || query.size() > 80) return;
-    auto lower = [](std::wstring s) {
-        for (auto& ch : s) ch = (wchar_t)towlower(ch);
-        return s;
-    };
-    std::wstring q = lower(query);
-    // The sheet's notes first, then the folder's notes waiting in the tray;
-    // names starting with what was typed before names holding it
-    std::vector<SheetDoc::Completion> starting, holding;
-    std::set<std::wstring> seen;
-    auto offer = [&](const std::wstring& name, const std::string& id) {
-        std::wstring key = lower(name);
-        if (name.empty() || !seen.insert(key).second) return;
-        if (key.rfind(q, 0) == 0) starting.push_back({name, id});
-        else if (key.find(q) != std::wstring::npos) holding.push_back({name, id});
-    };
-    for (const Node& n : doc.model.nodes) {
-        if (n.type != NodeType::File || n.id == doc.editId) continue;
-        std::wstring path = absolutePath(doc, n.file);
-        size_t dot = path.find_last_of(L'.');
-        std::wstring ext = dot == std::wstring::npos ? std::wstring() : toLower(path.substr(dot));
-        if (ext != L".md" && ext != L".markdown") continue;
-        offer(stemOf(path), n.id);
-    }
-    for (const std::wstring& path : doc.unplaced) offer(stemOf(path), std::string());
-    std::vector<SheetDoc::Completion> list = starting;
-    list.insert(list.end(), holding.begin(), holding.end());
-    if (list.size() > 8) list.resize(8);
-    if (list.empty()) return;
-    // Typing on keeps the list's place only while the names stay the same
-    bool same = list.size() == doc.completions.size() &&
-                std::equal(list.begin(), list.end(), doc.completions.begin(),
-                           [](const SheetDoc::Completion& a, const SheetDoc::Completion& b) { return a.name == b.name; });
-    if (!same) doc.completeIndex = 0;
-    doc.completions = list;
-    doc.completeIndex = std::clamp(doc.completeIndex, 0, (int)list.size() - 1);
-    doc.completeFrom = open + 2;
-    doc.completing = true;
-}
-
-void acceptCompletion(App& app, SheetDoc& doc, int index, bool arrow) {
-    if (!doc.completing || index < 0 || index >= (int)doc.completions.size()) return;
-    SheetDoc::Completion pick = doc.completions[index];
-    SheetTextEdit& e = doc.edit;
-    size_t caret = std::min(e.caret, e.text.size());
-    // What was typed after [[ becomes the name; the brackets close unless
-    // they already follow
-    bool closed = e.text.compare(caret, 2, L"]]") == 0;
-    e.anchor = std::min(doc.completeFrom, caret);
-    e.caret = caret;
-    replaceSelection(doc, pick.name + (closed ? std::wstring() : std::wstring(L"]]")));
-    if (closed) e.caret = e.anchor = std::min(e.text.size(), e.caret + 2);
-    doc.completing = false;
-    hintDone(HINT_LINK);
-    // Ctrl+Enter draws the arrow too; the link is in the text already
-    if (arrow && !pick.nodeId.empty()) addEdge(app, doc, doc.editId, pick.nodeId, {}, false);
-    fitEditor(app, doc);
-    app.cursorBlinkOn = true;
-    invalidate(app);
-}
 
 // --- Jump labels ---------------------------------------------------------------
 
@@ -2811,12 +2247,8 @@ bool sheetCharInput(App& app, HWND, wchar_t ch) {
     if (!doc || doc->editing == SheetDoc::Edit::None) return doc != nullptr && doc->menuOpen;
     if (ch < 0x20 && ch != L'\t') return true;  // Enter, Backspace and the rest were keys
     if (ch == 0x7F) return true;
-    replaceSelection(*doc, std::wstring(1, ch), true);
-    if (doc->editing == SheetDoc::Edit::Find) updateFind(app, *doc);
-    if (doc->editing == SheetDoc::Edit::Card) updateCompletions(app, *doc);
-    fitEditor(app, *doc);
-    app.cursorBlinkOn = true;
-    invalidate(app);
+    live::character(app, doc->edit, ch, editHost(app, *doc));
+    editChanged(app, *doc);
     return true;
 }
 
@@ -3163,17 +2595,22 @@ bool sheetMouseDown(App& app, HWND hwnd, int x, int y) {
         invalidate(app);
         return true;
     }
-    // The [[ list under the caret takes a click on a name
-    if (doc.completing) {
-        for (const auto& hit : doc.completeHits) {
-            const D2D1_RECT_F& r = hit.first;
-            if (fx >= r.left && fx <= r.right && fy >= r.top && fy <= r.bottom) {
-                acceptCompletion(app, doc, hit.second, false);
-                doc.gesture = SheetDoc::Gesture::None;
-                return true;
-            }
+    // The popup under the caret takes a click on a row, the format bar on a button
+    if (doc.editing == SheetDoc::Edit::Card) {
+        int hit = live::hitAt(doc.edit, fx, fy);
+        if (hit >= 1000) {
+            live::applyFormat(doc.edit, hit - 1000);
+            doc.gesture = SheetDoc::Gesture::None;
+            editChanged(app, doc);
+            return true;
         }
-        doc.completing = false;
+        if (hit >= 0) {
+            live::pickChoice(app, doc.edit, hit, false, editHost(app, doc));
+            doc.gesture = SheetDoc::Gesture::None;
+            editChanged(app, doc);
+            return true;
+        }
+        if (doc.edit.popup != LiveText::Popup::None) live::closePopup(doc.edit);
     }
     // A folded card's +N unfolds it
     for (const auto& hit : doc.foldHits) {
@@ -3237,24 +2674,37 @@ bool sheetMouseDown(App& app, HWND hwnd, int x, int y) {
         D2D1_RECT_F rect{};
         float sc = 1;
         if (editRect(app, doc, rect, sc) && fx >= rect.left && fx <= rect.right && fy >= rect.top && fy <= rect.bottom) {
-            size_t at = positionAt(app, doc, (fx - rect.left) / sc, (fy - rect.top) / sc + doc.edit.scrollY);
+            float lx = (fx - rect.left) / sc, ly = (fy - rect.top) / sc + doc.edit.scrollY;
+            // A task box away from the caret ticks or clears without moving it
+            if (doc.editing == SheetDoc::Edit::Card) {
+                size_t task = live::taskBoxAt(editLayout(app, doc, (rect.right - rect.left) / sc), doc.edit, 0,
+                                              doc.edit.text.size(), lx, ly);
+                if (task != (size_t)-1) {
+                    live::toggleTask(doc.edit, task);
+                    doc.gesture = SheetDoc::Gesture::None;
+                    editChanged(app, doc);
+                    return true;
+                }
+            }
+            size_t at = positionAt(app, doc, lx, ly);
             unsigned long long t = nowMs();
             if (t - doc.edit.lastClickMs < GetDoubleClickTime()) doc.edit.clickCount++;
             else doc.edit.clickCount = 1;
             doc.edit.lastClickMs = t;
             if (doc.edit.clickCount == 2) {
-                doc.edit.anchor = wordLeft(doc.edit.text, std::min(at + 1, doc.edit.text.size()));
-                doc.edit.caret = wordRight(doc.edit.text, at);
+                doc.edit.anchor = live::wordLeft(doc.edit.text, std::min(at + 1, doc.edit.text.size()));
+                doc.edit.caret = live::wordRight(doc.edit.text, at);
             } else if (doc.edit.clickCount >= 3) {
-                doc.edit.anchor = lineStart(doc.edit.text, at);
-                doc.edit.caret = lineEnd(doc.edit.text, at);
+                doc.edit.anchor = live::lineStart(doc.edit.text, at);
+                doc.edit.caret = live::lineEnd(doc.edit.text, at);
             } else {
                 doc.edit.caret = at;
                 if (!doc.pressShift) doc.edit.anchor = at;
             }
             doc.edit.preferredX = -1;
+            doc.edit.selectingWithMouse = true;
             doc.gesture = SheetDoc::Gesture::EditSelect;
-            updateCompletions(app, doc);
+            live::updatePopup(app, doc.edit, editHost(app, doc));
             app.cursorBlinkOn = true;
             invalidate(app);
             return true;
@@ -3524,6 +2974,7 @@ bool sheetMouseUp(App& app, HWND hwnd, int x, int y) {
     // way there counts as lost (sheetCaptureLost puts it back)
     SheetDoc::Gesture gesture = doc.gesture;
     doc.gesture = SheetDoc::Gesture::None;
+    doc.edit.selectingWithMouse = false;
     doc.pressed = false;
     if (GetCapture() == hwnd) ReleaseCapture();
     float fx = (float)x, fy = (float)y;

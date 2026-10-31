@@ -36,6 +36,8 @@ bool openClipboard(HWND hwnd, bool* held = nullptr);
 // warning says so (warnings show with notifications off too)
 void signalClipboardBusy(App& app);
 bool copyToClipboard(HWND hwnd, const std::wstring& text, bool* held = nullptr);
+// The clipboard's text, or nothing when it holds none or stays held
+std::wstring readClipboardText(HWND hwnd);
 // Plain text plus an HTML fragment ("HTML Format") for rich paste targets
 bool copyRichTextToClipboard(HWND hwnd, const std::wstring& text,
                              const std::wstring& htmlFragment, bool* held = nullptr);

@@ -1,5 +1,6 @@
 #include "frontmatter_ui.h"
 #include "input.h"
+#include "live_editor.h"
 #include "sheet_ui.h"
 #include "link_target.h"
 #include "network_path.h"
@@ -957,7 +958,7 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
     // Edit mode: the wheel scrolls the editor from either pane — the preview
     // follows through the scroll-anchor sync, so the panes cannot drift
     // apart and both sides always respond (#77)
-    if (app.editMode && !app.editorReadingPreview) {
+    if (app.editMode && !app.editorReadingPreview && !editorLiveOn(app)) {
         float sepX = app.editorShowPreview
             ? app.width * app.editorSplitRatio
             : static_cast<float>(app.width);
@@ -1443,6 +1444,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
 
     // Edit mode: handle separator drag, editor selection, cursor shape
     if (app.editMode) {
+        if (liveMouseMove(app, hwnd, app.mouseX, app.mouseY)) return;
         handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
         // The Read button owns the pointer while it shows (#245)
         if (app.readButtonHover) return;
@@ -1882,6 +1884,13 @@ void handleContextMenu(App& app, HWND hwnd, LPARAM lParam) {
 
     // Preserve the selection on an inside right-click (#230); otherwise
     // move the caret so INSERT entries drop their Markdown at that point.
+    if (editorLiveOn(app) && !app.confirmExitPending && !fromKeyboard &&
+        (float)pt.x >= documentViewportX(app)) {
+        livePrepareContextMenu(app, hwnd, pt.x, pt.y);
+        openEditCtxMenu(app, hwnd, (float)pt.x, (float)pt.y);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
     if (app.editMode && !app.confirmExitPending &&
         !fromKeyboard && (float)pt.x >= editRailWidth(app) &&
         (float)pt.x < editorPaneWidth(app)) {
@@ -2166,6 +2175,8 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             handleEditorMouseDown(app, hwnd, x, y);
             return;
         }
+        // Live: a press on the page puts the caret there
+        if (liveMouseDown(app, hwnd, x, y)) return;
         // Quick-note empty state: the Open button in the preview pane
         if (quickNoteEmptyStateActive(app) && app.editorShowPreview &&
             (float)x >= app.quickNoteButtonRect.left &&
@@ -2428,8 +2439,17 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
 // Resolves an Obsidian [[wiki link]] target against the current file's
 // folder and opens it: the name as written, then with .md / .markdown
 // appended, then a case-insensitive scan of the directory listing.
+static std::wstring wikiLinkPath(const App& app, const std::string& target);
+
 static bool openWikiLink(App& app, const std::string& target) {
     if (app.editMode || app.currentFile.empty()) return false;
+    std::wstring path = wikiLinkPath(app, target);
+    return !path.empty() && openDocumentInViewer(app, path);
+}
+
+// The note a wiki link names, beside the current file
+static std::wstring wikiLinkPath(const App& app, const std::string& target) {
+    if (app.currentFile.empty()) return {};
     namespace fs = std::filesystem;
     std::error_code ec;
     std::wstring wideTarget = toWide(target);
@@ -2437,14 +2457,13 @@ static bool openWikiLink(App& app, const std::string& target) {
 
     // A wiki link names a note; one that reaches another computer's share
     // is not looked up (network_path.h)
-    auto tryOpen = [&](const fs::path& p) {
+    auto found = [&](const fs::path& p) {
         return qmd::mayOpenFromDocument(p.wstring(), dir.wstring()) &&
-               fs::exists(p, ec) && !fs::is_directory(p, ec) &&
-               openDocumentInViewer(app, p.wstring());
+               fs::exists(p, ec) && !fs::is_directory(p, ec);
     };
-    if (tryOpen(dir / wideTarget)) return true;
-    if (tryOpen(dir / (wideTarget + L".md"))) return true;
-    if (tryOpen(dir / (wideTarget + L".markdown"))) return true;
+    if (found(dir / wideTarget)) return (dir / wideTarget).wstring();
+    if (found(dir / (wideTarget + L".md"))) return (dir / (wideTarget + L".md")).wstring();
+    if (found(dir / (wideTarget + L".markdown"))) return (dir / (wideTarget + L".markdown")).wstring();
 
     auto lower = [](std::wstring s) {
         for (auto& c : s) c = (wchar_t)std::towlower(c);
@@ -2455,13 +2474,11 @@ static bool openWikiLink(App& app, const std::string& target) {
         if (!entry.is_regular_file(ec)) continue;
         std::wstring stem = lower(entry.path().stem().wstring());
         std::wstring name = lower(entry.path().filename().wstring());
-        if (stem == want || name == want) {
-            if (openDocumentInViewer(app, entry.path().wstring())) return true;
-        }
+        if (stem == want || name == want) return entry.path().wstring();
     }
     // Target doesn't exist: leave the document as-is (a viewer doesn't
     // create notes the way Obsidian would)
-    return false;
+    return {};
 }
 
 // Link jumps remember where they came from so mouse-back (XBUTTON1) can
@@ -2907,6 +2924,8 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         handleEditorMouseUp(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
         return;
     }
+    // A selection dragged on the Live page lands
+    if (liveMouseUp(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return;
     if (app.tabDragIndex >= 0) {
         tabDragEnd(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
     }
@@ -3588,6 +3607,43 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     if (GetCapture() == hwnd) ReleaseCapture();
 }
 
+void followDocumentLink(App& app, HWND hwnd, const std::string& url) {
+    if (url.empty()) return;
+    if (url.rfind("wiki:", 0) == 0) {
+        if (!app.editMode) {
+            std::string fromPath = app.currentFile;
+            float fromScroll = app.scrollY;
+            if (openWikiLink(app, url.substr(5))) navRecordJump(app, fromPath, fromScroll);
+            return;
+        }
+        // From the editor the note joins as a tab
+        std::wstring path = wikiLinkPath(app, url.substr(5));
+        if (!path.empty()) openFileRefTarget(app, hwnd, toUtf8(path));
+        return;
+    }
+    if (url.rfind("fileref-ok:", 0) == 0) {
+        openFileRefTarget(app, hwnd, url.substr(11));
+        return;
+    }
+    if (url.rfind("fileref-missing:", 0) == 0) {
+        offerCreateFileRef(app, url.substr(16));
+        return;
+    }
+    // A note beside the document, written as a relative link
+    if (url.find("://") == std::string::npos && url[0] != '#' && url.rfind("mailto:", 0) != 0 && !app.currentFile.empty()) {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path target = fs::path(toWide(app.currentFile)).parent_path() /
+                          toWide(qmd::decodeLinkComponent(qmd::splitLinkTarget(url).path));
+        if (fs::exists(target, ec) && !fs::is_directory(target, ec)) {
+            openFileRefTarget(app, hwnd, toUtf8(target.wstring()));
+            return;
+        }
+    }
+    app.hoveredLink = url;
+    handleLinkClick(app);
+}
+
 // Zen mode: borderless fullscreen + centered reading column (F11)
 static void toggleZenMode(App& app, HWND hwnd) {
     app.zenMode = !app.zenMode;
@@ -3931,6 +3987,11 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             app.hasSelection = false;
             InvalidateRect(hwnd, nullptr, FALSE);
             return false;
+        }
+        // Live: the page takes the keys it types with (live_editor.h)
+        if (editorLiveOn(app)) {
+            bool consumed = false;
+            if (liveKeyDown(app, hwnd, wParam, consumed)) return consumed;
         }
         const bool wasReading=app.editorReadingPreview;
         handleEditorKeyDown(app, hwnd, wParam);
@@ -4424,6 +4485,11 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
             return;
         }
         if (tableEditChar(app, (wchar_t)wParam)) return;
+        if (editorLiveOn(app)) {
+            // Enter, Tab and Backspace were keys; Ctrl and a letter type nothing
+            if (wParam >= 0x20 && wParam != 0x7F) liveCharInput(app, hwnd, (wchar_t)wParam);
+            return;
+        }
         handleEditorCharInput(app, hwnd, wParam);
         return;
     }

@@ -910,7 +910,7 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
     startEdit(app, doc, SheetDoc::Edit::Card, delta);
     doc.edit.caret = doc.edit.anchor = doc.edit.text.size();
     typeKeys(app, L" See [[Be");
-    check(doc.completing && !doc.completions.empty() && doc.completions[0].name == L"Beta",
+    check(doc.edit.popup == LiveText::Popup::Names && !doc.edit.choices.empty() && doc.edit.choices[0].label == L"Beta",
           "[[ lists the notes, Beta first for Be");
     frame(app, out / "ten-complete.png");
     keystroke(app, VK_RETURN, {true, false, false});
@@ -918,6 +918,27 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
           "Ctrl+Enter writes the link and draws the arrow");
     keystroke(app, VK_ESCAPE);
     check(noteText(doc, delta).find("See [[Beta]]") != std::string::npos, "the note holds the link");
+
+    // The engine cards share with Live: / makes a block, a selection shows the format bar
+    doc.selected = {delta};
+    startEdit(app, doc, SheetDoc::Edit::Card, delta);
+    doc.edit.caret = doc.edit.anchor = doc.edit.text.size();
+    keystroke(app, VK_RETURN);
+    typeKeys(app, L"/h2");
+    check(doc.edit.popup == LiveText::Popup::Slash && !doc.edit.choices.empty() && doc.edit.choices[0].insert == live::INS_H2,
+          "/h2 offers Heading 2 first in a card");
+    keystroke(app, VK_RETURN);
+    typeKeys(app, L"Next");
+    check(doc.edit.text.find(L"## Next") != std::wstring::npos, "Enter on it makes the line a heading: " + toUtf8(doc.edit.text));
+    doc.edit.anchor = doc.edit.text.size() - 4;
+    doc.edit.caret = doc.edit.text.size();
+    paint(app);
+    check(!doc.edit.barHits.empty(), "a selection in a card shows the format bar");
+    frame(app, out / "ten-format-bar.png");
+    keystroke(app, 'B', {true, false, false});
+    check(doc.edit.text.find(L"## **Next**") != std::wstring::npos, "Ctrl+B in a card makes it bold: " + toUtf8(doc.edit.text));
+    keystroke(app, VK_ESCAPE);
+    check(noteText(doc, delta).find("## **Next**") != std::string::npos, "the note holds the heading");
 
     // Peek: far out, a card rested on opens in a lens
     flyTo(doc, 760, 120, 0.2f, 0);

@@ -237,7 +237,8 @@ std::vector<float> computePageBreaks(const App& app, float pageContentH) {
 void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
                        ID2D1SolidColorBrush* brush,
                        float yStart, float yEnd,
-                       float offsetX, float offsetY) {
+                       float offsetX, float offsetY,
+                       D2D1_DRAW_TEXT_OPTIONS textOptions = D2D1_DRAW_TEXT_OPTIONS_NONE) {
     auto inRange = [&](float top, float bottom) {
         return bottom >= yStart && top < yEnd;
     };
@@ -429,7 +430,7 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
         bool banded = applyBand(run.bounds.top, run.bounds.bottom);
         brush->SetColor(run.color);
         dc->DrawTextLayout(D2D1::Point2F(run.pos.x + dx, run.pos.y + dy),
-                           run.layout, brush);
+                           run.layout, brush, textOptions);
         resetBand(banded);
     }
 }
@@ -963,8 +964,9 @@ bool exportPdfFile(App& app, const std::wstring& path) {
 void layoutForWidth(App& app, float widthDips) { layoutAtPrintWidth(app, widthDips); }
 
 void drawLayoutRange(App& app, ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brush,
-                     float yStart, float yEnd, float offsetX, float offsetY) {
-    drawDocumentRange(app, dc, brush, yStart, yEnd, offsetX, offsetY);
+                     float yStart, float yEnd, float offsetX, float offsetY,
+                     D2D1_DRAW_TEXT_OPTIONS textOptions) {
+    drawDocumentRange(app, dc, brush, yStart, yEnd, offsetX, offsetY, textOptions);
 }
 
 // Link peek: renders the top of another markdown file at the live theme

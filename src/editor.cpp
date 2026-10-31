@@ -1,5 +1,6 @@
 #include "frontmatter_ui.h"
 #include "editor.h"
+#include "live_editor.h"
 #include "document.h"
 #include "drafts.h"
 #include "signals.h"
@@ -256,7 +257,7 @@ static void rebuildEditorRowMetrics(App& app) {
     app.editorRowStarts.clear();
     app.editorTotalRows = 0;
     app.editorRowMetricsWidth = -1.0f;
-    if (!editorWrapOn(app) || !app.editMode) return;
+    if (!editorWrapOn(app) || !app.editMode || editorLiveOn(app)) return;
 
     float maxTextWidth = editorTextMaxWidth(app);
     app.editorRowMetricsWidth = maxTextWidth;
@@ -626,6 +627,36 @@ void editorReplaceRangeExternal(App& app, size_t start, size_t end,
     app.editorRowMetricsWidth = -1.0f;
 }
 
+static void scheduleReparse(App& app);
+
+void editorApplyLiveEdits(App& app, const std::vector<LiveText::Change>& changes, size_t caret, size_t anchor) {
+    if (!changes.empty()) {
+        const size_t before = app.editorCursorPos;
+        const LiveText::Change& first = changes.front();
+        if (changes.size() == 1 && !first.removed && first.inserted.size() == 1) {
+            app.editorText.insert(first.at, first.inserted);
+            pushUndo(app, App::EditAction::Insert, first.at, first.inserted, before, caret);
+        } else {
+            UndoGroupScope group(app);
+            for (const LiveText::Change& c : changes) {
+                size_t at = std::min(c.at, app.editorText.size());
+                size_t removed = std::min(c.removed, app.editorText.size() - at);
+                pushReplaceUndo(app, at, app.editorText.substr(at, removed), c.inserted, before, caret);
+                app.editorText.replace(at, removed, c.inserted);
+            }
+        }
+        app.editorExtraCarets.clear();
+        rebuildLineStarts(app);
+        scheduleReparse(app);
+    }
+    app.editorCursorPos = std::min(caret, app.editorText.size());
+    app.editorSelStart = std::min(anchor, app.editorText.size());
+    app.editorSelEnd = app.editorCursorPos;
+    app.editorHasSelection = app.editorSelStart != app.editorSelEnd;
+    app.editorCaretUpstreamPos = std::wstring::npos;
+    app.editorDesiredCol = -1;
+}
+
 // Pad a markdown table for insertion at pos: a table cannot interrupt a
 // paragraph, so a blank line must separate it on both sides (#181)
 static std::wstring padTableForInsert(const App& app,
@@ -666,6 +697,21 @@ static void editorUndo(App& app) {
     rebuildLineStarts(app);
     app.editorHasSelection = false;
     app.editorDesiredCol = -1;
+}
+
+static void editorRedo(App& app);
+
+static void editorEnsureCursorVisible(App& app);
+
+void editorRevealCaret(App& app) {
+    rebuildEditorRowMetrics(app);
+    editorEnsureCursorVisible(app);
+}
+
+void editorUndoRedo(App& app, bool redo) {
+    if (redo) editorRedo(app);
+    else editorUndo(app);
+    scheduleReparse(app);
 }
 
 static void editorRedo(App& app) {
@@ -1433,6 +1479,7 @@ void editorReparse(App& app, bool force) {
         app.root = result.root;
         app.parseTimeUs = result.parseTimeUs;
         app.layoutDirty = true;
+        liveTextParsed(app);
         InvalidateRect(app.hwnd, nullptr, FALSE);
     }
     if (app.showWordCount) editorRefreshDocCounts(app, result.success ? result.root : nullptr);
@@ -2661,6 +2708,8 @@ static void editorNavigate(App& app, WPARAM key, bool ctrl, bool shift) {
     }
 }
 
+static void editorInsertLink(App& app, HWND hwnd);
+
 void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     if (!shortcutModifiersAllowed(static_cast<unsigned>(wParam))) return;
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -2955,6 +3004,14 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return;
             }
+            case 'K':
+                // The rail's Link button's shortcut
+                editorInsertLink(app, hwnd);
+                return;
+            case VK_OEM_2:
+                // Ctrl+/ switches to Live (docs/live-editor.md)
+                setEditorLive(app, hwnd, true);
+                return;
             case 'D':
                 // Select the word, then add its next occurrence (#251)
                 editorSelectNextOccurrence(app);
@@ -2991,6 +3048,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 // character, so that guard has nothing to protect for them.
 bool editorAltArrowKey(App& app, HWND hwnd, WPARAM wParam) {
     if (wParam != VK_UP && wParam != VK_DOWN) return false;
+    if (editorLiveOn(app)) return liveAltArrow(app, hwnd, wParam);
     if (!(GetKeyState(VK_MENU) & 0x8000) || (GetKeyState(VK_SHIFT) & 0x8000)) return false;
     if (!sourceEditorHasFocus(app) || app.confirmExitPending || app.createRefPending ||
         app.editCtxOpen || app.showSettings || app.showHelp || app.showThemeChooser ||
@@ -3269,6 +3327,7 @@ static bool editorSelectionContainsPoint(App& app, size_t line, float x, float y
 }
 
 void editorPrepareContextMenuAt(App& app, int x, int y) {
+    if (editorLiveOn(app)) return;  // Live placed its caret already
     focusSourceEditor(app);
     size_t affinity = app.editorCaretUpstreamPos;
     size_t position = editorPosFromClick(app, x, y);
@@ -3300,7 +3359,7 @@ void editorInsertTableGrid(App& app, HWND hwnd, int cols, int rows) {
     editorInsertSnippet(app, hwnd, snippet, 2);
 }
 
-void editorInsertDiagramTemplate(App& app, HWND hwnd, int kind) {
+const wchar_t* diagramTemplate(int kind) {
     static const wchar_t* kTemplates[] = {
         // 0 flowchart
         L"```mermaid\nflowchart TD\n    A[Start] --> B{Decide}\n"
@@ -3334,10 +3393,16 @@ void editorInsertDiagramTemplate(App& app, HWND hwnd, int kind) {
         L"```plantuml\n@startuml\nstart\nif (Edited?) then (yes)\n"
         L"    :Save file;\nelse (no)\n    :Keep editing;\n"
         L"endif\nstop\n@enduml\n```\n",
+        // 10 mind map
+        L"```mermaid\nmindmap\n  root((Idea))\n    First\n    Second\n```\n",
     };
+    return kind >= 0 && kind <= 10 ? kTemplates[kind] : L"";
+}
+
+void editorInsertDiagramTemplate(App& app, HWND hwnd, int kind) {
     if (kind < 0 || kind > 9) return;
     // PlantUML fences are one char wider: caret lands inside the body
-    editorInsertSnippet(app, hwnd, kTemplates[kind], kind >= 7 ? 12 : 11);
+    editorInsertSnippet(app, hwnd, diagramTemplate(kind), kind >= 7 ? 12 : 11);
 }
 
 void editorInsertSnippetPublic(App& app, HWND hwnd,
@@ -3396,6 +3461,11 @@ void editorClipboardPaste(App& app, HWND hwnd) {
 }
 
 void editRailInvoke(App& app, HWND hwnd, int id) {
+    if (id == 30 || id == 31) {
+        setEditorLive(app, hwnd, id == 31);
+        return;
+    }
+    if (editorLiveOn(app) && liveRailCommand(app, hwnd, id)) return;
     // Marks act at every caret and line prefixes on every caret line
     // (#251); links, snippets and flyouts work at the primary caret
     auto mark = [&](const wchar_t* text) {
@@ -3674,7 +3744,14 @@ void editorPositionImeWindow(App& app, HWND hwnd) {
     }
 
     D2D1_POINT_2F point{};
-    if (editorCaretPoint(app, point)) {
+    float liveHeight = 0;
+    if (liveCaretClientPoint(app, point, liveHeight)) {
+        // The Live page's caret
+        COMPOSITIONFORM cf{};
+        cf.dwStyle = CFS_POINT;
+        cf.ptCurrentPos = {(LONG)point.x, (LONG)(point.y + liveHeight)};
+        ImmSetCompositionWindow(himc, &cf);
+    } else if (editorCaretPoint(app, point)) {
         float lineHeight = app.editorTextFormat->GetFontSize() * 1.5f;
         COMPOSITIONFORM cf{};
         cf.dwStyle = CFS_POINT;

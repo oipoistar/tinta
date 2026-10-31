@@ -15,6 +15,7 @@
 #include "image_loader.h"
 #include "print.h"
 #include "render.h"
+#include "ui_paint.h"
 #include "utils.h"
 
 #include <d2d1_1.h>
@@ -28,6 +29,7 @@
 using namespace sheet;
 using namespace sheetui;
 using Microsoft::WRL::ComPtr;
+using namespace paint;
 
 // --- Geometry ------------------------------------------------------------
 
@@ -179,15 +181,6 @@ int nodeAt(const SheetDoc& doc, float x, float y, bool groupsToo) {
 
 namespace {
 
-D2D1_COLOR_F mix(D2D1_COLOR_F a, D2D1_COLOR_F b, float t) {
-    return D2D1::ColorF(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t);
-}
-
-D2D1_COLOR_F alpha(D2D1_COLOR_F c, float a) {
-    c.a *= a;
-    return c;
-}
-
 struct Palette {
     D2D1_COLOR_F canvas, dots, card, cardBorder, text, muted, accent, surface, surfaceBorder, shadow, heading;
 };
@@ -206,10 +199,10 @@ Palette palette(const App& app) {
     p.card.a = 1;
     p.cardBorder = alpha(th.text, th.isDark ? 0.16f : 0.17f);
     p.muted = alpha(th.text, 0.56f);
-    p.surface = th.isDark ? mix(th.background, th.text, 0.09f) : mix(th.background, white, 0.9f);
-    p.surface.a = 1;
-    p.surfaceBorder = alpha(th.text, th.isDark ? 0.16f : 0.15f);
-    p.shadow = D2D1::ColorF(0, 0, 0, th.isDark ? 0.40f : 0.12f);
+    paint::Surface s = paint::surface(app);
+    p.surface = s.fill;
+    p.surfaceBorder = s.border;
+    p.shadow = s.shadow;
     return p;
 }
 
@@ -222,54 +215,8 @@ D2D1_COLOR_F cardFill(const App& app, const Node& node, const Palette& p) {
     return out;
 }
 
-// Text formats by face, size and weight, made once
-IDWriteTextFormat* textFormat(App& app, const wchar_t* family, float px, DWRITE_FONT_WEIGHT weight,
-                              bool wrap = true) {
-    static std::map<std::wstring, IDWriteTextFormat*> cache;
-    static IDWriteFactory* owner = nullptr;
-    // Kept for the factory's life (a few hundred sizes at most), so a
-    // format's address names it for the cards' cached layouts
-    if (owner != app.dwriteFactory) {
-        for (auto& entry : cache) {
-            if (entry.second) entry.second->Release();
-        }
-        cache.clear();
-        owner = app.dwriteFactory;
-    }
-    px = std::max(1.0f, std::round(px * 4.0f) / 4.0f);
-    std::wstring key = std::wstring(family) + L"|" + std::to_wstring((int)(px * 4)) + L"|" +
-                       std::to_wstring((int)weight) + (wrap ? L"w" : L"n");
-    auto it = cache.find(key);
-    if (it != cache.end()) return it->second;
-    IDWriteTextFormat* fmt = nullptr;
-    app.dwriteFactory->CreateTextFormat(family, nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                                        px, L"en-us", &fmt);
-    if (fmt) {
-        useUiFontFallback(app, fmt);
-        if (!wrap) fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-        IDWriteInlineObject* sign = nullptr;
-        if (SUCCEEDED(app.dwriteFactory->CreateEllipsisTrimmingSign(fmt, &sign)) && sign) {
-            DWRITE_TRIMMING trim{wrap ? DWRITE_TRIMMING_GRANULARITY_WORD : DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
-            fmt->SetTrimming(&trim, sign);
-            sign->Release();
-        }
-    }
-    cache[key] = fmt;
-    return fmt;
-}
-
-const wchar_t* uiFace() { return L"Segoe UI"; }
-
 const wchar_t* docFace(const App& app) {
     return app.theme.fontFamily && *app.theme.fontFamily ? app.theme.fontFamily : L"Segoe UI";
-}
-
-IDWriteTextLayout* makeLayout(App& app, const std::wstring& text, IDWriteTextFormat* fmt, float maxW, float maxH) {
-    if (!fmt) return nullptr;
-    IDWriteTextLayout* layout = nullptr;
-    app.dwriteFactory->CreateTextLayout(text.c_str(), (UINT32)text.size(), fmt, std::max(1.0f, maxW),
-                                        std::max(1.0f, maxH), &layout);
-    return layout;
 }
 
 // A layout kept on its card; the caller does not release it
@@ -289,71 +236,13 @@ IDWriteTextLayout* cachedLayout(App& app, SheetCard::TextCache& cache, const std
     return cache.layout.Get();
 }
 
-DWRITE_TEXT_METRICS metrics(IDWriteTextLayout* layout) {
-    DWRITE_TEXT_METRICS m{};
-    if (layout) layout->GetMetrics(&m);
-    return m;
-}
-
-void drawText(App& app, IDWriteTextLayout* layout, float x, float y, D2D1_COLOR_F color) {
-    if (!layout) return;
-    app.brush->SetColor(color);
-    app.renderTarget->DrawTextLayout(D2D1::Point2F(x, y), layout, app.brush,
-                                     D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT | D2D1_DRAW_TEXT_OPTIONS_CLIP);
-}
-
-void fillRound(App& app, const D2D1_RECT_F& r, float radius, D2D1_COLOR_F color) {
-    app.brush->SetColor(color);
-    app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(r, radius, radius), app.brush);
-}
-
-void strokeRound(App& app, const D2D1_RECT_F& r, float radius, D2D1_COLOR_F color, float width,
-                 ID2D1StrokeStyle* style = nullptr) {
-    app.brush->SetColor(color);
-    app.renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(r, radius, radius), app.brush, width, style);
-}
-
-void line(App& app, D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_COLOR_F color, float width, ID2D1StrokeStyle* style = nullptr) {
-    app.brush->SetColor(color);
-    app.renderTarget->DrawLine(a, b, app.brush, width, style);
-}
-
-ID2D1StrokeStyle* dashedStyle(App& app) {
-    static ID2D1StrokeStyle* style = nullptr;
-    static ID2D1Factory* owner = nullptr;
-    if (!style || owner != app.d2dFactory) {
-        D2D1_STROKE_STYLE_PROPERTIES props = D2D1::StrokeStyleProperties(
-            D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND, 10.0f,
-            D2D1_DASH_STYLE_DASH, 0.0f);
-        app.d2dFactory->CreateStrokeStyle(props, nullptr, 0, &style);
-        owner = app.d2dFactory;
-    }
-    return style;
-}
-
-ID2D1StrokeStyle* roundStyle(App& app) {
-    static ID2D1StrokeStyle* style = nullptr;
-    static ID2D1Factory* owner = nullptr;
-    if (!style || owner != app.d2dFactory) {
-        D2D1_STROKE_STYLE_PROPERTIES props = D2D1::StrokeStyleProperties(
-            D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND);
-        app.d2dFactory->CreateStrokeStyle(props, nullptr, 0, &style);
-        owner = app.d2dFactory;
-    }
-    return style;
-}
-
 bool intersects(const D2D1_RECT_F& a, const D2D1_RECT_F& b) {
     return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
-// A soft shadow under a card: two widening, fading rounded rectangles
+// A soft shadow under a card, in the palette's shadow colour
 void shadow(App& app, const D2D1_RECT_F& r, float radius, const Palette& p, float strength) {
-    for (int i = 2; i >= 1; --i) {
-        float grow = dpi(app, 1.5f) * i;
-        D2D1_RECT_F s = D2D1::RectF(r.left - grow * 0.5f, r.top + grow * 0.6f, r.right + grow * 0.5f, r.bottom + grow * 1.4f);
-        fillRound(app, s, radius + grow, alpha(p.shadow, strength * (i == 1 ? 0.55f : 0.30f)));
-    }
+    paint::shadow(app, r, radius, p.shadow, strength);
 }
 
 }  // namespace
@@ -1090,53 +979,7 @@ void drawEditBox(App& app, SheetDoc& doc, const Palette& p) {
     app.renderTarget->GetTransform(&saved);
     app.renderTarget->SetTransform(D2D1::Matrix3x2F::Scale(textScale, textScale) *
                                    D2D1::Matrix3x2F::Translation(rect.left, rect.top - doc.edit.scrollY * textScale) * saved);
-    // Selection
-    if (doc.edit.hasSelection()) {
-        UINT32 count = 0;
-        layout->HitTestTextRange((UINT32)doc.edit.selStart(), (UINT32)(doc.edit.selEnd() - doc.edit.selStart()), 0, 0,
-                                 nullptr, 0, &count);
-        std::vector<DWRITE_HIT_TEST_METRICS> hits(count);
-        if (count && SUCCEEDED(layout->HitTestTextRange((UINT32)doc.edit.selStart(),
-                                                        (UINT32)(doc.edit.selEnd() - doc.edit.selStart()), 0, 0,
-                                                        hits.data(), count, &count))) {
-            app.brush->SetColor(alpha(p.accent, 0.28f));
-            for (const auto& h : hits) {
-                app.renderTarget->FillRectangle(D2D1::RectF(h.left, h.top, h.left + std::max(h.width, 3.0f), h.top + h.height),
-                                                app.brush);
-            }
-        }
-    }
-    app.brush->SetColor(p.text);
-    app.renderTarget->DrawTextLayout(D2D1::Point2F(0, 0), layout, app.brush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
-    if (card) {
-        // The caret's line starts #word: a mark where the heading's space belongs
-        const std::wstring& t = doc.edit.text;
-        size_t caret = std::min(doc.edit.caret, t.size());
-        size_t start = caret == 0 ? 0 : t.rfind(L'\n', caret - 1);
-        start = start == std::wstring::npos || caret == 0 ? 0 : start + 1;
-        size_t hashes = 0;
-        while (start + hashes < t.size() && t[start + hashes] == L'#') ++hashes;
-        if (hashes >= 1 && hashes <= 6 && start + hashes < t.size() && t[start + hashes] != L' ' &&
-            t[start + hashes] != L'\n') {
-            float gx = 0, gy = 0;
-            DWRITE_HIT_TEST_METRICS gm{};
-            layout->HitTestTextPosition((UINT32)(start + hashes), FALSE, &gx, &gy, &gm);
-            float u = dpi(app, 1.0f) / textScale;
-            app.brush->SetColor(alpha(p.accent, 0.9f));
-            app.renderTarget->FillRectangle(D2D1::RectF(gx - 3.5f * u, gy + gm.height - 1.5f * u, gx + 3.5f * u, gy + gm.height),
-                                            app.brush);
-            app.renderTarget->FillRectangle(D2D1::RectF(gx - 0.75f * u, gy + gm.height - 5.0f * u, gx + 0.75f * u, gy + gm.height),
-                                            app.brush);
-        }
-    }
-    // Caret
-    if (app.cursorBlinkOn) {
-        float cx = 0, cy = 0;
-        DWRITE_HIT_TEST_METRICS hm{};
-        layout->HitTestTextPosition((UINT32)doc.edit.caret, FALSE, &cx, &cy, &hm);
-        app.brush->SetColor(p.accent);
-        app.renderTarget->FillRectangle(D2D1::RectF(cx - 0.75f / textScale, cy, cx + 1.25f / textScale, cy + hm.height), app.brush);
-    }
+    live::draw(app, doc.edit, layout, doc.editCache, 0, editLook(app, doc), app.cursorBlinkOn, dpi(app, 1.0f) / textScale);
     app.renderTarget->SetTransform(saved);
     app.renderTarget->PopAxisAlignedClip();
     if (!card && doc.edit.text.empty()) {
@@ -1811,44 +1654,33 @@ void drawJumpLabels(App& app, SheetDoc& doc, const Palette& p) {
     }
 }
 
-// The [[ names under the caret: the sheet's notes, then the folder's
-void drawCompletions(App& app, SheetDoc& doc, const Palette& p) {
-    if (!doc.completing || doc.completions.empty() || doc.editing != SheetDoc::Edit::Card) return;
+// Over a card being typed in: the slash menu or the [[ names under the
+// caret, or the format bar over a selection
+void drawEditPopups(App& app, SheetDoc& doc) {
+    doc.edit.popupHits.clear();
+    doc.edit.barHits.clear();
+    if (doc.editing != SheetDoc::Edit::Card) return;
     D2D1_RECT_F rect{};
     float sc = 1;
     if (!editRect(app, doc, rect, sc)) return;
     IDWriteTextLayout* layout = editLayout(app, doc, (rect.right - rect.left) / sc);
     if (!layout) return;
-    float cx = 0, cy = 0;
-    DWRITE_HIT_TEST_METRICS hm{};
-    layout->HitTestTextPosition((UINT32)std::min(doc.completeFrom, doc.edit.text.size()), FALSE, &cx, &cy, &hm);
+    auto place = [&](size_t at, float& x, float& top, float& bottom) {
+        float cx = 0, cy = 0, h = 0;
+        if (!live::caretPoint(layout, 0, std::min(at, doc.edit.text.size()), cx, cy, h)) return false;
+        x = rect.left + cx * sc;
+        top = rect.top + (cy - doc.edit.scrollY) * sc;
+        bottom = top + h * sc;
+        return true;
+    };
     D2D1_RECT_F v = viewRect(app);
-    float rowH = dpi(app, 26.0f), w = dpi(app, 280.0f), pad = dpi(app, 4.0f);
-    float h = rowH * (float)doc.completions.size() + pad * 2;
-    float x = std::clamp(rect.left + cx * sc - dpi(app, 10.0f), v.left + dpi(app, 6.0f), std::max(v.left, v.right - w - dpi(app, 6.0f)));
-    float y = rect.top + (cy + hm.height - doc.edit.scrollY) * sc + dpi(app, 6.0f);
-    if (y + h > v.bottom - dpi(app, 6.0f)) y = rect.top + (cy - doc.edit.scrollY) * sc - h - dpi(app, 6.0f);
-    D2D1_RECT_F box = D2D1::RectF(x, y, x + w, y + h);
-    shadow(app, box, dpi(app, 8.0f), p, 1.4f);
-    fillRound(app, box, dpi(app, 8.0f), p.surface);
-    strokeRound(app, box, dpi(app, 8.0f), p.surfaceBorder, dpi(app, 1.0f));
-    IDWriteTextFormat* nameFormat = textFormat(app, uiFace(), dpi(app, 13.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
-    IDWriteTextFormat* whereFormat = textFormat(app, uiFace(), dpi(app, 11.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
-    for (size_t k = 0; k < doc.completions.size(); ++k) {
-        const SheetDoc::Completion& item = doc.completions[k];
-        D2D1_RECT_F row = D2D1::RectF(box.left + pad, box.top + pad + rowH * (float)k, box.right - pad,
-                                      box.top + pad + rowH * (float)(k + 1));
-        if ((int)k == doc.completeIndex) fillRound(app, row, dpi(app, 5.0f), alpha(p.accent, 0.18f));
-        std::wstring where = tr(app, item.nodeId.empty() ? "sheet.complete.folder" : "sheet.complete.sheet");
-        IDWriteTextLayout* wl = makeLayout(app, where, whereFormat, 400, rowH);
-        DWRITE_TEXT_METRICS wm = metrics(wl);
-        IDWriteTextLayout* nl = makeLayout(app, item.name, nameFormat, std::max(1.0f, row.right - row.left - wm.width - dpi(app, 24.0f)), rowH);
-        DWRITE_TEXT_METRICS nm = metrics(nl);
-        drawText(app, nl, row.left + dpi(app, 8.0f), (row.top + row.bottom - nm.height) * 0.5f, p.text);
-        drawText(app, wl, row.right - wm.width - dpi(app, 8.0f), (row.top + row.bottom - wm.height) * 0.5f, alpha(p.text, 0.45f));
-        if (nl) nl->Release();
-        if (wl) wl->Release();
-        doc.completeHits.push_back({row, (int)k});
+    float x = 0, top = 0, bottom = 0;
+    if (doc.edit.popup != LiveText::Popup::None) {
+        if (place(doc.edit.popupFrom, x, top, bottom)) live::drawPopup(app, doc.edit, D2D1::Point2F(x, top), bottom, v);
+    } else if (doc.edit.hasSelection() && place(doc.edit.selStart(), x, top, bottom)) {
+        float x2 = 0, top2 = 0, bottom2 = 0;
+        place(doc.edit.selEnd(), x2, top2, bottom2);
+        live::drawFormatBar(app, doc.edit, D2D1::Point2F(x, top), bottom2, v);
     }
 }
 
@@ -1859,7 +1691,7 @@ void drawCompletions(App& app, SheetDoc& doc, const Palette& p) {
 std::wstring contextHint(App& app, SheetDoc& doc) {
     if (doc.presenting) return {};
     if (doc.jumping) return tr(app, doc.jumpJoin ? "sheet.hint.join" : "sheet.hint.jump");
-    if (doc.completing) return tr(app, "sheet.hint.complete");
+    if (doc.editing == SheetDoc::Edit::Card && doc.edit.popup == LiveText::Popup::Names) return tr(app, "sheet.hint.complete");
     auto say = [&](int which, const char* key) { return hintRetired(which) ? std::wstring() : std::wstring(tr(app, key)); };
     switch (doc.gesture) {
         case SheetDoc::Gesture::Connect: return say(HINT_CONNECT, "sheet.hint.connect");
@@ -2009,7 +1841,6 @@ void renderSheet(App& app) {
     Palette p = palette(app);
     doc.uiHits.clear();
     doc.foldHits.clear();
-    doc.completeHits.clear();
     if (doc.hidden.size() != doc.model.nodes.size()) updateFolds(doc);
     bool anyHidden = std::find(doc.hidden.begin(), doc.hidden.end(), 1) != doc.hidden.end();
     auto away = [&](const std::string& id) { return anyHidden && foldedAwayAt(doc, nodeIndex(doc.model, id)); };
@@ -2149,7 +1980,7 @@ void renderSheet(App& app) {
     drawSelectionBar(app, doc, p);
     drawJumpLabels(app, doc, p);
     drawEditBox(app, doc, p);
-    drawCompletions(app, doc, p);
+    drawEditPopups(app, doc);
     drawEmptyHint(app, doc, p);
 
     // Chrome

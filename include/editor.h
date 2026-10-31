@@ -2,6 +2,7 @@
 #define TINTA_EDITOR_H
 
 #include "app.h"
+#include "live_text.h"
 #include <windows.h>
 
 // Mode transitions
@@ -82,6 +83,17 @@ void editorReparse(App& app, bool force = false);
 void editorReplaceRangeExternal(App& app, size_t start, size_t end,
                                 const std::wstring& repl);
 void editorMarkDirtyAndReparse(App& app);
+// The Live editor's edits, in order, as one undo step (a character typed
+// runs on like typing in the source), then its caret and selection
+void editorApplyLiveEdits(App& app, const std::vector<LiveText::Change>& changes, size_t caret, size_t anchor);
+// Ctrl+Z and Ctrl+Y, for the Live editor
+void editorUndoRedo(App& app, bool redo);
+// Puts the source's caret in view (back from Live)
+void editorRevealCaret(App& app);
+// The fenced templates the rail's flyout and Live's slash menu insert:
+// 0 flowchart, 1 sequence, 2 class, 3 state, 4 gantt, 5 pie, 6 an empty
+// Mermaid block, 7-9 PlantUML sequence, class and activity, 10 mind map
+const wchar_t* diagramTemplate(int kind);
 
 // Editor search
 void performEditorSearch(App& app);
