@@ -206,7 +206,7 @@ enum class SidePanel { None, Contents, Browser };
 enum class PanelList { None, Contents, Browser, Search };
 // What a finger drives (#286): the page (the reader or the docked
 // preview), the editor's text, or a side panel's list
-enum class TouchTarget { None, Document, Editor, List, Sheet };
+enum class TouchTarget { None, Document, Editor, List, Sheet, Help };
 
 struct Settings {
     int themeIndex = 5;          // Default to Midnight

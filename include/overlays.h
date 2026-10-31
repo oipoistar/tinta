@@ -16,6 +16,7 @@ void renderThemeChooser(App& app);
 int themeChooserRows();
 void themeChooserCell(int themeIndex, int& col, int& row);
 void renderHelpOverlay(App& app);
+D2D1_RECT_F helpPanelRect(const App& app);
 // Full-frame print preview; render() short-circuits to this while it is open
 void renderPrintPreview(App& app);
 

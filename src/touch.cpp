@@ -49,11 +49,11 @@ bool isExtra(const App::TouchGesture& t, UINT32 pointer) {
 // Menus, dialogs and overlays own their touches through the mouse
 bool overlayUp(const App& app) {
     return app.showSettings || app.showThemeEditor || app.showShortcutEditor ||
-           app.showThemeChooser || app.showHelp || app.showPrintPreview || app.showLightbox ||
+           app.showThemeChooser || app.showPrintPreview || app.showLightbox ||
            app.showContextMenu || app.editCtxOpen || app.showTabMenu || app.showTabSwitcher ||
            app.confirmExitPending || app.createRefPending ||
            (app.annotEditorOpen && !app.editMode) || app.signalTrayOpen || app.gotoLineOpen ||
-           app.appMenuPressed || startPageActive(app);
+           app.appMenuPressed || (startPageActive(app) && !app.showHelp);
 }
 
 bool onSidePanel(const App& app, float x) {
@@ -93,6 +93,7 @@ void scrollOf(const App& app, TouchTarget target, PanelList list, float& x, floa
                 y = doc->camY * sheetui::scale(app, *doc);
             }
             break;
+        case TouchTarget::Help: y = app.helpScroll; break;
         case TouchTarget::List: {
             PanelListView view;
             if (panelListView(app, list, view)) y = view.scroll;
@@ -105,6 +106,9 @@ void scrollOf(const App& app, TouchTarget target, PanelList list, float& x, floa
 void scrollRange(const App& app, TouchTarget target, PanelList list, float& maxX, float& maxY) {
     maxX = maxY = 0;
     switch (target) {
+        case TouchTarget::Help:
+            maxY = app.showHelp ? std::max(0.0f, app.helpContentHeight - app.helpVisibleHeight) : 0;
+            break;
         case TouchTarget::Document:
             maxX = std::max(0.0f, app.contentWidth - documentViewportWidth(app));
             maxY = std::max(0.0f, app.contentHeight - static_cast<float>(app.height));
@@ -147,6 +151,7 @@ bool scrollTo(App& app, TouchTarget target, PanelList list, float& x, float& y) 
             if (app.editMode) editorFollowPreview(app);
             break;
         case TouchTarget::Editor: app.editorScrollY = y; break;
+        case TouchTarget::Help: app.helpScroll = y; break;
         case TouchTarget::List: setPanelListScroll(app, list, y); break;
         case TouchTarget::Sheet:
             if (SheetDoc* doc = activeSheet(app)) {
@@ -294,6 +299,12 @@ TouchTarget touchTargetAt(const App& app, POINT pt, PanelList& list) {
     const float x = static_cast<float>(pt.x), y = static_cast<float>(pt.y);
     if (overlayUp(app) || x < 0 || y < chromeTopHeight(app) || x >= app.width || y >= app.height)
         return TouchTarget::None;
+    if (app.showHelp) {
+        const auto panel = helpPanelRect(app);
+        return x >= panel.left && x < panel.right - dpi(app, 16) &&
+               y >= app.helpScrollbarTop && y < app.helpScrollbarTop + app.helpVisibleHeight
+                   ? TouchTarget::Help : TouchTarget::None;
+    }
     if (sidePanelResizeAt(app, x, y) != SidePanel::None) return TouchTarget::None;
     // A side panel's list; its scrollbar drags as with the mouse
     for (PanelList which : {PanelList::Search, PanelList::Contents, PanelList::Browser}) {
@@ -361,7 +372,8 @@ bool touchDown(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
     t.axis = 0;
     t.samples.push_back({ms, static_cast<float>(pt.x), static_cast<float>(pt.y)});
     // A held row is a slow tap: only text selects
-    if (target != TouchTarget::List && !braking) SetTimer(hwnd, TIMER_TOUCH_HOLD, kHoldMs, nullptr);
+    if ((target == TouchTarget::Document || target == TouchTarget::Editor) && !braking)
+        SetTimer(hwnd, TIMER_TOUCH_HOLD, kHoldMs, nullptr);
     return true;
 }
 
@@ -451,6 +463,7 @@ void touchHold(App& app, HWND hwnd) {
     KillTimer(hwnd, TIMER_TOUCH_HOLD);
     auto& t = app.touch;
     if (!t.active || t.phase != Phase::Pending || t.multi || t.braking) return;
+    if (t.target != TouchTarget::Document && t.target != TouchTarget::Editor) return;
     if (!sameContext(app)) { touchCancel(app, hwnd); return; }
     resetTap(app);
     t.phase = Phase::Holding;
@@ -480,6 +493,10 @@ void touchHold(App& app, HWND hwnd) {
 bool touchFlingStep(App& app, HWND hwnd, double ms) {
     auto& t = app.touch;
     if (!t.flinging) return false;
+    if (t.flingTarget == TouchTarget::Help && !app.showHelp) {
+        touchStopFling(app, hwnd);
+        return false;
+    }
     // The document under it changed: the fling belonged to the other one
     if (app.activeTab != t.flingTab || app.currentFile != t.flingFile || app.editMode != t.flingEdit) {
         touchStopFling(app, hwnd);

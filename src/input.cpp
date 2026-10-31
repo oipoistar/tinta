@@ -2,6 +2,7 @@
 #include "input.h"
 #include "live_editor.h"
 #include "sheet_ui.h"
+#include "touch.h"
 #include "link_target.h"
 #include "network_path.h"
 #include "annotations.h"
@@ -2132,6 +2133,16 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
 
     // Help overlay: check scrollbar click
     if (app.showHelp) {
+        const auto panel = helpPanelRect(app);
+        const float x = (float)GET_X_LPARAM(lParam), y = (float)GET_Y_LPARAM(lParam);
+        if (!cursorPointInRect(x, y, panel)) {
+            app.showHelp = false;
+            app.helpAnimation = 0;
+            app.swallowNextMouseUp = true;
+            touchStopFling(app, hwnd);
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
         float maxScroll = std::max(0.0f, app.helpContentHeight - app.helpVisibleHeight);
         if (maxScroll > 0) {
             int clickX = GET_X_LPARAM(lParam);

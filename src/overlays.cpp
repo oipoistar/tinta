@@ -1876,6 +1876,14 @@ static void drawCenteredText(App& app, const wchar_t* text, IDWriteTextFormat* f
     layout->Release();
 }
 
+D2D1_RECT_F helpPanelRect(const App& app) {
+    const float width = std::min(dpi(app, 520.0f), app.width - dpi(app, 40.0f));
+    const float height = std::min(dpi(app, 700.0f), app.height - dpi(app, 40.0f));
+    const float x = (app.width - width) / 2;
+    const float y = (app.height - height) / 2 + (1 - app.helpAnimation) * dpi(app, 50.0f);
+    return D2D1::RectF(x, y, x + width, y + height);
+}
+
 void renderHelpOverlay(App& app) {
     // Animate in
     if (app.helpAnimation < 1.0f) {
@@ -1894,10 +1902,11 @@ void renderHelpOverlay(App& app) {
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
     // Panel dimensions - fit to window
-    float panelWidth = std::min(dpi(app, 520.0f), app.width - dpi(app, 40.0f));
-    float panelHeight = std::min(dpi(app, 700.0f), app.height - dpi(app, 40.0f));
-    float panelX = (app.width - panelWidth) / 2;
-    float panelY = (app.height - panelHeight) / 2 + (1 - anim) * dpi(app, 50.0f);
+    const auto panel = helpPanelRect(app);
+    float panelWidth = panel.right - panel.left;
+    float panelHeight = panel.bottom - panel.top;
+    float panelX = panel.left;
+    float panelY = panel.top;
 
     // Panel background follows the active document theme.
     D2D1_ROUNDED_RECT panelRect = D2D1::RoundedRect(

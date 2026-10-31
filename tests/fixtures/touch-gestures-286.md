@@ -52,6 +52,10 @@ In split editing, hold lavender in the rendered preview and extend to
 rosemary. Lifting should open a copy menu and keep the selected words.
 Holding table text should select it too; a normal tap still edits a cell.
 
+Open Help from the application menu: swipe and flick its shortcut list.
+The document underneath must stay still. Tap the empty margin on either
+side to close Help; that tap must not activate the document underneath.
+
 | Bed 1 | Bed 2 | Bed 3 | Bed 4 | Bed 5 | Bed 6 | Bed 7 | Bed 8 | Bed 9 | Bed 10 | Bed 11 | Bed 12 | Bed 13 | Bed 14 | Bed 15 | Bed 16 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `12` cm | `24` cm | `36` cm | **Chard** | `60` cm | `72` cm | `84` cm | **Beans** | `108` cm | `120` cm | `132` cm | **Chard** | `156` cm | `168` cm | `180` cm | **Beans** |
