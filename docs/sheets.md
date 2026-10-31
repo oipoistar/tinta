@@ -42,6 +42,10 @@ second and draws a whole-sheet frame in about 20 ms.
 | Colour | The swatches in the context menu | 1 to 6, 0 for none |
 | Pan | Wheel, Space+drag, middle drag, the minimap | |
 | Zoom | Ctrl+wheel or a pinch, the zoom control | Ctrl+= and Ctrl+-, Ctrl+0 for 100%, Shift+1 everything, Shift+2 the selection |
+| Jump to a card | | J, then its letters (Shift+J joins the selection to it) |
+| Fold what follows a card | Its +N badge opens it again | Z (Shift+Z unfolds everything) |
+| Read a card from far out | Rest the pointer on it | Hold Alt |
+| Link another note | | [[ while typing in a card |
 | Undo | | Ctrl+Z, Ctrl+Y |
 | Copy and paste | | Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D to duplicate |
 | Remove from the sheet | Context menu | Delete |
@@ -106,6 +110,53 @@ An Untitled left in the sheet's folder by an earlier session does the same
 the next time you type into it; a note with a name of its own keeps it, and
 so does an Untitled in an Obsidian vault, where other notes may link to it.
 
+## Ten more
+
+1. **A hint line.** Above the tool bar, one quiet line says what can be
+   done now: with two cards selected, how to move them; while a new note
+   is typed, that its first line names it. Each hint retires once it has
+   been done three times; **Hide hints** in the menu puts them all away and
+   **Show hints again** brings them back.
+2. **The selection bar.** Over any selection: the six colours and none,
+   Group, for several cards **Join in order** (arrows in rows, left to
+   right, where there are none yet) and **Align**, for a card with arrows
+   out Fold, and Remove.
+3. **Live writing.** In a card being typed in, the caret's line shows its
+   Markdown as typed and every other line shows it drawn: headings without
+   their #, bullets, task boxes, bold and italic, `[[links]]` and
+   `[links](...)` in the accent, quotes with their bar. A line that starts
+   `#word`, which Markdown does not take for a heading, gets a mark where
+   the space belongs.
+4. **`[[` names.** Typing `[[` in a card lists the notes on the sheet and
+   in its folder; the arrow keys choose, Enter writes the link and
+   Ctrl+Enter draws the arrow too.
+5. **Peek.** Far out, rest the pointer on a card (or hold Alt) and its note
+   opens in a lens beside it at reading size; the wheel scrolls it, a click
+   on it flies there.
+6. **Jump labels.** J puts a letter on every card in view; typing one picks
+   its card, with Shift added to the selection. Shift+J joins the
+   selection to the card picked.
+7. **Folds.** Z folds away what follows a card along its arrows (a card
+   something else still points at stays); a +N badge marks the fold and a
+   click on it opens it. A folded card moves with what it holds; presenting,
+   compiling, find and the arrow keys pass folded cards by; Shift+Z
+   unfolds everything. Folds are saved with the sheet.
+8. **Arrows written into notes.** With **Write arrows into the notes** (the
+   menu on open ground) an arrow from one note to another adds
+   `related: "[[Other]]"` to the first one's front matter, and removing
+   the arrow takes it out again. Turning it on writes the arrows already
+   drawn; a new note gets its links once it has a name.
+9. **Explode a document.** **Explode a document into cards...** (on open
+   ground) cuts a Markdown document at its `##` sections, each a note in
+   the sheet's folder, chained in reading order; two or more `#` headings
+   become groups, and images and links keep working. **Open as a sheet** in
+   a document's context menu makes a new sheet of it beside it; **Split by
+   headings** on a card does the same to one note.
+10. **Lanes that stack.** A lane keeps its cards in a column: a card
+    dropped in takes its place, the lane it left closes up, and the lane
+    grows to hold them. **Card limit...** sets how many it holds before its
+    border and count turn red.
+
 ## The .smd format
 
 A `.smd` is Markdown: front matter, a title, an outline of the cards that
@@ -144,8 +195,10 @@ folder: Roadmap
   format of Obsidian's canvases, written one node or edge per line so it
   diffs well. Copy it into a `.canvas` file and Obsidian opens it. File paths
   run from the `.smd`'s folder.
-- Tinta adds one field: `tintaLane` on a group names the property its lane
-  writes. Fields Tinta does not know are kept as they are.
+- Tinta adds a few fields: `tintaLane` on a group names the property its
+  lane writes and `tintaLimit` how many cards it holds; `tintaFolded` marks
+  a folded card; `tintaWriteLinks` at the top writes arrows into the notes.
+  Fields Tinta does not know are kept as they are.
 - The outline is written fresh on every save; only the block is read back.
   A block that does not parse leaves the sheet read-only, so a broken file
   is never written over.
@@ -191,8 +244,8 @@ recents and tabs bring it back.
 - PDFs, videos and other files are cards that open in their own app.
 - No freehand drawing or shapes, no nested sheets, no image export of the
   whole sheet.
-- A card's text is edited as Markdown with light styling; images and
-  diagrams show again once you leave the card.
+- A card's text is edited as Markdown shown live (the caret's line as
+  typed); images and diagrams show again once you leave the card.
 - On a touchscreen a finger pans the sheet (a flick carries on), a tap
   selects, a double tap writes a note or opens a card, and a held press opens
   the menu. Pinch zoom works on a touchpad, not yet on a screen, and moving

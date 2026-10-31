@@ -38,8 +38,12 @@ struct Node {
     std::string background;       // Group: an image behind it
     std::string backgroundStyle;  // Group: cover, ratio or repeat
     // Tinta: a group that is a lane writes `laneKey: label` into the front
-    // matter of the notes put in it
+    // matter of the notes put in it, and holds at most `laneLimit` cards
+    // without turning red (0: no limit)
     std::string laneKey;
+    int laneLimit = 0;
+    // Tinta: what follows this card along its arrows is folded away
+    bool folded = false;
     Extra extra;
 };
 
@@ -56,6 +60,9 @@ struct Edge {
 struct Sheet {
     std::vector<Node> nodes;  // back to front, as JSON Canvas orders them
     std::vector<Edge> edges;
+    // Tinta: an arrow drawn from one note to another is written into the
+    // first one's front matter as `related: "[[Other]]"`, and leaves with it
+    bool writeLinks = false;
     Extra extra;
 };
 
@@ -111,8 +118,8 @@ std::vector<int> readingOrder(const Sheet& sheet, const std::vector<int>& subset
 
 // The card the arrow keys move to: the nearest one whose centre lies in
 // the direction (dx, dy) from this one's, favouring cards straight ahead.
-// -1 when there is none.
-int neighbourInDirection(const Sheet& sheet, int from, int dx, int dy);
+// -1 when there is none. Cards flagged in `skip` are passed over.
+int neighbourInDirection(const Sheet& sheet, int from, int dx, int dy, const std::vector<char>* skip = nullptr);
 
 // Tidies cards into layers along their arrows, left to right or top to
 // bottom; cards with no arrows go into a grid beside them. Each group is
@@ -122,6 +129,43 @@ void tidy(Sheet& sheet, const std::vector<int>& subset, bool leftToRight);
 // Places `count` new cards of the given size in a grid starting at (x, y)
 std::vector<std::pair<float, float>> gridPlaces(int count, float x, float y, float width,
                                                 float height, float gap = 40.0f);
+
+// Cards folded away: those along the arrows after a folded card that
+// nothing shown and unfolded points at. One flag per node.
+std::vector<char> foldedAway(const Sheet& sheet);
+// The cards after a folded one that are folded away, and how many
+std::vector<int> foldedBehind(const Sheet& sheet, int folded, const std::vector<char>& hidden);
+int foldedCount(const Sheet& sheet, int folded, const std::vector<char>& hidden);
+
+// The cards a lane (any group) holds directly, top to bottom
+std::vector<int> laneCards(const Sheet& sheet, int lane);
+// Stacks a lane's cards into a column under its label, 20 apart, no wider
+// than the lane; the lane grows to hold them
+void stackLane(Sheet& sheet, int lane);
+
+// Cards in rows, top to bottom, each row left to right: the order a chain
+// of arrows joins them in
+std::vector<int> rowOrder(const Sheet& sheet, std::vector<int> cards);
+
+// A Markdown document cut into notes at its sections: ## sections when it
+// has any (else its top headings), under groups for its # headings when
+// there are two or more, a lone # heading being the title. Text before the
+// first section is a part of its own; each part's headings are shifted so
+// its own heading is #. Code fences are not cut.
+struct ExplodedPart {
+    std::string title;
+    std::string text;
+    int group = -1;  // into `groups`
+};
+struct Exploded {
+    std::string title;
+    std::vector<std::string> groups;
+    std::vector<ExplodedPart> parts;
+};
+Exploded explodeDocument(std::string_view markdown, std::string_view fallbackTitle);
+// Where the parts go from (x, y): each group a column of its cards, else
+// rows of four, with room for the arrows that chain them
+void layoutExploded(const Exploded& doc, float x, float y, std::vector<Box>& cards, std::vector<Box>& groups);
 
 // Links a note makes to other notes: [[wiki]] names and relative Markdown
 // links to .md files, decoded, without #fragments, in order and once each
@@ -147,6 +191,12 @@ std::string_view noteBody(std::string_view markdown);
 bool setFrontmatterValue(std::string& markdown, std::string_view key, std::string_view value);
 // The scalar value of a front matter property, or empty
 std::string frontmatterValue(std::string_view markdown, std::string_view key);
+// Adds `link` to the front matter list `key` (the list or the block is made
+// when missing), once; removes it again. False when nothing could be done
+// safely (another kind of value, a block it cannot edit) or, for removal,
+// when the link was not there.
+bool addFrontmatterLink(std::string& markdown, std::string_view key, std::string_view link);
+bool removeFrontmatterLink(std::string& markdown, std::string_view key, std::string_view link);
 
 // A file name for a card from its title: characters Windows refuses
 // become spaces, runs collapse, at most `limit` characters, never empty

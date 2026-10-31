@@ -2036,6 +2036,10 @@ void renderHelpOverlay(App& app) {
         {L"L / M",            tr(app, "help.sheet.layers")},
         {L"Shift+1 / Shift+2", tr(app, "help.sheet.fit")},
         {L"Space+Drag",       tr(app, "help.sheet.pan")},
+        {L"J / Shift+J",      tr(app, "help.sheet.jump")},
+        {L"Z / Shift+Z",      tr(app, "help.sheet.fold")},
+        {L"[[",               tr(app, "help.sheet.link")},
+        {L"Alt / Hover",      tr(app, "help.sheet.peek")},
     };
 
     float padding = dpi(app, 20.0f);

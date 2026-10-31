@@ -215,6 +215,7 @@ void loadModel(App& app, SheetDoc& doc) {
         else ++it;
     }
     if (sheet::edgeIndex(doc.model, doc.selectedEdge) < 0) doc.selectedEdge.clear();
+    updateFolds(doc);
 }
 
 }  // namespace
@@ -448,6 +449,7 @@ void ensureTimer(App& app) {
 }
 
 void markChanged(App& app, SheetDoc& doc) {
+    updateFolds(doc);
     if (doc.readOnly) return;
     doc.dirty = true;
     ensureTimer(app);
@@ -814,6 +816,372 @@ bool ghostShown(const SheetDoc& doc, size_t count, const std::pair<std::string, 
            isSelected(doc, ghost.second);
 }
 
+// --- Placeholder names and moved links --------------------------------------
+
+bool placeholderName(App& app, const std::wstring& stem) {
+    for (const std::wstring& base : {std::wstring(tr(app, "title.untitled")), std::wstring(L"Untitled")}) {
+        if (stem.size() < base.size() || _wcsnicmp(stem.c_str(), base.c_str(), base.size()) != 0) continue;
+        std::wstring rest = stem.substr(base.size());
+        if (rest.empty()) return true;
+        if (rest.size() >= 2 && rest[0] == L' ' && rest.find_first_not_of(L"0123456789", 1) == std::wstring::npos)
+            return true;
+    }
+    return false;
+}
+
+std::string rebaseLinks(const std::string& body, const std::wstring& fromDir, const std::wstring& toDir) {
+    if (_wcsicmp(fromDir.c_str(), toDir.c_str()) == 0) return body;
+    std::wstring r = std::filesystem::path(fromDir).lexically_relative(toDir).wstring();
+    for (auto& ch : r) {
+        if (ch == L'\\') ch = L'/';
+    }
+    std::string prefix;
+    for (char ch : toUtf8(r)) prefix += ch == ' ' ? std::string("%20") : std::string(1, ch);
+    if (prefix.empty()) return body;
+    prefix += "/";
+    std::string fixed;
+    for (size_t k = 0; k < body.size(); ++k) {
+        fixed += body[k];
+        if (body[k] == ']' && k + 1 < body.size() && body[k + 1] == '(') {
+            size_t start = k + 2;
+            std::string dest = body.substr(start, body.find(')', start) - start);
+            bool relative = !dest.empty() && dest[0] != '#' && dest[0] != '/' && dest.find("://") == std::string::npos &&
+                            dest.rfind("mailto:", 0) != 0 && !(dest.size() > 1 && dest[1] == ':');
+            if (relative) {
+                // Copy the '(' (and a '<') ourselves, then the prefix
+                fixed += '(';
+                ++k;
+                if (dest[0] == '<') {
+                    fixed += '<';
+                    ++k;
+                }
+                fixed += prefix;
+            }
+        }
+    }
+    return fixed;
+}
+
+namespace {
+
+// One edited file per step: from what it held to what it holds now
+void recordEdit(SheetDoc& doc, const std::wstring& path, const std::string& before, const std::string& after) {
+    for (auto& change : doc.pendingFiles) {
+        if (change.kind == SheetDoc::FileChange::Edited && change.path == path) {
+            change.after = after;
+            return;
+        }
+    }
+    SheetDoc::FileChange change;
+    change.kind = SheetDoc::FileChange::Edited;
+    change.path = path;
+    change.before = before;
+    change.after = after;
+    doc.pendingFiles.push_back(change);
+}
+
+Edge joining(const std::string& from, const std::string& to) {
+    Edge e;
+    e.id = newId();
+    e.fromNode = from;
+    e.toNode = to;
+    return e;
+}
+
+// Whether a box comes within 20 units of a card already on the sheet
+bool covers(const Sheet& sheet, const Box& b) {
+    for (const Node& n : sheet.nodes) {
+        if (n.type == NodeType::Group) continue;
+        if (b.left < n.x + n.width + 20 && n.x < b.right + 20 && b.top < n.y + n.height + 20 && n.y < b.bottom + 20) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+// --- Folds -----------------------------------------------------------------
+
+void updateFolds(SheetDoc& doc) { doc.hidden = foldedAway(doc.model); }
+
+bool foldedAwayAt(const SheetDoc& doc, int index) {
+    return index >= 0 && index < (int)doc.hidden.size() && doc.hidden[index];
+}
+
+void toggleFolds(App& app, SheetDoc& doc, const std::vector<std::string>& ids) {
+    std::set<std::string> leaving;
+    for (const Edge& e : doc.model.edges) leaving.insert(e.fromNode);
+    auto foldable = [&](const std::string& id) {
+        int i = nodeIndex(doc.model, id);
+        return i >= 0 && (doc.model.nodes[i].folded || leaving.count(id));
+    };
+    if (std::none_of(ids.begin(), ids.end(), foldable)) {
+        hint(app, tr(app, "sheet.fold_nothing"));
+        return;
+    }
+    beginStep(doc);
+    for (const std::string& id : ids) {
+        if (!foldable(id)) continue;
+        Node& n = doc.model.nodes[nodeIndex(doc.model, id)];
+        n.folded = !n.folded;
+    }
+    updateFolds(doc);
+    // What went out of sight leaves the selection
+    doc.selected.erase(std::remove_if(doc.selected.begin(), doc.selected.end(),
+                                      [&](const std::string& id) { return foldedAwayAt(doc, nodeIndex(doc.model, id)); }),
+                       doc.selected.end());
+    commitStep(app, doc);
+}
+
+// --- Lanes -----------------------------------------------------------------
+
+void settleLanes(App& app, SheetDoc& doc, const std::vector<std::string>& moved) {
+    std::set<int> lanes;
+    for (const std::string& id : doc.moveLanes) {
+        int g = nodeIndex(doc.model, id);
+        if (g >= 0) lanes.insert(g);
+    }
+    for (const std::string& id : moved) {
+        int i = nodeIndex(doc.model, id);
+        if (i < 0 || doc.model.nodes[i].type == NodeType::Group) continue;
+        Node& n = doc.model.nodes[i];
+        // A card dropped with its middle over a lane goes into it
+        float cx = n.x + n.width * 0.5f, cy = n.y + n.height * 0.5f;
+        int lane = -1;
+        float area = 0;
+        for (int g = 0; g < (int)doc.model.nodes.size(); ++g) {
+            const Node& l = doc.model.nodes[g];
+            if (l.type != NodeType::Group || l.laneKey.empty()) continue;
+            if (cx < l.x || cx > l.x + l.width || cy < l.y || cy > l.y + l.height) continue;
+            if (lane < 0 || l.width * l.height < area) {
+                lane = g;
+                area = l.width * l.height;
+            }
+        }
+        if (lane < 0) continue;
+        Node& l = doc.model.nodes[lane];
+        if (groupOf(doc.model, i) != lane) {
+            n.width = std::min(n.width, std::max(80.0f, l.width - 80.0f));
+            n.x = l.x + 40.0f;
+            n.y = std::max(n.y, l.y + 80.0f);
+            if (n.y + n.height + 40.0f > l.y + l.height) l.height = std::ceil((n.y + n.height + 40.0f - l.y) / kGrid) * kGrid;
+        }
+        lanes.insert(lane);
+        hintDone(HINT_LANE);
+    }
+    for (int g : lanes) stackLane(doc.model, g);
+    (void)app;
+}
+
+// --- Arrows written into notes ---------------------------------------------
+
+void linkArrow(App& app, SheetDoc& doc, const std::string& from, const std::string& to, bool add) {
+    if (!doc.model.writeLinks || doc.readOnly) return;
+    int a = nodeIndex(doc.model, from), b = nodeIndex(doc.model, to);
+    if (a < 0 || b < 0 || a == b) return;
+    if (doc.model.nodes[a].type != NodeType::File || doc.model.nodes[b].type != NodeType::File) return;
+    SheetCard& source = card(app, doc, doc.model.nodes[a]);
+    SheetCard& target = card(app, doc, doc.model.nodes[b]);
+    if (source.kind != SheetCard::Kind::Note || target.kind != SheetCard::Kind::Note) return;
+    // A note still to be named gets its links when it has a name
+    std::wstring name = stemOf(target.path);
+    if (add && placeholderName(app, name)) return;
+    std::string text;
+    if (!readFileUtf8(source.path, text)) return;
+    std::string bom;
+    if (startsWithUtf8Bom(text)) {
+        bom = text.substr(0, 3);
+        text.erase(0, 3);
+    }
+    std::string link = "[[" + toUtf8(name) + "]]";
+    std::string updated = text;
+    bool done = add ? addFrontmatterLink(updated, "related", link) : removeFrontmatterLink(updated, "related", link);
+    if (!done || updated == text) return;
+    if (!writeFileUtf8(source.path, bom + updated)) {
+        signalPush(app, SIG_ERROR, SIGI_WARNING, tr(app, "sheet.note_failed"));
+        return;
+    }
+    recordEdit(doc, source.path, bom + text, bom + updated);
+    refreshCard(app, doc, doc.model.nodes[a], true);
+}
+
+void writeAllLinks(App& app, SheetDoc& doc) {
+    std::vector<std::pair<std::string, std::string>> pairs;
+    for (const Edge& e : doc.model.edges) pairs.push_back({e.fromNode, e.toNode});
+    for (const auto& pair : pairs) linkArrow(app, doc, pair.first, pair.second, true);
+}
+
+// --- Explode and split -----------------------------------------------------
+
+int explodeDocumentInto(App& app, SheetDoc& doc, const std::wstring& path, float x, float y) {
+    std::string text;
+    if (doc.readOnly || !readFileUtf8(path, text)) return 0;
+    if (startsWithUtf8Bom(text)) text.erase(0, 3);
+    Exploded parts = explodeDocument(text, toUtf8(stemOf(path)));
+    if (parts.parts.empty()) return 0;
+    std::vector<Box> cards, groups;
+    layoutExploded(parts, std::round(x / kGrid) * kGrid, std::round(y / kGrid) * kGrid, cards, groups);
+    // A block that would land on cards goes below everything instead
+    bool clash = std::any_of(cards.begin(), cards.end(), [&](const Box& b) { return covers(doc.model, b); });
+    if (clash && !doc.model.nodes.empty()) {
+        Box all = bounds(doc.model);
+        layoutExploded(parts, std::round(x / kGrid) * kGrid, std::ceil((all.bottom + 160) / kGrid) * kGrid, cards, groups);
+    }
+    beginStep(doc);
+    // Groups behind everything
+    for (size_t g = 0; g < parts.groups.size(); ++g) {
+        Node group;
+        group.id = newId();
+        group.type = NodeType::Group;
+        group.label = parts.groups[g];
+        group.x = groups[g].left;
+        group.y = groups[g].top;
+        group.width = groups[g].right - groups[g].left;
+        group.height = groups[g].bottom - groups[g].top;
+        doc.model.nodes.insert(doc.model.nodes.begin() + (std::ptrdiff_t)g, group);
+    }
+    std::wstring from = parentOf(path);
+    std::vector<std::string> ids;
+    for (size_t k = 0; k < parts.parts.size(); ++k) {
+        const Box& b = cards[k];
+        std::string id = newNoteCard(app, doc, b.left, b.top, rebaseLinks(parts.parts[k].text, from, doc.cardDir),
+                                     b.right - b.left, b.bottom - b.top);
+        if (!id.empty()) ids.push_back(id);
+    }
+    for (size_t k = 1; k < ids.size(); ++k) doc.model.edges.push_back(joining(ids[k - 1], ids[k]));
+    for (size_t k = 1; k < ids.size(); ++k) linkArrow(app, doc, ids[k - 1], ids[k], true);
+    doc.selected = ids;
+    doc.selectedEdge.clear();
+    updateFolds(doc);
+    commitStep(app, doc);
+    if (!ids.empty()) {
+        std::vector<int> made;
+        for (const std::string& id : ids) made.push_back(nodeIndex(doc.model, id));
+        fitBox(app, doc, bounds(doc.model, made), true, std::max(doc.zoom, 0.3f));
+    }
+    return (int)ids.size();
+}
+
+bool splitCard(App& app, SheetDoc& doc, const std::string& id) {
+    int i = nodeIndex(doc.model, id);
+    if (i < 0 || doc.readOnly || doc.model.nodes[i].type != NodeType::File) return false;
+    SheetCard& c = card(app, doc, doc.model.nodes[i]);
+    std::string text;
+    if (c.kind != SheetCard::Kind::Note || !readFileUtf8(c.path, text)) return false;
+    std::string bom;
+    if (startsWithUtf8Bom(text)) {
+        bom = text.substr(0, 3);
+        text.erase(0, 3);
+    }
+    Exploded parts = explodeDocument(text, toUtf8(stemOf(c.path)));
+    if (parts.parts.size() < 2) {
+        hint(app, tr(app, "sheet.split_nothing"));
+        return false;
+    }
+    beginStep(doc);
+    // The note keeps its front matter and its first part; the rest go into
+    // new notes in a column beside it, joined in order
+    std::string kept = text.substr(0, text.size() - noteBody(text).size()) + parts.parts[0].text;
+    if (writeFileUtf8(c.path, bom + kept)) recordEdit(doc, c.path, bom + text, bom + kept);
+    Node n = doc.model.nodes[i];
+    std::vector<std::string> ids = {n.id};
+    // Down the column beside the card, each where nothing covers it
+    float px = n.x + n.width + 120.0f, py = n.y;
+    for (size_t k = 1; k < parts.parts.size(); ++k) {
+        for (int step = 0; step < 400 && covers(doc.model, {px, py, px + n.width, py + 240.0f}); ++step) py += kGrid;
+        std::string made = newNoteCard(app, doc, px, py, parts.parts[k].text, n.width, 240.0f);
+        if (!made.empty()) ids.push_back(made);
+        py += 240.0f + 60.0f;
+    }
+    for (size_t k = 1; k < ids.size(); ++k) doc.model.edges.push_back(joining(ids[k - 1], ids[k]));
+    for (size_t k = 1; k < ids.size(); ++k) linkArrow(app, doc, ids[k - 1], ids[k], true);
+    refreshCard(app, doc, doc.model.nodes[nodeIndex(doc.model, n.id)], true);
+    doc.selected = ids;
+    updateFolds(doc);
+    commitStep(app, doc);
+    return true;
+}
+
+bool openDocumentAsSheet(App& app, HWND hwnd, const std::wstring& path) {
+    std::wstring dir = parentOf(path), stem = stemOf(path);
+    std::wstring sheetPath;
+    for (int k = 1; k < 100; ++k) {
+        std::wstring name = stem + (k == 1 ? std::wstring() : L" " + std::to_wstring(k));
+        sheetPath = dir + L"\\" + name + L".smd";
+        if (!fileExists(sheetPath) && !folderExists(dir + L"\\" + name)) break;
+    }
+    if (!sheetCreateAt(app, sheetPath)) {
+        signalPush(app, SIG_ERROR, SIGI_WARNING, tr(app, "sheet.create_failed"));
+        return false;
+    }
+    tabsInit(app);
+    tabOpenPath(app, hwnd, toUtf8(sheetPath));
+    SheetDoc* doc = activeSheet(app);
+    if (!doc) return false;
+    int count = explodeDocumentInto(app, *doc, path, 0, 0);
+    // A fresh sheet has nothing to go back to
+    doc->undo.clear();
+    doc->redo.clear();
+    saveNow(app, *doc);
+    fitBox(app, *doc, bounds(doc->model), false);
+    InvalidateRect(hwnd, nullptr, FALSE);
+    return count > 0;
+}
+
+// --- Hints -----------------------------------------------------------------
+
+namespace {
+
+const wchar_t* const kHintNames[HINT_COUNT] = {L"", L"multi", L"single", L"naming", L"link", L"heading",
+                                                L"connect", L"marquee", L"lane", L"far"};
+int hintCounts[HINT_COUNT] = {};
+bool hintsLoaded = false, hintsOff = false;
+constexpr int kHintRetires = 3;
+
+void loadHints() {
+    if (hintsLoaded) return;
+    hintsLoaded = true;
+    std::wstring ini = sheetsIniPath();
+    if (ini.empty()) return;
+    hintsOff = GetPrivateProfileIntW(L"Hints", L"off", 0, ini.c_str()) != 0;
+    for (int h = 1; h < HINT_COUNT; ++h) hintCounts[h] = (int)GetPrivateProfileIntW(L"Hints", kHintNames[h], 0, ini.c_str());
+}
+
+void saveHint(const wchar_t* key, int value) {
+    std::wstring ini = sheetsIniPath();
+    if (!ini.empty()) WritePrivateProfileStringW(L"Hints", key, std::to_wstring(value).c_str(), ini.c_str());
+}
+
+}  // namespace
+
+void hintDone(int which) {
+    loadHints();
+    if (which <= HINT_NONE || which >= HINT_COUNT || hintCounts[which] >= kHintRetires) return;
+    ++hintCounts[which];
+    saveHint(kHintNames[which], hintCounts[which]);
+}
+
+bool hintRetired(int which) {
+    loadHints();
+    return hintsOff || (which > HINT_NONE && which < HINT_COUNT && hintCounts[which] >= kHintRetires);
+}
+
+void setHintsShown(bool shown) {
+    loadHints();
+    hintsOff = !shown;
+    saveHint(L"off", hintsOff ? 1 : 0);
+    if (!shown) return;
+    // Shown again: every hint starts over
+    for (int h = 1; h < HINT_COUNT; ++h) {
+        hintCounts[h] = 0;
+        saveHint(kHintNames[h], 0);
+    }
+}
+
+bool hintsShown() {
+    loadHints();
+    return !hintsOff;
+}
+
 }  // namespace sheetui
 
 // --- Leaving, timers, images ---------------------------------------------
@@ -880,9 +1248,21 @@ void sheetTimer(App& app, HWND hwnd) {
         }
     }
     if (animating || cardsWaiting || now - doc->zoomChangedMs < 400) InvalidateRect(hwnd, nullptr, FALSE);
+    // A card rested on long enough opens in the peek lens
+    bool peekWaiting = !doc->peekCandidate.empty() && doc->peekId.empty();
+    if (peekWaiting && now - doc->peekSinceMs >= 450) {
+        doc->peekId = doc->peekCandidate;
+        doc->peekScroll = 0;
+        peekWaiting = false;
+        hintDone(HINT_FAR);
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
     // Fast while something moves, slow while it only watches the folder
     SetTimer(hwnd, SHEET_TIMER_ID,
-             (animating || cardsWaiting) ? 16 : doc->editing != SheetDoc::Edit::None ? 120 : 500, nullptr);
+             (animating || cardsWaiting) ? 16
+             : (doc->editing != SheetDoc::Edit::None || peekWaiting) ? 120
+                                                                     : 500,
+             nullptr);
     static unsigned long long lastViewSave = 0;
     if (now - lastViewSave > 3000) {
         lastViewSave = now;

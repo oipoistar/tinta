@@ -14,6 +14,10 @@ folder of its notes, with Obsidian's `.canvas` opening the same way.
   both ends; and one note in the folder that is not on the sheet.
 - `fixtures/sheets/vault/`: an Obsidian vault (`.obsidian/`) with a
   `Boards/Board.canvas` whose paths run from the vault root.
+- `fixtures/sheets/Long draft.md`: a document to explode, with front
+  matter, a title, an intro, `##` sections (one with a `###` inside), a
+  table, a fence holding `## not a heading`, a quote, an ordered list,
+  emphasis, a wiki link and relative links to a note and an image.
 
 ## Checks
 
@@ -90,6 +94,41 @@ folder of its notes, with Obsidian's `.canvas` opening the same way.
 - `i18n`: the 100 new interface strings have their Chinese, Japanese,
   Korean, German, French, Italian and Russian text, counts with their
   plural forms.
+- Ten more (a second round, on a sheet of their own, `Ten.smd`):
+  - `sheet_model`: folds (around a cycle, a card something shown points
+    at stays in sight, a fold inside a fold, the counts), a lane stacking
+    its cards and growing, row order for a chain, the new fields through
+    JSON Canvas, exploding documents (a title over sections, groups
+    under two `#` headings, front matter titles, fences, a document
+    without headings, the layout), and `related:` links added and
+    removed in block and flow lists, CRLF kept, other values left alone;
+  - the hint line says how to move two selected cards and retires after
+    three; the selection bar's Join in order, a colour swatch and Align;
+  - Z folds what follows a card, its +3 badge is drawn and unfolds it, a
+    folded-away card is not hit, a folded card moves with what it holds;
+  - writing links writes the arrows drawn, removing an arrow takes its
+    link out, undo brings both back;
+  - live writing: a heading's # takes no room away from the caret and
+    shows on the caret's line; `#Plan` asks for its space;
+  - `[[Be` lists Beta first, Ctrl+Enter writes `[[Beta]]` and draws the
+    arrow;
+  - far out, a card rested on opens in the lens beside it; a click
+    elsewhere puts it away;
+  - J labels the four cards in row order, a letter picks one, Shift+J
+    joins the selection to the card picked;
+  - `Long draft.md` explodes into five chained notes named after their
+    sections, its image link re-aimed (`../Launch%20plan/mock.png`), its
+    fence whole; Split by headings keeps a note's intro and makes the
+    rest notes of their own;
+  - a card dropped into a lane stands at the top of its column, the next
+    stacks under it 20 apart, and one leaving lets the rest close up.
+- Its frames (`ten-*.png`) were looked at: the bar and hint line, the
+  fold and its badge, live writing, the `[[` list, the lens at 20%, the
+  jump labels, the exploded draft (its table and image drawn), the lane
+  over its limit. They led to fixes: the bar no longer floats at the top
+  of the view for a selection out of sight, Split finds room beside a
+  card instead of covering its neighbours, and an exploded block that
+  would land on cards goes below them.
 - The full suite passed, 56 of 56.
 
 ## The real app
@@ -126,6 +165,13 @@ From an isolated portable copy (`out/sheets-playground/runner/`):
   reported card Untitled was not found, so naming no longer hangs on a
   card's runtime flag.
 
+- The ten more, by posted keys in a window at 60%: J then S picked Research
+  (second in its row) and 3 coloured it; J then F picked Design and Z
+  folded it; the saved `.smd` held `"color":"3"` and `"tintaFolded":true`.
+  A first run at 50% showed what a pick does there: the card picked is
+  too small to read, so the camera flies to it, and the next J labels the
+  cards in that new view.
+
 ## Performance and size
 
 - 400 linked notes: open about 0.2 s, ghost links 1.4 ms, a whole-sheet
@@ -138,13 +184,17 @@ From an isolated portable copy (`out/sheets-playground/runner/`):
   selected are drawn.
 - `tinta.exe` grows from 3.12 MB to 3.57 MB (local Release builds of
   `master` and this branch); the sheet sources are compiled for small code.
+  The ten more add 114 KB (3,577,344 to 3,691,520 bytes), their 45
+  strings in eight languages included.
 
 ## Limitations
 
 - No web page embeds or video players, by design; PDFs and other files are
   cards that open in their own app. No freehand drawing, no image export.
-- A card's text is edited as Markdown with light styling; the IME's
-  candidate window is not placed at a card's caret.
+- A card's text is edited as live Markdown; the IME's candidate window
+  is not placed at a card's caret.
+- Peek, the selection bar and the hint line were checked at 100% and at
+  the frames' two widths only.
 - Touch has no pinch zoom on a screen yet; moving cards needs a mouse or a
   pen.
 - High DPI was drawn at 150% only (`fit-midnight-150pct.png`), not at

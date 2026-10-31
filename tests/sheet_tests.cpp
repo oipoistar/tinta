@@ -5,6 +5,7 @@
 #include "d2d_init.h"
 #include "editor.h"
 #include "frame_preview.h"
+#include "i18n.h"
 #include "input.h"
 #include "keystroke.h"
 #include "overlays.h"
@@ -766,6 +767,243 @@ void naming(App& app, const fs::path& dir) {
     check(doc.model.nodes[nodeIndex(doc.model, start.id)].file == "Naming/Start.md", "a named note keeps its name");
 }
 
+// The ten additions, on a sheet of their own (Ten.smd): the hint line, the
+// selection bar, folds, arrows written into notes, live writing in a card,
+// [[ names, the peek lens, jump labels, exploding a document and lanes
+// that stack
+void tenMore(App& app, const fs::path& dir, const fs::path& out) {
+    setHintsShown(true);  // every hint starts over
+    fs::path path = dir / "Ten.smd";
+    fs::create_directories(dir / "Ten");
+    writeBytes(dir / "Ten" / "Alpha.md", "# Alpha\n\nThe first.\n");
+    writeBytes(dir / "Ten" / "Beta.md", "# Beta\n\nThe second.\n");
+    writeBytes(dir / "Ten" / "Gamma.md", "# Gamma\n\n- one\n- two\n");
+    writeBytes(dir / "Ten" / "Delta.md", "# Delta\n\nLast.\n");
+    check(sheetCreateAt(app, path.wstring()), "the ten's sheet is made");
+    tabOpenPath(app, app.hwnd, toUtf8(path.wstring()));
+    SheetDoc* docPtr = activeSheet(app);
+    check(docPtr && docPtr->model.nodes.size() == 4, "it holds the four notes of its folder");
+    if (!docPtr || docPtr->model.nodes.size() != 4) return;
+    SheetDoc& doc = *docPtr;
+    auto idOf = [&](const char* name) {
+        for (const Node& n : doc.model.nodes) {
+            if (n.file == std::string("Ten/") + name + ".md") return n.id;
+        }
+        return std::string();
+    };
+    const std::string alpha = idOf("Alpha"), beta = idOf("Beta"), gamma = idOf("Gamma"), delta = idOf("Delta");
+    auto node = [&](const std::string& id) -> Node& { return doc.model.nodes[nodeIndex(doc.model, id)]; };
+    auto joined = [&](const std::string& from, const std::string& to) {
+        return std::any_of(doc.model.edges.begin(), doc.model.edges.end(),
+                           [&](const Edge& e) { return e.fromNode == from && e.toNode == to; });
+    };
+    // In a row, 440 apart, Alpha → Beta → Gamma
+    float x = 0;
+    for (const std::string& id : {alpha, beta, gamma, delta}) {
+        node(id).x = x;
+        node(id).y = 0;
+        x += 440;
+    }
+    doc.model.edges.clear();
+    for (auto pair : {std::make_pair(alpha, beta), std::make_pair(beta, gamma)}) {
+        Edge e;
+        e.id = newId();
+        e.fromNode = pair.first;
+        e.toNode = pair.second;
+        doc.model.edges.push_back(e);
+    }
+    markChanged(app, doc);
+    flyTo(doc, 760, 120, 0.6f, 0);
+    auto buttonAt = [&](int id) {
+        for (const auto& hit : doc.uiHits) {
+            if (hit.second == id) return D2D1::Point2F((hit.first.left + hit.first.right) * 0.5f, (hit.first.top + hit.first.bottom) * 0.5f);
+        }
+        return D2D1::Point2F(-1, -1);
+    };
+
+    // The hint line and the selection bar
+    doc.selected = {gamma, delta};
+    paint(app);
+    check(doc.hintText == tr(app, "sheet.hint.multi"), "two cards selected: the hint line tells how to move them");
+    check(doc.selectionBar.right > doc.selectionBar.left, "a bar stands over the selection");
+    frame(app, out / "ten-bar.png");
+    pauseClicks();
+    click(app, buttonAt(ACT_CHAIN));
+    check(joined(gamma, delta), "Join in order joins the cards left to right");
+    pauseClicks();
+    click(app, buttonAt(ACT_COLOR_BASE + 4));
+    check(node(gamma).color == "4" && node(delta).color == "4", "a swatch colours every selected card");
+    pauseClicks();
+    click(app, buttonAt(ACT_ALIGN_MENU));
+    check(doc.menuOpen && !doc.menu.empty() && doc.menu[0].action == ACT_ALIGN_LEFT, "Align opens the align commands");
+    keystroke(app, VK_ESCAPE);
+    for (int k = 0; k < 3; ++k) hintDone(HINT_MULTI);
+    paint(app);
+    check(doc.hintText.empty(), "a hint done three times retires");
+
+    // Folds: Z folds what follows; the +N badge unfolds; the fold moves with its card
+    doc.selected = {alpha};
+    keystroke(app, 'Z');
+    check(node(alpha).folded && foldedAwayAt(doc, nodeIndex(doc.model, beta)) &&
+              foldedAwayAt(doc, nodeIndex(doc.model, delta)) && !foldedAwayAt(doc, nodeIndex(doc.model, alpha)),
+          "Z folds away what follows the card");
+    paint(app);
+    check(doc.foldHits.size() == 1 && foldedCount(doc.model, nodeIndex(doc.model, alpha), doc.hidden) == 3,
+          "a +3 badge stands beside it");
+    Node b0 = node(beta);
+    check(nodeAt(doc, b0.x + 10, b0.y + 10, false) != nodeIndex(doc.model, beta), "a folded-away card is not hit");
+    frame(app, out / "ten-folded.png");
+    Node a0 = node(alpha);
+    D2D1_POINT_2F grab = centreOf(app, doc, alpha);
+    drag(app, grab, D2D1::Point2F(grab.x, grab.y + 120));
+    check(node(alpha).y != a0.y && node(beta).y - b0.y == node(alpha).y - a0.y, "what it folds away moves along with it");
+    keystroke(app, 'Z', {true, false, false});
+    // Undo glides the cards back: the badge is where they come to rest
+    pauseClicks();
+    paint(app);
+    D2D1_RECT_F badge = doc.foldHits.empty() ? D2D1_RECT_F{} : doc.foldHits[0].first;
+    click(app, D2D1::Point2F((badge.left + badge.right) * 0.5f, (badge.top + badge.bottom) * 0.5f));
+    check(!node(alpha).folded && !foldedAwayAt(doc, nodeIndex(doc.model, beta)), "a click on the badge unfolds it");
+
+    // Arrows written into the notes they leave
+    runAction(app, app.hwnd, doc, ACT_WRITE_LINKS);
+    check(doc.model.writeLinks && noteText(doc, alpha).find("related:\n  - \"[[Beta]]\"") != std::string::npos,
+          "writing links writes the arrows already drawn: " + noteText(doc, alpha).substr(0, 60));
+    doc.selectedEdge = doc.model.edges.front().id;
+    std::string from = doc.model.edges.front().fromNode;
+    keystroke(app, VK_DELETE);
+    check(noteText(doc, from).find("related") == std::string::npos, "removing the arrow takes its link out");
+    keystroke(app, 'Z', {true, false, false});
+    check(noteText(doc, from).find("[[") != std::string::npos, "undo brings arrow and link back");
+    runAction(app, app.hwnd, doc, ACT_WRITE_LINKS);
+
+    // Live writing: the caret's line shows its Markdown, the others show it drawn
+    doc.selected = {alpha};
+    startEdit(app, doc, SheetDoc::Edit::Card, alpha);
+    std::wstring kept = doc.edit.text;
+    doc.edit.text = L"# Title\n- item\n- [ ] task\n**bold** and [[Beta]]\nplain";
+    doc.edit.caret = doc.edit.anchor = doc.edit.text.size();
+    D2D1_RECT_F rect{};
+    float sc = 1;
+    editRect(app, doc, rect, sc);
+    auto xAt = [&](size_t at) {
+        IDWriteTextLayout* layout = editLayout(app, doc, (rect.right - rect.left) / sc);
+        float px = 0, py = 0;
+        DWRITE_HIT_TEST_METRICS m{};
+        if (layout) layout->HitTestTextPosition((UINT32)at, FALSE, &px, &py, &m);
+        return px;
+    };
+    check(std::fabs(xAt(2) - xAt(0)) < 0.5f, "away from the caret a heading's # takes no room");
+    frame(app, out / "ten-writing.png");
+    doc.edit.caret = doc.edit.anchor = 3;
+    check(xAt(2) - xAt(0) > 3.0f, "on the caret's line it shows as typed");
+    doc.edit.text = L"#Plan";
+    doc.edit.caret = doc.edit.anchor = 5;
+    paint(app);
+    check(doc.hintText == tr(app, "sheet.hint.heading"), "a line starting #word asks for the space");
+    doc.edit.text = kept;
+    doc.edit.caret = doc.edit.anchor = kept.size();
+    keystroke(app, VK_ESCAPE);
+
+    // [[ names: the sheet's notes under the caret; Ctrl+Enter draws the arrow too
+    doc.selected = {delta};
+    startEdit(app, doc, SheetDoc::Edit::Card, delta);
+    doc.edit.caret = doc.edit.anchor = doc.edit.text.size();
+    typeKeys(app, L" See [[Be");
+    check(doc.completing && !doc.completions.empty() && doc.completions[0].name == L"Beta",
+          "[[ lists the notes, Beta first for Be");
+    frame(app, out / "ten-complete.png");
+    keystroke(app, VK_RETURN, {true, false, false});
+    check(doc.edit.text.size() >= 8 && doc.edit.text.substr(doc.edit.text.size() - 8) == L"[[Beta]]" && joined(delta, beta),
+          "Ctrl+Enter writes the link and draws the arrow");
+    keystroke(app, VK_ESCAPE);
+    check(noteText(doc, delta).find("See [[Beta]]") != std::string::npos, "the note holds the link");
+
+    // Peek: far out, a card rested on opens in a lens
+    flyTo(doc, 760, 120, 0.2f, 0);
+    doc.selected.clear();
+    paint(app);
+    move(app, centreOf(app, doc, gamma));
+    check(doc.peekCandidate == gamma, "resting on a card far out readies a peek");
+    doc.peekSinceMs = 0;
+    sheetTimer(app, app.hwnd);
+    check(doc.peekId == gamma, "after a moment it opens");
+    frame(app, out / "ten-peek.png");
+    check(doc.peekRect.right > doc.peekRect.left && doc.peekBitmap, "the lens is drawn beside the card");
+    pauseClicks();
+    click(app, toScreen(app, doc, 760, 1600));
+    check(doc.peekId.empty(), "a click elsewhere puts it away");
+
+    // Jump labels: J, then a card's letter
+    flyTo(doc, 760, 120, 0.6f, 0);
+    doc.selected.clear();
+    paint(app);
+    keystroke(app, 'J');
+    check(doc.jumping && doc.jumpLabels.size() == 4 && doc.jumpLabels[2].second == gamma,
+          "J labels the cards in view, row by row");
+    frame(app, out / "ten-jump.png");
+    keystroke(app, 'D');
+    check(!doc.jumping && doc.selected == std::vector<std::string>{gamma}, "a card's letter picks it");
+    keystroke(app, 'J', {false, true, false});
+    keystroke(app, 'A');
+    check(joined(gamma, alpha), "Shift+J joins the selection to the card picked");
+
+    // Explode: a document's sections as cards, chained, their links aimed anew
+    size_t nodes = doc.model.nodes.size(), edges = doc.model.edges.size();
+    int made = explodeDocumentInto(app, doc, (dir / "Long draft.md").wstring(), 0, 1600);
+    check(made == 5 && doc.model.nodes.size() == nodes + 5 && doc.model.edges.size() == edges + 4,
+          "the draft explodes into five cards in a chain: " + std::to_string(made));
+    std::string pictures = readBytes(dir / "Ten" / "Pictures.md");
+    check(fs::exists(dir / "Ten" / "Long draft.md") && fs::exists(dir / "Ten" / "Why now.md") &&
+              pictures.find("](../Launch%20plan/mock.png)") != std::string::npos,
+          "each section is a note named after it, its image still found: " + pictures.substr(0, 60));
+    check(readBytes(dir / "Ten" / "How.md").find("// ## not a heading inside a fence") != std::string::npos,
+          "a fence is not cut");
+    settle(app);
+    frame(app, out / "ten-exploded.png");
+    // Split: a note's sections go into notes of their own beside it
+    writeBytes(dir / "Ten" / "Gamma.md", "# Gamma\n\nIntro.\n\n## One\n\nFirst.\n\n## Two\n\nSecond.\n");
+    pollFolder(app, doc, true);
+    nodes = doc.model.nodes.size();
+    check(splitCard(app, doc, gamma) && doc.model.nodes.size() == nodes + 2 && readBytes(dir / "Ten" / "Gamma.md") ==
+              "# Gamma\n\nIntro.\n\n" && fs::exists(dir / "Ten" / "One.md") && fs::exists(dir / "Ten" / "Two.md"),
+          "Split by headings keeps the intro and makes One and Two");
+
+    // Lanes that stack: a card dropped in takes its place in the column; the
+    // lane it leaves closes up; over its limit the lane says so
+    Node lane;
+    lane.id = newId();
+    lane.type = NodeType::Group;
+    lane.label = "Doing";
+    lane.laneKey = "status";
+    lane.laneLimit = 1;
+    lane.x = 0;
+    lane.y = 400;
+    lane.width = 440;
+    lane.height = 340;
+    doc.model.nodes.insert(doc.model.nodes.begin(), lane);
+    markChanged(app, doc);
+    flyTo(doc, 600, 400, 0.5f, 0);
+    auto dropInto = [&](const std::string& id, float sx, float sy) {
+        D2D1_POINT_2F a = centreOf(app, doc, id);
+        drag(app, a, toScreen(app, doc, sx, sy));
+    };
+    doc.selected.clear();
+    dropInto(alpha, 220, 560);
+    const Node& ln = node(lane.id);
+    check(node(alpha).x == ln.x + 40 && node(alpha).y == ln.y + 80 && frontmatterValue(noteText(doc, alpha), "status") == "Doing",
+          "a card dropped into a lane stands at the top of its column");
+    doc.selected.clear();
+    dropInto(beta, 220, 700);
+    check(node(beta).x == ln.x + 40 && node(beta).y == node(alpha).y + node(alpha).height + 20,
+          "the next stacks under it, 20 apart");
+    settle(app);
+    frame(app, out / "ten-lane.png");
+    doc.selected.clear();
+    dropInto(alpha, 900, 300);
+    check(node(beta).y == ln.y + 80, "a card leaving the lane lets the rest close up");
+}
+
 // The start page's four buttons stand two by two, of one width: Open a file
 // and Browse over New document and New sheet. Drawn at two widths in a dark
 // and a light theme for a look.
@@ -901,6 +1139,7 @@ int runSheetTests(const char* fixtureDir) {
     check(parseSmd(readBytes(fresh), model, info) && model.nodes.size() == 2 && info.folder == "Fresh",
           "a new sheet takes the notes already in its folder");
     naming(app, dir);
+    tenMore(app, dir, out);
     newTabPage(app, dir, out);
     performance(app, dir);
 

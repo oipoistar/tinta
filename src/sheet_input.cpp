@@ -62,19 +62,6 @@ std::wstring stemOf(const std::wstring& path) {
     return dot == std::wstring::npos || dot == 0 ? name : name.substr(0, dot);
 }
 
-// The name a new note keeps until its first line names it: Untitled,
-// Untitled 2 and so on, in the interface's language or in English
-bool placeholderName(App& app, const std::wstring& stem) {
-    for (const std::wstring& base : {std::wstring(tr(app, "title.untitled")), std::wstring(L"Untitled")}) {
-        if (stem.size() < base.size() || _wcsnicmp(stem.c_str(), base.c_str(), base.size()) != 0) continue;
-        std::wstring rest = stem.substr(base.size());
-        if (rest.empty()) return true;
-        if (rest.size() >= 2 && rest[0] == L' ' && rest.find_first_not_of(L"0123456789", 1) == std::wstring::npos)
-            return true;
-    }
-    return false;
-}
-
 // A note just written can be held for a moment by a virus scanner or the
 // search indexer; its rename waits that out
 bool moveNote(const std::wstring& from, const std::wstring& to) {
@@ -94,6 +81,90 @@ void selectOnly(SheetDoc& doc, const std::string& id) {
     if (!id.empty()) doc.selected.push_back(id);
     doc.selectedEdge.clear();
 }
+
+// Drawn in place of Markdown's own characters on a card's lines away from
+// the caret: nothing at all, a bullet, a task box (ticked or not) or a
+// quote's bar. The text stays as typed; only its look changes.
+class MarkObject final : public IDWriteInlineObject {
+public:
+    enum Kind { Hidden, Bullet, Box, Checked, Quote };
+    MarkObject(Kind kind, float size, ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush, D2D1_COLOR_F text,
+               D2D1_COLOR_F accent)
+        : kind_(kind), size_(size), target_(target), brush_(brush), text_(text), accent_(accent) {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IDWriteInlineObject)) {
+            *out = static_cast<IDWriteInlineObject*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return (ULONG)InterlockedIncrement(&refs_); }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG left = (ULONG)InterlockedDecrement(&refs_);
+        if (!left) delete this;
+        return left;
+    }
+
+    HRESULT STDMETHODCALLTYPE Draw(void*, IDWriteTextRenderer*, FLOAT x, FLOAT y, BOOL, BOOL, IUnknown*) override {
+        if (!target_ || !brush_ || kind_ == Hidden) return S_OK;
+        float u = size_;
+        float mid = y + u * 0.8f - u * 0.3f;  // halfway up a lowercase letter
+        auto color = [&](D2D1_COLOR_F c, float a) {
+            c.a = a;
+            brush_->SetColor(c);
+        };
+        if (kind_ == Bullet) {
+            color(text_, 0.7f);
+            target_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x + u * 0.2f, mid), u * 0.12f, u * 0.12f), brush_);
+        } else if (kind_ == Box || kind_ == Checked) {
+            D2D1_ROUNDED_RECT box = D2D1::RoundedRect(D2D1::RectF(x + u * 0.08f, mid - u * 0.36f, x + u * 0.8f, mid + u * 0.36f),
+                                                      u * 0.14f, u * 0.14f);
+            if (kind_ == Checked) {
+                color(accent_, 1.0f);
+                target_->FillRoundedRectangle(box, brush_);
+                color(D2D1::ColorF(1, 1, 1), 1.0f);
+                target_->DrawLine(D2D1::Point2F(x + u * 0.24f, mid), D2D1::Point2F(x + u * 0.4f, mid + u * 0.17f), brush_, u * 0.1f);
+                target_->DrawLine(D2D1::Point2F(x + u * 0.4f, mid + u * 0.17f), D2D1::Point2F(x + u * 0.66f, mid - u * 0.2f), brush_,
+                                  u * 0.1f);
+            } else {
+                color(text_, 0.6f);
+                target_->DrawRoundedRectangle(box, brush_, u * 0.07f);
+            }
+        } else if (kind_ == Quote) {
+            color(accent_, 0.6f);
+            target_->FillRectangle(D2D1::RectF(x + u * 0.08f, y - u * 0.2f, x + u * 0.2f, y + u * 1.25f), brush_);
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetMetrics(DWRITE_INLINE_OBJECT_METRICS* metrics) override {
+        // No taller than the line's own letters, so lines keep their height
+        static const float widths[] = {0.0f, 0.55f, 1.05f, 1.05f, 0.45f};
+        metrics->width = widths[kind_] * size_;
+        metrics->height = size_;
+        metrics->baseline = size_ * 0.8f;
+        metrics->supportsSideways = FALSE;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetOverhangMetrics(DWRITE_OVERHANG_METRICS* overhangs) override {
+        *overhangs = {};
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetBreakConditions(DWRITE_BREAK_CONDITION* before, DWRITE_BREAK_CONDITION* after) override {
+        *before = *after = DWRITE_BREAK_CONDITION_NEUTRAL;
+        return S_OK;
+    }
+
+private:
+    volatile LONG refs_ = 1;
+    Kind kind_;
+    float size_;
+    ID2D1RenderTarget* target_;
+    ID2D1SolidColorBrush* brush_;
+    D2D1_COLOR_F text_, accent_;
+};
 
 }  // namespace
 
@@ -127,13 +198,14 @@ bool editRect(App& app, SheetDoc& doc, D2D1_RECT_F& rect, float& textScale) {
             return true;
         }
         case SheetDoc::Edit::GroupLabel:
-        case SheetDoc::Edit::LaneKey: {
+        case SheetDoc::Edit::LaneKey:
+        case SheetDoc::Edit::LaneLimit: {
             int g = nodeIndex(doc.model, doc.editId);
             if (g < 0) return false;
             Box lb = groupLabelBox(app, doc, doc.model.nodes[g]);
             D2D1_POINT_2F q = toScreen(app, doc, lb.left, lb.top);
             float w = dpi(app, 240.0f), h = editFontSize(doc) * app.contentScale * 1.4f;
-            if (doc.editing == SheetDoc::Edit::LaneKey) q.y -= h + dpi(app, 18.0f);
+            if (doc.editing != SheetDoc::Edit::GroupLabel) q.y -= h + dpi(app, 18.0f);
             rect = D2D1::RectF(q.x + dpi(app, 8.0f), q.y + dpi(app, 4.0f), q.x + dpi(app, 8.0f) + w, q.y + dpi(app, 4.0f) + h);
             textScale = app.contentScale;
             return true;
@@ -155,18 +227,23 @@ bool editRect(App& app, SheetDoc& doc, D2D1_RECT_F& rect, float& textScale) {
 }
 
 IDWriteTextLayout* editLayout(App& app, SheetDoc& doc, float width) {
-    // One layout at a time, rebuilt when the text, the width or the kind change
+    // One layout at a time, rebuilt when the text, the width, the kind or,
+    // in a card, the caret's line change
     static Microsoft::WRL::ComPtr<IDWriteTextLayout> cached;
     static std::wstring cachedText;
     static float cachedWidth = -1;
     static int cachedKind = -1;
     static std::wstring cachedFace;
-    static Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> markBrush;
+    static size_t cachedLine = 0;
+    static Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> markBrush, linkBrush, glyphBrush;
     static unsigned brushGeneration = 0;
     bool card = doc.editing == SheetDoc::Edit::Card;
     const wchar_t* face = card && app.theme.fontFamily && *app.theme.fontFamily ? app.theme.fontFamily : L"Segoe UI";
-    if (cached && cachedText == doc.edit.text && std::fabs(cachedWidth - width) < 0.01f && cachedKind == (int)doc.editing &&
-        cachedFace == face && brushGeneration == app.renderTargetGeneration) {
+    const std::wstring& t = doc.edit.text;
+    // The caret's line shows its Markdown as typed, the others show it drawn
+    size_t caretLine = card ? (size_t)std::count(t.begin(), t.begin() + (std::ptrdiff_t)std::min(doc.edit.caret, t.size()), L'\n') : 0;
+    if (cached && cachedText == t && std::fabs(cachedWidth - width) < 0.01f && cachedKind == (int)doc.editing &&
+        cachedFace == face && brushGeneration == app.renderTargetGeneration && cachedLine == caretLine) {
         return cached.Get();
     }
     cached.Reset();
@@ -177,99 +254,139 @@ IDWriteTextLayout* editLayout(App& app, SheetDoc& doc, float width) {
     useUiFontFallback(app, fmt);
     if (!card) fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     IDWriteTextLayout* layout = nullptr;
-    app.dwriteFactory->CreateTextLayout(doc.edit.text.c_str(), (UINT32)doc.edit.text.size(), fmt, std::max(1.0f, width),
-                                        100000.0f, &layout);
+    app.dwriteFactory->CreateTextLayout(t.c_str(), (UINT32)t.size(), fmt, std::max(1.0f, width), 100000.0f, &layout);
     fmt->Release();
     if (!layout) return nullptr;
     cached.Attach(layout);
-    cachedText = doc.edit.text;
+    cachedText = t;
     cachedWidth = width;
     cachedKind = (int)doc.editing;
     cachedFace = face;
-    if (card) {
-        // Markdown, lightly: headings bold and larger, **strong**, *emphasis*,
-        // `code` in the code face, and the marks themselves muted
-        if (!markBrush || brushGeneration != app.renderTargetGeneration) {
-            markBrush.Reset();
-            app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &markBrush);
+    cachedLine = caretLine;
+    if (!card) return cached.Get();
+    if (!markBrush || brushGeneration != app.renderTargetGeneration) {
+        markBrush.Reset();
+        linkBrush.Reset();
+        glyphBrush.Reset();
+        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &markBrush);
+        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &linkBrush);
+        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &glyphBrush);
+    }
+    brushGeneration = app.renderTargetGeneration;
+    if (!markBrush || !linkBrush || !glyphBrush) return cached.Get();
+    D2D1_COLOR_F muted = app.theme.text;
+    muted.a = 0.45f;
+    markBrush->SetColor(muted);
+    linkBrush->SetColor(app.theme.accent);
+
+    // Headings bold and larger, **strong**, *emphasis*, `code` in the code
+    // face, links in the accent. On the caret's line the marks are muted;
+    // on the others they go, or turn into bullets, task boxes and bars.
+    const float size = editFontSize(doc);
+    const wchar_t* codeFace = app.theme.codeFontFamily && *app.theme.codeFontFamily ? app.theme.codeFontFamily : L"Consolas";
+    bool here = false;
+    auto mark = [&](size_t at, size_t length, MarkObject::Kind kind) {
+        if (!length) return;
+        DWRITE_TEXT_RANGE range{(UINT32)at, (UINT32)length};
+        if (here) {
+            layout->SetDrawingEffect(markBrush.Get(), range);
+            return;
         }
-        brushGeneration = app.renderTargetGeneration;
-        if (markBrush) {
-            D2D1_COLOR_F muted = app.theme.text;
-            muted.a = 0.45f;
-            markBrush->SetColor(muted);
-        }
-        const std::wstring& t = doc.edit.text;
-        const wchar_t* codeFace = app.theme.codeFontFamily && *app.theme.codeFontFamily ? app.theme.codeFontFamily : L"Consolas";
-        size_t start = 0;
-        bool inFence = false;
-        while (start <= t.size()) {
-            size_t end = t.find(L'\n', start);
-            if (end == std::wstring::npos) end = t.size();
-            std::wstring_view lineText(t.data() + start, end - start);
-            size_t lead = lineText.find_first_not_of(L' ');
-            bool fence = lead != std::wstring::npos && lineText.substr(lead, 3) == L"```";
-            if (fence || inFence) {
-                layout->SetFontFamilyName(codeFace, {(UINT32)start, (UINT32)(end - start)});
-                if (fence) inFence = !inFence;
-            } else {
-                size_t hashes = 0;
-                while (hashes < lineText.size() && lineText[hashes] == L'#') ++hashes;
-                if (hashes >= 1 && hashes <= 6 && hashes < lineText.size() && lineText[hashes] == L' ') {
-                    float sizes[] = {1.6f, 1.35f, 1.18f, 1.08f, 1.0f, 1.0f};
-                    DWRITE_TEXT_RANGE range{(UINT32)start, (UINT32)(end - start)};
-                    layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range);
-                    layout->SetFontSize(editFontSize(doc) * sizes[hashes - 1], range);
-                    if (markBrush) layout->SetDrawingEffect(markBrush.Get(), {(UINT32)start, (UINT32)hashes});
-                }
-                // Inline spans
-                for (size_t i = 0; i < lineText.size(); ++i) {
-                    wchar_t c = lineText[i];
-                    if (c == L'`') {
-                        size_t close = lineText.find(L'`', i + 1);
-                        if (close == std::wstring::npos) break;
-                        layout->SetFontFamilyName(codeFace, {(UINT32)(start + i), (UINT32)(close - i + 1)});
-                        if (markBrush) {
-                            layout->SetDrawingEffect(markBrush.Get(), {(UINT32)(start + i), 1});
-                            layout->SetDrawingEffect(markBrush.Get(), {(UINT32)(start + close), 1});
-                        }
-                        i = close;
-                    } else if (c == L'*' && i + 1 < lineText.size() && lineText[i + 1] == L'*') {
-                        size_t close = lineText.find(L"**", i + 2);
-                        if (close == std::wstring::npos) continue;
-                        layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, {(UINT32)(start + i), (UINT32)(close - i + 2)});
-                        if (markBrush) {
-                            layout->SetDrawingEffect(markBrush.Get(), {(UINT32)(start + i), 2});
-                            layout->SetDrawingEffect(markBrush.Get(), {(UINT32)(start + close), 2});
-                        }
-                        i = close + 1;
-                    } else if ((c == L'*' || c == L'_') && i + 1 < lineText.size() && lineText[i + 1] != L' ' &&
-                               (i == 0 || lineText[i - 1] == L' ')) {
-                        size_t close = lineText.find(c, i + 1);
-                        if (close == std::wstring::npos || close == i + 1) continue;
-                        layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, {(UINT32)(start + i), (UINT32)(close - i + 1)});
-                        if (markBrush) {
-                            layout->SetDrawingEffect(markBrush.Get(), {(UINT32)(start + i), 1});
-                            layout->SetDrawingEffect(markBrush.Get(), {(UINT32)(start + close), 1});
-                        }
-                        i = close;
+        MarkObject* object = new MarkObject(kind, size, app.renderTarget, glyphBrush.Get(), app.theme.text, app.theme.accent);
+        layout->SetInlineObject(object, range);
+        object->Release();
+    };
+    size_t start = 0, lineIndex = 0;
+    bool inFence = false;
+    while (start <= t.size()) {
+        size_t end = t.find(L'\n', start);
+        if (end == std::wstring::npos) end = t.size();
+        here = lineIndex == caretLine;
+        std::wstring_view lineText(t.data() + start, end - start);
+        size_t lead = lineText.find_first_not_of(L' ');
+        bool fence = lead != std::wstring::npos && lineText.substr(lead, 3) == L"```";
+        if (fence || inFence) {
+            layout->SetFontFamilyName(codeFace, {(UINT32)start, (UINT32)(end - start)});
+            if (fence) {
+                layout->SetDrawingEffect(markBrush.Get(), {(UINT32)start, (UINT32)(end - start)});
+                inFence = !inFence;
+            }
+        } else {
+            size_t hashes = 0;
+            while (hashes < lineText.size() && lineText[hashes] == L'#') ++hashes;
+            if (hashes >= 1 && hashes <= 6 && hashes < lineText.size() && lineText[hashes] == L' ') {
+                float sizes[] = {1.6f, 1.35f, 1.18f, 1.08f, 1.0f, 1.0f};
+                DWRITE_TEXT_RANGE range{(UINT32)start, (UINT32)(end - start)};
+                layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range);
+                layout->SetFontSize(size * sizes[hashes - 1], range);
+                mark(start, hashes + 1, MarkObject::Hidden);
+            } else if (lead != std::wstring::npos) {
+                // List, task and quote marks
+                std::wstring_view rest = lineText.substr(lead);
+                if (rest.size() >= 2 && rest[0] == L'>' && rest[1] == L' ') {
+                    mark(start + lead, 1, MarkObject::Quote);
+                    layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, {(UINT32)(start + lead), (UINT32)rest.size()});
+                } else if (rest.size() >= 2 && (rest[0] == L'-' || rest[0] == L'*' || rest[0] == L'+') && rest[1] == L' ') {
+                    bool task = rest.size() >= 5 && rest[2] == L'[' && rest[4] == L']' && (rest.size() == 5 || rest[5] == L' ');
+                    if (task) {
+                        mark(start + lead, 2, MarkObject::Hidden);
+                        mark(start + lead + 2, 3, rest[3] == L'x' || rest[3] == L'X' ? MarkObject::Checked : MarkObject::Box);
+                    } else {
+                        mark(start + lead, 1, MarkObject::Bullet);
                     }
-                }
-                // List and quote marks
-                if (lead != std::wstring::npos && markBrush) {
-                    std::wstring_view rest = lineText.substr(lead);
-                    size_t mark = 0;
-                    if (rest.size() >= 2 && (rest[0] == L'-' || rest[0] == L'*' || rest[0] == L'+' || rest[0] == L'>') &&
-                        rest[1] == L' ') {
-                        mark = 1;
-                        if (rest.size() >= 6 && rest[2] == L'[' && rest[4] == L']') mark = 5;
-                    }
-                    if (mark) layout->SetDrawingEffect(markBrush.Get(), {(UINT32)(start + lead), (UINT32)mark});
                 }
             }
-            if (end == t.size()) break;
-            start = end + 1;
+            // Inline spans
+            for (size_t i = 0; i < lineText.size(); ++i) {
+                wchar_t c = lineText[i];
+                if (c == L'`') {
+                    size_t close = lineText.find(L'`', i + 1);
+                    if (close == std::wstring::npos) break;
+                    layout->SetFontFamilyName(codeFace, {(UINT32)(start + i), (UINT32)(close - i + 1)});
+                    mark(start + i, 1, MarkObject::Hidden);
+                    mark(start + close, 1, MarkObject::Hidden);
+                    i = close;
+                } else if (c == L'[' && i + 1 < lineText.size() && lineText[i + 1] == L'[') {
+                    // [[a note]] or [[a note|shown as]]: the name in the accent
+                    size_t close = lineText.find(L"]]", i + 2);
+                    if (close == std::wstring::npos) continue;
+                    size_t bar = lineText.find(L'|', i + 2);
+                    size_t shown = bar != std::wstring::npos && bar < close ? bar + 1 : i + 2;
+                    layout->SetDrawingEffect(linkBrush.Get(), {(UINT32)(start + shown), (UINT32)(close - shown)});
+                    mark(start + i, shown - i, MarkObject::Hidden);
+                    mark(start + close, 2, MarkObject::Hidden);
+                    i = close + 1;
+                } else if (c == L'[' && (i == 0 || lineText[i - 1] != L'!')) {
+                    // [text](address): the text in the accent
+                    size_t middle = lineText.find(L"](", i + 1);
+                    if (middle == std::wstring::npos) continue;
+                    size_t close = lineText.find(L')', middle + 2);
+                    if (close == std::wstring::npos) continue;
+                    layout->SetDrawingEffect(linkBrush.Get(), {(UINT32)(start + i + 1), (UINT32)(middle - i - 1)});
+                    mark(start + i, 1, MarkObject::Hidden);
+                    mark(start + middle, close - middle + 1, MarkObject::Hidden);
+                    i = close;
+                } else if (c == L'*' && i + 1 < lineText.size() && lineText[i + 1] == L'*') {
+                    size_t close = lineText.find(L"**", i + 2);
+                    if (close == std::wstring::npos) continue;
+                    layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, {(UINT32)(start + i), (UINT32)(close - i + 2)});
+                    mark(start + i, 2, MarkObject::Hidden);
+                    mark(start + close, 2, MarkObject::Hidden);
+                    i = close + 1;
+                } else if ((c == L'*' || c == L'_') && i + 1 < lineText.size() && lineText[i + 1] != L' ' &&
+                           (i == 0 || lineText[i - 1] == L' ')) {
+                    size_t close = lineText.find(c, i + 1);
+                    if (close == std::wstring::npos || close == i + 1) continue;
+                    layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, {(UINT32)(start + i), (UINT32)(close - i + 1)});
+                    mark(start + i, 1, MarkObject::Hidden);
+                    mark(start + close, 1, MarkObject::Hidden);
+                    i = close;
+                }
+            }
         }
+        ++lineIndex;
+        if (end == t.size()) break;
+        start = end + 1;
     }
     return cached.Get();
 }
@@ -423,6 +540,7 @@ void startEdit(App& app, SheetDoc& doc, SheetDoc::Edit what, const std::string& 
     doc.editId = id;
     switch (what) {
         case SheetDoc::Edit::Card: {
+            hintDone(HINT_SINGLE);
             int i = nodeIndex(doc.model, id);
             if (i < 0) return;
             const Node& n = doc.model.nodes[i];
@@ -461,6 +579,13 @@ void startEdit(App& app, SheetDoc& doc, SheetDoc::Edit what, const std::string& 
             int g = nodeIndex(doc.model, id);
             if (g < 0) return;
             doc.edit.text = toWide(doc.model.nodes[g].laneKey.empty() ? std::string("status") : doc.model.nodes[g].laneKey);
+            break;
+        }
+        case SheetDoc::Edit::LaneLimit: {
+            int g = nodeIndex(doc.model, id);
+            if (g < 0) return;
+            int limit = doc.model.nodes[g].laneLimit;
+            doc.edit.text = limit > 0 ? std::to_wstring(limit) : std::wstring();
             break;
         }
         case SheetDoc::Edit::Url: {
@@ -556,6 +681,14 @@ void commitEdit(App& app, SheetDoc& doc, bool stay) {
                             n.file = relativePath(doc, target);
                             changedModel = true;
                             refreshCard(app, doc, n, true);
+                            hintDone(HINT_NAMING);
+                            // Arrows into it can be written now that it has a name
+                            std::vector<std::string> into;
+                            for (const Edge& e : doc.model.edges) {
+                                if (e.toNode == n.id) into.push_back(e.fromNode);
+                            }
+                            std::string named = n.id;
+                            for (const std::string& from : into) linkArrow(app, doc, from, named, true);
                         }
                     }
                 }
@@ -601,6 +734,17 @@ void commitEdit(App& app, SheetDoc& doc, bool stay) {
                     if (groupOf(doc.model, i) == g) ids.push_back(doc.model.nodes[i].id);
                 }
                 applyLanes(app, doc, ids);
+                // A lane keeps its cards in a column
+                if (!key.empty()) stackLane(doc.model, g);
+            }
+            break;
+        }
+        case SheetDoc::Edit::LaneLimit: {
+            int g = nodeIndex(doc.model, doc.editId);
+            int limit = std::max(0, _wtoi(doc.edit.text.c_str()));
+            if (g >= 0 && doc.model.nodes[g].laneLimit != limit) {
+                doc.model.nodes[g].laneLimit = limit;
+                changedModel = true;
             }
             break;
         }
@@ -623,6 +767,7 @@ void commitEdit(App& app, SheetDoc& doc, bool stay) {
         return;
     }
     doc.editing = SheetDoc::Edit::None;
+    doc.completing = false;
     if (what == SheetDoc::Edit::Find) {
         invalidate(app);
         return;
@@ -744,7 +889,7 @@ void indentLines(SheetDoc& doc, bool out) {
     (void)delta;
 }
 
-bool editKey(App& app, HWND hwnd, SheetDoc& doc, WPARAM key) {
+bool editKeyText(App& app, HWND hwnd, SheetDoc& doc, WPARAM key) {
     SheetTextEdit& e = doc.edit;
     bool ctrl = keyDown(VK_CONTROL), shift = keyDown(VK_SHIFT);
     bool card = doc.editing == SheetDoc::Edit::Card;
@@ -896,6 +1041,34 @@ bool editKey(App& app, HWND hwnd, SheetDoc& doc, WPARAM key) {
     return true;
 }
 
+bool editKey(App& app, HWND hwnd, SheetDoc& doc, WPARAM key) {
+    // An open [[ list takes the keys that choose from it
+    if (doc.completing && doc.editing == SheetDoc::Edit::Card) {
+        int count = std::max(1, (int)doc.completions.size());
+        switch (key) {
+            case VK_UP:
+            case VK_DOWN:
+                doc.completeIndex = (doc.completeIndex + (key == VK_DOWN ? 1 : count - 1)) % count;
+                invalidate(app);
+                return true;
+            case VK_RETURN:
+            case VK_TAB:
+                acceptCompletion(app, doc, doc.completeIndex, key == VK_RETURN && keyDown(VK_CONTROL));
+                return true;
+            case VK_ESCAPE:
+                doc.completing = false;
+                invalidate(app);
+                return true;
+            default:
+                break;
+        }
+    }
+    bool taken = editKeyText(app, hwnd, doc, key);
+    if (doc.editing == SheetDoc::Edit::Card) updateCompletions(app, doc);
+    else doc.completing = false;
+    return taken;
+}
+
 }  // namespace
 
 // --- Commands --------------------------------------------------------------
@@ -912,6 +1085,8 @@ std::vector<int> movingSet(const SheetDoc& doc) {
                 if (insideGroup(doc.model.nodes[i], doc.model.nodes[j])) out.insert(j);
             }
         }
+        // A folded card takes what it folds away along
+        for (int j : foldedBehind(doc.model, i, doc.hidden)) out.insert(j);
     }
     return std::vector<int>(out.begin(), out.end());
 }
@@ -941,7 +1116,10 @@ D2D1_POINT_2F freeSpot(const SheetDoc& doc, float x, float y, float w, float h) 
     return D2D1::Point2F(snap(x), snap(y));
 }
 
-void addEdge(SheetDoc& doc, const std::string& from, const std::string& to, const std::string& label = {}) {
+// A new arrow, once; a sheet that writes links writes it into the note it
+// leaves (not one promoted from a link the note already has)
+void addEdge(App& app, SheetDoc& doc, const std::string& from, const std::string& to, const std::string& label = {},
+             bool write = true) {
     if (from == to || from.empty() || to.empty()) return;
     for (const Edge& e : doc.model.edges) {
         if (e.fromNode == from && e.toNode == to) return;
@@ -952,6 +1130,7 @@ void addEdge(SheetDoc& doc, const std::string& from, const std::string& to, cons
     e.toNode = to;
     e.label = label;
     doc.model.edges.push_back(e);
+    if (write) linkArrow(app, doc, from, to, true);
 }
 
 void newCardAndEdit(App& app, SheetDoc& doc, float x, float y, const std::string& connectFrom = {}) {
@@ -961,7 +1140,7 @@ void newCardAndEdit(App& app, SheetDoc& doc, float x, float y, const std::string
         doc.undo.pop_back();
         return;
     }
-    if (!connectFrom.empty()) addEdge(doc, connectFrom, id);
+    if (!connectFrom.empty()) addEdge(app, doc, connectFrom, id);
     commitStep(app, doc);
     selectOnly(doc, id);
     startEdit(app, doc, SheetDoc::Edit::Card, id);
@@ -970,6 +1149,7 @@ void newCardAndEdit(App& app, SheetDoc& doc, float x, float y, const std::string
 // Mind-map growth from the selected card: a child to its right below its
 // other children, or a sibling below it under the same parent
 void growFromSelection(App& app, SheetDoc& doc, bool sibling) {
+    hintDone(HINT_SINGLE);
     if (doc.selected.size() != 1) {
         D2D1_POINT_2F c = viewCentre(app, doc);
         D2D1_POINT_2F spot = freeSpot(doc, c.x - 180, c.y - 120, 360, 240);
@@ -1009,7 +1189,7 @@ void growFromSelection(App& app, SheetDoc& doc, bool sibling) {
         doc.undo.pop_back();
         return;
     }
-    addEdge(doc, sibling ? parent : from.id, id);
+    addEdge(app, doc, sibling ? parent : from.id, id);
     commitStep(app, doc);
     selectOnly(doc, id);
     // Keep the new card in view
@@ -1046,6 +1226,11 @@ void groupSelection(App& app, SheetDoc& doc) {
 void removeSelection(App& app, SheetDoc& doc) {
     if (!doc.selectedEdge.empty()) {
         beginStep(doc);
+        int e = edgeIndex(doc.model, doc.selectedEdge);
+        if (e >= 0) {
+            Edge gone = doc.model.edges[e];
+            linkArrow(app, doc, gone.fromNode, gone.toNode, false);
+        }
         doc.model.edges.erase(std::remove_if(doc.model.edges.begin(), doc.model.edges.end(),
                                              [&](const Edge& e) { return e.id == doc.selectedEdge; }),
                               doc.model.edges.end());
@@ -1149,40 +1334,7 @@ std::string compileMarkdown(App& app, SheetDoc& doc, const std::vector<int>& sub
             std::string body(noteBody(c.source));
             // Links and images in the note keep pointing where they did
             std::wstring noteDir = n.type == NodeType::File ? c.path.substr(0, c.path.find_last_of(L"\\/")) : doc.dir;
-            std::string prefix;
-            if (_wcsicmp(noteDir.c_str(), outDir.c_str()) != 0) {
-                std::filesystem::path rel = std::filesystem::path(noteDir).lexically_relative(outDir);
-                std::wstring r = rel.wstring();
-                for (auto& ch : r) {
-                    if (ch == L'\\') ch = L'/';
-                }
-                std::string encoded;
-                for (char ch : toUtf8(r)) encoded += ch == ' ' ? std::string("%20") : std::string(1, ch);
-                if (!encoded.empty()) prefix = encoded + "/";
-            }
-            if (!prefix.empty()) {
-                std::string fixed;
-                for (size_t k = 0; k < body.size(); ++k) {
-                    fixed += body[k];
-                    if (body[k] == ']' && k + 1 < body.size() && body[k + 1] == '(') {
-                        size_t start = k + 2;
-                        std::string dest = body.substr(start, body.find(')', start) - start);
-                        bool relative = !dest.empty() && dest[0] != '#' && dest[0] != '/' && dest.find("://") == std::string::npos &&
-                                        dest.rfind("mailto:", 0) != 0 && !(dest.size() > 1 && dest[1] == ':');
-                        if (relative) {
-                            // Copy the '(' (and a '<') ourselves, then the prefix
-                            fixed += '(';
-                            ++k;
-                            if (dest[0] == '<') {
-                                fixed += '<';
-                                ++k;
-                            }
-                            fixed += prefix;
-                        }
-                    }
-                }
-                body = fixed;
-            }
+            body = rebaseLinks(body, noteDir, outDir);
             // Its headings sit under the section; a note without one gets its title
             int top = 7;
             bool firstIsHeading = false;
@@ -1229,6 +1381,12 @@ std::string compileMarkdown(App& app, SheetDoc& doc, const std::vector<int>& sub
 void compileSheet(App& app, HWND hwnd, SheetDoc& doc) {
     std::vector<int> subset = selectedIndexes(doc);
     if (subset.size() < 2) subset.clear();
+    // Folded away is left out
+    if (subset.empty() && std::find(doc.hidden.begin(), doc.hidden.end(), 1) != doc.hidden.end()) {
+        for (int i = 0; i < (int)doc.model.nodes.size(); ++i) {
+            if (!foldedAwayAt(doc, i)) subset.push_back(i);
+        }
+    }
     std::wstring dir = doc.cardDir;
     std::string text = compileMarkdown(app, doc, subset, dir);
     std::wstring path = dir + L"\\" + safeFileStem(toWide(doc.info.title)) + L".compiled.md";
@@ -1416,7 +1574,7 @@ bool pasteFromClipboard(App& app, HWND hwnd, SheetDoc& doc, float x, float y) {
         }
         for (auto& l : flow.links) {
             if (ids[l.from].empty() || ids[l.to].empty()) continue;
-            addEdge(doc, ids[l.from], ids[l.to], l.label);
+            addEdge(app, doc, ids[l.from], ids[l.to], l.label);
             if (!l.arrow) doc.model.edges.back().toArrow = false;
         }
         for (auto& g : flow.groups) {
@@ -1535,7 +1693,11 @@ void sortIntoLanes(App& app, SheetDoc& doc) {
             break;
         }
     }
-    if (moved) {
+    // Every lane stands as a tidy column
+    for (int g = 0; g < (int)doc.model.nodes.size(); ++g) {
+        if (doc.model.nodes[g].type == NodeType::Group && !doc.model.nodes[g].laneKey.empty()) stackLane(doc.model, g);
+    }
+    if (moved || writeCanvas(doc.undo.back().model) != writeCanvas(doc.model)) {
         doc.glide.active = true;
         doc.glide.startMs = nowMs();
         commitStep(app, doc);
@@ -1545,9 +1707,164 @@ void sortIntoLanes(App& app, SheetDoc& doc) {
     signalHint(app, SIGI_CHECK, trCount(app.currentLanguageIndex, "sheet.sorted", moved));
 }
 
+// A jump label typed: the card is picked (Shift adds it), or after Shift+J
+// the selection gets an arrow to it; a card too far to read comes close
+void pickJump(App& app, SheetDoc& doc, const std::string& id, bool add) {
+    doc.jumping = false;
+    if (doc.jumpJoin) {
+        beginStep(doc);
+        std::vector<std::string> from = doc.selected;
+        for (const std::string& source : from) addEdge(app, doc, source, id);
+        commitStep(app, doc);
+        selectOnly(doc, id);
+        return;
+    }
+    if (add) {
+        if (!isSelected(doc, id)) doc.selected.push_back(id);
+    } else {
+        selectOnly(doc, id);
+    }
+    int i = nodeIndex(doc.model, id);
+    if (i >= 0 && scale(app, doc) < 0.6f * app.contentScale) fitBox(app, doc, boxOf(doc.model.nodes[i]), true, 1.0f);
+}
+
+// The selection bar's Align: the align and spread commands in a menu
+// under the bar
+void openAlignMenu(App& app, SheetDoc& doc) {
+    doc.menu.clear();
+    for (const auto& entry : std::initializer_list<std::pair<int, const char*>>{
+             {ACT_ALIGN_LEFT, "sheet.menu.align_left"},
+             {ACT_ALIGN_CENTER, "sheet.menu.align_center"},
+             {ACT_ALIGN_TOP, "sheet.menu.align_top"},
+             {ACT_DISTRIBUTE_H, "sheet.menu.distribute_h"},
+             {ACT_DISTRIBUTE_V, "sheet.menu.distribute_v"},
+             {ACT_TIDY, "sheet.menu.tidy"}}) {
+        SheetDoc::MenuItem item;
+        item.action = entry.first;
+        item.label = tr(app, entry.second);
+        doc.menu.push_back(item);
+    }
+    doc.menuOpen = true;
+    doc.menuX = doc.selectionBar.left + (doc.selectionBar.right - doc.selectionBar.left) * 0.55f;
+    doc.menuY = doc.selectionBar.bottom + dpi(app, 6.0f);
+    doc.menuHover = -1;
+    doc.menuSheetX = doc.menuSheetY = 0;
+    invalidate(app);
+}
+
 }  // namespace
 
 namespace sheetui {
+
+// --- [[ completion ------------------------------------------------------------
+
+void updateCompletions(App& app, SheetDoc& doc) {
+    (void)app;
+    doc.completing = false;
+    if (doc.editing != SheetDoc::Edit::Card || doc.edit.hasSelection()) return;
+    const std::wstring& t = doc.edit.text;
+    size_t caret = std::min(doc.edit.caret, t.size());
+    if (caret < 2) return;
+    // The last [[ before the caret, with only a name typed after it
+    size_t open = t.rfind(L"[[", caret - 2);
+    if (open == std::wstring::npos) return;
+    std::wstring query = t.substr(open + 2, caret - open - 2);
+    if (query.find_first_of(L"[]\n|#") != std::wstring::npos || query.size() > 80) return;
+    auto lower = [](std::wstring s) {
+        for (auto& ch : s) ch = (wchar_t)towlower(ch);
+        return s;
+    };
+    std::wstring q = lower(query);
+    // The sheet's notes first, then the folder's notes waiting in the tray;
+    // names starting with what was typed before names holding it
+    std::vector<SheetDoc::Completion> starting, holding;
+    std::set<std::wstring> seen;
+    auto offer = [&](const std::wstring& name, const std::string& id) {
+        std::wstring key = lower(name);
+        if (name.empty() || !seen.insert(key).second) return;
+        if (key.rfind(q, 0) == 0) starting.push_back({name, id});
+        else if (key.find(q) != std::wstring::npos) holding.push_back({name, id});
+    };
+    for (const Node& n : doc.model.nodes) {
+        if (n.type != NodeType::File || n.id == doc.editId) continue;
+        std::wstring path = absolutePath(doc, n.file);
+        size_t dot = path.find_last_of(L'.');
+        std::wstring ext = dot == std::wstring::npos ? std::wstring() : toLower(path.substr(dot));
+        if (ext != L".md" && ext != L".markdown") continue;
+        offer(stemOf(path), n.id);
+    }
+    for (const std::wstring& path : doc.unplaced) offer(stemOf(path), std::string());
+    std::vector<SheetDoc::Completion> list = starting;
+    list.insert(list.end(), holding.begin(), holding.end());
+    if (list.size() > 8) list.resize(8);
+    if (list.empty()) return;
+    // Typing on keeps the list's place only while the names stay the same
+    bool same = list.size() == doc.completions.size() &&
+                std::equal(list.begin(), list.end(), doc.completions.begin(),
+                           [](const SheetDoc::Completion& a, const SheetDoc::Completion& b) { return a.name == b.name; });
+    if (!same) doc.completeIndex = 0;
+    doc.completions = list;
+    doc.completeIndex = std::clamp(doc.completeIndex, 0, (int)list.size() - 1);
+    doc.completeFrom = open + 2;
+    doc.completing = true;
+}
+
+void acceptCompletion(App& app, SheetDoc& doc, int index, bool arrow) {
+    if (!doc.completing || index < 0 || index >= (int)doc.completions.size()) return;
+    SheetDoc::Completion pick = doc.completions[index];
+    SheetTextEdit& e = doc.edit;
+    size_t caret = std::min(e.caret, e.text.size());
+    // What was typed after [[ becomes the name; the brackets close unless
+    // they already follow
+    bool closed = e.text.compare(caret, 2, L"]]") == 0;
+    e.anchor = std::min(doc.completeFrom, caret);
+    e.caret = caret;
+    replaceSelection(doc, pick.name + (closed ? std::wstring() : std::wstring(L"]]")));
+    if (closed) e.caret = e.anchor = std::min(e.text.size(), e.caret + 2);
+    doc.completing = false;
+    hintDone(HINT_LINK);
+    // Ctrl+Enter draws the arrow too; the link is in the text already
+    if (arrow && !pick.nodeId.empty()) addEdge(app, doc, doc.editId, pick.nodeId, {}, false);
+    fitEditor(app, doc);
+    app.cursorBlinkOn = true;
+    invalidate(app);
+}
+
+// --- Jump labels ---------------------------------------------------------------
+
+void startJump(App& app, SheetDoc& doc, bool join) {
+    if (join && doc.selected.empty()) join = false;
+    std::vector<int> shown;
+    D2D1_RECT_F v = viewRect(app);
+    for (int i = 0; i < (int)doc.model.nodes.size(); ++i) {
+        const Node& n = doc.model.nodes[i];
+        if (n.type == NodeType::Group || foldedAwayAt(doc, i) || (join && isSelected(doc, n.id))) continue;
+        D2D1_RECT_F r = screenRect(app, doc, boxOf(n));
+        if (r.right < v.left || r.left > v.right || r.bottom < v.top || r.top > v.bottom) continue;
+        shown.push_back(i);
+    }
+    if (shown.empty()) {
+        hint(app, tr(app, "sheet.jump_none"));
+        return;
+    }
+    // Home row first; two letters each when there are more cards than letters
+    static const wchar_t letters[] = L"asdfghjklqwertyuiopzxcvbnm";
+    const size_t count = 26;
+    shown = rowOrder(doc.model, shown);
+    bool two = shown.size() > count;
+    doc.jumpLabels.clear();
+    for (size_t k = 0; k < shown.size() && k < count * count; ++k) {
+        std::wstring label = two ? std::wstring{letters[k / count], letters[k % count]} : std::wstring(1, letters[k]);
+        doc.jumpLabels.push_back({label, doc.model.nodes[shown[k]].id});
+    }
+    closeMenu(doc);
+    doc.peekId.clear();
+    doc.jumping = true;
+    doc.jumpJoin = join;
+    doc.jumpTyped.clear();
+    hintDone(HINT_FAR);
+    invalidate(app);
+}
 
 void updateFind(App& app, SheetDoc& doc) {
     doc.found.clear();
@@ -1555,6 +1872,7 @@ void updateFind(App& app, SheetDoc& doc) {
     std::wstring needle = toLower(doc.edit.text);
     if (needle.empty()) return;
     for (int i : readingOrder(doc.model)) {
+        if (foldedAwayAt(doc, i)) continue;
         const Node& n = doc.model.nodes[i];
         SheetCard& c = card(app, doc, n);
         std::wstring hay = toLower(toWide(c.title + "\n" + c.source + "\n" + n.url + "\n" + n.text));
@@ -1580,6 +1898,7 @@ void startPresenting(App& app, SheetDoc& doc) {
     // Along the arrows; a group shows whole before its first card
     std::set<int> shownGroups;
     for (int i : readingOrder(doc.model)) {
+        if (foldedAwayAt(doc, i)) continue;
         int g = groupOf(doc.model, i);
         if (g >= 0 && !shownGroups.count(g)) {
             shownGroups.insert(g);
@@ -1713,6 +2032,7 @@ void openMenu(App& app, SheetDoc& doc, float x, float y) {
             swatches();
             sep();
             add(ACT_LANE, n.laneKey.empty() ? "sheet.menu.lane" : "sheet.menu.lane_off");
+            if (!n.laneKey.empty()) add(ACT_LANE_LIMIT, "sheet.menu.lane_limit");
             add(ACT_SORT_LANES, "sheet.menu.sort_lanes");
             add(ACT_UNGROUP, "sheet.menu.ungroup", L"Ctrl+Shift+G");
             sep();
@@ -1728,7 +2048,11 @@ void openMenu(App& app, SheetDoc& doc, float x, float y) {
                     add(ACT_OPEN_TAB, n.type == NodeType::Link ? "sheet.menu.open_link" : "sheet.menu.open", L"Ctrl+Enter");
                 if (n.type == NodeType::Text) add(ACT_TO_FILE, "sheet.menu.to_file");
                 if (c.kind == SheetCard::Kind::Note && c.contentHeight > 0) add(ACT_FIT_HEIGHT, "sheet.menu.fit_height");
+                if (c.kind == SheetCard::Kind::Note && n.type == NodeType::File) add(ACT_SPLIT, "sheet.menu.split");
                 add(ACT_SPOTLIGHT, "sheet.menu.spotlight", L"S");
+                bool leaves = std::any_of(doc.model.edges.begin(), doc.model.edges.end(),
+                                          [&](const Edge& e) { return e.fromNode == n.id; });
+                if (n.folded || leaves) add(ACT_FOLD, n.folded ? "sheet.menu.unfold" : "sheet.menu.fold", L"Z");
                 bool ghosted = false;
                 for (const auto& g : ghostLinks(app, doc)) {
                     if (g.first == n.id || g.second == n.id) ghosted = true;
@@ -1741,6 +2065,7 @@ void openMenu(App& app, SheetDoc& doc, float x, float y) {
             add(ACT_DUPLICATE, "sheet.menu.duplicate", L"Ctrl+D");
             if (many) {
                 sep();
+                add(ACT_CHAIN, "sheet.menu.chain");
                 add(ACT_ALIGN_LEFT, "sheet.menu.align_left");
                 add(ACT_ALIGN_CENTER, "sheet.menu.align_center");
                 add(ACT_ALIGN_TOP, "sheet.menu.align_top");
@@ -1762,6 +2087,7 @@ void openMenu(App& app, SheetDoc& doc, float x, float y) {
         add(ACT_ADD_FILES, "sheet.menu.add_files");
         add(ACT_ADD_LINK, "sheet.menu.add_link");
         add(ACT_ADD_GROUP, "sheet.menu.add_group");
+        add(ACT_EXPLODE, "sheet.menu.explode");
         add(ACT_PASTE, "sheet.menu.paste", L"Ctrl+V");
         sep();
         add(ACT_TIDY, "sheet.menu.tidy", L"Ctrl+L");
@@ -1771,10 +2097,15 @@ void openMenu(App& app, SheetDoc& doc, float x, float y) {
         add(ACT_COMPILE, "sheet.menu.compile");
         add(ACT_COPY_MERMAID, "sheet.menu.copy_mermaid");
         if (!ghostLinks(app, doc).empty()) add(ACT_LINKS_TO_ARROWS, "sheet.menu.all_links_to_arrows");
+        add(ACT_WRITE_LINKS, doc.model.writeLinks ? "sheet.menu.write_links_off" : "sheet.menu.write_links");
+        if (std::any_of(doc.model.nodes.begin(), doc.model.nodes.end(), [](const Node& n) { return n.folded; }))
+            add(ACT_UNFOLD_ALL, "sheet.menu.unfold_all", L"Shift+Z");
         sep();
         add(ACT_SELECT_ALL, "sheet.menu.select_all", L"Ctrl+A");
+        add(ACT_JUMP, "sheet.menu.jump", L"J");
         add(ACT_ZOOM_FIT, "sheet.menu.zoom_fit", L"Shift+1");
         add(ACT_SHOW_FOLDER, "sheet.menu.show_folder");
+        add(ACT_HINTS, hintsShown() ? "sheet.menu.hints_off" : "sheet.menu.hints_on");
     }
     while (!doc.menu.empty() && doc.menu.back().separator) doc.menu.pop_back();
     doc.menuOpen = true;
@@ -2054,6 +2385,85 @@ void runAction(App& app, HWND hwnd, SheetDoc& doc, int action) {
             break;
         }
         case ACT_SORT_LANES: sortIntoLanes(app, doc); break;
+        case ACT_CHAIN: {
+            // The selected cards joined in rows, left to right, where not joined yet
+            std::vector<int> cards;
+            for (int i : selectedIndexes(doc)) {
+                if (doc.model.nodes[i].type != NodeType::Group) cards.push_back(i);
+            }
+            if (cards.size() < 2) break;
+            cards = rowOrder(doc.model, cards);
+            beginStep(doc);
+            size_t before = doc.model.edges.size();
+            for (size_t k = 1; k < cards.size(); ++k) {
+                std::string a = doc.model.nodes[cards[k - 1]].id, b = doc.model.nodes[cards[k]].id;
+                bool joined = std::any_of(doc.model.edges.begin(), doc.model.edges.end(), [&](const Edge& e) {
+                    return (e.fromNode == a && e.toNode == b) || (e.fromNode == b && e.toNode == a);
+                });
+                if (!joined) addEdge(app, doc, a, b);
+            }
+            if (doc.model.edges.size() > before) commitStep(app, doc);
+            else doc.undo.pop_back();
+            break;
+        }
+        case ACT_FOLD: toggleFolds(app, doc, doc.selected); break;
+        case ACT_UNFOLD_ALL: {
+            if (std::none_of(doc.model.nodes.begin(), doc.model.nodes.end(), [](const Node& n) { return n.folded; })) break;
+            beginStep(doc);
+            for (Node& n : doc.model.nodes) n.folded = false;
+            commitStep(app, doc);
+            break;
+        }
+        case ACT_LANE_LIMIT: {
+            if (doc.selected.size() != 1) break;
+            int g = nodeIndex(doc.model, doc.selected[0]);
+            if (g < 0 || doc.model.nodes[g].laneKey.empty()) break;
+            startEdit(app, doc, SheetDoc::Edit::LaneLimit, doc.model.nodes[g].id);
+            break;
+        }
+        case ACT_WRITE_LINKS: {
+            beginStep(doc);
+            doc.model.writeLinks = !doc.model.writeLinks;
+            if (doc.model.writeLinks) writeAllLinks(app, doc);
+            commitStep(app, doc);
+            signalHint(app, SIGI_CHECK, tr(app, doc.model.writeLinks ? "sheet.write_links_started" : "sheet.write_links_stopped"));
+            break;
+        }
+        case ACT_EXPLODE: {
+            // A Markdown document's sections, as cards where the menu opened
+            wchar_t file[MAX_PATH] = {};
+            std::wstring filter = L"Markdown (*.md;*.markdown)";
+            filter.push_back(L'\0');
+            filter += L"*.md;*.markdown";
+            filter.push_back(L'\0');
+            filter.push_back(L'\0');
+            std::wstring title = tr(app, "sheet.explode_title");
+            OPENFILENAMEW ofn{};
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner = hwnd;
+            ofn.lpstrFilter = filter.c_str();
+            ofn.lpstrFile = file;
+            ofn.nMaxFile = MAX_PATH;
+            ofn.lpstrInitialDir = doc.dir.c_str();
+            ofn.lpstrTitle = title.c_str();
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+            float x = doc.menuSheetX, y = doc.menuSheetY;
+            if (x == 0 && y == 0) {
+                x = centre.x;
+                y = centre.y;
+            }
+            if (!runOpenFileDialog(ofn)) break;
+            if (!explodeDocumentInto(app, doc, file, x, y))
+                signalPush(app, SIG_ERROR, SIGI_WARNING, tr(app, "sheet.explode_failed"));
+            break;
+        }
+        case ACT_SPLIT:
+            if (doc.selected.size() == 1) splitCard(app, doc, doc.selected[0]);
+            break;
+        case ACT_ALIGN_MENU: openAlignMenu(app, doc); break;
+        case ACT_HINTS: setHintsShown(!hintsShown()); break;
+        case ACT_JUMP: startJump(app, doc, false); break;
+        case ACT_JOIN: startJump(app, doc, true); break;
         case ACT_LINKS_TO_ARROWS: {
             // Links written in the notes become arrows: the selection's, or all
             std::set<std::string> picked(doc.selected.begin(), doc.selected.end());
@@ -2061,7 +2471,7 @@ void runAction(App& app, HWND hwnd, SheetDoc& doc, int action) {
             int made = 0;
             for (const auto& g : ghostLinks(app, doc)) {
                 if (!picked.empty() && !picked.count(g.first) && !picked.count(g.second)) continue;
-                addEdge(doc, g.first, g.second);
+                addEdge(app, doc, g.first, g.second, {}, false);
                 ++made;
             }
             if (made) {
@@ -2175,6 +2585,33 @@ bool sheetKeyDown(App& app, HWND hwnd, WPARAM key, bool& handled) {
             closeMenu(doc);
             runAction(app, hwnd, doc, action);
         }
+        invalidate(app);
+        return true;
+    }
+    // Jump labels take the letters while they are up
+    if (doc.jumping) {
+        if (key == VK_BACK) {
+            if (!doc.jumpTyped.empty()) doc.jumpTyped.pop_back();
+        } else if (key >= 'A' && key <= 'Z') {
+            doc.jumpTyped += (wchar_t)towlower((wint_t)key);
+            std::string target;
+            bool more = false;
+            for (const auto& label : doc.jumpLabels) {
+                if (label.first == doc.jumpTyped) target = label.second;
+                else if (label.first.compare(0, doc.jumpTyped.size(), doc.jumpTyped) == 0) more = true;
+            }
+            if (!target.empty()) pickJump(app, doc, target, shift);
+            else if (!more) doc.jumpTyped.clear();  // no label starts so: start over
+        } else if (key != VK_SHIFT && key != VK_CONTROL) {
+            doc.jumping = false;  // Esc, or any other key
+        }
+        invalidate(app);
+        return true;
+    }
+    // Esc puts a peek away
+    if (key == VK_ESCAPE && !doc.peekId.empty() && doc.editing == SheetDoc::Edit::None) {
+        doc.peekId.clear();
+        doc.peekCandidate.clear();
         invalidate(app);
         return true;
     }
@@ -2296,10 +2733,14 @@ bool sheetKeyDown(App& app, HWND hwnd, WPARAM key, bool& handled) {
             int from = doc.selected.empty() ? -1 : nodeIndex(doc.model, doc.selected.back());
             int to = -1;
             if (from < 0) {
-                std::vector<int> order = readingOrder(doc.model);
-                if (!order.empty()) to = order[0];
+                for (int i : readingOrder(doc.model)) {
+                    if (!foldedAwayAt(doc, i)) {
+                        to = i;
+                        break;
+                    }
+                }
             } else {
-                to = neighbourInDirection(doc.model, from, dx, dy);
+                to = neighbourInDirection(doc.model, from, dx, dy, &doc.hidden);
             }
             if (to >= 0) {
                 if (shift) {
@@ -2320,6 +2761,8 @@ bool sheetKeyDown(App& app, HWND hwnd, WPARAM key, bool& handled) {
             return true;
         }
         case 'N': runAction(app, hwnd, doc, ACT_NEW_NOTE); return true;
+        case 'J': runAction(app, hwnd, doc, shift ? ACT_JOIN : ACT_JUMP); return true;
+        case 'Z': runAction(app, hwnd, doc, shift ? ACT_UNFOLD_ALL : ACT_FOLD); return true;
         case 'P': runAction(app, hwnd, doc, ACT_PRESENT); return true;
         case 'M': runAction(app, hwnd, doc, ACT_MINIMAP); return true;
         case 'L': runAction(app, hwnd, doc, ACT_GHOSTS); return true;
@@ -2370,6 +2813,7 @@ bool sheetCharInput(App& app, HWND, wchar_t ch) {
     if (ch == 0x7F) return true;
     replaceSelection(*doc, std::wstring(1, ch), true);
     if (doc->editing == SheetDoc::Edit::Find) updateFind(app, *doc);
+    if (doc->editing == SheetDoc::Edit::Card) updateCompletions(app, *doc);
     fitEditor(app, *doc);
     app.cursorBlinkOn = true;
     invalidate(app);
@@ -2463,11 +2907,17 @@ void updateHover(App& app, SheetDoc& doc, float x, float y) {
             {ACT_TIDY, {"sheet.tool.tidy", L"Ctrl+L"}},        {ACT_PRESENT, {"sheet.tool.present", L"P"}},
             {ACT_COMPILE, {"sheet.tool.compile", L""}},        {ACT_GHOSTS, {"sheet.tool.ghosts", L"L"}},
             {ACT_MINIMAP, {"sheet.tool.minimap", L"M"}},
+            // The selection bar
+            {ACT_GROUP_SELECTION, {"sheet.bar.group", L"Ctrl+G"}}, {ACT_CHAIN, {"sheet.bar.chain", L""}},
+            {ACT_ALIGN_MENU, {"sheet.bar.align", L""}},          {ACT_FOLD, {"sheet.bar.fold", L"Z"}},
+            {ACT_REMOVE, {"sheet.bar.remove", L"Del"}},
         };
         auto it = tips.find(ui);
         if (it != tips.end()) {
             tip = tr(app, it->second.first);
             if (*it->second.second) tip += std::wstring(L"  \u00B7  ") + it->second.second;
+        } else if (ui >= ACT_COLOR_BASE && ui <= ACT_COLOR_BASE + 6) {
+            tip = std::wstring(tr(app, "sheet.bar.color")) + L"  \u00B7  " + std::to_wstring(ui - ACT_COLOR_BASE);
         }
     }
     if (ui == 0) {
@@ -2509,6 +2959,32 @@ void updateHover(App& app, SheetDoc& doc, float x, float y) {
         doc.hoverGhostFrom = ghostFrom;
         doc.hoverGhostTo = ghostTo;
         doc.tip = tip;
+        invalidate(app);
+    }
+
+    // Peek: a note rested on while the sheet is too far out to read it opens
+    // in a lens after a moment (at once with Alt); the lens stays while the
+    // pointer is over it
+    const D2D1_RECT_F& lens = doc.peekRect;
+    if (!doc.peekId.empty() && x >= lens.left && x <= lens.right && y >= lens.top && y <= lens.bottom) return;
+    std::string candidate;
+    if (!node.empty() && scale(app, doc) < sheetDetailThreshold() && doc.gesture == SheetDoc::Gesture::None &&
+        doc.editing == SheetDoc::Edit::None && !doc.jumping && !doc.menuOpen && !doc.presenting) {
+        int i = nodeIndex(doc.model, node);
+        if (i >= 0 && card(app, doc, doc.model.nodes[i]).kind == SheetCard::Kind::Note) candidate = node;
+    }
+    if (candidate != doc.peekCandidate) {
+        doc.peekCandidate = candidate;
+        doc.peekSinceMs = nowMs();
+        if (!doc.peekId.empty() && doc.peekId != candidate) {
+            doc.peekId.clear();
+            invalidate(app);
+        }
+        doc.peekScroll = 0;
+        if (!candidate.empty()) ensureTimer(app);
+    }
+    if (!candidate.empty() && doc.peekId.empty() && keyDown(VK_MENU)) {
+        doc.peekId = candidate;
         invalidate(app);
     }
 }
@@ -2588,7 +3064,16 @@ void beginMove(App& app, SheetDoc& doc) {
     beginStep(doc);
     if (doc.pressAlt) duplicateSelection(app, doc, 0, 0);
     doc.moveStart.clear();
-    for (int i : movingSet(doc)) doc.moveStart.push_back({doc.model.nodes[i].id, boxOf(doc.model.nodes[i])});
+    doc.moveLanes.clear();
+    std::vector<int> moving = movingSet(doc);
+    for (int i : moving) {
+        doc.moveStart.push_back({doc.model.nodes[i].id, boxOf(doc.model.nodes[i])});
+        // The lanes cards leave close up when they land
+        int g = groupOf(doc.model, i);
+        if (doc.model.nodes[i].type != NodeType::Group && g >= 0 && !doc.model.nodes[g].laneKey.empty() &&
+            std::find(moving.begin(), moving.end(), g) == moving.end())
+            doc.moveLanes.push_back(doc.model.nodes[g].id);
+    }
     doc.gesture = SheetDoc::Gesture::Move;
 }
 
@@ -2671,6 +3156,52 @@ bool sheetMouseDown(App& app, HWND hwnd, int x, int y) {
         invalidate(app);
         return true;
     }
+    // Jump labels go with a click
+    if (doc.jumping) {
+        doc.jumping = false;
+        doc.gesture = SheetDoc::Gesture::None;
+        invalidate(app);
+        return true;
+    }
+    // The [[ list under the caret takes a click on a name
+    if (doc.completing) {
+        for (const auto& hit : doc.completeHits) {
+            const D2D1_RECT_F& r = hit.first;
+            if (fx >= r.left && fx <= r.right && fy >= r.top && fy <= r.bottom) {
+                acceptCompletion(app, doc, hit.second, false);
+                doc.gesture = SheetDoc::Gesture::None;
+                return true;
+            }
+        }
+        doc.completing = false;
+    }
+    // A folded card's +N unfolds it
+    for (const auto& hit : doc.foldHits) {
+        const D2D1_RECT_F& r = hit.first;
+        if (fx >= r.left && fx <= r.right && fy >= r.top && fy <= r.bottom) {
+            std::string id = hit.second;
+            toggleFolds(app, doc, {id});
+            doc.gesture = SheetDoc::Gesture::None;
+            return true;
+        }
+    }
+    // A click on the peek lens brings its card close; one elsewhere puts it away
+    if (!doc.peekId.empty()) {
+        D2D1_RECT_F lens = doc.peekRect;
+        std::string id = doc.peekId;
+        doc.peekId.clear();
+        doc.peekCandidate.clear();
+        invalidate(app);
+        if (fx >= lens.left && fx <= lens.right && fy >= lens.top && fy <= lens.bottom) {
+            int i = nodeIndex(doc.model, id);
+            if (i >= 0) {
+                selectOnly(doc, id);
+                fitBox(app, doc, boxOf(doc.model.nodes[i]), true, 1.0f);
+            }
+            doc.gesture = SheetDoc::Gesture::None;
+            return true;
+        }
+    }
     // Chrome first: tool bar, zoom, tray, find, presentation controls
     int ui = uiHitAt(doc, fx, fy);
     if (ui != 0) {
@@ -2723,6 +3254,7 @@ bool sheetMouseDown(App& app, HWND hwnd, int x, int y) {
             }
             doc.edit.preferredX = -1;
             doc.gesture = SheetDoc::Gesture::EditSelect;
+            updateCompletions(app, doc);
             app.cursorBlinkOn = true;
             invalidate(app);
             return true;
@@ -2774,7 +3306,7 @@ bool sheetMouseDown(App& app, HWND hwnd, int x, int y) {
     // A ghost link: a click makes it a real arrow
     if (!doc.hoverGhostFrom.empty()) {
         beginStep(doc);
-        addEdge(doc, doc.hoverGhostFrom, doc.hoverGhostTo);
+        addEdge(app, doc, doc.hoverGhostFrom, doc.hoverGhostTo, {}, false);
         commitStep(app, doc);
         doc.selectedEdge = doc.model.edges.back().id;
         doc.selected.clear();
@@ -3016,9 +3548,23 @@ bool sheetMouseUp(App& app, HWND hwnd, int x, int y) {
             break;
         case SheetDoc::Gesture::Move: {
             std::vector<std::string> ids;
-            for (const auto& entry : doc.moveStart) ids.push_back(entry.first);
+            int cards = 0;
+            for (const auto& entry : doc.moveStart) {
+                ids.push_back(entry.first);
+                int i = nodeIndex(doc.model, entry.first);
+                if (i >= 0 && doc.model.nodes[i].type != NodeType::Group) ++cards;
+            }
+            // Cards dropped into a lane glide into its column; the lanes
+            // they left close up
+            doc.glide.from.clear();
+            for (const Node& n : doc.model.nodes) doc.glide.from[n.id] = boxOf(n);
+            settleLanes(app, doc, ids);
+            doc.glide.active = true;
+            doc.glide.startMs = nowMs();
             applyLanes(app, doc, ids);
+            if (cards >= 2) hintDone(HINT_MULTI);
             doc.moveStart.clear();
+            doc.moveLanes.clear();
             commitStep(app, doc);
             break;
         }
@@ -3032,9 +3578,13 @@ bool sheetMouseUp(App& app, HWND hwnd, int x, int y) {
             }
             break;
         case SheetDoc::Gesture::Connect: {
+            if (doc.gestureMoved) {
+                hintDone(HINT_CONNECT);
+                hintDone(HINT_SINGLE);
+            }
             if (!doc.connectTarget.empty()) {
                 beginStep(doc);
-                addEdge(doc, doc.pressNode, doc.connectTarget);
+                addEdge(app, doc, doc.pressNode, doc.connectTarget);
                 commitStep(app, doc);
             } else if (doc.gestureMoved) {
                 // Dropped on open ground: a new note there, joined to the first
@@ -3054,7 +3604,7 @@ bool sheetMouseUp(App& app, HWND hwnd, int x, int y) {
                 if (id.empty()) {
                     doc.undo.pop_back();
                 } else {
-                    addEdge(doc, doc.pressNode, id);
+                    addEdge(app, doc, doc.pressNode, id);
                     commitStep(app, doc);
                     selectOnly(doc, id);
                     startEdit(app, doc, SheetDoc::Edit::Card, id);
@@ -3071,13 +3621,16 @@ bool sheetMouseUp(App& app, HWND hwnd, int x, int y) {
             }
             Box m{std::min(doc.pressSX, doc.lastSX), std::min(doc.pressSY, doc.lastSY), std::max(doc.pressSX, doc.lastSX),
                   std::max(doc.pressSY, doc.lastSY)};
-            for (const Node& n : doc.model.nodes) {
+            for (int i = 0; i < (int)doc.model.nodes.size(); ++i) {
+                const Node& n = doc.model.nodes[i];
+                if (foldedAwayAt(doc, i)) continue;
                 Box b = boxOf(n);
                 bool inside = n.type == NodeType::Group
                                   ? b.left >= m.left && b.right <= m.right && b.top >= m.top && b.bottom <= m.bottom
                                   : b.left < m.right && b.right > m.left && b.top < m.bottom && b.bottom > m.top;
                 if (inside && !isSelected(doc, n.id)) doc.selected.push_back(n.id);
             }
+            if (!doc.selected.empty()) hintDone(HINT_MARQUEE);
             break;
         }
         case SheetDoc::Gesture::Minimap:
@@ -3143,6 +3696,13 @@ bool sheetMouseWheel(App& app, HWND hwnd, float delta, bool horizontal, int x, i
     if (x < v.left || y < v.top) return false;
     if (doc.menuOpen) {
         closeMenu(doc);
+        invalidate(app);
+        return true;
+    }
+    // The wheel over the peek lens reads on in it
+    const D2D1_RECT_F& lens = doc.peekRect;
+    if (!doc.peekId.empty() && !horizontal && x >= lens.left && x <= lens.right && y >= lens.top && y <= lens.bottom) {
+        doc.peekScroll = std::max(0.0f, doc.peekScroll - delta / 120.0f * 60.0f);
         invalidate(app);
         return true;
     }

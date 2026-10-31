@@ -263,7 +263,7 @@ void writeNumber(std::string& out, float value) {
 bool knownNodeField(std::string_view key) {
     static const char* known[] = {"id", "type", "x", "y", "width", "height", "color", "text",
                                   "file", "subpath", "url", "label", "background",
-                                  "backgroundStyle", "tintaLane"};
+                                  "backgroundStyle", "tintaLane", "tintaLimit", "tintaFolded"};
     for (const char* k : known) {
         if (key == k) return true;
     }
@@ -552,6 +552,9 @@ bool parseCanvas(std::string_view json, Sheet& out, std::string* error) {
                 node.background = textOf(item.get("background"));
                 node.backgroundStyle = textOf(item.get("backgroundStyle"));
                 node.laneKey = textOf(item.get("tintaLane"));
+                node.laneLimit = std::max(0, (int)numberOf(item.get("tintaLimit"), 0));
+                const Json* folded = item.get("tintaFolded");
+                node.folded = folded && folded->type == Json::Bool && folded->boolean;
                 for (const auto& f : item.fields) {
                     if (!knownNodeField(f.first)) {
                         node.extra.emplace_back(
@@ -585,6 +588,8 @@ bool parseCanvas(std::string_view json, Sheet& out, std::string* error) {
                 ids.insert(edge.id);
                 out.edges.push_back(std::move(edge));
             }
+        } else if (field.first == "tintaWriteLinks") {
+            out.writeLinks = field.second.type == Json::Bool && field.second.boolean;
         } else {
             out.extra.emplace_back(field.first, std::string(trimmed.substr(
                                                     field.second.begin, field.second.end - field.second.begin)));
@@ -642,8 +647,13 @@ std::string writeCanvas(const Sheet& sheet) {
                     out += ",\"tintaLane\":";
                     writeJsonString(out, n.laneKey);
                 }
+                if (n.laneLimit > 0) {
+                    out += ",\"tintaLimit\":";
+                    out += std::to_string(n.laneLimit);
+                }
                 break;
         }
+        if (n.folded) out += ",\"tintaFolded\":true";
         out += ",\"x\":";
         writeNumber(out, n.x);
         out += ",\"y\":";
@@ -701,6 +711,7 @@ std::string writeCanvas(const Sheet& sheet) {
         out += '}';
     }
     out += sheet.edges.empty() ? "]" : "\n\t]";
+    if (sheet.writeLinks) out += ",\n\t\"tintaWriteLinks\":true";
     for (const auto& extra : sheet.extra) {
         out += ",\n\t";
         writeJsonString(out, extra.first);
@@ -1091,7 +1102,7 @@ std::vector<int> readingOrder(const Sheet& sheet, const std::vector<int>& subset
     return order;
 }
 
-int neighbourInDirection(const Sheet& sheet, int from, int dx, int dy) {
+int neighbourInDirection(const Sheet& sheet, int from, int dx, int dy, const std::vector<char>* skip) {
     if (from < 0 || from >= (int)sheet.nodes.size()) return -1;
     Center a = centerOf(sheet.nodes[from]);
     float len = std::sqrt((float)(dx * dx + dy * dy));
@@ -1101,6 +1112,7 @@ int neighbourInDirection(const Sheet& sheet, int from, int dx, int dy) {
     float bestScore = 0;
     for (int i = 0; i < (int)sheet.nodes.size(); ++i) {
         if (i == from || sheet.nodes[i].type == NodeType::Group) continue;
+        if (skip && i < (int)skip->size() && (*skip)[i]) continue;
         Center b = centerOf(sheet.nodes[i]);
         float vx = b.x - a.x, vy = b.y - a.y;
         float along = vx * ux + vy * uy;
@@ -1891,6 +1903,373 @@ std::string exportFlowchart(const Sheet& sheet, const std::function<std::string(
     }
     (void)included;
     return out;
+}
+
+// --- Folds, lanes, chains --------------------------------------------------
+
+namespace {
+
+// Each node's arrows out (and in), as node indexes
+std::vector<std::vector<int>> arrowsOut(const Sheet& sheet, std::vector<std::vector<int>>* in = nullptr) {
+    std::unordered_map<std::string, int> index;
+    for (int i = 0; i < (int)sheet.nodes.size(); ++i) index[sheet.nodes[i].id] = i;
+    std::vector<std::vector<int>> out(sheet.nodes.size());
+    if (in) in->assign(sheet.nodes.size(), {});
+    for (const Edge& e : sheet.edges) {
+        auto f = index.find(e.fromNode), t = index.find(e.toNode);
+        if (f == index.end() || t == index.end() || f->second == t->second) continue;
+        out[f->second].push_back(t->second);
+        if (in) (*in)[t->second].push_back(f->second);
+    }
+    return out;
+}
+
+// Marks the cards after `from` along the arrows, never going back through it
+void collectAfter(const std::vector<std::vector<int>>& out, int from, std::vector<char>& seen) {
+    std::vector<int> stack(out[from].begin(), out[from].end());
+    while (!stack.empty()) {
+        int i = stack.back();
+        stack.pop_back();
+        if (i == from || seen[i]) continue;
+        seen[i] = 1;
+        stack.insert(stack.end(), out[i].begin(), out[i].end());
+    }
+}
+
+}  // namespace
+
+std::vector<char> foldedAway(const Sheet& sheet) {
+    std::vector<char> hidden(sheet.nodes.size(), 0);
+    if (std::none_of(sheet.nodes.begin(), sheet.nodes.end(), [](const Node& n) { return n.folded; })) return hidden;
+    std::vector<std::vector<int>> in;
+    std::vector<std::vector<int>> out = arrowsOut(sheet, &in);
+    for (int i = 0; i < (int)sheet.nodes.size(); ++i) {
+        if (sheet.nodes[i].folded) collectAfter(out, i, hidden);
+    }
+    // A card that something shown and unfolded points at stays in sight
+    for (bool changed = true; changed;) {
+        changed = false;
+        for (int i = 0; i < (int)hidden.size(); ++i) {
+            if (!hidden[i]) continue;
+            for (int from : in[i]) {
+                if (!hidden[from] && !sheet.nodes[from].folded) {
+                    hidden[i] = 0;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+    }
+    return hidden;
+}
+
+std::vector<int> foldedBehind(const Sheet& sheet, int folded, const std::vector<char>& hidden) {
+    std::vector<int> out;
+    if (folded < 0 || folded >= (int)sheet.nodes.size() || !sheet.nodes[folded].folded) return out;
+    std::vector<char> after(sheet.nodes.size(), 0);
+    collectAfter(arrowsOut(sheet), folded, after);
+    for (size_t i = 0; i < after.size() && i < hidden.size(); ++i) {
+        if (after[i] && hidden[i]) out.push_back((int)i);
+    }
+    return out;
+}
+
+int foldedCount(const Sheet& sheet, int folded, const std::vector<char>& hidden) {
+    return (int)foldedBehind(sheet, folded, hidden).size();
+}
+
+std::vector<int> laneCards(const Sheet& sheet, int lane) {
+    std::vector<int> cards;
+    for (int i = 0; i < (int)sheet.nodes.size(); ++i) {
+        if (sheet.nodes[i].type != NodeType::Group && groupOf(sheet, i) == lane) cards.push_back(i);
+    }
+    std::sort(cards.begin(), cards.end(), [&](int a, int b) {
+        const Node &na = sheet.nodes[a], &nb = sheet.nodes[b];
+        return na.y != nb.y ? na.y < nb.y : na.x < nb.x;
+    });
+    return cards;
+}
+
+void stackLane(Sheet& sheet, int lane) {
+    if (lane < 0 || lane >= (int)sheet.nodes.size() || sheet.nodes[lane].type != NodeType::Group) return;
+    std::vector<int> cards = laneCards(sheet, lane);
+    Node& g = sheet.nodes[lane];
+    // Under the label, 40 in from the sides, 20 apart; the lane grows to hold them
+    float y = g.y + 80.0f;
+    for (int i : cards) {
+        Node& n = sheet.nodes[i];
+        n.x = g.x + 40.0f;
+        n.y = y;
+        n.width = std::min(n.width, std::max(80.0f, g.width - 80.0f));
+        y += n.height + 20.0f;
+    }
+    float needed = y - 20.0f + 40.0f - g.y;
+    if (needed > g.height) g.height = std::ceil(needed / 20.0f) * 20.0f;
+}
+
+std::vector<int> rowOrder(const Sheet& sheet, std::vector<int> cards) {
+    std::sort(cards.begin(), cards.end(), [&](int a, int b) {
+        const Node &na = sheet.nodes[a], &nb = sheet.nodes[b];
+        return na.y + na.height * 0.5f < nb.y + nb.height * 0.5f;
+    });
+    // A card whose middle lies within the first card of a row joins the row
+    std::vector<std::vector<int>> rows;
+    for (int i : cards) {
+        const Node& n = sheet.nodes[i];
+        float middle = n.y + n.height * 0.5f;
+        if (!rows.empty()) {
+            const Node& first = sheet.nodes[rows.back().front()];
+            if (middle >= first.y && middle <= first.y + first.height) {
+                rows.back().push_back(i);
+                continue;
+            }
+        }
+        rows.push_back({i});
+    }
+    std::vector<int> out;
+    for (auto& row : rows) {
+        std::sort(row.begin(), row.end(), [&](int a, int b) { return sheet.nodes[a].x < sheet.nodes[b].x; });
+        out.insert(out.end(), row.begin(), row.end());
+    }
+    return out;
+}
+
+// --- Exploding a document --------------------------------------------------
+
+Exploded explodeDocument(std::string_view markdown, std::string_view fallbackTitle) {
+    Exploded out;
+    std::string_view body = noteBody(markdown);
+    struct Head {
+        size_t start, after;
+        int level;
+        std::string text;
+    };
+    std::vector<Head> heads;
+    bool inFence = false;
+    char fenceChar = 0;
+    int fenceLen = 0;
+    std::vector<Line> lines = splitLines(body);
+    for (size_t k = 0; k < lines.size(); ++k) {
+        const Line& line = lines[k];
+        char marker = 0;
+        int run = fenceRun(line.text, marker);
+        if (inFence) {
+            if (run >= fenceLen && marker == fenceChar) inFence = false;
+            continue;
+        }
+        if (run) {
+            inFence = true;
+            fenceChar = marker;
+            fenceLen = run;
+            continue;
+        }
+        int level = 0;
+        std::string text = lineText(line.text, &level);
+        if (level > 0 && !text.empty())
+            heads.push_back({line.start, k + 1 < lines.size() ? lines[k + 1].start : body.size(), level, text});
+    }
+    int firstLevel = 0, minLevel = 7;
+    bool second = false;
+    for (const Head& h : heads) {
+        firstLevel += h.level == 1;
+        second = second || h.level == 2;
+        minLevel = std::min(minLevel, h.level);
+    }
+    // ## sections are the cards when there are any, else the top headings;
+    // two or more # headings over them are groups, one alone is the title
+    int cardLevel = second ? 2 : minLevel;
+    bool grouped = second && firstLevel >= 2;
+    out.title = frontmatterValue(markdown, "title");
+    if (out.title.empty() && firstLevel == 1 && !heads.empty() && heads[0].level == 1) out.title = heads[0].text;
+    if (out.title.empty()) out.title = std::string(fallbackTitle);
+
+    int group = -1;
+    size_t from = 0;
+    bool fromHeading = false;
+    std::string partTitle = out.title;
+    auto cut = [&](size_t end) {
+        std::string_view piece = body.substr(from, end - from);
+        if (piece.find_first_not_of(" \t\r\n") == std::string_view::npos) return;
+        std::string text = shiftHeadings(piece, 1 - cardLevel);
+        if (!fromHeading) {
+            // Text before any card heading reads under its own title
+            size_t first = text.find_first_not_of("\r\n");
+            text = "# " + partTitle + "\n\n" + (first == std::string::npos ? std::string() : text.substr(first));
+        }
+        out.parts.push_back({partTitle, text, group});
+    };
+    for (const Head& h : heads) {
+        if (h.level > cardLevel) continue;  // stays inside its card
+        cut(h.start);
+        if (h.level == cardLevel) {
+            from = h.start;
+            fromHeading = true;
+        } else {
+            if (grouped) {
+                out.groups.push_back(h.text);
+                group = (int)out.groups.size() - 1;
+            }
+            from = h.after;
+            fromHeading = false;
+        }
+        partTitle = h.text;
+    }
+    from = std::min(from, body.size());
+    cut(body.size());
+    return out;
+}
+
+void layoutExploded(const Exploded& doc, float x, float y, std::vector<Box>& cards, std::vector<Box>& groups) {
+    const float w = 360, h = 240;
+    cards.assign(doc.parts.size(), Box{});
+    groups.assign(doc.groups.size(), Box{});
+    if (doc.groups.empty()) {
+        // Rows of four, with room for the arrows between them
+        for (size_t i = 0; i < doc.parts.size(); ++i) {
+            float cx = x + (float)(i % 4) * (w + 80), cy = y + (float)(i / 4) * (h + 80);
+            cards[i] = {cx, cy, cx + w, cy + h};
+        }
+        return;
+    }
+    // Each group a column of its cards; what comes before the first group
+    // stands in a column of its own on the left
+    std::vector<std::vector<size_t>> columns(doc.groups.size() + 1);
+    for (size_t i = 0; i < doc.parts.size(); ++i) columns[(size_t)(doc.parts[i].group + 1)].push_back(i);
+    float cx = x;
+    for (size_t c = 0; c < columns.size(); ++c) {
+        if (c == 0 && columns[c].empty()) continue;
+        bool inGroup = c > 0;
+        float left = cx + (inGroup ? 40.0f : 0.0f), top = y + (inGroup ? 80.0f : 0.0f);
+        for (size_t k = 0; k < columns[c].size(); ++k) {
+            float cy = top + (float)k * (h + 60);
+            cards[columns[c][k]] = {left, cy, left + w, cy + h};
+        }
+        if (inGroup) {
+            float rows = (float)std::max<size_t>(1, columns[c].size());
+            groups[c - 1] = {cx, y, cx + w + 80, top + rows * (h + 60) - 60 + 40};
+            cx += w + 80 + 120;
+        } else {
+            cx += w + 120;
+        }
+    }
+}
+
+// --- Links in the front matter ---------------------------------------------
+
+namespace {
+
+// The lines of a block list under a key line, as [start, end) of the text
+// past the key line; `indent` takes what the last item line starts with
+size_t blockListEnd(const std::string& markdown, size_t keyLineEnd, size_t closing, std::string* indent) {
+    size_t end = keyLineEnd;
+    size_t scan = keyLineEnd;
+    while (scan < closing) {
+        size_t next = markdown.find('\n', scan);
+        size_t lineEnd = next == std::string::npos ? markdown.size() : next;
+        std::string_view line(markdown.data() + scan, lineEnd - scan);
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        std::string_view t = trimView(line);
+        size_t after = next == std::string::npos ? markdown.size() : next + 1;
+        if (!t.empty() && t[0] != '#') {
+            if (line[0] != ' ' && line[0] != '\t' && t.rfind("- ", 0) != 0) break;
+            if (indent && t.rfind("- ", 0) == 0) *indent = std::string(line.substr(0, line.find('-')));
+            end = after;
+        }
+        scan = after;
+    }
+    return end;
+}
+
+// Whether a list item's raw text (after "- ") holds the link
+bool itemIs(std::string_view raw, std::string_view link) {
+    size_t hash = raw.find(" #");
+    std::string_view t = trimView(hash == std::string_view::npos ? raw : raw.substr(0, hash));
+    if (t.size() >= 2 && (t.front() == '"' || t.front() == '\'') && t.back() == t.front()) t = t.substr(1, t.size() - 2);
+    return t == link;
+}
+
+}  // namespace
+
+bool addFrontmatterLink(std::string& markdown, std::string_view key, std::string_view link) {
+    std::string item = yamlScalar(link);
+    fm::Document doc = fm::parse(markdown);
+    if (!doc.present) {
+        size_t begin = markdown.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;
+        std::string eol = markdown.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+        std::string block = "---" + eol + std::string(key) + ":" + eol + "  - " + item + eol + "---" + eol;
+        if (begin < markdown.size() && markdown[begin] != '\n' && markdown[begin] != '\r') block += eol;
+        markdown.insert(begin, block);
+        return true;
+    }
+    if (!doc.safeToWrite) return false;
+    const fm::Property* p = fm::find(doc, std::string(key));
+    if (!p) {
+        markdown.insert(doc.closing, std::string(key) + ":" + doc.eol + "  - " + item + doc.eol);
+        return true;
+    }
+    size_t keyLineEnd = markdown.find('\n', p->valueEnd);
+    keyLineEnd = keyLineEnd == std::string::npos ? markdown.size() : keyLineEnd + 1;
+    if (p->kind == fm::Kind::List) {
+        if (std::find(p->items.begin(), p->items.end(), std::string(link)) != p->items.end()) return true;
+        if (p->valueStart < p->valueEnd) {
+            // A flow list: [a, b]
+            std::string flow = "[";
+            for (const std::string& existing : p->items) flow += yamlScalar(existing) + ", ";
+            markdown.replace(p->valueStart, p->valueEnd - p->valueStart, flow + item + "]");
+            return true;
+        }
+        std::string indent = "  ";
+        size_t end = blockListEnd(markdown, keyLineEnd, doc.closing, &indent);
+        markdown.insert(end, indent + "- " + item + doc.eol);
+        return true;
+    }
+    // `key:` with nothing yet becomes the list
+    if (p->writable && !p->nullValue && p->valueStart == p->valueEnd) {
+        markdown.insert(keyLineEnd, "  - " + item + doc.eol);
+        return true;
+    }
+    return false;
+}
+
+bool removeFrontmatterLink(std::string& markdown, std::string_view key, std::string_view link) {
+    fm::Document doc = fm::parse(markdown);
+    if (!doc.present || !doc.safeToWrite) return false;
+    const fm::Property* p = fm::find(doc, std::string(key));
+    if (!p || p->kind != fm::Kind::List) return false;
+    if (std::find(p->items.begin(), p->items.end(), std::string(link)) == p->items.end()) return false;
+    size_t keyLine = p->valueStart == 0 ? 0 : markdown.rfind('\n', p->valueStart - 1);
+    keyLine = keyLine == std::string::npos ? 0 : keyLine + 1;
+    size_t keyLineEnd = markdown.find('\n', p->valueEnd);
+    keyLineEnd = keyLineEnd == std::string::npos ? markdown.size() : keyLineEnd + 1;
+    bool last = p->items.size() == 1;
+    if (p->valueStart < p->valueEnd) {
+        if (last) {
+            markdown.erase(keyLine, keyLineEnd - keyLine);
+            return true;
+        }
+        std::string flow = "[";
+        for (const std::string& existing : p->items) {
+            if (existing == link) continue;
+            flow += (flow.size() > 1 ? ", " : "") + yamlScalar(existing);
+        }
+        markdown.replace(p->valueStart, p->valueEnd - p->valueStart, flow + "]");
+        return true;
+    }
+    // The item's line in the block list, then the key line when it was the last
+    size_t end = blockListEnd(markdown, keyLineEnd, doc.closing, nullptr);
+    for (size_t scan = keyLineEnd; scan < end;) {
+        size_t next = markdown.find('\n', scan);
+        size_t lineEnd = next == std::string::npos ? markdown.size() : next;
+        size_t after = next == std::string::npos ? markdown.size() : next + 1;
+        std::string_view t = trimView(std::string_view(markdown.data() + scan, lineEnd - scan));
+        if (t.rfind("- ", 0) == 0 && itemIs(t.substr(2), link)) {
+            markdown.erase(scan, after - scan);
+            if (last) markdown.erase(keyLine, keyLineEnd - keyLine);
+            return true;
+        }
+        scan = after;
+    }
+    return false;
 }
 
 }  // namespace sheet

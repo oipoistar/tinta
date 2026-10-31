@@ -150,7 +150,7 @@ int nodeAt(const SheetDoc& doc, float x, float y, bool groupsToo) {
     for (int pass = 0; pass < 2; ++pass) {
         for (int i = (int)doc.model.nodes.size() - 1; i >= 0; --i) {
             const Node& n = doc.model.nodes[i];
-            if (n.type == NodeType::Group) continue;
+            if (n.type == NodeType::Group || foldedAwayAt(doc, i)) continue;
             if ((pass == 0) != isSelected(doc, n.id)) continue;
             Box b = boxOf(n);
             if (x >= b.left && x <= b.right && y >= b.top && y <= b.bottom) return i;
@@ -383,9 +383,105 @@ unsigned long long contentKey(const App& app, const SheetCard& c, const D2D1_COL
     return key | 1;  // never 0: 0 means "draw again"
 }
 
+// The document layout borrowed to draw notes off screen: unit scale, the
+// print layout, no panels, the screen's theme. Everything is put back when
+// the session ends, and the page behind the sheet is laid out again if it
+// is ever shown.
+struct NoteLayoutSession {
+    App& app;
+    ComPtr<ID2D1DeviceContext> dc;
+    ComPtr<ID2D1SolidColorBrush> brush;
+    qmd::ElementPtr savedRoot;
+    std::string savedFile;
+    int savedW = 0, savedH = 0, savedPct = 100;
+    float savedScale = 1, savedZoom = 1, savedApplied = 1, savedScrollX = 0, savedScrollY = 0;
+    bool savedEdit = false, savedToc = false, savedBrowser = false, savedPanel = false;
+
+    explicit NoteLayoutSession(App& a) : app(a) {
+        ComPtr<ID2D1Device> device;
+        if (app.deviceContext) app.deviceContext->GetDevice(&device);
+        if (!device || FAILED(device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc)) || !dc) return;
+        dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
+        if (!brush) return;
+        savedRoot = app.root;
+        savedFile = app.currentFile;
+        savedW = app.width;
+        savedH = app.height;
+        savedScale = app.contentScale;
+        savedZoom = app.zoomFactor;
+        savedApplied = app.appliedZoomFactor;
+        savedEdit = app.editMode;
+        savedToc = app.showToc;
+        savedBrowser = app.showFolderBrowser;
+        savedPanel = app.showSearchPanel;
+        savedScrollX = app.scrollX;
+        savedScrollY = app.scrollY;
+        savedPct = app.readingWidthPct;
+        app.editMode = false;
+        app.showToc = app.showFolderBrowser = app.showSearchPanel = false;
+        app.printLayout = true;
+        app.contentScale = 1.0f;
+        app.zoomFactor = 1.0f;
+        app.readingWidthPct = 100;
+        updateTextFormats(app);
+    }
+
+    ~NoteLayoutSession() {
+        if (!ready()) return;
+        app.root = savedRoot;
+        app.currentFile = savedFile;
+        app.width = savedW;
+        app.height = savedH;
+        app.contentScale = savedScale;
+        app.zoomFactor = savedZoom;
+        app.editMode = savedEdit;
+        app.showToc = savedToc;
+        app.showFolderBrowser = savedBrowser;
+        app.showSearchPanel = savedPanel;
+        app.readingWidthPct = savedPct;
+        app.printLayout = false;
+        app.scrollX = savedScrollX;
+        app.scrollY = savedScrollY;
+        updateTextFormats(app);
+        app.appliedZoomFactor = savedApplied;
+        app.layoutDirty = true;
+    }
+
+    bool ready() const { return dc && brush; }
+
+    // Lays a note out at `width`: its content height, or 0 when it does not parse
+    float layout(const std::string& source, const std::wstring& path, float width) {
+        auto parsed = parseDocument(app.parser, source, path);
+        if (!parsed.success || !parsed.root) return 0;
+        app.root = parsed.root;
+        app.currentFile = toUtf8(path);
+        layoutForWidth(app, width);
+        return std::max(1.0f, app.contentHeight);
+    }
+
+    // The laid-out note from `top`, `height` units of it, at `px` pixels a unit
+    ComPtr<ID2D1Bitmap1> draw(float width, float top, float height, float px, D2D1_COLOR_F fill) {
+        UINT w = (UINT)std::ceil(width * px), h = (UINT)std::ceil(std::max(1.0f, height) * px);
+        if (w == 0 || h == 0) return nullptr;
+        D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_TARGET, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+            96.0f * px, 96.0f * px);
+        ComPtr<ID2D1Bitmap1> bitmap;
+        if (FAILED(dc->CreateBitmap(D2D1::SizeU(w, h), nullptr, 0, &props, &bitmap)) || !bitmap) return nullptr;
+        dc->SetTarget(bitmap.Get());
+        dc->SetDpi(96.0f * px, 96.0f * px);
+        dc->BeginDraw();
+        dc->Clear(fill);
+        drawLayoutRange(app, dc.Get(), brush.Get(), top, top + height, 0.0f, 0.0f);
+        bool ok = SUCCEEDED(dc->EndDraw());
+        dc->SetTarget(nullptr);
+        return ok ? bitmap : nullptr;
+    }
+};
+
 }  // namespace
 
-static float sheetDetailThreshold() { return 0.33f; }
+float sheetui::sheetDetailThreshold() { return 0.33f; }
 
 namespace sheetui {
 
@@ -425,32 +521,8 @@ void renderCardBitmaps(App& app, SheetDoc& doc, unsigned long long budgetMs) {
     if (jobs.empty()) return;
     std::sort(jobs.begin(), jobs.end(), [](const Job& a, const Job& b) { return a.distance < b.distance; });
 
-    // One layout session for the batch: unit scale, no screen padding, the
-    // screen's theme
-    ComPtr<ID2D1Device> device;
-    app.deviceContext->GetDevice(&device);
-    if (!device) return;
-    ComPtr<ID2D1DeviceContext> dc;
-    if (FAILED(device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc)) || !dc) return;
-    ComPtr<ID2D1SolidColorBrush> brush;
-    dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
-    if (!brush) return;
-
-    const qmd::ElementPtr savedRoot = app.root;
-    const std::string savedFile = app.currentFile;
-    const int savedW = app.width, savedH = app.height;
-    const float savedScale = app.contentScale, savedZoom = app.zoomFactor, savedApplied = app.appliedZoomFactor;
-    const bool savedEdit = app.editMode, savedToc = app.showToc, savedBrowser = app.showFolderBrowser,
-               savedPanel = app.showSearchPanel;
-    const float savedScrollX = app.scrollX, savedScrollY = app.scrollY;
-    const int savedPct = app.readingWidthPct;
-    app.editMode = false;
-    app.showToc = app.showFolderBrowser = app.showSearchPanel = false;
-    app.printLayout = true;
-    app.contentScale = 1.0f;
-    app.zoomFactor = 1.0f;
-    app.readingWidthPct = 100;
-    updateTextFormats(app);
+    NoteLayoutSession session(app);
+    if (!session.ready()) return;
 
     for (const Job& job : jobs) {
         if (nowMs() - now > budgetMs) break;
@@ -460,39 +532,21 @@ void renderCardBitmaps(App& app, SheetDoc& doc, unsigned long long budgetMs) {
         float innerH = std::max(20.0f, n.height - cardPadding() * 2);
         D2D1_COLOR_F fill = cardFill(app, n, pal);
         std::wstring notePath = n.type == NodeType::File ? c.path : doc.file;
-        auto parsed = parseDocument(app.parser, c.source, notePath);
-        if (!parsed.success || !parsed.root) {
+        float contentH = session.layout(c.source, notePath, inner);
+        if (contentH <= 0) {
             c.layoutFailed = true;
             c.bmKey = contentKey(app, c, fill, inner);
             continue;
         }
-        app.root = parsed.root;
-        app.currentFile = toUtf8(notePath);
-        layoutForWidth(app, inner);
-        float contentH = std::max(1.0f, app.contentHeight);
         c.contentHeight = contentH;
         c.scroll = std::clamp(c.scroll, 0.0f, std::max(0.0f, contentH - innerH));
         // The slice around what the card shows, so a short scroll needs no redraw
         float sliceH = std::min(contentH, std::max(innerH * 2.5f, innerH + 400.0f));
         float sliceTop = std::clamp(c.scroll - innerH * 0.5f, 0.0f, std::max(0.0f, contentH - sliceH));
-        float px = bucket;
         // A bitmap stays within 4096 pixels a side
-        px = std::min(px, 4096.0f / std::max(inner, sliceH));
-        UINT w = (UINT)std::ceil(inner * px), h = (UINT)std::ceil(std::max(1.0f, sliceH) * px);
-        if (w == 0 || h == 0) continue;
-        D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
-            D2D1_BITMAP_OPTIONS_TARGET, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
-            96.0f * px, 96.0f * px);
-        ComPtr<ID2D1Bitmap1> bitmap;
-        if (FAILED(dc->CreateBitmap(D2D1::SizeU(w, h), nullptr, 0, &props, &bitmap)) || !bitmap) continue;
-        dc->SetTarget(bitmap.Get());
-        dc->SetDpi(96.0f * px, 96.0f * px);
-        dc->BeginDraw();
-        dc->Clear(fill);
-        drawLayoutRange(app, dc.Get(), brush.Get(), sliceTop, sliceTop + sliceH, 0.0f, 0.0f);
-        bool ok = SUCCEEDED(dc->EndDraw());
-        dc->SetTarget(nullptr);
-        if (!ok) continue;
+        float px = std::min(bucket, 4096.0f / std::max(inner, sliceH));
+        ComPtr<ID2D1Bitmap1> bitmap = session.draw(inner, sliceTop, sliceH, px, fill);
+        if (!bitmap) continue;
         c.bitmap = bitmap;
         c.bmScale = px;
         c.bmWidth = inner;
@@ -502,25 +556,39 @@ void renderCardBitmaps(App& app, SheetDoc& doc, unsigned long long budgetMs) {
         c.bmKey = contentKey(app, c, fill, inner);
         c.layoutFailed = false;
     }
+}
 
-    app.root = savedRoot;
-    app.currentFile = savedFile;
-    app.width = savedW;
-    app.height = savedH;
-    app.contentScale = savedScale;
-    app.zoomFactor = savedZoom;
-    app.editMode = savedEdit;
-    app.showToc = savedToc;
-    app.showFolderBrowser = savedBrowser;
-    app.showSearchPanel = savedPanel;
-    app.readingWidthPct = savedPct;
-    app.printLayout = false;
-    app.scrollX = savedScrollX;
-    app.scrollY = savedScrollY;
-    updateTextFormats(app);
-    app.appliedZoomFactor = savedApplied;
-    // The page behind the sheet is laid out again if it is ever shown
-    app.layoutDirty = true;
+void renderPeekBitmap(App& app, SheetDoc& doc) {
+    if (doc.peekId.empty() || !app.deviceContext) return;
+    int i = nodeIndex(doc.model, doc.peekId);
+    if (i < 0) return;
+    const Node& n = doc.model.nodes[i];
+    SheetCard& c = card(app, doc, n);
+    if (c.kind != SheetCard::Kind::Note) return;
+    float inner = std::max(40.0f, n.width - cardPadding() * 2);
+    D2D1_COLOR_F fill = cardFill(app, n, palette(app));
+    unsigned long long key = contentKey(app, c, fill, inner) ^ (unsigned long long)(app.contentScale * 64);
+    if (doc.peekBitmap && doc.peekBitmapId == n.id && doc.peekBitmapKey == key &&
+        doc.peekBitmapGeneration == app.renderTargetGeneration) {
+        return;
+    }
+    NoteLayoutSession session(app);
+    if (!session.ready()) return;
+    float contentH = session.layout(c.source, n.type == NodeType::File ? c.path : doc.file, inner);
+    if (contentH <= 0) return;
+    // The lens reads at the screen's scale, up to a long note's first pages
+    float px = app.contentScale;
+    float height = std::min(contentH, 4096.0f / px);
+    px = std::min(px, 4096.0f / std::max(inner, height));
+    ComPtr<ID2D1Bitmap1> bitmap = session.draw(inner, 0.0f, height, px, fill);
+    if (!bitmap) return;
+    doc.peekBitmap = bitmap;
+    doc.peekBitmapId = n.id;
+    doc.peekBitmapKey = key;
+    doc.peekBitmapGeneration = app.renderTargetGeneration;
+    doc.peekContentHeight = contentH;
+    doc.peekBitmapHeight = height;
+    doc.peekBitmapScale = px;
 }
 
 }  // namespace sheetui
@@ -550,6 +618,7 @@ void sheetPrepareFrame(App& app) {
         if (t >= 1.0f) doc->flight.active = false;
     }
     renderCardBitmaps(app, *doc, 14);
+    renderPeekBitmap(app, *doc);
     ensureTimer(app);
 }
 
@@ -618,14 +687,19 @@ void drawGroup(App& app, SheetDoc& doc, const Node& g, const Palette& p, float f
         for (int i = 0; i < (int)doc.model.nodes.size(); ++i) {
             if (doc.model.nodes[i].type != NodeType::Group && insideGroup(g, doc.model.nodes[i])) ++count;
         }
-        std::wstring chip = toWide(g.laneKey) + L": " + text + L" \u00B7 " + std::to_wstring(count);
+        // Over its limit, the lane says so in red
+        bool over = g.laneLimit > 0 && count > g.laneLimit;
+        std::wstring chip = toWide(g.laneKey) + L": " + text + L" \u00B7 " + std::to_wstring(count) +
+                            (g.laneLimit > 0 ? L"/" + std::to_wstring(g.laneLimit) : std::wstring());
+        if (over) strokeRound(app, r, radius, alpha(presetColor(app, "1"), 0.85f * fade), dpi(app, 2.0f));
         float cpx = std::clamp(11.5f * s, dpi(app, 8.0f), dpi(app, 22.0f));
         IDWriteTextLayout* cl = makeLayout(app, chip, textFormat(app, uiFace(), cpx, DWRITE_FONT_WEIGHT_NORMAL, false), 4000, cpx * 2);
         DWRITE_TEXT_METRICS cm = metrics(cl);
         float cx = tx + m.width + cpx * 0.9f, cy = ty + (m.height - cm.height) * 0.5f;
         D2D1_RECT_F pill = D2D1::RectF(cx - cpx * 0.55f, cy - cpx * 0.12f, cx + cm.width + cpx * 0.55f, cy + cm.height + cpx * 0.12f);
         if (pill.right < r.right) {
-            fillRound(app, pill, (pill.bottom - pill.top) * 0.5f, alpha(has ? color : p.accent, 0.16f * fade));
+            fillRound(app, pill, (pill.bottom - pill.top) * 0.5f,
+                      over ? alpha(presetColor(app, "1"), 0.32f * fade) : alpha(has ? color : p.accent, 0.16f * fade));
             drawText(app, cl, cx, cy, alpha(p.text, 0.75f * fade));
         }
         if (cl) cl->Release();
@@ -1034,6 +1108,27 @@ void drawEditBox(App& app, SheetDoc& doc, const Palette& p) {
     }
     app.brush->SetColor(p.text);
     app.renderTarget->DrawTextLayout(D2D1::Point2F(0, 0), layout, app.brush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    if (card) {
+        // The caret's line starts #word: a mark where the heading's space belongs
+        const std::wstring& t = doc.edit.text;
+        size_t caret = std::min(doc.edit.caret, t.size());
+        size_t start = caret == 0 ? 0 : t.rfind(L'\n', caret - 1);
+        start = start == std::wstring::npos || caret == 0 ? 0 : start + 1;
+        size_t hashes = 0;
+        while (start + hashes < t.size() && t[start + hashes] == L'#') ++hashes;
+        if (hashes >= 1 && hashes <= 6 && start + hashes < t.size() && t[start + hashes] != L' ' &&
+            t[start + hashes] != L'\n') {
+            float gx = 0, gy = 0;
+            DWRITE_HIT_TEST_METRICS gm{};
+            layout->HitTestTextPosition((UINT32)(start + hashes), FALSE, &gx, &gy, &gm);
+            float u = dpi(app, 1.0f) / textScale;
+            app.brush->SetColor(alpha(p.accent, 0.9f));
+            app.renderTarget->FillRectangle(D2D1::RectF(gx - 3.5f * u, gy + gm.height - 1.5f * u, gx + 3.5f * u, gy + gm.height),
+                                            app.brush);
+            app.renderTarget->FillRectangle(D2D1::RectF(gx - 0.75f * u, gy + gm.height - 5.0f * u, gx + 0.75f * u, gy + gm.height),
+                                            app.brush);
+        }
+    }
     // Caret
     if (app.cursorBlinkOn) {
         float cx = 0, cy = 0;
@@ -1047,6 +1142,7 @@ void drawEditBox(App& app, SheetDoc& doc, const Palette& p) {
     if (!card && doc.edit.text.empty()) {
         const char* key = doc.editing == SheetDoc::Edit::Url       ? "sheet.url_placeholder"
                           : doc.editing == SheetDoc::Edit::LaneKey ? "sheet.lane_placeholder"
+                          : doc.editing == SheetDoc::Edit::LaneLimit ? "sheet.limit_placeholder"
                                                                    : "sheet.label_placeholder";
         IDWriteTextLayout* l = makeLayout(app, tr(app, key), textFormat(app, uiFace(), editFontSize(doc) * textScale,
                                                                         DWRITE_FONT_WEIGHT_NORMAL, false),
@@ -1159,6 +1255,45 @@ void icon(App& app, int which, const D2D1_RECT_F& r, D2D1_COLOR_F c) {
         case ACT_PRESENT_NEXT:
             L(-3, -6, 3, 0);
             L(3, 0, -3, 6);
+            break;
+        case ACT_GROUP_SELECTION:  // as Add group
+            R(-9, -6, 9, 8, 2, true);
+            L(-9, -9, -2, -9);
+            break;
+        case ACT_CHAIN:  // three cards joined in a row
+            R(-11, -3, -6, 3, 1);
+            R(-2.5f, -3, 2.5f, 3, 1);
+            R(6, -3, 11, 3, 1);
+            L(-6, 0, -2.5f, 0);
+            L(2.5f, 0, 6, 0);
+            break;
+        case ACT_ALIGN_MENU:  // bars against a line
+            L(-8, -8, -8, 8);
+            R(-5, -6, 7, -2, 1);
+            R(-5, 2, 3, 6, 1);
+            break;
+        case ACT_FOLD:  // chevrons closing
+            L(-6, -8, 0, -3);
+            L(0, -3, 6, -8);
+            L(-6, 8, 0, 3);
+            L(0, 3, 6, 8);
+            break;
+        case ACT_UNFOLD_ALL:  // chevrons opening
+            L(-6, -3, 0, -8);
+            L(0, -8, 6, -3);
+            L(-6, 3, 0, 8);
+            L(0, 8, 6, 3);
+            break;
+        case ACT_REMOVE:  // a bin
+            L(-7, -5, 7, -5);
+            L(-2.5f, -5, -2.5f, -8);
+            L(-2.5f, -8, 2.5f, -8);
+            L(2.5f, -8, 2.5f, -5);
+            L(-5, -5, -4, 8);
+            L(-4, 8, 4, 8);
+            L(4, 8, 5, -5);
+            L(-1.5f, -2, -1.5f, 5);
+            L(1.5f, -2, 1.5f, 5);
             break;
         case ACT_PRESENT_EXIT:
         case ACT_FIND_CLOSE:
@@ -1520,6 +1655,324 @@ void drawMenu(App& app, SheetDoc& doc, const Palette& p) {
     }
 }
 
+// Text that reads on the accent: dark on a light accent, else white
+D2D1_COLOR_F onAccent(const Palette& p) {
+    float lum = 0.299f * p.accent.r + 0.587f * p.accent.g + 0.114f * p.accent.b;
+    return lum > 0.55f ? D2D1::ColorF(0.07f, 0.08f, 0.1f) : D2D1::ColorF(1, 1, 1);
+}
+
+// --- Folds, the selection bar, jump labels, [[ names ---------------------
+
+// A folded card's +N on its right, joined to it; a click unfolds it
+void drawFoldBadges(App& app, SheetDoc& doc, const Palette& p) {
+    float s = scale(app, doc);
+    D2D1_RECT_F v = viewRect(app);
+    for (int i = 0; i < (int)doc.model.nodes.size(); ++i) {
+        const Node& n = doc.model.nodes[i];
+        if (!n.folded || n.type == NodeType::Group || foldedAwayAt(doc, i)) continue;
+        int count = foldedCount(doc.model, i, doc.hidden);
+        if (count <= 0) continue;
+        D2D1_RECT_F r = screenRect(app, doc, drawBox(doc, n));
+        float px = std::clamp(12.0f * s, dpi(app, 9.0f), dpi(app, 13.0f));
+        IDWriteTextLayout* l = makeLayout(app, L"+" + std::to_wstring(count),
+                                          textFormat(app, uiFace(), px, DWRITE_FONT_WEIGHT_SEMI_BOLD, false), 400, px * 2);
+        DWRITE_TEXT_METRICS m = metrics(l);
+        float h = m.height + dpi(app, 6.0f), w = std::max(h, m.width + dpi(app, 14.0f));
+        float mid = (r.top + r.bottom) * 0.5f;
+        D2D1_RECT_F pill = D2D1::RectF(r.right + dpi(app, 12.0f), mid - h * 0.5f, r.right + dpi(app, 12.0f) + w, mid + h * 0.5f);
+        if (intersects(pill, v)) {
+            line(app, D2D1::Point2F(r.right, mid), D2D1::Point2F(pill.left, mid), alpha(p.accent, 0.7f), dpi(app, 1.5f));
+            fillRound(app, pill, h * 0.5f, p.accent);
+            drawText(app, l, pill.left + (w - m.width) * 0.5f, pill.top + (h - m.height) * 0.5f, onAccent(p));
+            doc.foldHits.push_back({pill, n.id});
+        }
+        if (l) l->Release();
+    }
+}
+
+// Over the selected cards: their colour, Group, Join in order and Align for
+// several, Fold for a card with arrows out, and Remove
+void drawSelectionBar(App& app, SheetDoc& doc, const Palette& p) {
+    doc.selectionBar = {};
+    if (doc.selected.empty() || doc.presenting || doc.menuOpen || doc.jumping || doc.editing != SheetDoc::Edit::None ||
+        (doc.gesture != SheetDoc::Gesture::None && doc.gesture != SheetDoc::Gesture::Pending)) {
+        return;
+    }
+    std::vector<int> picked = selectedIndexes(doc);
+    if (picked.empty()) return;
+    bool many = picked.size() > 1;
+    const Node& first = doc.model.nodes[picked[0]];
+    bool leaves = std::any_of(doc.model.edges.begin(), doc.model.edges.end(),
+                              [&](const Edge& e) { return e.fromNode == first.id; });
+    std::string color = first.color;
+    for (int i : picked) {
+        if (doc.model.nodes[i].color != color) color = "*";
+    }
+    std::vector<int> ids;
+    for (int c = 1; c <= 6; ++c) ids.push_back(ACT_COLOR_BASE + c);
+    ids.push_back(ACT_COLOR_BASE);
+    ids.push_back(0);
+    ids.push_back(ACT_GROUP_SELECTION);
+    if (many) {
+        ids.push_back(ACT_CHAIN);
+        ids.push_back(ACT_ALIGN_MENU);
+    } else if (first.type != NodeType::Group && (first.folded || leaves)) {
+        ids.push_back(ACT_FOLD);
+    }
+    ids.push_back(ACT_REMOVE);
+    float swatch = dpi(app, 22.0f), size = dpi(app, 30.0f), sep = dpi(app, 11.0f), pad = dpi(app, 5.0f);
+    float total = 0;
+    for (int id : ids) total += id == 0 ? sep : id >= ACT_COLOR_BASE && id <= ACT_COLOR_BASE + 6 ? swatch : size;
+    float h = size + pad * 2, w = total + pad * 2;
+    D2D1_RECT_F v = viewRect(app);
+    D2D1_RECT_F sel = screenRect(app, doc, bounds(doc.model, picked));
+    if (!intersects(sel, v)) return;  // nothing selected in view, nothing to stand over
+    // Above the cards, else below them, else inside the top of the view
+    float top = sel.top - dpi(app, 34.0f) - h;
+    if (top < v.top + dpi(app, 8.0f)) top = sel.bottom + dpi(app, 14.0f);
+    if (top + h > v.bottom - dpi(app, 70.0f)) top = v.top + dpi(app, 8.0f);
+    float left = std::clamp((sel.left + sel.right) * 0.5f - w * 0.5f, v.left + dpi(app, 8.0f),
+                            std::max(v.left + dpi(app, 8.0f), v.right - dpi(app, 8.0f) - w));
+    D2D1_RECT_F bar = D2D1::RectF(left, top, left + w, top + h);
+    shadow(app, bar, dpi(app, 10.0f), p, 1.2f);
+    fillRound(app, bar, dpi(app, 10.0f), p.surface);
+    strokeRound(app, bar, dpi(app, 10.0f), p.surfaceBorder, dpi(app, 1.0f));
+    addHit(doc, bar, -1);
+    doc.selectionBar = bar;
+    float x = bar.left + pad, y = bar.top + pad;
+    float tipX = 0;
+    for (int id : ids) {
+        if (id == 0) {
+            line(app, D2D1::Point2F(x + sep * 0.5f, y + dpi(app, 6.0f)), D2D1::Point2F(x + sep * 0.5f, y + size - dpi(app, 6.0f)),
+                 alpha(p.text, 0.15f), dpi(app, 1.0f));
+            x += sep;
+            continue;
+        }
+        bool isSwatch = id >= ACT_COLOR_BASE && id <= ACT_COLOR_BASE + 6;
+        float slot = isSwatch ? swatch : size;
+        D2D1_RECT_F r = D2D1::RectF(x, y, x + slot, y + size);
+        bool hover = doc.hoverUi == id;
+        if (hover) tipX = (r.left + r.right) * 0.5f;
+        if (isSwatch) {
+            int preset = id - ACT_COLOR_BASE;
+            D2D1_POINT_2F c = D2D1::Point2F((r.left + r.right) * 0.5f, (r.top + r.bottom) * 0.5f);
+            float rad = dpi(app, hover ? 7.5f : 6.5f);
+            if (preset > 0) {
+                app.brush->SetColor(presetColor(app, std::string(1, (char)('0' + preset))));
+                app.renderTarget->FillEllipse(D2D1::Ellipse(c, rad, rad), app.brush);
+            } else {
+                // No colour: a ring struck through
+                app.brush->SetColor(alpha(p.text, 0.55f));
+                app.renderTarget->DrawEllipse(D2D1::Ellipse(c, rad, rad), app.brush, dpi(app, 1.2f));
+                line(app, D2D1::Point2F(c.x - rad * 0.7f, c.y + rad * 0.7f), D2D1::Point2F(c.x + rad * 0.7f, c.y - rad * 0.7f),
+                     alpha(p.text, 0.55f), dpi(app, 1.2f));
+            }
+            bool current = color != "*" && ((preset == 0 && color.empty()) || color == std::string(1, (char)('0' + preset)));
+            if (current) {
+                app.brush->SetColor(p.text);
+                app.renderTarget->DrawEllipse(D2D1::Ellipse(c, rad + dpi(app, 2.5f), rad + dpi(app, 2.5f)), app.brush,
+                                              dpi(app, 1.25f));
+            }
+        } else {
+            if (hover) fillRound(app, r, dpi(app, 7.0f), alpha(p.text, 0.08f));
+            int shape = id == ACT_FOLD && first.folded ? ACT_UNFOLD_ALL : id;
+            icon(app, shape, r, alpha(p.text, hover ? 0.95f : 0.75f));
+        }
+        addHit(doc, r, id);
+        x += slot;
+    }
+    if (tipX > 0) drawTip(app, doc, p, tipX, bar.top);
+}
+
+// J: a label on each card in view; what was typed leaves the labels it ruled out
+void drawJumpLabels(App& app, SheetDoc& doc, const Palette& p) {
+    if (!doc.jumping) return;
+    D2D1_RECT_F v = viewRect(app);
+    app.brush->SetColor(alpha(p.canvas, 0.35f));
+    app.renderTarget->FillRectangle(v, app.brush);
+    float px = dpi(app, 13.0f);
+    for (const auto& label : doc.jumpLabels) {
+        if (label.first.compare(0, doc.jumpTyped.size(), doc.jumpTyped) != 0) continue;
+        int i = nodeIndex(doc.model, label.second);
+        if (i < 0) continue;
+        D2D1_RECT_F r = screenRect(app, doc, drawBox(doc, doc.model.nodes[i]));
+        std::wstring rest = label.first.substr(doc.jumpTyped.size());
+        for (auto& ch : rest) ch = (wchar_t)towupper(ch);
+        IDWriteTextLayout* l = makeLayout(app, rest, textFormat(app, uiFace(), px, DWRITE_FONT_WEIGHT_BOLD, false), 200, px * 2);
+        DWRITE_TEXT_METRICS m = metrics(l);
+        float h = m.height + dpi(app, 6.0f), w = std::max(h, m.width + dpi(app, 12.0f));
+        float x = std::max(v.left + dpi(app, 4.0f), r.left + dpi(app, 6.0f));
+        float y = std::max(v.top + dpi(app, 4.0f), r.top + dpi(app, 6.0f));
+        D2D1_RECT_F pill = D2D1::RectF(x, y, x + w, y + h);
+        shadow(app, pill, dpi(app, 5.0f), p, 1.0f);
+        fillRound(app, pill, dpi(app, 5.0f), p.accent);
+        drawText(app, l, x + (w - m.width) * 0.5f, y + (h - m.height) * 0.5f, onAccent(p));
+        if (l) l->Release();
+    }
+}
+
+// The [[ names under the caret: the sheet's notes, then the folder's
+void drawCompletions(App& app, SheetDoc& doc, const Palette& p) {
+    if (!doc.completing || doc.completions.empty() || doc.editing != SheetDoc::Edit::Card) return;
+    D2D1_RECT_F rect{};
+    float sc = 1;
+    if (!editRect(app, doc, rect, sc)) return;
+    IDWriteTextLayout* layout = editLayout(app, doc, (rect.right - rect.left) / sc);
+    if (!layout) return;
+    float cx = 0, cy = 0;
+    DWRITE_HIT_TEST_METRICS hm{};
+    layout->HitTestTextPosition((UINT32)std::min(doc.completeFrom, doc.edit.text.size()), FALSE, &cx, &cy, &hm);
+    D2D1_RECT_F v = viewRect(app);
+    float rowH = dpi(app, 26.0f), w = dpi(app, 280.0f), pad = dpi(app, 4.0f);
+    float h = rowH * (float)doc.completions.size() + pad * 2;
+    float x = std::clamp(rect.left + cx * sc - dpi(app, 10.0f), v.left + dpi(app, 6.0f), std::max(v.left, v.right - w - dpi(app, 6.0f)));
+    float y = rect.top + (cy + hm.height - doc.edit.scrollY) * sc + dpi(app, 6.0f);
+    if (y + h > v.bottom - dpi(app, 6.0f)) y = rect.top + (cy - doc.edit.scrollY) * sc - h - dpi(app, 6.0f);
+    D2D1_RECT_F box = D2D1::RectF(x, y, x + w, y + h);
+    shadow(app, box, dpi(app, 8.0f), p, 1.4f);
+    fillRound(app, box, dpi(app, 8.0f), p.surface);
+    strokeRound(app, box, dpi(app, 8.0f), p.surfaceBorder, dpi(app, 1.0f));
+    IDWriteTextFormat* nameFormat = textFormat(app, uiFace(), dpi(app, 13.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
+    IDWriteTextFormat* whereFormat = textFormat(app, uiFace(), dpi(app, 11.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
+    for (size_t k = 0; k < doc.completions.size(); ++k) {
+        const SheetDoc::Completion& item = doc.completions[k];
+        D2D1_RECT_F row = D2D1::RectF(box.left + pad, box.top + pad + rowH * (float)k, box.right - pad,
+                                      box.top + pad + rowH * (float)(k + 1));
+        if ((int)k == doc.completeIndex) fillRound(app, row, dpi(app, 5.0f), alpha(p.accent, 0.18f));
+        std::wstring where = tr(app, item.nodeId.empty() ? "sheet.complete.folder" : "sheet.complete.sheet");
+        IDWriteTextLayout* wl = makeLayout(app, where, whereFormat, 400, rowH);
+        DWRITE_TEXT_METRICS wm = metrics(wl);
+        IDWriteTextLayout* nl = makeLayout(app, item.name, nameFormat, std::max(1.0f, row.right - row.left - wm.width - dpi(app, 24.0f)), rowH);
+        DWRITE_TEXT_METRICS nm = metrics(nl);
+        drawText(app, nl, row.left + dpi(app, 8.0f), (row.top + row.bottom - nm.height) * 0.5f, p.text);
+        drawText(app, wl, row.right - wm.width - dpi(app, 8.0f), (row.top + row.bottom - wm.height) * 0.5f, alpha(p.text, 0.45f));
+        if (nl) nl->Release();
+        if (wl) wl->Release();
+        doc.completeHits.push_back({row, (int)k});
+    }
+}
+
+// --- The hint line -------------------------------------------------------
+
+// What the hint line says now: the next thing that can be done, until it
+// has been done a few times; jumping and the [[ list always say theirs
+std::wstring contextHint(App& app, SheetDoc& doc) {
+    if (doc.presenting) return {};
+    if (doc.jumping) return tr(app, doc.jumpJoin ? "sheet.hint.join" : "sheet.hint.jump");
+    if (doc.completing) return tr(app, "sheet.hint.complete");
+    auto say = [&](int which, const char* key) { return hintRetired(which) ? std::wstring() : std::wstring(tr(app, key)); };
+    switch (doc.gesture) {
+        case SheetDoc::Gesture::Connect: return say(HINT_CONNECT, "sheet.hint.connect");
+        case SheetDoc::Gesture::Marquee: return doc.gestureMoved ? say(HINT_MARQUEE, "sheet.hint.marquee") : std::wstring();
+        case SheetDoc::Gesture::None:
+        case SheetDoc::Gesture::Pending: break;
+        default: return {};
+    }
+    if (doc.editing == SheetDoc::Edit::Card) {
+        // A line that starts #word is not a heading yet
+        const std::wstring& t = doc.edit.text;
+        size_t caret = std::min(doc.edit.caret, t.size());
+        size_t start = caret == 0 ? 0 : t.rfind(L'\n', caret - 1);
+        start = start == std::wstring::npos || caret == 0 ? 0 : start + 1;
+        size_t hashes = 0;
+        while (start + hashes < t.size() && t[start + hashes] == L'#') ++hashes;
+        if (hashes >= 1 && hashes <= 6 && start + hashes < t.size() && t[start + hashes] != L' ' && t[start + hashes] != L'\n' &&
+            hintsShown()) {
+            return tr(app, "sheet.hint.heading");
+        }
+        int i = nodeIndex(doc.model, doc.editId);
+        if (i >= 0 && doc.model.nodes[i].type == NodeType::File) {
+            std::wstring path = absolutePath(doc, doc.model.nodes[i].file);
+            size_t slash = path.find_last_of(L"\\/");
+            std::wstring name = path.substr(slash == std::wstring::npos ? 0 : slash + 1);
+            size_t dot = name.find_last_of(L'.');
+            if (placeholderName(app, dot == std::wstring::npos ? name : name.substr(0, dot)))
+                return say(HINT_NAMING, "sheet.hint.naming");
+        }
+        return say(HINT_LINK, "sheet.hint.link");
+    }
+    if (doc.editing != SheetDoc::Edit::None) return {};
+    if (doc.selected.size() >= 2) return say(HINT_MULTI, "sheet.hint.multi");
+    if (doc.selected.size() == 1) {
+        int i = nodeIndex(doc.model, doc.selected[0]);
+        if (i < 0) return {};
+        const Node& n = doc.model.nodes[i];
+        if (n.type == NodeType::Group) return n.laneKey.empty() ? std::wstring() : say(HINT_LANE, "sheet.hint.lane");
+        return say(HINT_SINGLE, "sheet.hint.single");
+    }
+    if (!doc.model.nodes.empty() && scale(app, doc) < sheetDetailThreshold()) return say(HINT_FAR, "sheet.hint.far");
+    return {};
+}
+
+// A quiet line above the tool bar
+void drawHintLine(App& app, SheetDoc& doc, const Palette& p) {
+    doc.hintText = contextHint(app, doc);
+    if (doc.hintText.empty()) return;
+    D2D1_RECT_F v = viewRect(app);
+    float maxW = std::max(dpi(app, 120.0f), std::min(dpi(app, 720.0f), v.right - v.left - dpi(app, 40.0f)));
+    IDWriteTextLayout* l = makeLayout(app, doc.hintText, textFormat(app, uiFace(), dpi(app, 12.0f), DWRITE_FONT_WEIGHT_NORMAL),
+                                      maxW, dpi(app, 100.0f));
+    if (!l) return;
+    l->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    DWRITE_TEXT_METRICS m = metrics(l);
+    // The tool bar's top, as drawToolbar places it
+    float toolbarTop = v.bottom - dpi(app, 16.0f) - dpi(app, 36.0f) - dpi(app, 8.0f) - dpi(app, 4.0f);
+    float cx = (v.left + v.right) * 0.5f;
+    D2D1_RECT_F pill = D2D1::RectF(cx - m.width * 0.5f - dpi(app, 12.0f), toolbarTop - dpi(app, 10.0f) - m.height - dpi(app, 8.0f),
+                                   cx + m.width * 0.5f + dpi(app, 12.0f), toolbarTop - dpi(app, 10.0f));
+    fillRound(app, pill, dpi(app, 9.0f), alpha(p.surface, 0.92f));
+    drawText(app, l, cx - maxW * 0.5f, pill.top + dpi(app, 4.0f), alpha(p.text, 0.72f));
+    l->Release();
+}
+
+// --- Peek ----------------------------------------------------------------
+
+// A card seen from far, at the screen's own scale beside it
+void drawPeek(App& app, SheetDoc& doc, const Palette& p) {
+    doc.peekRect = {};
+    if (doc.peekId.empty() || !doc.peekBitmap || doc.peekBitmapId != doc.peekId ||
+        doc.peekBitmapGeneration != app.renderTargetGeneration || scale(app, doc) >= sheetDetailThreshold()) {
+        return;
+    }
+    int i = nodeIndex(doc.model, doc.peekId);
+    if (i < 0 || foldedAwayAt(doc, i)) return;
+    const Node& n = doc.model.nodes[i];
+    D2D1_RECT_F r = screenRect(app, doc, drawBox(doc, n));
+    D2D1_RECT_F v = viewRect(app);
+    float s = app.contentScale;
+    float pad = cardPadding() * s;
+    float innerW = std::max(40.0f, n.width - cardPadding() * 2);
+    float shownH = std::min(doc.peekBitmapHeight, doc.peekContentHeight);
+    float w = innerW * s + pad * 2;
+    float h = std::min((v.bottom - v.top) * 0.7f, shownH * s + pad * 2);
+    float x = r.right + dpi(app, 14.0f);
+    if (x + w > v.right - dpi(app, 8.0f)) x = r.left - dpi(app, 14.0f) - w;
+    x = std::clamp(x, v.left + dpi(app, 8.0f), std::max(v.left + dpi(app, 8.0f), v.right - dpi(app, 8.0f) - w));
+    float y = std::clamp(r.top, v.top + dpi(app, 8.0f), std::max(v.top + dpi(app, 8.0f), v.bottom - dpi(app, 8.0f) - h));
+    D2D1_RECT_F lens = D2D1::RectF(x, y, x + w, y + h);
+    float radius = dpi(app, 12.0f);
+    shadow(app, lens, radius, p, 1.8f);
+    fillRound(app, lens, radius, cardFill(app, n, p));
+    strokeRound(app, lens, radius, alpha(p.accent, 0.55f), dpi(app, 1.5f));
+    float visible = (h - pad * 2) / s;
+    doc.peekScroll = std::clamp(doc.peekScroll, 0.0f, std::max(0.0f, shownH - visible));
+    D2D1_RECT_F inner = D2D1::RectF(lens.left + pad, lens.top + pad, lens.right - pad, lens.bottom - pad);
+    D2D1_RECT_F src = D2D1::RectF(0, doc.peekScroll, innerW, doc.peekScroll + std::min(visible, shownH));
+    D2D1_RECT_F dest = D2D1::RectF(inner.left, inner.top, inner.left + innerW * s, inner.top + (src.bottom - src.top) * s);
+    app.renderTarget->PushAxisAlignedClip(inner, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    app.renderTarget->DrawBitmap(doc.peekBitmap.Get(), dest, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, src);
+    app.renderTarget->PopAxisAlignedClip();
+    if (shownH > visible + 1.0f) {
+        // How far into the note the lens reads
+        float trackTop = lens.top + radius, trackBottom = lens.bottom - radius;
+        float thumbH = std::max(dpi(app, 14.0f), (trackBottom - trackTop) * visible / shownH);
+        float ty = trackTop + (trackBottom - trackTop - thumbH) * (doc.peekScroll / std::max(1.0f, shownH - visible));
+        fillRound(app, D2D1::RectF(lens.right - dpi(app, 6.0f), ty, lens.right - dpi(app, 3.0f), ty + thumbH), dpi(app, 1.5f),
+                  alpha(p.text, 0.3f));
+    }
+    doc.peekRect = lens;
+}
+
 void drawEmptyHint(App& app, SheetDoc& doc, const Palette& p) {
     if (!doc.model.nodes.empty() || doc.editing != SheetDoc::Edit::None) return;
     D2D1_RECT_F v = viewRect(app);
@@ -1555,6 +2008,11 @@ void renderSheet(App& app) {
     SheetDoc& doc = *docPtr;
     Palette p = palette(app);
     doc.uiHits.clear();
+    doc.foldHits.clear();
+    doc.completeHits.clear();
+    if (doc.hidden.size() != doc.model.nodes.size()) updateFolds(doc);
+    bool anyHidden = std::find(doc.hidden.begin(), doc.hidden.end(), 1) != doc.hidden.end();
+    auto away = [&](const std::string& id) { return anyHidden && foldedAwayAt(doc, nodeIndex(doc.model, id)); };
     D2D1_RECT_F v = viewRect(app);
     app.brush->SetColor(p.canvas);
     app.renderTarget->FillRectangle(v, app.brush);
@@ -1601,7 +2059,7 @@ void renderSheet(App& app) {
         for (const auto& g : ghosts) {
             if (!ghostShown(doc, ghosts.size(), g)) continue;
             int a = nodeIndex(doc.model, g.first), b = nodeIndex(doc.model, g.second);
-            if (a < 0 || b < 0) continue;
+            if (a < 0 || b < 0 || foldedAwayAt(doc, a) || foldedAwayAt(doc, b)) continue;
             Side fs, ts;
             edgeSides(doc.model.nodes[a], doc.model.nodes[b], Side::None, Side::None, fs, ts);
             Curve c = edgeCurve(drawBox(doc, doc.model.nodes[a]), drawBox(doc, doc.model.nodes[b]), fs, ts);
@@ -1620,6 +2078,7 @@ void renderSheet(App& app) {
     }
     // Arrows
     for (const Edge& e : doc.model.edges) {
+        if (away(e.fromNode) || away(e.toNode)) continue;
         Curve c = edgeCurveFor(doc, e);
         if (c.p0.x == 0 && c.p3.x == 0 && c.p0.y == 0 && c.p3.y == 0) continue;
         bool has = false;
@@ -1639,11 +2098,12 @@ void renderSheet(App& app) {
     std::string current = doc.foundIndex >= 0 && doc.foundIndex < (int)doc.found.size() ? doc.found[doc.foundIndex] : std::string();
     for (int pass = 0; pass < 2; ++pass) {
         for (const Node& n : doc.model.nodes) {
-            if (n.type == NodeType::Group) continue;
+            if (n.type == NodeType::Group || (anyHidden && foldedAwayAt(doc, (int)(&n - doc.model.nodes.data())))) continue;
             if ((pass == 1) != isSelected(doc, n.id)) continue;
             drawCard(app, doc, n, p, fadeOf(n.id), doc.finding && n.id == current);
         }
     }
+    drawFoldBadges(app, doc, p);
     // The press in progress
     if (doc.gesture == SheetDoc::Gesture::Marquee) {
         D2D1_POINT_2F a = toScreen(app, doc, doc.pressSX, doc.pressSY), b = toScreen(app, doc, doc.lastSX, doc.lastSY);
@@ -1686,7 +2146,10 @@ void renderSheet(App& app) {
         D2D1_POINT_2F q = toScreen(app, doc, 0, gy);
         line(app, D2D1::Point2F(v.left, q.y), D2D1::Point2F(v.right, q.y), alpha(p.accent, 0.55f), dpi(app, 1.0f), dashedStyle(app));
     }
+    drawSelectionBar(app, doc, p);
+    drawJumpLabels(app, doc, p);
     drawEditBox(app, doc, p);
+    drawCompletions(app, doc, p);
     drawEmptyHint(app, doc, p);
 
     // Chrome
@@ -1699,7 +2162,9 @@ void renderSheet(App& app) {
         drawTray(app, doc, p);
         drawFind(app, doc, p);
         drawToolbar(app, doc, p, zoomLeft);
+        drawHintLine(app, doc, p);
     }
+    drawPeek(app, doc, p);
     if (doc.readOnly) {
         std::wstring text = tr(app, "sheet.read_only");
         IDWriteTextLayout* l = makeLayout(app, text, textFormat(app, uiFace(), dpi(app, 12.5f), DWRITE_FONT_WEIGHT_NORMAL), v.right - v.left - dpi(app, 80.0f), 200);

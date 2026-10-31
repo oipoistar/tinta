@@ -10,6 +10,7 @@ const std::vector<ContextMenuEntry>& contextMenuEntries(const App& app) {
         {CTX_NEW, "ctx.new", L"", false},
         {CTX_PRINT, "ctx.print", L"Ctrl+P", false},
         {CTX_EXPORT, "ctx.export", L"", false},
+        {CTX_AS_SHEET, "ctx.as_sheet", L"", false},
         {CTX_EDIT, "ctx.edit", L"", false},
         {CTX_SEARCH, "ctx.search", L"", false},
         {CTX_TOC, "ctx.toc", L"", true},
@@ -83,6 +84,14 @@ bool contextMenuItemEnabled(const App& app, int item) {
         case CTX_SELECT_ALL: case CTX_SEARCH: case CTX_TOC:
             return document;
         case CTX_COPY_PATH: case CTX_REVEAL: return !app.currentFile.empty();
+        // A Markdown document, read here, can become a sheet of its sections
+        case CTX_AS_SHEET: {
+            if (app.editMode || app.currentFile.empty()) return false;
+            std::string lower = app.currentFile;
+            for (char& c : lower) c = (char)tolower((unsigned char)c);
+            return lower.size() > 3 && (lower.compare(lower.size() - 3, 3, ".md") == 0 ||
+                                        (lower.size() > 9 && lower.compare(lower.size() - 9, 9, ".markdown") == 0));
+        }
         default: return item >= 0 && item < CTX_ITEM_COUNT;
     }
 }

@@ -123,6 +123,7 @@ struct SheetDoc {
     bool pressWasSelected = false;
     bool pressShift = false, pressCtrl = false, pressAlt = false;
     std::vector<std::pair<std::string, sheet::Box>> moveStart;
+    std::vector<std::string> moveLanes;  // the lanes the moving cards were in
     int resizeEdges = 0;                // 1 left, 2 top, 4 right, 8 bottom
     sheet::Box resizeStart;
     sheet::Side connectSide = sheet::Side::None;
@@ -135,7 +136,7 @@ struct SheetDoc {
     int lastClickX = -100, lastClickY = -100;
 
     // Editing in place
-    enum class Edit { None, Card, EdgeLabel, GroupLabel, Url, LaneKey, Find };
+    enum class Edit { None, Card, EdgeLabel, GroupLabel, Url, LaneKey, LaneLimit, Find };
     Edit editing = Edit::None;
     std::string editId;
     SheetTextEdit edit;
@@ -178,6 +179,45 @@ struct SheetDoc {
     // Cards by their note's lowercased path and name, kept while the sheet's files stay the same
     size_t linkIndexKey = 0;
     std::unordered_map<std::wstring, std::string> cardByPath, cardByName;
+
+    // Folds: one flag per node, folded away behind a folded card; kept in
+    // step with the model by updateFolds
+    std::vector<char> hidden;
+    std::vector<std::pair<D2D1_RECT_F, std::string>> foldHits;  // a folded card's +N badge
+
+    // The hint line: what can be done now, until it has been done a few times
+    std::wstring hintText;
+
+    // Jump labels: J puts letters on the cards in view, typing them picks one
+    bool jumping = false;
+    bool jumpJoin = false;              // Shift+J: the selection gets an arrow to it
+    std::wstring jumpTyped;
+    std::vector<std::pair<std::wstring, std::string>> jumpLabels;  // letters, node id
+
+    // Peek: a card seen from far, readable in a lens beside it
+    std::string peekCandidate, peekId;
+    unsigned long long peekSinceMs = 0;
+    float peekScroll = 0;
+    D2D1_RECT_F peekRect{};
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> peekBitmap;
+    std::string peekBitmapId;
+    unsigned long long peekBitmapKey = 0;
+    unsigned peekBitmapGeneration = 0;
+    float peekContentHeight = 0, peekBitmapHeight = 0, peekBitmapScale = 1;
+
+    // [[ completion while a card is typed in
+    struct Completion {
+        std::wstring name;              // what goes between the brackets
+        std::string nodeId;             // the card it names, if on the sheet
+    };
+    bool completing = false;
+    size_t completeFrom = 0;            // where the name starts, after [[
+    std::vector<Completion> completions;
+    int completeIndex = 0;
+    std::vector<std::pair<D2D1_RECT_F, int>> completeHits;
+
+    // The selection bar over the selected cards (client pixels)
+    D2D1_RECT_F selectionBar{};
 
     // Context menu
     struct MenuItem {
@@ -316,7 +356,8 @@ enum Action {
     ACT_PRESENT_PREV, ACT_PRESENT_NEXT, ACT_PRESENT_EXIT, ACT_FIND_CLOSE, ACT_FIT_HEIGHT,
     ACT_ALIGN_LEFT, ACT_ALIGN_CENTER, ACT_ALIGN_RIGHT, ACT_ALIGN_TOP, ACT_ALIGN_MIDDLE,
     ACT_ALIGN_BOTTOM, ACT_DISTRIBUTE_H, ACT_DISTRIBUTE_V, ACT_REANCHOR,
-    ACT_LINKS_TO_ARROWS,
+    ACT_LINKS_TO_ARROWS, ACT_CHAIN, ACT_FOLD, ACT_UNFOLD_ALL, ACT_LANE_LIMIT, ACT_WRITE_LINKS,
+    ACT_EXPLODE, ACT_SPLIT, ACT_ALIGN_MENU, ACT_HINTS, ACT_JUMP, ACT_JOIN,
     ACT_COLOR_BASE = 100,  // + 0 none, 1..6 presets
     ACT_TRAY_ROW = 200,    // + row
 };
@@ -340,6 +381,57 @@ sheet::Box groupLabelBox(App& app, const SheetDoc& doc, const sheet::Node& group
 IDWriteTextLayout* editLayout(App& app, SheetDoc& doc, float width);
 float editFontSize(const SheetDoc& doc);
 float cardPadding();
+// Below this many pixels a sheet unit, a card shows its title, not its note
+float sheetDetailThreshold();
+
+// The name a new note keeps until its first line names it: Untitled,
+// Untitled 2 and so on, in the interface's language or in English
+bool placeholderName(App& app, const std::wstring& stem);
+// A note's relative links and images re-aimed for text moving from one
+// folder to another
+std::string rebaseLinks(const std::string& body, const std::wstring& fromDir, const std::wstring& toDir);
+
+// Folds: works out which nodes are folded away; call after the model changes
+void updateFolds(SheetDoc& doc);
+bool foldedAwayAt(const SheetDoc& doc, int index);
+// Folds or unfolds the given cards (those with arrows out, or folded)
+void toggleFolds(App& app, SheetDoc& doc, const std::vector<std::string>& ids);
+
+// Lanes: cards dropped into a lane go into its column; the lanes they left
+// close up; all of it in the step under way
+void settleLanes(App& app, SheetDoc& doc, const std::vector<std::string>& moved);
+
+// An arrow between two notes goes into the first one's front matter as a
+// link when the sheet writes links (and out with the arrow)
+void linkArrow(App& app, SheetDoc& doc, const std::string& from, const std::string& to, bool add);
+// Every arrow between notes written into its note, for a sheet that starts writing links
+void writeAllLinks(App& app, SheetDoc& doc);
+
+// Explode: a Markdown document's sections become notes in the sheet's
+// folder, as cards from (x, y) chained in order, grouped under its #
+// headings; returns how many. Split: one note's sections, the rest moving
+// into new notes beside it.
+int explodeDocumentInto(App& app, SheetDoc& doc, const std::wstring& path, float x, float y);
+bool splitCard(App& app, SheetDoc& doc, const std::string& id);
+// A document opened as a new sheet beside it, named after it
+bool openDocumentAsSheet(App& app, HWND hwnd, const std::wstring& path);
+
+// Hints: what the line says now, and an action the line suggested being
+// done (it retires after a few times)
+enum Hint { HINT_NONE, HINT_MULTI, HINT_SINGLE, HINT_NAMING, HINT_LINK, HINT_HEADING, HINT_CONNECT,
+            HINT_MARQUEE, HINT_LANE, HINT_FAR, HINT_COUNT };
+void hintDone(int hint);
+bool hintRetired(int hint);
+void setHintsShown(bool shown);
+bool hintsShown();
+
+// Jump labels and [[ completion
+void startJump(App& app, SheetDoc& doc, bool join);
+void updateCompletions(App& app, SheetDoc& doc);
+void acceptCompletion(App& app, SheetDoc& doc, int index, bool arrow);
+
+// Peek: the lens's content, drawn before the frame like the cards'
+void renderPeekBitmap(App& app, SheetDoc& doc);
 }  // namespace sheetui
 
 void sheetSaveView(SheetDoc& doc);

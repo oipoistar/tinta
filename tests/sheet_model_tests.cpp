@@ -440,10 +440,141 @@ void geometry() {
     for (int i = 0; i < 1000; ++i) ids.insert(newId());
     check(ids.size() == 1000 && ids.begin()->size() == 16, "ids are unique 16-digit hex");
 }
+// Folds, lanes that stack, chains in rows, and the Tinta fields that carry
+// them through JSON Canvas
+void foldsLanesChains() {
+    auto shown = [](const Sheet& sheet, const std::vector<char>& hidden) {
+        std::string out;
+        for (size_t i = 0; i < sheet.nodes.size(); ++i) {
+            if (!hidden[i]) out += sheet.nodes[i].id;
+        }
+        return out;
+    };
+    Sheet s;
+    for (const char* id : {"a", "b", "c", "d", "x"}) s.nodes.push_back(card(id, 0, 0));
+    s.edges = {arrow("a", "b"), arrow("b", "c"), arrow("c", "d"), arrow("d", "a")};
+    check(shown(s, foldedAway(s)) == "abcdx", "nothing is folded away without a fold");
+    s.nodes[1].folded = true;  // b
+    std::vector<char> hidden = foldedAway(s);
+    check(shown(s, hidden) == "bx", "a fold hides what follows it, around a cycle but not itself: " + shown(s, hidden));
+    check(foldedCount(s, 1, hidden) == 3, "the fold counts the three cards it hides");
+    s.edges.push_back(arrow("x", "d"));
+    hidden = foldedAway(s);
+    check(shown(s, hidden) == "abdx", "a card something shown points at stays, with what follows: " + shown(s, hidden));
+
+    Sheet tree;
+    for (const char* id : {"root", "mid", "leaf"}) tree.nodes.push_back(card(id, 0, 0));
+    tree.edges = {arrow("root", "mid"), arrow("mid", "leaf")};
+    tree.nodes[0].folded = tree.nodes[1].folded = true;
+    hidden = foldedAway(tree);
+    check(shown(tree, hidden) == "root", "a fold inside a fold stays hidden: " + shown(tree, hidden));
+    tree.nodes[0].folded = false;
+    hidden = foldedAway(tree);
+    check(shown(tree, hidden) == "rootmid" && foldedCount(tree, 1, hidden) == 1,
+          "the inner fold holds once the outer opens");
+
+    Sheet lanes;
+    Node lane = card("lane", 0, 0, 420, 300);
+    lane.type = NodeType::Group;
+    lane.laneKey = "status";
+    lane.laneLimit = 2;
+    lanes.nodes = {lane, card("low", 20, 120, 380, 160), card("high", 30, 100, 200, 120), card("out", 600, 0)};
+    stackLane(lanes, 0);
+    const Node &high = lanes.nodes[2], &low = lanes.nodes[1];
+    check(high.x == 40 && high.y == 80 && low.x == 40 && low.y == 220, "a lane stacks its cards in order, 20 apart");
+    check(low.width == 340 && high.width == 200, "no card is wider than the lane");
+    check(lanes.nodes[0].height == 420 && lanes.nodes[3].x == 600, "the lane grows to hold them; others stay");
+    check(laneCards(lanes, 0) == std::vector<int>({2, 1}), "the lane's cards, top to bottom");
+    lanes.nodes[3].folded = true;
+    Sheet back;
+    check(parseCanvas(writeCanvas(lanes), back) && back.nodes[0].laneLimit == 2 && back.nodes[3].folded &&
+              !back.nodes[1].folded,
+          "a lane's limit and a fold go through JSON Canvas");
+    lanes.writeLinks = true;
+    check(parseCanvas(writeCanvas(lanes), back) && back.writeLinks && back.extra.empty(),
+          "so does writing arrows into the notes");
+
+    Sheet rows;
+    rows.nodes = {card("r2b", 300, 260), card("r1b", 300, 10), card("r1a", 0, 0), card("r2a", 0, 250)};
+    std::vector<int> order = rowOrder(rows, {0, 1, 2, 3});
+    std::string ids;
+    for (int i : order) ids += rows.nodes[i].id + " ";
+    check(ids == "r1a r1b r2a r2b ", "a chain runs row by row, left to right: " + ids);
+}
+
+// A document cut into notes at its sections, and back through layout
+void explode() {
+    Exploded one = explodeDocument("# Plan\n\nWhy we do it.\n\n## Goals\n\nShip.\n\n### Detail\n\n- a\n\n"
+                                   "## Risks\n\n```\n## not a heading\n```\n",
+                                   "fallback");
+    check(one.title == "Plan" && one.groups.empty() && one.parts.size() == 3, "a titled document: intro and two sections");
+    if (one.parts.size() == 3) {
+        check(one.parts[0].title == "Plan" && one.parts[0].text == "# Plan\n\nWhy we do it.\n\n",
+              "the text under the title is its own part: " + one.parts[0].text);
+        check(one.parts[1].title == "Goals" && one.parts[1].text.rfind("# Goals\n", 0) == 0 &&
+                  one.parts[1].text.find("## Detail") != std::string::npos,
+              "a section moves up to #, its subsections with it: " + one.parts[1].text);
+        check(one.parts[2].text.find("## not a heading") != std::string::npos, "a fence is not cut");
+    }
+    Exploded parts = explodeDocument("---\ntitle: Book\n---\n# One\n## A\na\n## B\nb\n# Two\nintro\n## C\nc\n", "f");
+    check(parts.title == "Book" && parts.groups == std::vector<std::string>({"One", "Two"}),
+          "two # headings over ## sections are groups, the front matter the title");
+    std::string seen;
+    for (const ExplodedPart& p : parts.parts) seen += p.title + ":" + std::to_string(p.group) + " ";
+    check(seen == "A:0 B:0 Two:1 C:1 ", "each section in its group, a group's own text first: " + seen);
+    Exploded flat = explodeDocument("Just text.\n", "Loose");
+    check(flat.parts.size() == 1 && flat.parts[0].title == "Loose" && flat.parts[0].text == "# Loose\n\nJust text.\n",
+          "a document without headings is one part");
+    std::vector<Box> cards, groups;
+    layoutExploded(parts, 0, 0, cards, groups);
+    check(groups.size() == 2 && cards.size() == 4 && cards[0].left == groups[0].left + 40 &&
+              cards[2].left == groups[1].left + 40 && cards[1].top > cards[0].bottom && groups[1].left > groups[0].right,
+          "groups stand side by side, each a column of its cards");
+    layoutExploded(one, 0, 0, cards, groups);
+    check(groups.empty() && cards[1].left > cards[0].right && cards[1].top == cards[0].top, "else the cards go in rows");
+}
+
+// Arrows written into a note's front matter as links, and out again
+void frontmatterLinks() {
+    std::string bare = "# Card\n";
+    check(addFrontmatterLink(bare, "related", "[[Budget]]") &&
+              bare == "---\nrelated:\n  - \"[[Budget]]\"\n---\n\n# Card\n",
+          "a link makes the front matter: " + bare);
+    check(addFrontmatterLink(bare, "related", "[[Ship]]") &&
+              bare == "---\nrelated:\n  - \"[[Budget]]\"\n  - \"[[Ship]]\"\n---\n\n# Card\n",
+          "a second goes after the first: " + bare);
+    std::string again = bare;
+    check(addFrontmatterLink(again, "related", "[[Ship]]") && again == bare, "a link is there once");
+    check(removeFrontmatterLink(bare, "related", "[[Budget]]") &&
+              bare == "---\nrelated:\n  - \"[[Ship]]\"\n---\n\n# Card\n",
+          "a link leaves: " + bare);
+    check(removeFrontmatterLink(bare, "related", "[[Ship]]") && bare == "---\n---\n\n# Card\n",
+          "and the key with its last link: " + bare);
+    check(!removeFrontmatterLink(bare, "related", "[[Ship]]"), "a link that is not there is not removed");
+    std::string crlf = "---\r\nstatus: Doing\r\n---\r\nbody";
+    check(addFrontmatterLink(crlf, "related", "[[A]]") &&
+              crlf == "---\r\nstatus: Doing\r\nrelated:\r\n  - \"[[A]]\"\r\n---\r\nbody",
+          "a key is added beside others, CRLF kept: " + crlf);
+    std::string flow = "---\nrelated: [\"[[A]]\"]\n---\n";
+    check(addFrontmatterLink(flow, "related", "[[B]]") && flow == "---\nrelated: [\"[[A]]\", \"[[B]]\"]\n---\n",
+          "a flow list grows in place: " + flow);
+    check(removeFrontmatterLink(flow, "related", "[[A]]") && flow == "---\nrelated: [\"[[B]]\"]\n---\n",
+          "and shrinks: " + flow);
+    std::string unindented = "---\nrelated:\n- \"[[A]]\"\ntags: x\n---\n";
+    check(addFrontmatterLink(unindented, "related", "[[B]]") &&
+              unindented == "---\nrelated:\n- \"[[A]]\"\n- \"[[B]]\"\ntags: x\n---\n",
+          "an item takes the list's own indent: " + unindented);
+    std::string scalar = "---\nrelated: something\n---\n";
+    check(!addFrontmatterLink(scalar, "related", "[[A]]") && scalar == "---\nrelated: something\n---\n",
+          "another kind of value is left alone");
+}
 }  // namespace
 
 int main() {
     canvasFormat();
+    foldsLanesChains();
+    explode();
+    frontmatterLinks();
     smdFormat();
     orderAndNavigation();
     tidyLayout();

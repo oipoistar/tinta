@@ -1819,6 +1819,9 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
         case CTX_COPY_PATH:
             copyFilePath(app, hwnd, app.currentFile);
             break;
+        case CTX_AS_SHEET:
+            if (contextMenuItemEnabled(app, CTX_AS_SHEET)) sheetui::openDocumentAsSheet(app, hwnd, toWide(app.currentFile));
+            break;
         case CTX_REVEAL: {
             std::wstring fullPath = absoluteFilePath(app.currentFile);
             if (!fullPath.empty()) {
