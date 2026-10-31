@@ -26,6 +26,19 @@ using Phase = App::TouchGesture::Phase;
 // Movement under this is still a tap or a hold
 float slop(const App& app) { return dpi(app, 10.0f); }
 
+bool sameContext(const App& app) {
+    const auto& t = app.touch;
+    return app.activeTab == t.contextTab && app.currentFile == t.contextFile &&
+           app.editMode == t.contextEdit;
+}
+
+void resetTap(App& app) {
+    app.touch.tapMs = 0;
+    app.touch.tapTarget = TouchTarget::None;
+    app.lastClickTime = {};
+    app.clickCount = 0;
+}
+
 bool isExtra(const App::TouchGesture& t, UINT32 pointer) {
     return std::find(t.extra.begin(), t.extra.end(), pointer) != t.extra.end();
 }
@@ -171,14 +184,18 @@ void click(App& app, HWND hwnd, POINT at) {
 
 void tap(App& app, HWND hwnd, POINT pt, double ms, TouchTarget target) {
     auto& t = app.touch;
-    const bool again = t.tapMs > 0 && ms - t.tapMs <= GetDoubleClickTime() && t.tapTarget == target &&
+    const bool text = target == TouchTarget::Document || target == TouchTarget::Editor;
+    const bool again = text && t.tapMs > 0 && ms >= t.tapMs &&
+                       ms - t.tapMs <= GetDoubleClickTime() && t.tapTarget == target &&
                        std::hypot(float(pt.x - t.tapPoint.x), float(pt.y - t.tapPoint.y)) <=
                            dpi(app, 24.0f);
     // A finger's second tap lands a little off the first: it clicks where
     // the first did, so the click handlers count the double-click it is
     const POINT at = again ? t.tapPoint : pt;
+    if (!again) resetTap(app);
+    else app.lastClickTime = std::chrono::steady_clock::now();
     t.tapPoint = at;
-    t.tapMs = ms;
+    t.tapMs = text ? ms : 0;
     t.tapTarget = target;
     click(app, hwnd, at);
 }
@@ -220,6 +237,7 @@ void startFling(App& app, HWND hwnd, float vx, float vy, double ms) {
     t.flingMs = ms;
     t.flingTab = app.activeTab;
     t.flingFile = app.currentFile;
+    t.flingEdit = app.editMode;
     SetTimer(hwnd, TIMER_TOUCH_FLING, 16, nullptr);
 }
 
@@ -285,6 +303,7 @@ bool touchDown(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
         // or holds
         if (!isExtra(t, pointer)) t.extra.push_back(pointer);
         t.multi = true;
+        resetTap(app);
         KillTimer(hwnd, TIMER_TOUCH_HOLD);
         return true;
     }
@@ -292,8 +311,10 @@ bool touchDown(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
     const TouchTarget target = touchTargetAt(app, pt, list);
     const bool braking = t.flinging && target != TouchTarget::None &&
                          target == t.flingTarget && list == t.flingList &&
-                         app.activeTab == t.flingTab && app.currentFile == t.flingFile;
+                         app.activeTab == t.flingTab && app.currentFile == t.flingFile &&
+                         app.editMode == t.flingEdit;
     touchStopFling(app, hwnd);
+    if (!sameContext(app) || target == TouchTarget::None) resetTap(app);
     if (target == TouchTarget::None) return false;
     endGesture(t);
     t.active = true;
@@ -307,6 +328,9 @@ bool touchDown(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
     t.target = target;
     t.list = list;
     t.start = t.last = pt;
+    t.contextTab = app.activeTab;
+    t.contextFile = app.currentFile;
+    t.contextEdit = app.editMode;
     t.axis = 0;
     t.samples.push_back({ms, static_cast<float>(pt.x), static_cast<float>(pt.y)});
     // A held row is a slow tap: only text selects
@@ -317,6 +341,7 @@ bool touchDown(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
 bool touchMove(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
     auto& t = app.touch;
     if (!t.active || pointer != t.pointer) return isExtra(t, pointer);
+    if (!sameContext(app)) { touchCancel(app, hwnd); return true; }
     t.samples.push_back({ms, static_cast<float>(pt.x), static_cast<float>(pt.y)});
     while (t.samples.size() > 2 && ms - t.samples[1].ms > kSpeedWindowMs * 2)
         t.samples.erase(t.samples.begin());
@@ -327,6 +352,7 @@ bool touchMove(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms) {
         // also pans across
         KillTimer(hwnd, TIMER_TOUCH_HOLD);
         t.phase = Phase::Panning;
+        resetTap(app);
         // A sheet pans every way at once
         t.axis = t.target == TouchTarget::Sheet ? 3
                  : std::fabs(dx) > std::fabs(dy) && pansAcross(app, t.target) ? 2 : 1;
@@ -355,6 +381,7 @@ bool touchUp(App& app, HWND hwnd, UINT32 pointer, POINT pt, double ms, bool canc
         t.extra.erase(it);
         return true;
     }
+    if (canceled || !sameContext(app)) { touchCancel(app, hwnd); return true; }
     KillTimer(hwnd, TIMER_TOUCH_HOLD);
     const Phase phase = t.phase;
     const TouchTarget target = t.target;
@@ -393,6 +420,8 @@ void touchHold(App& app, HWND hwnd) {
     KillTimer(hwnd, TIMER_TOUCH_HOLD);
     auto& t = app.touch;
     if (!t.active || t.phase != Phase::Pending || t.multi || t.braking) return;
+    if (!sameContext(app)) { touchCancel(app, hwnd); return; }
+    resetTap(app);
     t.phase = Phase::Holding;
     if (t.target == TouchTarget::Editor) {
         editorTouchSelection(app, t.start.x, t.start.y, true);
@@ -417,7 +446,7 @@ bool touchFlingStep(App& app, HWND hwnd, double ms) {
     auto& t = app.touch;
     if (!t.flinging) return false;
     // The document under it changed: the fling belonged to the other one
-    if (app.activeTab != t.flingTab || app.currentFile != t.flingFile) {
+    if (app.activeTab != t.flingTab || app.currentFile != t.flingFile || app.editMode != t.flingEdit) {
         touchStopFling(app, hwnd);
         return false;
     }
@@ -447,11 +476,15 @@ void touchStopFling(App& app, HWND hwnd) {
 
 void touchCancel(App& app, HWND hwnd) {
     auto& t = app.touch;
-    if (!t.active) return;
     KillTimer(hwnd, TIMER_TOUCH_HOLD);
+    touchStopFling(app, hwnd);
+    resetTap(app);
     // A selection under way keeps what it has, without the menu
-    if (t.phase == Phase::Holding) {
-        handleMouseUp(app, hwnd, 0, MAKELPARAM(t.last.x, t.last.y));
+    if (t.active && t.phase == Phase::Holding) {
+        // Cancel the owned selection directly; a new modal must not receive
+        // a synthetic release that could activate one of its controls.
+        if (t.target == TouchTarget::Editor) handleEditorMouseUp(app, hwnd, t.last.x, t.last.y);
+        else app.selecting = false;
         pointerAway(app, hwnd);
     }
     endGesture(t);

@@ -345,6 +345,60 @@ void scenario(App& app, const char* path, int width, float scale) {
           "a tap on a Contents row opens its section" + where);
     app.showToc = false;
 
+    // Adjacent rows can be closer than the forgiving text double-tap radius.
+    // Each list tap must still use the finger's actual landing point.
+    app.showToc = true;
+    app.tocAnimation = 1;
+    app.tocScroll = 0;
+    const auto listRect = tocListRect(app);
+    const LONG rowX = (LONG)(listRect.left + dpi(app, 40));
+    bool adjacent = false;
+    for (LONG y = (LONG)listRect.top + 1; y < listRect.bottom - 1; ++y) {
+        const int first = tocItemIndexAt(app, (float)rowX, (float)y);
+        const int second = tocItemIndexAt(app, (float)rowX, (float)(y + 1));
+        if (first < 0 || second <= first) continue;
+        tapAt(app, 61, POINT{rowX, y});
+        app.showToc = true;
+        app.tocAnimation = 1;
+        app.tocScroll = 0;
+        touchDown(app, app.hwnd, 62, POINT{rowX, y + 1}, ms += 30);
+        touchUp(app, app.hwnd, 62, POINT{rowX, y + 1}, ms += 40, false);
+        check(app.tocSpyOverride == second, "nearby taps on adjacent rows activate the actual second row");
+        adjacent = true;
+        break;
+    }
+    check(adjacent, "the Contents has adjacent rows to test");
+    app.showToc = false;
+
+    app.scrollY = app.targetScrollY = 0;
+    const POINT freshWord = wordPoint(app, L"marigold");
+    tapAt(app, 63, freshWord);
+    touchDown(app, app.hwnd, 64, freshWord, ms += 10);
+    touchMove(app, app.hwnd, 64, shifted(freshWord, 0, (int)dpi(app, 20)), ms += 20);
+    touchUp(app, app.hwnd, 64, shifted(freshWord, 0, (int)dpi(app, 20)), ms += 100, false);
+    touchDown(app, app.hwnd, 65, freshWord, ms += 10);
+    touchUp(app, app.hwnd, 65, freshWord, ms += 30, false);
+    check(!app.hasSelection, "a tap after a pan starts a new click chain");
+    touchDown(app, app.hwnd, 66, freshWord, ms += 10);
+    touchUp(app, app.hwnd, 66, freshWord, ms += 30, true);
+    touchDown(app, app.hwnd, 67, freshWord, ms += 10);
+    touchUp(app, app.hwnd, 67, freshWord, ms += 30, false);
+    check(!app.hasSelection, "a canceled contact resets the text tap chain");
+
+    touchDown(app, app.hwnd, 68, freshWord, ms += 10);
+    enterEditMode(app);
+    touchHold(app, app.hwnd);
+    check(!app.touch.active && !app.editorHasSelection && !app.editCtxOpen,
+          "a delayed hold cannot select text after changing mode");
+    exitEditMode(app);
+    ensureLayoutComplete(app);
+    swipe(app, 69, low, 0, -20, 4, 10, 5);
+    check(app.touch.flinging && !app.touch.active, "a released gesture can still be flinging");
+    const float idleY = app.scrollY;
+    touchCancel(app, app.hwnd);
+    touchFlingStep(app, app.hwnd, ms += 100);
+    check(!app.touch.flinging && app.scrollY == idleY, "canceling without an active finger stops inertia too");
+
     // A mouse drag still selects
     app.scrollY = app.targetScrollY = 0;
     app.hasSelection = false;

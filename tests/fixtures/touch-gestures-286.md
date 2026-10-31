@@ -41,6 +41,13 @@ near the split: its table submenu must work over the preview, and tapping
 outside must only dismiss it. In reading mode, drag either Contents
 resize edge with a finger; the edge must resize rather than scroll.
 
+For tap cleanup, tap a word, pan, and quickly tap the same word again:
+it must start a fresh tap rather than select a word. In Contents, tap two
+adjacent rows near their shared boundary; each tap follows its own row.
+Switch focus or editing mode during a held press or fling: no delayed
+menu or scrolling should continue in the new context. Normal deliberate
+double and triple taps must still select words and lines.
+
 | Bed 1 | Bed 2 | Bed 3 | Bed 4 | Bed 5 | Bed 6 | Bed 7 | Bed 8 | Bed 9 | Bed 10 | Bed 11 | Bed 12 | Bed 13 | Bed 14 | Bed 15 | Bed 16 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `12` cm | `24` cm | `36` cm | **Chard** | `60` cm | `72` cm | `84` cm | **Beans** | `108` cm | `120` cm | `132` cm | **Chard** | `156` cm | `168` cm | `180` cm | **Beans** |
