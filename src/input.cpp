@@ -45,6 +45,9 @@ static HCURSOR cursorHand  = LoadCursor(nullptr, IDC_HAND);
 static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
 static HCURSOR cursorSizeWE = LoadCursor(nullptr, IDC_SIZEWE);
 
+static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY);
+static bool tableFitButtonAt(const App& app, int mouseX, int mouseY);
+
 static const App::TaskRect* taskRectAt(const App& app);
 static void startPageInvoke(App& app, HWND hwnd, int id);
 static bool tableCopyButtonAt(const App& app, int mouseX, int mouseY);
@@ -2231,6 +2234,24 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         if (app.editorShowPreview && !app.editorReadingPreview) {
             float docX = (float)x - documentViewportX(app) + app.scrollX;
             float docY = (float)y + app.scrollY;
+            // Table actions sit above cells. Resolve the press itself rather
+            // than relying on a hover frame, including a finger's first tap.
+            const int oldHover = app.hoveredTable;
+            bool tableAction = false;
+            for (int i = 0; i < (int)app.tableRects.size(); ++i) {
+                app.hoveredTable = i;
+                if (tableCopyButtonAt(app, x, y) || tableFitButtonAt(app, x, y)) {
+                    tableAction = true;
+                    break;
+                }
+            }
+            if (tableAction) {
+                tableEditCommit(app);
+                app.mouseX = x;
+                app.mouseY = y;
+                return; // the existing release handler invokes Fit / Copy
+            }
+            app.hoveredTable = oldHover;
             if (tableEditMouseDown(app, hwnd, docX, docY)) {
                 app.swallowNextMouseUp = true;
                 return;

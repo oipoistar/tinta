@@ -691,10 +691,25 @@ render_document:
         }
     }
 
+    // Cell input stays inside the preview clip and below the table actions.
+    // It used to paint after them, hiding Fit / Copy behind the header editor.
+    if (app.editMode) {
+        D2D1_MATRIX_3X2_F saved;
+        app.renderTarget->GetTransform(&saved);
+        app.renderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
+        renderTableEditOverlay(app);
+        app.renderTarget->SetTransform(saved);
+    }
+
     // Table copy-as-TSV button on hover (same pattern as code blocks;
     // wide tables clamp the button into the visible viewport)
-    if (app.hoveredTable >= 0 && app.hoveredTable < (int)app.tableRects.size()) {
-        const auto& tb = app.tableRects[app.hoveredTable];
+    int actionTable = app.hoveredTable;
+    if (actionTable < 0 && app.tableEditActive) {
+        for (int i = 0; i < (int)app.tableRects.size(); ++i)
+            if (app.tableRects[i].sourceOffset == app.tableEditSrc) { actionTable = i; break; }
+    }
+    if (actionTable >= 0 && actionTable < (int)app.tableRects.size()) {
+        const auto& tb = app.tableRects[actionTable];
         if (tb.bounds.bottom >= viewportTop - cullMargin &&
             tb.bounds.top <= viewportBottom + cullMargin) {
             float btnW = dpi(app, 88.0f);
@@ -1065,9 +1080,6 @@ render_document:
 
         // Quick-note empty state: Open button in the blank preview pane
         renderQuickNoteEmptyState(app);
-
-        // In-place table editing: cell input + hover affordances (#148)
-        renderTableEditOverlay(app);
 
         // Render search overlay in screen coordinates (over editor pane)
         if (app.showSearch) renderSearchOverlay(app);

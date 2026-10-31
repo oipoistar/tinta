@@ -50,6 +50,56 @@ void open(App& app,int row,int col) {
     click(app,documentViewportX(app)+c.rect.left-app.scrollX+10,c.rect.top-app.scrollY+12);
     check(app.tableEditActive && app.tableEditRow==row && app.tableEditCol==col,"public click opens the intended cell");
 }
+void tableActions(App& app) {
+    ClipboardSnapshot clipboard(app.hwnd);
+    check(clipboard.captured, "table action tests preserve the clipboard");
+    auto copiedText = [&] {
+        std::wstring text;
+        if (openClipboard(app.hwnd)) {
+            HANDLE data = GetClipboardData(CF_UNICODETEXT);
+            if (data) if (const auto* p = (const wchar_t*)GlobalLock(data)) {
+                text = p;
+                GlobalUnlock(data);
+            }
+            CloseClipboard();
+        }
+        return text;
+    };
+    for (int width : {650, 1050}) for (int theme : {0, 5}) {
+        app.width = width;
+        app.fitBlocks.clear();
+        applyTheme(app, theme);
+        buffer(app, L"# Table actions\n\n| A | B | C | D | E | F | G | H | I | J |\n"
+                    L"|---|---|---|---|---|---|---|---|---|---|\n"
+                    L"| alpha | beta | gamma | delta | epsilon | zeta | eta | theta | iota | kappa |\n");
+        check(!app.tableRects.empty(), "wide table has action geometry");
+        if (app.tableRects.empty()) continue;
+        auto table = app.tableRects.front();
+        const auto source = app.editorText;
+        const float right = std::min(table.bounds.right, app.scrollX + documentViewportWidth(app));
+        const float pad = 8 * app.contentScale * app.zoomFactor;
+        const float copyX = documentViewportX(app) + right - dpi(app, 44) - pad - app.scrollX;
+        const float y = table.bounds.top + pad + dpi(app, 13) - app.scrollY;
+        app.hoveredTable = -1;
+        click(app, copyX, y);
+        check(!app.tableEditActive && app.editorText == source && copiedText() == table.tsv,
+              "first click on Copy TSV copies the table instead of opening a header cell");
+        // An active header input must not intercept the next table action.
+        open(app, 0, 0);
+        paint(app);
+        table = app.tableRects.front();
+        const float fitX = documentViewportX(app) + std::min(table.bounds.right, app.scrollX + documentViewportWidth(app)) -
+                           dpi(app, 88 + 6 + 22) - pad - app.scrollX;
+        const float fitY = table.bounds.top + pad + dpi(app, 13) - app.scrollY;
+        check(table.fitCandidate, "wide table offers Fit");
+        const auto before = app.fitBlocks.size();
+        app.hoveredTable = -1;
+        click(app, fitX, fitY);
+        check(!app.tableEditActive && app.fitBlocks.size() != before && app.editorText == source,
+              "Fit wins over an open cell and preserves its source");
+    }
+}
+
 void modifiers(App& app) {
     buffer(app,L"# Modifiers\n\nType here\n");app.editorCursorPos=app.editorText.size();
     bool wrap=app.editorWordWrap;
@@ -223,7 +273,7 @@ int runTableInputTests() {
     // so fresh Windows checkouts behave like LF checkouts in these comparisons.
     std::ifstream input(fixture);std::string bytes((std::istreambuf_iterator<char>(input)),{});
     auto source=toWide(bytes);check(!source.empty(),"fixture loads");app.currentFile=toUtf8(fixture.wstring());tabsInit(app);
-    modifiers(app);cells(app,source);reading(app,source);escapeAndChrome(app);
+    modifiers(app);cells(app,source);reading(app,source);escapeAndChrome(app);tableActions(app);
     DestroyWindow(app.hwnd);app.hwnd=nullptr;state.reset();CoUninitialize();OleUninitialize();
     std::cout<<"Table and modifier input: "<<failures<<" failures\n";return failures?1:0;
 }
