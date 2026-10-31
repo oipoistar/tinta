@@ -551,6 +551,17 @@ void touch(App& app, SheetDoc& doc) {
     check(doc.model.nodes.size() == nodes + 1 && doc.editing == SheetDoc::Edit::Card,
           "a double tap on open ground makes a note to type in");
     keystroke(app, VK_ESCAPE);
+    // A finger's second tap lands a few pixels from its first, and the
+    // sheet still sees the double-click (only list rows keep taps apart)
+    const POINT ground{from.x - 250, from.y + 200};
+    nodes = doc.model.nodes.size();
+    touchDown(app, app.hwnd, 9, ground, ms += 900);
+    touchUp(app, app.hwnd, 9, ground, ms += 40, false);
+    touchDown(app, app.hwnd, 10, POINT{ground.x + 7, ground.y + 6}, ms += 80);
+    touchUp(app, app.hwnd, 10, POINT{ground.x + 7, ground.y + 6}, ms += 40, false);
+    check(doc.model.nodes.size() == nodes + 1 && doc.editing == SheetDoc::Edit::Card,
+          "a double tap a few pixels apart still makes a note");
+    keystroke(app, VK_ESCAPE);
 }
 
 void saving(App& app, const fs::path& sheetPath) {

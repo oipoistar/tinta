@@ -216,8 +216,10 @@ void click(App& app, HWND hwnd, POINT at) {
 
 void tap(App& app, HWND hwnd, POINT pt, double ms, TouchTarget target) {
     auto& t = app.touch;
-    const bool text = target == TouchTarget::Document || target == TouchTarget::Editor;
-    const bool again = text && t.tapMs > 0 && ms >= t.tapMs &&
+    // A list's rows lie closer together than a second tap strays, so each
+    // tap there is its own; text and a sheet take double taps
+    const bool doubles = target != TouchTarget::List;
+    const bool again = doubles && t.tapMs > 0 && ms >= t.tapMs &&
                        ms - t.tapMs <= GetDoubleClickTime() && t.tapTarget == target &&
                        std::hypot(float(pt.x - t.tapPoint.x), float(pt.y - t.tapPoint.y)) <=
                            dpi(app, 24.0f);
@@ -227,7 +229,7 @@ void tap(App& app, HWND hwnd, POINT pt, double ms, TouchTarget target) {
     if (!again) resetTap(app);
     else app.lastClickTime = std::chrono::steady_clock::now();
     t.tapPoint = at;
-    t.tapMs = text ? ms : 0;
+    t.tapMs = doubles ? ms : 0;
     t.tapTarget = target;
     click(app, hwnd, at);
 }
