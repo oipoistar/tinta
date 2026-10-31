@@ -147,7 +147,11 @@ int main() {
         check(arguments(entry.key, tr(en, entry.key)) == arguments(entry.key, entry.text),
               "Russian preserves printf arguments and order");
     }
-    check(russianKeys.size() == 581, "Russian covers every current interface key");
+    // The loops below walk the Russian table, so it has to hold every key
+    for (int i = 0; i < translationKeyCount(); ++i)
+        check(russianKeys.count(translationKeyAt(i)) == 1,
+              (std::string("Russian translates ") + translationKeyAt(i)).c_str());
+    check((int)russianKeys.size() == translationKeyCount(), "Russian covers every current interface key");
     // Every shipped language has its own text for every key, with the
     // English printf arguments in order. A few read the same everywhere
     // and stay out of the de/fr/it table: the window titles and the key

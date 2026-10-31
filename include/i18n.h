@@ -38,6 +38,9 @@ const wchar_t* tr(const App& app, const char* key);
 // Whether a language has its own text for a key rather than falling back
 // to English (its text may still read the same as the English)
 bool languageTranslatesKey(int langIndex, const char* key);
+// The interface's keys, as compiled, so a test can ask each language for each
+int translationKeyCount();
+const char* translationKeyAt(int index);
 
 // A count in the language's words. The key's text lists its plural forms
 // split by '|', in the order of the language's rule ("%d day ago|%d days
