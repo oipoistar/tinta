@@ -79,7 +79,12 @@ same way on a sheet and in its own tab.
 - A click on the page opens the block there and puts the caret on the word
   clicked. A double-click selects a word and a triple-click selects a line.
   Dragging selects, across blocks too, and the page scrolls along at the
-  window's edges.
+  window's edges; a drag after a double- or triple-click goes by words or
+  lines, and keeps the first one whichever way it runs.
+- On a touchscreen a finger pans the page and a tap clicks. A finger held on
+  a word selects it, the selection grows by words as the finger slides, and
+  the menu (below) opens over them where it lifts. While the menu is up, a
+  finger works it as the mouse does.
 - A click on a task box, on the page or in an open block, ticks or clears
   it without moving the caret.
 - **Ctrl+click** follows a link: a note opens in a tab, a heading scrolls

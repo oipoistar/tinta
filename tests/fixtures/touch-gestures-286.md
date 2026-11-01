@@ -63,8 +63,11 @@ Save or Discard deliberately. The document tab must stay open.
 
 On a sheet, a double tap whose second tap lands a little off the first
 still writes a note there, and a finger held on the canvas opens the
-sheet's menu where it lifts. With **Live** on, a held finger puts Live's
-caret where it rests, and Live's own menu opens when it lifts.
+sheet's menu where it lifts. In a card being typed in, and on the page
+with **Live** on, a held finger selects the word under it and slides on by
+words, keeping that word if it slides back, and the menu opens over the
+words where it lifts. While that menu is up, a finger works it as the
+mouse does, and the page under it stays still.
 
 | Bed 1 | Bed 2 | Bed 3 | Bed 4 | Bed 5 | Bed 6 | Bed 7 | Bed 8 | Bed 9 | Bed 10 | Bed 11 | Bed 12 | Bed 13 | Bed 14 | Bed 15 | Bed 16 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|

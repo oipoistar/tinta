@@ -96,20 +96,51 @@ Copy TSV was not clicked in the app, so as not to write over the clipboard;
 
 `tinta.exe` grows by 6 KB (3,911,168 to 3,917,312 bytes).
 
+## Holds in Live and in cards, menus under a finger
+
+Two gaps found while landing these, fixed after them:
+
+- A finger held on Live's page, or in a sheet's text box being typed in,
+  only put the caret where it rested: the hold reached them as a single
+  click (each counts its own double-clicks), and letting go of the press's
+  mouse capture ended their drag. `liveTouchHold` and `sheetTouchHold` take
+  the held word as a double-click does, without a capture; the finger's
+  moves grow the selection by words until it lifts, and the menu opens over
+  the words. A hold cut short (`touchCancel`) keeps its words and ends the
+  drag.
+- Live and cards share the press and the drag now (`live::pressAt`,
+  `live::dragTo`): a double or triple click keeps its word or line as a
+  drag runs either way, as the reader and the source editor do. Before,
+  dragging back past it left it out in Live, and a card's drag after a
+  double-click went letter by letter.
+- Live's menu, a sheet's menu and the text menu of a card being typed in
+  now leave a finger to the mouse, as the other menus do (`overlayUp`): a
+  pan that starts on one no longer scrolls the page or the sheet under it.
+
+Checks: `live_editor` holds *paragraph* in the Live tour, slides on to
+*with* and back to *A*, lifts (Live's menu over *A paragraph*), finds a
+finger left to the mouse while that menu is up, cuts a hold short (the word
+kept, a hover after it drags nothing), and drags a mouse's double-click
+back (*A paragraph*). `sheet_canvas` does the same in a card being typed in
+(*beta*, *beta gamma*, *alpha beta*, the text's menu, the mouse's
+double-click drawn back) and finds a finger left to the mouse while the
+sheet's menu and the card's text menu are up. With master's `src` and
+`include` under these checks, exactly the 14 new ones fail. The points are
+taken with the paragraph open: Live shows the caret's block as typed, so
+the words can move under a finger once a hold opens their block, as they
+do under the mouse after a first click. The suite passes 55 of 55, run
+without notification_setting, copy_file_path and code_block_layout, which
+write the clipboard and leave it so. `tinta.exe` grows by 1 KB (3,917,312
+to 3,918,336 bytes).
+
 ## Limitations
 
 - Touch itself went through the native harness (`touchDown`, `touchMove`,
   `touchHold`, `touchUp` on the real handlers), not injected into a window
   as in tests/touch-gestures-validation.md, and not on a touchscreen here;
   SHM-white tried the pull requests on theirs.
-- In Live a held finger puts the caret where it rests and opens Live's menu,
-  but selects no word and does not extend as the finger slides: the hold's
-  press reaches Live as a single click, and releasing the press's capture
-  ends Live's drag. A card being typed in on a sheet is likely the same (not
-  checked).
-- Live's menu and a sheet card's text menu are not among the overlays a
-  finger leaves to the mouse, so a pan that starts on one scrolls the page
-  under it; taps on them work.
+- A finger held on Live's format bar or on a row of its slash or [[ list
+  still takes it as a press there, as before.
 - While a header cell under Fit or Copy TSV is being edited, the buttons
   (translucent) sit over the start of its text.
 - `live_editor` failed about one run in twenty here, on master as well, for

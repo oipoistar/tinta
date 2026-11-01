@@ -254,7 +254,9 @@ recents and tabs bring it back.
   typed); images and diagrams show again once you leave the card.
 - On a touchscreen a finger pans the sheet (a flick carries on), a tap
   selects, a double tap writes a note or opens a card, and a held press opens
-  the menu. Pinch zoom works on a touchpad, not yet on a screen, and moving
-  cards takes a mouse or a pen.
+  the menu. In a card being typed in, a held press selects the word, grows by
+  words as the finger slides, and opens the text's menu where it lifts; while
+  a menu is up, a finger works it as the mouse does. Pinch zoom works on a
+  touchpad, not yet on a screen, and moving cards takes a mouse or a pen.
 - Sheets add about 450 KB to `tinta.exe`, most of it the sheet code and its
   strings in eight languages.
