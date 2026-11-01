@@ -15,9 +15,14 @@ second and draws a whole-sheet frame in about 20 ms.
 ## Making a sheet
 
 - On the start page, or on the empty page of a new tab (+), choose **New
-  sheet**. A Save dialog names the sheet: `Roadmap.smd` is created with a
-  folder `Roadmap` beside it, and every note you add goes into that folder.
-  The sheet opens in the empty tab's place.
+  sheet** (**S** on the start page). A Save dialog names the sheet:
+  `Roadmap.smd` is created with a folder `Roadmap` beside it, and every note
+  you add goes into that folder. The sheet opens in the empty tab's place.
+- **Sheet tour**, the last of the start page's Learn cards, opens a small
+  sheet that shows the moves: notes and arrows, lanes that write `status:`,
+  a text card and a ghost link. Each time it is a fresh copy, written to a
+  Tinta folder in the temp folder and fitted to the window; a tour that is
+  open already is shown as it is.
 - Name the sheet after a folder that already holds notes, and the new sheet
   lays all of them out in a grid.
 - A `.smd` opens like any file: from the start page's recents, the file
