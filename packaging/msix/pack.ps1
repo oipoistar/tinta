@@ -33,6 +33,13 @@ $makepri = Join-Path $sdkBin "makepri.exe"
 $priconfig = Join-Path $OutDir "priconfig.xml"
 & $makepri createconfig /cf $priconfig /dq lang-en-US /o
 if ($LASTEXITCODE -ne 0) { throw "makepri createconfig failed" }
+# One package, so every scale stays in its resources.pri: the default config
+# moves all but scale-100 to resource packs, which only a bundle installs,
+# and Windows enlarged the scale-100 logos on every other display (#309)
+$config = [xml](Get-Content $priconfig -Raw)
+$packaging = $config.SelectSingleNode('//packaging')
+if ($packaging) { [void]$packaging.ParentNode.RemoveChild($packaging) }
+$config.Save($priconfig)
 & $makepri new /pr $staging /cf $priconfig /of "$staging\resources.pri" /mn "$staging\AppxManifest.xml" /o
 if ($LASTEXITCODE -ne 0) { throw "makepri new failed" }
 
