@@ -208,7 +208,9 @@ void backspace(LiveText& e, bool word);        // a line's mark goes first
 void deleteForward(LiveText& e, bool word);
 void indent(LiveText& e, bool out);            // a list item under the one above
 void tab(LiveText& e, bool back);              // table cells, a link's address, indents
-void paste(LiveText& e, const std::wstring& text);  // an address over words links them
+// An address over words links them, and lines on a list item are its items
+// (pasteMarks); raw: the text as it is
+void paste(LiveText& e, const std::wstring& text, bool raw = false);
 bool undo(LiveText& e, bool redo);
 // Formats: on the selection, else the word at the caret; off when on already
 void toggleWrap(LiveText& e, const std::wstring& mark);
@@ -230,6 +232,12 @@ std::vector<MarkEdit> lineMarkEdits(const std::wstring& text, const std::vector<
 // a mark, after the mark that takes its place)
 std::wstring markedSpan(const std::wstring& text, const std::vector<MarkEdit>& edits);
 size_t throughMarks(size_t at, const std::vector<MarkEdit>& edits);
+// Lines pasted on a list item or in a quote, as Enter would make them: each
+// an item of the list (numbers count on, a task gets an empty box) or a line
+// of the quote. `at` is where they go in and `end` the end of what they
+// replace. Blank lines stay blank, lines with a mark of their own keep it,
+// and text holding a table or a fence goes in as it is.
+std::wstring pasteMarks(const std::wstring& text, size_t at, size_t end, const std::wstring& paste);
 void toggleTask(LiveText& e, size_t lineBegin);
 void moveLines(LiveText& e, bool up);          // the caret's lines past the one above or below
 // The selection's lines made a block of another kind: their marks go and

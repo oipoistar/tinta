@@ -5,10 +5,12 @@
 #include "i18n.h"
 #include "input.h"
 #include "keystroke.h"
+#include "live_text.h"
 #include "render.h"
 #include "settings.h"
 #include "tabs.h"
 #include "utils.h"
+#include "clipboard_snapshot.h"
 #include "frame_preview.h"
 
 #include <algorithm>
@@ -22,9 +24,9 @@
 #include <memory>
 #include <vector>
 
-// Editor conveniences (#251), the rail's list marks (#304, #306), the word
-// count (#240) and draft recovery after a close without asking (#252),
-// driven through the real handlers
+// Editor conveniences (#251), the rail's list marks and lines pasted on a
+// list (#304, #305, #306), the word count (#240) and draft recovery after a
+// close without asking (#252), driven through the real handlers
 namespace {
 int failures = 0, checks = 0;
 void check(bool ok, const char* message) {
@@ -487,6 +489,94 @@ void railFixture(App& app) {
     app.editorDirty = false;
 }
 
+// Lines pasted on a list item are its items, as Enter makes them, and lines
+// pasted in a quote its lines (#305)
+void pasteOnLists(App& app) {
+    const std::wstring three = L"line one\nline two\nline three";
+    auto pasted = [](const std::wstring& text, size_t at, const std::wstring& paste) {
+        std::wstring out = text;
+        out.insert(at, live::pasteMarks(text, at, at, paste));
+        return out;
+    };
+    check(pasted(L"- ", 2, three) == L"- line one\n- line two\n- line three", "lines pasted on a bullet are items");
+    check(pasted(L"1. ", 3, three) == L"1. line one\n2. line two\n3. line three", "on a number they count on");
+    check(pasted(L"- [x] ", 6, three) == L"- [x] line one\n- [ ] line two\n- [ ] line three",
+          "on a task they get empty boxes");
+    check(pasted(L"> ", 2, three) == L"> line one\n> line two\n> line three", "in a quote they are quoted");
+    check(pasted(L"> - ", 4, three) == L"> - line one\n> - line two\n> - line three", "a list in a quote goes on in it");
+    check(pasted(L"  * ", 4, three) == L"  * line one\n  * line two\n  * line three",
+          "a nested item's indent and bullet go on");
+    check(pasted(L"- ", 2, three + L"\n") == L"- line one\n- line two\n- line three",
+          "a line break at the paste's end leaves no empty item");
+    check(pasted(L"- ab", 3, L"x\ny") == L"- ax\n- yb", "pasted inside an item, its rest is the last item");
+    check(pasted(L"- ab", 3, L"x\n") == L"- ax\n- b", "also after a paste ending with a line break");
+    check(pasted(L"- ", 2, L"one\n\ntwo") == L"- one\n\n- two", "a blank line stays blank between items");
+    check(pasted(L"> ", 2, L"one\n\ntwo") == L"> one\n>\n> two", "and keeps a quote going");
+    check(pasted(L"- ", 2, L"one\n- two\n  - three\n    more") == L"- one\n- two\n  - three\n    more",
+          "lines with a mark or an indent of their own keep it");
+    check(pasted(L"- ", 2, L"```\ncode\n```") == L"- ```\ncode\n```", "a fence goes in as it is");
+    check(pasted(L"- ", 2, L"| a |\n| - |") == L"- | a |\n| - |", "so does a table");
+    check(pasted(L"- x", 0, three) == three + L"- x", "before the mark the paste is plain");
+    check(pasted(L"plain", 5, three) == L"plain" + three, "on a paragraph it is plain");
+    check(pasted(L"```\n- ", 6, three) == L"```\n- " + three, "in code it is plain");
+
+    // Through the editor's own paste, the user's clipboard put back after
+    ClipboardSnapshot saved(app.hwnd);
+    check(saved.captured, "the clipboard is kept to be put back");
+    if (!saved.captured) return;
+    auto clip = [&](const std::wstring& text) {
+        bool copied = false;
+        for (int attempt = 0; attempt < 20 && !(copied = copyToClipboard(app.hwnd, text)); ++attempt) Sleep(5);
+        check(copied, "the test's lines reach the clipboard");
+    };
+    clip(three);
+    setText(app, L"- ", 2);
+    key(app, 'V', {true});
+    check(app.editorText == L"- line one\n- line two\n- line three" && app.editorCursorPos == app.editorText.size(),
+          "Ctrl+V on a bullet pastes three items, the caret after the last");
+    key(app, 'Z', {true});
+    check(app.editorText == L"- ", "one Ctrl+Z takes the paste back");
+    key(app, 'V', {true, true});
+    check(app.editorText == L"- " + three, "Ctrl+Shift+V pastes the text as it is");
+    app.editorAssists = false;
+    setText(app, L"- ", 2);
+    key(app, 'V', {true});
+    check(app.editorText == L"- " + three, "with the assists off the paste is plain");
+    app.editorAssists = true;
+    setText(app, L"1. ", 3);
+    editorClipboardPaste(app, app.hwnd);
+    check(app.editorText == L"1. line one\n2. line two\n3. line three", "the menu's Paste numbers on as well");
+
+    // The pastes the mixed fixture describes
+    openListFixture(app);
+    clip(L"Milk\nEggs\nBread\n");
+    const struct { const wchar_t* item; const wchar_t* expect; } cases[] = {
+        {L"- Pears", L"- Pears\n- Milk\n- Eggs\n- Bread\n\n1. First"},
+        {L"2. Second", L"2. Second\n3. Milk\n4. Eggs\n5. Bread\n\n- [ ]"},
+        {L"- [x] Send them", L"- [x] Send them\n- [ ] Milk\n- [ ] Eggs\n- [ ] Bread\n\n> A quoted"},
+    };
+    for (const auto& c : cases) {
+        const size_t at = app.editorText.find(c.item) + wcslen(c.item);
+        select(app, at, at);
+        keystroke(app, VK_RETURN);
+        key(app, 'V', {true});
+        check(app.editorText.find(c.expect) != std::wstring::npos,
+              "Enter at a list's end and a paste make each line an item of that list");
+    }
+    clip(L"\nSecond line\nThird line");
+    const size_t quoted = app.editorText.find(L"> A quoted line") + 15;
+    select(app, quoted, quoted);
+    key(app, 'V', {true});
+    check(app.editorText.find(L"> A quoted line\n> Second line\n> Third line\n") != std::wstring::npos,
+          "lines pasted at a quote's end are quoted");
+    const size_t code = app.editorText.find(L"- not a list here") + 17;
+    select(app, code, code);
+    key(app, 'V', {true});
+    check(app.editorText.find(L"- not a list here\nSecond line\nThird line\n```") != std::wstring::npos,
+          "in the fixture's code the lines stay as they are");
+    app.editorDirty = false;
+}
+
 void wordCount(App& app) {
     app.showWordCount = true;
     setText(app, L"# Title\n\nHello **bold** world", 0);
@@ -629,6 +719,7 @@ int runEditorFeatureTests() {
     railNumberButton(app);
     railLongDocument(app);
     railFixture(app);
+    pasteOnLists(app);
     wordCount(app);
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;

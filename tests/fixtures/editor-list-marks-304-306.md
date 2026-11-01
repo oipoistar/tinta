@@ -1,8 +1,8 @@
-# List marks from the rail (#304, #306)
+# List marks from the rail and from a paste (#304, #305, #306)
 
 The edit rail's **block buttons** mark *every* line a selection takes in, and
-a fourth one, under the bullets, numbers them. Live does the same
-([Live's notes](../../docs/live-editor.md)).
+a fourth one, under the bullets, numbers them. Lines pasted on a list item
+become its items. Live does the same ([Live's notes](../../docs/live-editor.md)).
 
 ## Lines to turn into a list (#306)
 
@@ -23,9 +23,11 @@ Wake up
 Make coffee
 Read the news
 
-## Lists already there
+## Lists to paste into (#305)
 
-The buttons leave these as they are while none of their lines is selected.
+Copy the three plain lines above. Put the caret at the end of a list's last
+item, press Enter and paste: each line becomes an item. The numbers count
+on, a task gets an empty box, and in the quote each line is quoted.
 
 - Apples
 - Pears
@@ -56,3 +58,5 @@ Code keeps its lines as they are:
   - like this one
   - and this one
 - back out
+
+Ctrl+Shift+V pastes the text as it is, without marks.

@@ -1905,7 +1905,7 @@ Result key(App& app, HWND hwnd, LiveText& e, WPARAM vk, bool ctrl, bool shift, c
             break;
         case 'V':
             if (!ctrl) return Result::Unhandled;
-            paste(e, readClipboardText(hwnd));
+            paste(e, readClipboardText(hwnd), shift);  // Ctrl+Shift+V: as it is
             break;
         case 'Z':
         case 'Y':
@@ -1929,13 +1929,72 @@ Result key(App& app, HWND hwnd, LiveText& e, WPARAM vk, bool ctrl, bool shift, c
     return Result::Handled;
 }
 
-void paste(LiveText& e, const std::wstring& clip) {
+std::wstring pasteMarks(const std::wstring& t, size_t at, size_t end, const std::wstring& paste) {
+    if (paste.find(L'\n') == std::wstring::npos) return paste;
+    at = std::min(at, t.size());
+    end = std::max(at, std::min(end, t.size()));
+    size_t ls = lineStart(t, at);
+    if (fenceState(t, ls) != 0) return paste;
+    size_t q = quoteLength(t, ls);
+    LineMark m = lineMark(t, ls + q);
+    const bool list = listKind(m.kind);
+    if ((!q && !list) || at < ls + q + (list ? m.indent + m.length : 0)) return paste;
+    std::vector<std::wstring_view> lines;
+    std::wstring_view all(paste);
+    for (size_t from = 0;;) {
+        size_t nl = all.find(L'\n', from);
+        lines.push_back(all.substr(from, nl == std::wstring_view::npos ? nl : nl - from));
+        if (nl == std::wstring_view::npos) break;
+        from = nl + 1;
+    }
+    for (std::wstring_view line : lines) {
+        if (fenceRun(line) || tableRow(line)) return paste;
+    }
+    // The rest of the line goes on after the last line pasted; with nothing
+    // there, the line breaks the paste ends with go, leaving no empty item
+    std::wstring_view rest = std::wstring_view(t).substr(end, lineEnd(t, end) - end);
+    if (blank(rest)) {
+        while (lines.size() > 1 && blank(lines.back())) lines.pop_back();
+    }
+    if (lines.size() == 1 && blank(lines[0])) return paste;
+    std::wstring quote = t.substr(ls, q), bare = quote;
+    while (!bare.empty() && bare.back() == L' ') bare.pop_back();
+    std::wstring out(lines[0]);
+    int number = m.number;
+    for (size_t k = 1; k < lines.size(); ++k) {
+        std::wstring line(lines[k]);
+        out += L'\n';
+        std::wstring whole = k + 1 == lines.size() ? line + std::wstring(rest) : line;
+        if (blank(whole)) {
+            out += bare;  // a blank line, which keeps a quote going
+            continue;
+        }
+        out += quote;
+        // Lines of the item's own (indented) and lines with a mark keep theirs
+        if (list && whole[0] != L' ' && whole[0] != L'\t' && lineMark(whole, 0).kind == LineMark::None) {
+            out += std::wstring(m.indent, L' ');
+            switch (m.kind) {
+                case LineMark::Task: out += std::wstring(1, m.symbol) + L" [ ] "; break;
+                case LineMark::Number: out += std::to_wstring(++number) + m.symbol + L" "; break;
+                default: out += std::wstring(1, m.symbol) + L" "; break;
+            }
+        }
+        out += line;
+    }
+    return out;
+}
+
+void paste(LiveText& e, const std::wstring& clip, bool raw) {
     std::wstring clean;
     clean.reserve(clip.size());
     for (wchar_t c : clip) {
         if (c != L'\r') clean += c;
     }
     if (clean.empty()) return;
+    if (raw) {
+        replace(e, clean);
+        return;
+    }
     // An address pasted over words makes them its link
     std::wstring trimmed = clean;
     while (!trimmed.empty() && (trimmed.back() == L'\n' || trimmed.back() == L' ')) trimmed.pop_back();
@@ -1951,7 +2010,16 @@ void paste(LiveText& e, const std::wstring& clip) {
             return;
         }
     }
-    replace(e, clean);
+    if (!e.multiline) {
+        replace(e, clean);
+        return;
+    }
+    // Lines pasted on a list item are its items, and the numbers below count on
+    std::wstring marked = pasteMarks(e.text, e.selStart(), e.selEnd(), clean);
+    replace(e, marked);
+    if (marked != clean && lineMark(e.text, lineStart(e.text, e.caret)).kind == LineMark::Number) {
+        renumberFrom(e, lineStart(e.text, e.caret));
+    }
 }
 
 void character(App& app, LiveText& e, wchar_t ch, const Host& host) {

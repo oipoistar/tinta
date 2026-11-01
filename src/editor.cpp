@@ -3485,6 +3485,11 @@ void editorPasteClipboard(App& app, HWND hwnd, bool raw) {
             app, tsvToMarkdownTable(paste), app.editorCursorPos);
         signalPushKey(app, SIG_SUCCESS, SIGI_CHECK,
                       "toast.paste_table");
+    } else if (!raw && app.editorAssists) {
+        // Lines pasted on a list item are its items, as Enter makes them,
+        // and lines pasted in a quote its lines (#305)
+        paste = live::pasteMarks(app.editorText, app.editorCursorPos,
+                                 app.editorCursorPos, paste);
     }
     size_t before = app.editorCursorPos;
     app.editorText.insert(app.editorCursorPos, paste);
@@ -3510,6 +3515,9 @@ void editorClipboardPaste(App& app, HWND hwnd) {
         paste = padTableForInsert(app, tsvToMarkdownTable(paste),
                                   app.editorCursorPos);
         signalPushKey(app, SIG_SUCCESS, SIGI_CHECK, "toast.paste_table");
+    } else if (app.editorAssists) {
+        paste = live::pasteMarks(app.editorText, app.editorCursorPos,
+                                 app.editorCursorPos, paste);  // #305
     }
     size_t before = app.editorCursorPos;
     app.editorText.insert(app.editorCursorPos, paste);

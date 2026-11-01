@@ -1053,6 +1053,16 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
         handleMouseMove(app, app.hwnd, MAKELPARAM(alphaAt.x, alphaAt.y));
         handleMouseUp(app, app.hwnd, 0, MAKELPARAM(alphaAt.x, alphaAt.y));
         check(selection() == L"alpha beta", "a double-click drawn back in a card keeps its word: " + toUtf8(selection()));
+        // Lines pasted on a list item in the card are its items, as in Live (#305)
+        {
+            ClipboardSnapshot saved(app.hwnd);
+            doc.edit.text = L"- one";
+            doc.edit.caret = doc.edit.anchor = 5;
+            check(copyToClipboard(app.hwnd, L"\ntwo\nthree"), "the test's lines reach the clipboard");
+            keystroke(app, 'V', {true, false, false});
+            check(doc.edit.text == L"- one\n- two\n- three",
+                  "lines pasted on a card's list item are its items: " + toUtf8(doc.edit.text));
+        }
         doc.edit.text = keptText;
         doc.edit.caret = doc.edit.anchor = keptText.size();
     }

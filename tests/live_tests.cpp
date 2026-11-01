@@ -1149,6 +1149,37 @@ void railNumbers(App& app, const fs::path& dir, const fs::path& out) {
     app.editorDirty = false;
 }
 
+// Lines pasted on a list item in Live are its items, as Enter makes them (#305)
+void listPaste(App& app, const fs::path& dir, const fs::path& out) {
+    const auto npos = std::wstring::npos;
+    const KeyMods ctrl{true, false, false};
+    openLists(app, dir);
+    // Enter on the numbered list's last item, then a paste: the lines count on,
+    // and the numbers below follow
+    bool copied = false;
+    for (int attempt = 0; attempt < 20 && !(copied = copyToClipboard(app.hwnd, L"Milk\nEggs\n")); ++attempt) Sleep(5);
+    check(copied, "the test's lines reach the clipboard");
+    placeCaret(app, find(app, L"2. Second") + 9);
+    keystroke(app, VK_RETURN);
+    keystroke(app, 'V', ctrl);
+    check(find(app, L"2. Second\n3. Milk\n4. Eggs\n5. Third") != npos,
+          "lines pasted on a numbered item count on, and so do the numbers below: " + textNear(app, L"Second"));
+    keystroke(app, 'Z', ctrl);
+    check(find(app, L"2. Second\n3. \n4. Third") != npos, "one Ctrl+Z takes the paste back, numbers and all");
+    keystroke(app, 'Z', ctrl);
+    // In a quote each line is quoted; Ctrl+Shift+V pastes the text as it is
+    placeCaret(app, find(app, L"> Quoted") + 8);
+    keystroke(app, VK_RETURN);
+    keystroke(app, 'V', ctrl);
+    check(find(app, L"> Quoted\n> Milk\n> Eggs\n\nThe end.") != npos, "lines pasted in a quote are quoted: " + textNear(app, L"Quoted"));
+    placeCaret(app, find(app, L"- Apples") + 8);
+    keystroke(app, VK_RETURN);
+    keystroke(app, 'V', {true, true, false});
+    check(find(app, L"- Apples\n- Milk\nEggs\n") != npos, "Ctrl+Shift+V pastes them as they are: " + textNear(app, L"Apples"));
+    frame(app, out / "live-list-paste.png");
+    app.editorDirty = false;
+}
+
 // A finger held on the page (#286) takes the word under it, as a double-click
 // does, and grows the selection by words as it slides, keeping that word
 // whichever way it goes; Live's menu opens where it lifts. Live's page is the
@@ -1255,6 +1286,7 @@ int runLiveTests(const char* fixtureDir) {
     drawings(app, dir, out);
     reviewed(app, dir);
     railNumbers(app, dir, out);
+    listPaste(app, dir, out);
     menuEngine(app);
     contextMenu(app, dir, out);
     heldFinger(app, doc);
