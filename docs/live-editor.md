@@ -59,7 +59,12 @@ same way on a sheet and in its own tab.
   italic, **Ctrl+K** link (a selected address becomes the link's target).
 - **Paste.** An address pasted over selected words makes them its link. A
   picture is saved beside the document and a spreadsheet's range becomes a
-  table, as in Source.
+  table, as in Source. Lines pasted on a list item become items of that
+  list, as Enter makes them: numbers count on (and the numbers below
+  follow), and a task gets an empty box. Lines pasted in a quote are
+  quoted. Blank lines stay blank, lines that start with a mark of their own
+  keep it, and text holding a table or a fence goes in as it is.
+  **Ctrl+Shift+V** pastes the text as it is.
 - **Alt+↑ / Alt+↓** move the caret's lines, or the selected ones, up and
   down.
 - **[[** lists the notes in the document's folder. The arrow keys choose
@@ -117,7 +122,9 @@ bold, italic, strikethrough, code, highlight, link, and Heading 1 to 3. A
 format already on the selection shows lit, and its button takes it off.
 
 **The rail.** The edit rail's text and block buttons (bold, italic,
-strikethrough, code, link, bullets, tasks, quote) act on the Live text. Its
+strikethrough, code, link, bullets, numbers, tasks, quote) act on the Live
+text. A block button marks every line of the selection, the numbers
+counting on, and takes the mark off them all when they all have it. Its
 table and diagram buttons open the menu's table grid and diagrams beside
 it, and its picture button picks a picture to link at the caret.
 
