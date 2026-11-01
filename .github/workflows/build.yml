@@ -55,18 +55,40 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown, Mermaid and PlantUML files
 
-            A fix release for 3.9.5. For what is new in 3.9.5 (dragging text in the editor and lists in copies), see the [v3.9.5 notes](https://github.com/oipoistar/tinta/releases/tag/v3.9.5).
+            Tinta 4.0 brings two new ways to work: **Live**, a WYSIWYG editor where you write on the page as it reads, and **Sheets**, an infinite canvas of Markdown notes. Both are experimental in this release. They are ready to use, and they will grow with what you tell me: I'm looking forward to any suggestions for improving them, so please open an issue with what you would change.
 
-            ### Security
-            - Images, wiki links and file references on another computer's share (`\\server\share\...`) open only in a document from that same server, since opening the share signs in to it with your Windows credentials. Anywhere else such an image shows the note "network path not opened". Files on this computer and on a mapped drive open as before
+            ### Live: write on the page (experimental)
+            - A second way to edit beside Source: the page as the reading view lays it out, with the Markdown showing only in the block you are typing in. The pill at the top of the edit rail switches between them, and so does Ctrl+/; Tinta remembers the choice
+            - Live edits the same text as Source, byte for byte, with the same undo, so switching changes nothing in the file
+            - Typing knows Markdown: lists, numbers and tasks go on and end, Tab nests items and walks table cells, a bracket or mark typed over a selection wraps it, and an address pasted over words links them
+            - A slash menu (`/`) makes every block Tinta draws: headings, lists, callouts, code, maths, Mermaid and PlantUML diagrams, a table, a picture, a link, a footnote and properties. Words selected on a line get a format bar
+            - A right-click menu that knows what is under the pointer: formats, links, pictures, tasks, a table's rows and columns, Turn into and Insert
+            - On a touchscreen a finger held on a word selects it and grows the selection by words, and the menu opens where it lifts
+            - More in [Live: write on the page](https://github.com/oipoistar/tinta/blob/master/docs/live-editor.md)
+
+            ### Sheets: an infinite canvas of notes (experimental)
+            - A sheet (`.smd`) lays out cards that are real Markdown notes in the sheet's folder, joined by arrows and gathered in groups. Make one with **New sheet** on the start page (or press S there), or open the **Sheet tour** among the start page's Learn cards
+            - Semantic zoom: far out a card is its title, close up the rendered note. The arrow keys walk between cards, and Tab grows a mind map
+            - The sheet is its folder: notes added from elsewhere wait in a tray, renamed ones are followed, and links written in the notes show as ghost lines that become arrows with a click
+            - Lanes write a property such as `status:` into the notes dropped in them, so a board and its notes agree
+            - A sheet compiles into one document along its arrows, presents along them (P) and tidies itself (Ctrl+L), and a pasted Mermaid flowchart arrives as cards
+            - Cards are typed in with Live's engine, slash menu and format bar included
+            - Obsidian `.canvas` files open as sheets too, and save back as JSON Canvas
+            - More in [Sheets](https://github.com/oipoistar/tinta/blob/master/docs/sheets.md)
+
+            ### Also new
+            - The source editor shows Markdown in colour: headings, links and code stand out, the marks go faint, and fenced code and the properties take their language's colours. Settings, Editor turns it off. Requested by @derek-price (#268)
+            - A numbered list button on the edit rail. Requested by @nokia5118 (#304)
+            - **Exit editing** in the application menu while editing. Contributed by @SHM-white (#300)
+            - Touch: a finger held in the split preview selects the rendered text and offers Copy, and Help scrolls under a finger. Contributed by @SHM-white (#301, #302)
 
             ### Fixed
-            - Tables, code blocks and other blocks inside list items render where they are written, with their own layout, and a heading that starts a list item lines up with its marker. Contributed by @shinfd (#292)
-            - Local images whose path holds percent escapes, such as `folder%20with%20space/image.png`, show in the viewer and the exports. Reported and contributed by @tferi99 (#293, #294)
-            - Documents in different folders that show an image of the same name each show their own
-            - Lists, quotes and emphasis nested a thousand or more levels deep no longer crash Tinta
-            - A file that starts with a UTF-8 byte order mark, as Windows PowerShell 5.1 writes it, shows its first heading instead of a literal `# Title`
-            - Text directly inside a raw HTML `<blockquote>`, without a `<p>` around it, shows in the quote and in the Word export
+            - The bullet, task and quote buttons mark every line of a selection, in one Ctrl+Z, instead of only the caret's line, and swap one list mark for another instead of stacking them. Reported by @nokia5118 (#306)
+            - Lines pasted on a list item become items of that list, as Enter makes them, instead of plain paragraphs after the first. Reported by @nokia5118 (#305)
+            - Touch: a finger held in the source editor selects whole words; touches on menus, search controls and panel edges reach them instead of panning the page; a finger that catches a flicked page only stops it; and a pan, a second finger or a change of tab starts over cleanly. Contributed by @SHM-white (#295, #296, #297, #298)
+            - A link to a heading in the split preview moves the source pane with it. Contributed by @SHM-white (#299)
+            - A table's Fit and Copy TSV buttons take a click before the cell under them and stay above a cell being edited. Contributed by @SHM-white (#303)
+            - Ctrl+K makes a link in Source, as the rail's tooltip says
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats
@@ -74,7 +96,7 @@ jobs:
             - Tabbed interface with drag, session restore, and a tab context menu
             - 10 tuned themes (5 light, 5 dark) plus custom themes
             - Hardware-accelerated rendering via Direct2D
-            - Single portable executable about 2.5 MB, no dependencies
+            - Single portable executable about 4 MB, no dependencies
           files: build/Release/tinta.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

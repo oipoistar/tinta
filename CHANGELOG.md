@@ -1,5 +1,28 @@
 # Changelog
 
+## [v4.0.0] - 2026-11-01
+
+Two new ways to work, both experimental: Live, a WYSIWYG editor that writes on the page as it reads, and Sheets, an infinite canvas of Markdown notes. Suggestions for improving them are very welcome.
+
+### Added
+- Live, a WYSIWYG editor (experimental): the page as the reading view lays it out, with the Markdown showing only in the blocks being typed in. It edits the same text as Source, byte for byte and with the same undo; the pill on the edit rail or Ctrl+/ switches between them, and the choice is remembered. Typing continues lists, tasks, quotes and tables, a slash menu makes every block Tinta draws, a format bar sits over selected words, a right-click menu offers what is under the pointer, and a held finger selects words. See [Live](docs/live-editor.md)
+- Sheets, an infinite canvas of notes (experimental): a `.smd` file whose cards are Markdown notes in the sheet's folder, joined by arrows and gathered in groups. Semantic zoom, keyboard mind mapping, a folder watched for new, renamed and missing notes, ghost lines for the links in the notes, lanes that write front matter, compiling into one document, presenting and tidying along the arrows, Mermaid flowcharts in and out, find and spotlight. Cards are typed in with Live's engine, and Obsidian `.canvas` files open as sheets. New sheet is on the start page (S) and on a new tab's empty page, and the start page's Learn has a Sheet tour. See [Sheets](docs/sheets.md)
+- Markdown in colour in the source editor: the marks go faint, headings take the heading colour, the marks that start a block the accent, links, code and maths their own colours, and fenced code and the properties their language's colours. Settings, Editor turns it off. Requested by @derek-price (#268)
+- A numbered list button on the edit rail, under the bullets: the numbers count on across a selection or several carets, at each level of a nested list, and a second press takes them off. Requested by @nokia5118 (#304)
+- **Exit editing** in the application menu while editing, through the same exit as Esc, in all eight languages. Contributed by @SHM-white (#300)
+- Touch: a finger held in the split preview selects the rendered text and opens Copy and Select all where it lifts, and Help scrolls and flings under a finger, a tap beside it closing it. Contributed by @SHM-white (#301, #302)
+
+### Changed
+- The start page's Learn column starts level with the top of the page
+
+### Fixed
+- The edit rail's bullet, task and quote buttons act on every line a selection takes in, adding the mark where it is missing or taking it off them all, in one Ctrl+Z; they marked only the line holding the caret. A list mark now gives way to another: the bullet button on a task left `[ ] task`, and the task button on a bullet made `- [ ] - item`. Reported by @nokia5118 (#306)
+- Lines pasted on a list item become items of that list as Enter makes them, numbers counting on and task boxes empty, and lines pasted in a quote are quoted; only the first line took the mark. Ctrl+Shift+V still pastes the text as it is. Reported by @nokia5118 (#305)
+- Touch: a finger held in the source editor selects the word and grows the selection by whole words, keeping the editor's menu on the selection. Touches on the editor's menu over the preview, the stacked Replace buttons and a panel's resize edge reach them instead of panning. A finger that catches a flicked page only stops it, and a pan, a second finger, losing focus or a change of tab, file or mode starts touch over. Contributed by @SHM-white (#295, #296, #297, #298)
+- A link to a heading in the split preview moves the source pane too, so the next frame no longer pulls the preview back. Contributed by @SHM-white (#299)
+- A table's Fit and Copy TSV buttons take a press before the cell under them, and draw above a cell being edited. Contributed by @SHM-white (#303)
+- Ctrl+K makes a link in Source, as the edit rail's tooltip says
+
 ## [v3.9.6] - 2026-10-31
 
 ### Security
