@@ -281,6 +281,50 @@ void checkNoUnderline(const App& app, Range r, const std::string& what) {
     }
 }
 
+// A rule through the middle of a run: above its baseline, across its ink
+bool struck(const App& app, const App::LayoutTextRun& run) {
+    for (const auto& line : app.layoutLines) {
+        if (horizontal(line) && line.p1.y > run.bounds.top && line.p1.y < runBaseline(run) &&
+            line.p1.x <= run.bounds.left + 0.5f && line.p2.x >= run.bounds.right - 0.5f) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// <del> and ~~ strike a code chip inside them as they strike text
+void strikeTests(App& app) {
+    auto doc = app.parser.parse("Struck ~~`struck_code()`~~ and <del>`del_code()`</del> beside "
+                                "~~plain struck~~ and `plain_code()` words.\n");
+    check(doc.success, "the strike document parses");
+    if (!doc.success) return;
+    app.height = 700;
+    app.readingWidthPct = 100;
+    for (int theme : {0, 5}) {
+        applyTheme(app, theme);
+        for (float scale : {1.0f, 1.5f}) {
+            app.contentScale = scale;
+            updateTextFormats(app);
+            for (int width : {1050, 650}) {
+                app.width = width;
+                app.root = doc.root;
+                layoutDocument(app);
+                ensureLayoutComplete(app);
+                for (const wchar_t* words : {L"struck_code()", L"del_code()", L"plain struck"}) {
+                    auto runs = runsIn(app, findText(app, words));
+                    check(!runs.empty(), "struck text is drawn");
+                    for (const auto* run : runs) {
+                        check(struck(app, *run), "a code chip or text inside ~~ or <del> is struck through");
+                    }
+                }
+                for (const auto* run : runsIn(app, findText(app, L"plain_code()"))) {
+                    check(!struck(app, *run), "a code chip outside them is not");
+                }
+            }
+        }
+    }
+}
+
 void layoutTests(App& app, const ElementPtr& root) {
     app.height = 700;
     app.readingWidthPct = 100;
@@ -482,6 +526,54 @@ void exportTests(App& app, const ElementPtr& root) {
     check(zip.find("&lt;ins&gt;") != std::string::npos, "Word keeps the fence literal");
     check(zip.find("alt with H2O (missing-263.png)") != std::string::npos, "Word keeps the words of an alt <sub>");
 }
+
+// ~~ and == around bold, italic, code and links export as they draw: HTML
+// nests the spans, Word gives each run both properties, and the words the
+// fixture keeps literal stay plain
+void markedEmphasisExportTests(App& app) {
+    namespace fs = std::filesystem;
+    auto doc = parseDocument(app.parser, read(TINTA_MARKED_EMPHASIS_FIXTURE), "struck-and-marked-emphasis.md");
+    check(doc.success, "the struck and marked emphasis fixture parses");
+    if (!doc.success) return;
+    fs::path output = fs::current_path() / "html-span-test-output";
+    fs::create_directories(output);
+    applyTheme(app, 0);
+    app.contentScale = 1.0f;
+    updateTextFormats(app);
+    app.width = 1050;
+    app.root = doc.root;
+    layoutDocument(app);
+    check(exportHtmlFile(app, (output / "marked.html").wstring()), "the fixture's HTML export succeeds");
+    std::string html = read(output / "marked.html");
+    for (const char* nested : {
+             "<del><strong>Struck_bold</strong></del> text after it",
+             "<mark><em>Marked_italic</em></mark>",
+             "<del><code>struck_code()</code></del>",
+             "<mark><a href=\"#around-emphasis\">Marked_link</a></mark>",
+             "<del><mark><strong>Struck_marked_bold</strong></mark></del>",
+             "<mark><del><em>Marked_struck_italic</em></del></mark>",
+             "<del>Struck_claim<sup id=\"tinta-fnref-1-1\">"}) {
+        check(html.find(nested) != std::string::npos, std::string("HTML nests ") + nested);
+    }
+    for (const char* literal : {
+             "~~ <strong>Spaced_struck</strong> ~~",
+             "<strong>Compared_left</strong> == <strong>Compared_right</strong>",
+             "~~a <strong>Crossing_struck~~ c</strong>",
+             "~~<strong>Escaped_struck</strong>~~"}) {
+        check(html.find(literal) != std::string::npos, std::string("HTML keeps ") + literal);
+    }
+
+    check(exportDocxFile(app, (output / "marked.docx").wstring()), "the fixture's Word export succeeds");
+    std::string zip = read(output / "marked.docx");
+    check(zip.find("<w:b/><w:strike/></w:rPr><w:t xml:space=\"preserve\">Struck_bold</w:t>") != std::string::npos,
+          "Word strikes the bold run");
+    check(zip.find("<w:i/><w:highlight w:val=\"yellow\"/></w:rPr><w:t xml:space=\"preserve\">Marked_italic</w:t>") !=
+              std::string::npos, "Word marks the italic run");
+    check(zip.find("<w:b/><w:strike/><w:highlight w:val=\"yellow\"/></w:rPr><w:t xml:space=\"preserve\">"
+                   "Struck_marked_bold</w:t>") != std::string::npos, "Word strikes and marks the bold run");
+    check(zip.find("<w:b/></w:rPr><w:t xml:space=\"preserve\">Escaped_struck</w:t>") != std::string::npos,
+          "Word keeps an escaped pair's bold plain");
+}
 }  // namespace
 
 int main() {
@@ -496,6 +588,8 @@ int main() {
         layoutTests(app, doc.root);
         exportTests(app, doc.root);
     }
+    strikeTests(app);
+    markedEmphasisExportTests(app);
     std::cout << "HTML spans: " << failures << " failures\n";
     return failures ? 1 : 0;
 }

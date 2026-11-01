@@ -231,7 +231,8 @@ int runHighlightLayoutTests() {
         const fs::path fixtures = fs::path(TINTA_FRAGMENT_FIXTURE).parent_path().parent_path();
         std::vector<std::pair<std::string, std::string>> documents;
         for (const char* name : {"highlight-seams.md", "math-mixed-layout.md", "superscript-subscript.md",
-                                 "footnotes.md", "markdown-regression-control.md", "math-inline-stress.md"}) {
+                                 "footnotes.md", "markdown-regression-control.md", "math-inline-stress.md",
+                                 "struck-and-marked-emphasis.md"}) {
             documents.emplace_back(name, read(fixtures / name));
             check(!documents.back().second.empty(), "fixture loads");
         }
@@ -241,7 +242,19 @@ int runHighlightLayoutTests() {
             "==alpha keeps x^2^, H~2~O, ~~struck text~~ and $E=mc^2$ on its background while it wraps, "
             "then e^iπ^ and $\\sqrt[3]{8}=2$ beside [[Wiki Page]] and CO~2~ at 10^5^ Pa, and again x^2^, "
             "H~2~O and $\\dfrac{1}{1+x^2}$ until the omega==\n";
+        // Bold, italic and links inside a highlight are runs of their own
+        const std::string longEmphasisHighlight =
+            "==alpha keeps **bold words**, *italic words*, ***both at once*** and [a link](#target) on "
+            "its background while it wraps, then ~~**struck bold**~~ and *more italic words* beside "
+            "**more bold words** over several lines in a narrow window until the omega==\n";
         const Case cases[] = {
+            {"==alpha **bold** omega==\n", 0},
+            {"==alpha *italic* and [a link](#target) omega==\n", 0},
+            {"==**alpha bold** and *italic omega*==\n", 0},
+            {"==alpha ~~**struck bold**~~ omega==\n", 0},
+            {"- ==alpha **bold** *italic* omega==\n", 0},
+            {"| Head |\n| --- |\n| ==alpha **bold** omega== |\n", 0},
+            {longEmphasisHighlight.c_str(), 3},
             {"==alpha x^2^ omega==\n", 0},
             {"==alpha H~2~O omega==\n", 0},
             {"==alpha x^2^H~2~O omega==\n", 0},

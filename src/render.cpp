@@ -717,6 +717,12 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                     addUnderline(run.style, x, x + textWidth, y, y + drawYOffset + baselineOf(textFormat),
                                  color);
                 }
+                // ~~`code`~~ and <del>`code`</del>: struck like the text around it
+                if (hasStrike) {
+                    float strikeY = y + mathTextOffset + normalLineHeight * 0.55f;
+                    app.layoutLines.push_back({D2D1::Point2F(x, strikeY),
+                                               D2D1::Point2F(x + textWidth, strikeY), color, 1.0f});
+                }
                 // Advance by the pill's own padding only: the surrounding text
                 // already carries the source's spacing, so a full space width
                 // here would double it and shove a following comma off the span

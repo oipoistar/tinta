@@ -84,6 +84,7 @@ struct ParserContext {
     // added an element, so its leave pops only that (see kMaxBlockNesting)
     std::vector<bool> nestPushed;
     std::vector<bool> spanPushed;
+    bool escapedSigns = false;  // some text holds an escaped-sign stand-in
 
     ParserContext() {
         root = std::make_shared<Element>(ElementType::Document);
@@ -653,6 +654,24 @@ static void flushPendingHtml(ParserContext* ctx) {
     inlineHtml(ctx, html.data(), (MD_SIZE)html.size());
 }
 
+// Whether the character at `text` follows an odd run of backslashes in the
+// source, so the last of them escapes it
+static bool escapedInSource(const ParserContext* ctx, const MD_CHAR* text) {
+    if (!ctx->inputStart) return false;
+    const auto start = reinterpret_cast<uintptr_t>(ctx->inputStart);
+    const auto at = reinterpret_cast<uintptr_t>(text);
+    if (at < start || at - start >= ctx->inputLength) return false;
+    size_t slashes = 0;
+    for (size_t p = at - start; p > 0 && ctx->inputStart[p - 1] == '\\'; --p) ++slashes;
+    return slashes % 2 == 1;
+}
+
+// An escaped ~, = or ^ stands in as a control byte while the extension
+// pass runs; restoreEscapedSigns puts the sign back
+static char escapedSignStandIn(char sign) {
+    return sign == '~' ? '\x02' : sign == '=' ? '\x03' : sign == '^' ? '\x04' : '\0';
+}
+
 static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata) {
     auto* ctx = static_cast<ParserContext*>(userdata);
 
@@ -691,6 +710,18 @@ static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, voi
             inlineHtml(ctx, text, size);
             break;
         case MD_TEXT_NORMAL:
+            // md4c hands an escaped character over alone, past its
+            // backslash. An escaped ~, = or ^ waits as a stand-in the
+            // extension pass does not read, so \~~**x**~~ stays text
+            if (size == 1 && escapedInSource(ctx, text)) {
+                if (char standIn = escapedSignStandIn(*text)) {
+                    ctx->addText(&standIn, 1);
+                    ctx->escapedSigns = true;
+                    break;
+                }
+            }
+            ctx->addText(text, size);
+            break;
         case MD_TEXT_CODE:
             ctx->addText(text, size);
             break;
@@ -758,8 +789,8 @@ static int textCallback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, voi
 //
 // md4c has no extension hooks for these Obsidian/Typora spans, so a pass
 // over the finished tree splits Text nodes, keeping intervening inline
-// math opaque, then splits each new span's content the same way. Code
-// spans, code blocks, and Mermaid sources are never touched.
+// math and spans opaque, then splits each new span's content the same
+// way. Code spans, code blocks, and Mermaid sources are never touched.
 
 namespace {
 
@@ -809,6 +840,34 @@ static bool isRangeTilde(const std::string& text, size_t i) {
     return rangeEnd(codePointBefore(text, i)) && rangeEnd(codePointAt(text, i + 1));
 }
 
+// Whitespace as md4c reads it: ASCII blanks and Unicode spaces (Zs). Either
+// end of the text counts as blank; an opaque part (\x01) does not.
+static bool isBlank(uint32_t c) {
+    return c == 0 || c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f' ||
+           c == 0xA0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200A) || c == 0x202F ||
+           c == 0x205F || c == 0x3000;
+}
+
+// == is two signs alone, so a === b is no delimiter
+static bool isEqualsPair(const std::string& text, size_t i) {
+    return text.compare(i, 2, "==") == 0 && (i == 0 || text[i - 1] != '=') &&
+           (i + 2 >= text.size() || text[i + 2] != '=');
+}
+
+// ~~ and == open before a non-blank and close after one, the rule md4c
+// gives its own ~~ (left to this pass for ~sub~'s sake). So x ~~ y and
+// `a` == `b` stay text, while ~~**bold**~~ pairs around the opaque part.
+// This finds the first ~~ or == at or after `from` that can close; a run
+// of the sign that cannot is passed whole.
+static size_t findCloser(const std::string& text, size_t from, char sign) {
+    const char pair[] = {sign, sign, '\0'};
+    for (size_t at = text.find(pair, from); at != std::string::npos; at = text.find(pair, at)) {
+        if ((sign != '=' || isEqualsPair(text, at)) && !isBlank(codePointBefore(text, at))) return at;
+        while (at < text.size() && text[at] == sign) at++;
+    }
+    return std::string::npos;
+}
+
 static bool findExtensionSpan(const std::string& text, size_t from, ExtensionMatch& match);
 
 // True when scanning text[from, end) the way splitInlineExtensions will
@@ -828,14 +887,15 @@ static bool spanClosesAt(const std::string& text, size_t from, size_t end) {
 static bool findExtensionSpan(const std::string& text, size_t from, ExtensionMatch& match) {
     for (size_t i = from; i < text.size(); i++) {
         char c = text[i];
-        if (c == '=' && i + 1 < text.size() && text[i + 1] == '=') {
-            size_t close = text.find("==", i + 2);
-            if (close != std::string::npos && close > i + 2) {
+        if (c == '=' && isEqualsPair(text, i) && !isBlank(codePointAt(text, i + 2))) {
+            size_t close = findCloser(text, i + 2, '=');
+            if (close != std::string::npos) {
                 match = {i, close - (i + 2), 2, ElementType::Highlight};
                 return true;
             }
         } else if (c == '~' && i + 1 < text.size() && text[i + 1] == '~') {
-            size_t close = text.find("~~", i + 2);
+            size_t close = isBlank(codePointAt(text, i + 2)) ? std::string::npos
+                                                             : findCloser(text, i + 2, '~');
             if (close != std::string::npos && close > i + 2) {
                 // ~~a ~b~~~: a subscript inside closes on the first tilde
                 // of the run and the strikethrough takes the last two
@@ -932,9 +992,39 @@ static bool isInlineHtmlSpan(ElementType type) {
            type == ElementType::Highlight;
 }
 
+// What a run of text the extension pass reads may hold besides text, each
+// part opaque: math, inline HTML spans, and md4c's own spans, so a span
+// wraps them as GitHub's ~~ does (~~**bold**~~, ==[a link](x)==,
+// ~~`code`~~). Line breaks end a run.
+static bool joinsRun(ElementType type) {
+    switch (type) {
+        case ElementType::Text:
+        case ElementType::MathInline:
+        case ElementType::Emphasis:
+        case ElementType::Strong:
+        case ElementType::Link:
+        case ElementType::Code:
+        case ElementType::Image:
+        case ElementType::FootnoteReference:
+        case ElementType::Anchor:
+        case ElementType::Ruby:
+            return true;
+        default:
+            return isInlineHtmlSpan(type);
+    }
+}
+
+// How many levels of elements sit below elem
+static size_t heightOf(const Element* elem) {
+    size_t most = 0;
+    for (const auto& child : elem->children) most = std::max(most, 1 + heightOf(child.get()));
+    return most;
+}
+
 // Adjacent siblings [begin, end) read as one string: text as itself, any
-// other part (math, an inline HTML span) as one opaque \x01. append()
-// hands out pieces of that string in order, moving opaque parts whole.
+// other part (math, an inline HTML or Markdown span) as one opaque \x01.
+// append() hands out pieces of that string in order, moving opaque parts
+// whole.
 class SiblingRun {
 public:
     SiblingRun(const ElementPtr& parent, size_t begin, size_t end)
@@ -976,6 +1066,19 @@ public:
         }
     }
 
+    // The most levels an opaque part in [start, end) holds below itself
+    size_t heightWithin(size_t start, size_t end) const {
+        if (single_) return 0;
+        size_t most = 0;
+        // From the part holding `start`: offsets_ ascend from 0
+        size_t k = std::upper_bound(offsets_.begin(), offsets_.end(), start) - offsets_.begin() - 1;
+        for (; k + 1 < offsets_.size() && offsets_[k] < end; ++k) {
+            const auto& part = parent_->children[begin_ + k];
+            if (part->type != ElementType::Text) most = std::max(most, heightOf(part.get()));
+        }
+        return most;
+    }
+
 private:
     const ElementPtr& parent_;
     size_t begin_;
@@ -985,57 +1088,79 @@ private:
     size_t partIndex_ = 0;
 };
 
-static void splitInlineExtensions(const ElementPtr& parent) {
+// partsSplit: parent is a span this pass just made, whose opaque parts
+// were split before they moved into it
+static void splitInlineExtensions(const ElementPtr& parent, bool partsSplit = false) {
     if (parent->type == ElementType::Code ||
         parent->type == ElementType::CodeBlock ||
         parent->type == ElementType::MermaidDiagram) {
         return;
     }
 
-    // TeX and inline HTML spans are opaque atoms between text nodes:
-    // ==before $x$ after== wraps the equation without interpreting
-    // delimiters inside it. Markdown wrappers and block boundaries keep
-    // their existing scope.
-    auto inRun = [](ElementType type) {
-        return type == ElementType::Text || type == ElementType::MathInline || isInlineHtmlSpan(type);
-    };
+    // TeX, inline HTML spans and md4c's spans are opaque atoms between text
+    // nodes: ==before $x$ after== wraps the equation without interpreting
+    // delimiters inside it, and ~~**bold**~~ wraps the bold. Line breaks
+    // and block boundaries end a run.
     std::vector<ElementPtr> rebuilt;
     bool changed = false;
+    size_t depth = SIZE_MAX;  // parent's, once a span is found
     for (size_t i = 0; i < parent->children.size();) {
         auto child = parent->children[i];
-        if (!inRun(child->type)) {
+        if (!joinsRun(child->type)) {
             splitInlineExtensions(child);
             rebuilt.push_back(child);
             ++i;
             continue;
         }
         size_t begin = i;
-        while (i < parent->children.size() && inRun(parent->children[i]->type)) {
-            // A span's own text is split first, then it moves whole
-            if (isInlineHtmlSpan(parent->children[i]->type)) splitInlineExtensions(parent->children[i]);
+        while (i < parent->children.size() && joinsRun(parent->children[i]->type)) {
+            // A part's own text is split first, then it moves whole
+            if (!partsSplit && parent->children[i]->type != ElementType::Text) {
+                splitInlineExtensions(parent->children[i]);
+            }
             ++i;
         }
         if (i == begin + 1 && child->type != ElementType::Text) {
             rebuilt.push_back(child);
             continue;
         }
+        // Most runs hold no sign at all: they stay as they are, unread
+        bool signs = false;
+        for (size_t j = begin; j < i && !signs; ++j) {
+            const auto& part = parent->children[j];
+            signs = part->type == ElementType::Text && part->text.find_first_of("~=^") != std::string::npos;
+        }
+        if (!signs) {
+            rebuilt.insert(rebuilt.end(), parent->children.begin() + begin, parent->children.begin() + i);
+            continue;
+        }
         SiblingRun run(parent, begin, i);
         const std::string& text = run.text();
-        size_t cursor = 0;
+        size_t cursor = 0;  // end of the text handed out so far
+        size_t from = 0;    // where the next span is looked for
         ExtensionMatch m;
         bool any = false;
-        while (findExtensionSpan(text, cursor, m)) {
+        while (findExtensionSpan(text, from, m)) {
+            const size_t contentStart = m.start + m.delimLen;
+            const size_t contentEnd = contentStart + m.contentLen;
+            // A span puts all it wraps a level deeper. Past kMaxNesting it
+            // adds none, as md4c's spans do, and its delimiters stay text:
+            // ~~**a ~~**a ... b**~~ b**~~ would otherwise double the depth
+            if (depth == SIZE_MAX) depth = treeDepth(parent.get());
+            if (depth + 1 + run.heightWithin(contentStart, contentEnd) > kMaxNesting) {
+                from = m.start + 1;
+                continue;
+            }
             any = true;
             run.append(cursor, m.start, parent, rebuilt);
             auto span = std::make_shared<Element>(m.type);
             span->parent = parent.get();
-            run.append(m.start + m.delimLen, m.start + m.delimLen + m.contentLen,
-                       span, span->children);
-            // Spans nest: ~~struck x^2^~~, ==mark H~2~O==. A span's content
+            run.append(contentStart, contentEnd, span, span->children);
+            // Spans nest: ~~struck x^2^~~, ==mark H~2~O==. A span's text
             // holds none of its own delimiter, so this ends within four levels
-            splitInlineExtensions(span);
+            splitInlineExtensions(span, true);
             rebuilt.push_back(std::move(span));
-            cursor = m.start + m.delimLen + m.contentLen + m.delimLen;
+            cursor = from = contentEnd + m.delimLen;
         }
         if (!any) {
             rebuilt.insert(rebuilt.end(), parent->children.begin() + begin,
@@ -1046,6 +1171,19 @@ static void splitInlineExtensions(const ElementPtr& parent) {
         run.append(cursor, text.size(), parent, rebuilt);
     }
     if (changed) parent->children = std::move(rebuilt);
+}
+
+// Once the extension pass is done, each escaped sign's stand-in is the
+// sign again, for the passes after it and the page
+static void restoreEscapedSigns(const ElementPtr& elem) {
+    if (elem->type == ElementType::Text) {
+        for (char& c : elem->text) {
+            if (c == '\x02') c = '~';
+            else if (c == '\x03') c = '=';
+            else if (c == '\x04') c = '^';
+        }
+    }
+    for (const auto& child : elem->children) restoreEscapedSigns(child);
 }
 
 // Obsidian [[wiki links]]: [[Target]] and [[Target|shown text]] become
@@ -1495,6 +1633,7 @@ static ParseResult parseCore(const std::string& markdown, FootnoteData* notes) {
 
     ctx.flushText();
     splitInlineExtensions(ctx.root);
+    if (ctx.escapedSigns) restoreEscapedSigns(ctx.root);
     splitWikiLinks(ctx.root);
     splitFileRefs(ctx.root);
     splitEmojiShortcodes(ctx.root);

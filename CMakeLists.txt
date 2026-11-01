@@ -398,7 +398,8 @@ if(BUILD_TESTING)
     target_include_directories(html_span_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(html_span_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
     target_compile_definitions(html_span_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
-        TINTA_HTML_SPAN_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/html-inline-tags-263.md")
+        TINTA_HTML_SPAN_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/html-inline-tags-263.md"
+        TINTA_MARKED_EMPHASIS_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/struck-and-marked-emphasis.md")
     add_test(NAME html_spans COMMAND html_span_tests)
 
     add_executable(rich_copy_tests tests/rich_copy_tests.cpp ${INPUT_TEST_SOURCES})
@@ -574,7 +575,8 @@ if(BUILD_TESTING)
     target_link_libraries(document_tests PRIVATE md4c)
     target_compile_definitions(document_tests PRIVATE
         TINTA_BOM_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/byte-order-mark.md"
-        TINTA_BOM_FRONTMATTER_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/byte-order-mark-frontmatter.md")
+        TINTA_BOM_FRONTMATTER_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/byte-order-mark-frontmatter.md"
+        TINTA_MARKED_EMPHASIS_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/struck-and-marked-emphasis.md")
     add_test(NAME document_types COMMAND document_tests)
 
     # Word and character counting (#240): plain text and parsed Markdown

@@ -189,6 +189,35 @@ int main() {
         check(markedAndBold, "highlight nested in bold keeps both");
     }
     {
+        // Strikethrough and highlight around md4c's spans: each word keeps
+        // its bold, italic, code or link style and takes the line or the
+        // marker as well; no delimiter is left as text
+        auto runs = flattenFirstBlock(app, parser,
+            "~~**bold**~~ ==*italic*== ~~`code`~~ ==[link](https://example.com)== after\n");
+        const StyledRun *bold = nullptr, *italic = nullptr, *link = nullptr;
+        for (const auto& run : runs) {
+            check(textOf(run).find("~~") == std::string::npos && textOf(run).find("==") == std::string::npos,
+                  "delimiters around spans are consumed");
+            if (textOf(run) == "bold") bold = &run;
+            if (textOf(run) == "italic") italic = &run;
+            if (textOf(run) == "link") link = &run;
+        }
+        check(bold && bold->style.bold && bold->style.format == kBold && bold->style.hasStrike &&
+                  !bold->style.hasBg,
+              "bold inside strikethrough is bold and struck");
+        check(italic && italic->style.italic && italic->style.format == kItalic && italic->style.hasBg &&
+                  !italic->style.hasStrike,
+              "italic inside a highlight is italic and marked");
+        const StyledRun* code = firstOfType(runs, ElementType::Code);
+        check(code && code->style.hasStrike && textOf(*code) == "code", "code inside strikethrough is struck");
+        check(link && link->style.hasBg && link->style.isLink && link->style.linkUrl == "https://example.com" &&
+                  link->style.color.b == app.theme.link.b,
+              "a link inside a highlight is marked and stays a link");
+        check(!runs.empty() && textOf(runs.back()) == " after" && !runs.back().style.hasBg &&
+                  !runs.back().style.hasStrike && !runs.back().style.bold && !runs.back().style.italic,
+              "text after them is plain again");
+    }
+    {
         auto runs = flattenFirstBlock(app, parser, "x^2^ and H~2~O\n");
         const StyledRun* sup = nullptr;
         const StyledRun* sub = nullptr;

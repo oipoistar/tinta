@@ -144,6 +144,11 @@ void deepCases(App& app) {
         {"Markdown links around images",
          "Start " + repeat("[![", 5000) + "deep" + repeat("](i.png)](#a)", 5000) + " end.\n", "", 0},
         {"inline HTML spans", "Start " + repeat("<sub>", 5000) + "deep" + repeat("</sub>", 5000) + " end.\n", "", 0},
+        // Each level's ~~ wraps the span inside it, one more level each
+        {"Markdown strong in strikethrough",
+         "Start " + repeat("~~**a ", 5000) + "deep" + repeat(" b**~~", 5000) + " end.\n", "", 0},
+        {"inline HTML spans in highlights",
+         "Start " + repeat("==<sub>a ", 5000) + "deep" + repeat(" b</sub>==", 5000) + " end.\n", "", 0},
         {"inline HTML marks", "Start " + repeat("<mark>", 20000) + "deep" + repeat("</mark>", 20000) + " end.\n", "", 0},
         {"HTML list", htmlList + "\n\nAfter.\n", "level ", 5000},
         {"HTML list left open", repeat("<ul><li>", 5000) + "deep\n\nAfter.\n", "", 0},

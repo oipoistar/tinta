@@ -1,5 +1,6 @@
 #include "document.h"
 
+#include <cctype>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -233,6 +234,71 @@ int main() {
             {"==50~100 mm and H~2~O==\n",
              "Paragraph(Highlight('50~100 mm and H',Subscript('2'),'O'))",
              "a range tilde stays literal in a nested highlight"},
+            // md4c's spans move whole into a ~~ or == span, as GitHub's
+            // strikethrough wraps them: ~~**bold**~~ kept its tildes before
+            {"~~**struck bold**~~ text\n",
+             "Paragraph(Strikethrough(Strong('struck bold')),' text')",
+             "strikethrough wraps bold"},
+            {"a mark: ==**marked bold**==.\n",
+             "Paragraph('a mark: ',Highlight(Strong('marked bold')),'.')",
+             "a highlight wraps bold"},
+            {"~~*struck*~~ and ==*marked*==\n",
+             "Paragraph(Strikethrough(Emphasis('struck')),' and ',Highlight(Emphasis('marked')))",
+             "strikethrough and highlight wrap italic"},
+            {"~~a **b** c~~ and ==a _b_ c==\n",
+             "Paragraph(Strikethrough('a ',Strong('b'),' c'),' and ',Highlight('a ',Emphasis('b'),' c'))",
+             "they wrap emphasis among text"},
+            {"**~~x~~** and *==y==*\n",
+             "Paragraph(Strong(Strikethrough('x')),' and ',Emphasis(Highlight('y')))",
+             "emphasis still wraps them"},
+            {"~~==**x**==~~ and ==~~*y*~~==\n",
+             "Paragraph(Strikethrough(Highlight(Strong('x'))),' and ',Highlight(Strikethrough(Emphasis('y'))))",
+             "nested spans wrap emphasis"},
+            {"~~**bold ==mark== in**~~\n",
+             "Paragraph(Strikethrough(Strong('bold ',Highlight('mark'),' in')))",
+             "a span inside the wrapped bold stays in it"},
+            {"~~[link](#a)~~, ==`code`== and ~~![alt](i.png)~~\n",
+             "Paragraph(Strikethrough(Link('link')),', ',Highlight(Code('code')),' and ',Strikethrough(Image('alt')))",
+             "they wrap a link, code and an image"},
+            {"==**bold** x^2^ and $y$==\n",
+             "Paragraph(Highlight(Strong('bold'),' x',Superscript('2'),' and ',$y$))",
+             "a highlight wraps bold beside a script and math"},
+            // Delimiters that open before a blank or close after one stay
+            // text, as md4c reads ~~, and == is two signs alone; so do
+            // escaped ones and pairs split by a span's edge
+            {"`~~**x**~~` ~~**open** and ==*open*\n",
+             "Paragraph(Code('~~**x**~~'),' ~~',Strong('open'),' and ==',Emphasis('open'))",
+             "code and unclosed delimiters stay text"},
+            {"~~ **x** ~~ and == *y* ==\n",
+             "Paragraph('~~ ',Strong('x'),' ~~ and == ',Emphasis('y'),' ==')",
+             "a blank just inside keeps the delimiters text"},
+            {"`a` == `b` and `c` == `d`\n",
+             "Paragraph(Code('a'),' == ',Code('b'),' and ',Code('c'),' == ',Code('d'))",
+             "comparisons between code spans stay text"},
+            {"`a` === `b` and `c` === `d`\n",
+             "Paragraph(Code('a'),' === ',Code('b'),' and ',Code('c'),' === ',Code('d'))",
+             "three equals signs are no delimiter"},
+            {"**a** == **b** and **c** == **d**\n",
+             "Paragraph(Strong('a'),' == ',Strong('b'),' and ',Strong('c'),' == ',Strong('d'))",
+             "comparisons between bold words stay text"},
+            {"~~a **b~~ c** and **d ==e** f==\n",
+             "Paragraph('~~a ',Strong('b~~ c'),' and ',Strong('d ==e'),' f==')",
+             "delimiters on both sides of a span's edge stay text"},
+            {"\\~\\~**x**\\~\\~ and \\=\\=*y*\\=\\=\n",
+             "Paragraph('~~',Strong('x'),'~~ and ==',Emphasis('y'),'==')",
+             "escaped delimiters around emphasis stay text"},
+            {"\\~\\~x\\~\\~, H\\~2\\~O and x\\^2\\^\n",
+             "Paragraph('~~x~~, H~2~O and x^2^')",
+             "escaped signs stay text in plain text too"},
+            {"\\\\~~x~~ and a\\\\~b~\n",
+             "Paragraph('\\',Strikethrough('x'),' and a\\',Subscript('b'))",
+             "a sign after an escaped backslash still pairs"},
+            {"x ~~ y ~~ z and a == b == c\n",
+             "Paragraph('x ~~ y ~~ z and a == b == c')",
+             "blank-flanked delimiters in plain text stay text"},
+            {"~~a ~~ b~~ and ==a\\=== b\n",
+             "Paragraph(Strikethrough('a ~~ b'),' and ',Highlight('a='),' b')",
+             "a delimiter that cannot close is passed over"},
         };
         for (const auto& c : cases) {
             std::string actual = paragraphShape(c.source);
@@ -241,6 +307,104 @@ int main() {
             }
             check(actual == c.expected, c.message);
         }
+    }
+
+    // The mixed fixture: each Struck_ and Marked_ word sits under its
+    // strikethrough or highlight, wherever it is, and the last section
+    // keeps every delimiter as text
+    {
+        using qmd::Element;
+        using qmd::ElementType;
+        auto doc = parseDocument(parser, readFile(TINTA_MARKED_EMPHASIS_FIXTURE), "notes.md");
+        check(doc.success && doc.root, "the struck and marked emphasis fixture parses");
+        if (doc.success && doc.root) {
+            auto under = [](const Element* e, ElementType type) {
+                for (; e; e = e->parent)
+                    if (e->type == type) return true;
+                return false;
+            };
+            auto wordChar = [](char c) { return isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+            const std::string keptPrefixes[] = {"Code_", "Fence_", "Spaced_", "Compared_",
+                                                "Open_", "Crossing_", "Escaped_"};
+            int struck = 0, marked = 0, kept = 0, wrong = 0;
+            int lastSectionSpans = 0;
+            bool literalAbove = false, lastSection = false;
+            std::string lastSectionText;
+            std::function<void(const qmd::ElementPtr&)> walk = [&](const qmd::ElementPtr& e) {
+                if (e->type == ElementType::Strikethrough || e->type == ElementType::Highlight) {
+                    if (lastSection) ++lastSectionSpans;
+                }
+                if (e->type == ElementType::Text) {
+                    const bool code = under(e.get(), ElementType::Code) || under(e.get(), ElementType::CodeBlock);
+                    if (!code && !lastSection && (e->text.find("~~") != std::string::npos ||
+                                                  e->text.find("==") != std::string::npos)) {
+                        std::cerr << "  literal delimiter in '" << e->text << "'\n";
+                        literalAbove = true;
+                    }
+                    if (!code && lastSection) lastSectionText += e->text;
+                    const std::string& t = e->text;
+                    for (size_t i = 0; i < t.size(); ++i) {
+                        if (i && wordChar(t[i - 1])) continue;
+                        size_t j = i;
+                        while (j < t.size() && wordChar(t[j])) ++j;
+                        const std::string word = t.substr(i, j - i);
+                        const bool isStrike = under(e.get(), ElementType::Strikethrough);
+                        const bool isMark = under(e.get(), ElementType::Highlight);
+                        bool right = true;
+                        if (word.rfind("Struck_", 0) == 0) { ++struck; right = isStrike; }
+                        else if (word.rfind("Marked_", 0) == 0) { ++marked; right = isMark; }
+                        else {
+                            for (const auto& prefix : keptPrefixes) {
+                                if (word.rfind(prefix, 0) != 0) continue;
+                                ++kept;
+                                right = !isStrike && !isMark;
+                            }
+                        }
+                        if (!right) {
+                            std::cerr << "  misplaced " << word << '\n';
+                            ++wrong;
+                        }
+                        if (j > i) i = j - 1;
+                    }
+                }
+                for (const auto& child : e->children) walk(child);
+            };
+            size_t tables = 0, quotes = 0, lists = 0, fences = 0;
+            for (const auto& block : doc.root->children) {
+                if (block->type == ElementType::Heading && !block->children.empty() &&
+                    block->children[0]->text == "Stays as typed") {
+                    lastSection = true;
+                }
+                tables += block->type == ElementType::Table;
+                quotes += block->type == ElementType::BlockQuote;
+                lists += block->type == ElementType::List;
+                fences += block->type == ElementType::CodeBlock;
+                // The footnotes close the page and are back to marked words
+                if (block->type == ElementType::Footnotes) lastSection = false;
+                walk(block);
+            }
+            check(struck == 22 && marked == 19, "the fixture's struck and marked words are all found");
+            check(kept == 16, "the fixture's literal words are all found");
+            check(wrong == 0, "every struck, marked and literal word is where it belongs");
+            check(!literalAbove, "no ~~ or == stays as text above the last section");
+            check(lastSectionSpans == 1, "the last section strikes only its final paragraph's word");
+            check(lastSectionText.find("~~") != std::string::npos && lastSectionText.find("==") != std::string::npos,
+                  "the last section keeps its delimiters as text");
+            check(tables == 1 && quotes == 1 && lists == 3 && fences == 1,
+                  "the fixture's table, quote, lists and fence remain");
+        }
+    }
+
+    // An escaped caret is no footnote reference, as on GitHub
+    {
+        auto doc = parseDocument(parser, "[^n] and [\\^n]\n\n[^n]: A note.\n", "notes.md");
+        size_t references = 0;
+        std::function<void(const qmd::ElementPtr&)> count = [&](const qmd::ElementPtr& e) {
+            references += e->type == qmd::ElementType::FootnoteReference;
+            for (const auto& child : e->children) count(child);
+        };
+        if (doc.success && doc.root) count(doc.root);
+        check(references == 1, "an escaped caret makes no footnote reference");
     }
 
     // GitHub alerts
