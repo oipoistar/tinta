@@ -55,40 +55,19 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown, Mermaid and PlantUML files
 
-            Tinta 4.0 brings two new ways to work: **Live**, a WYSIWYG editor where you write on the page as it reads, and **Sheets**, an infinite canvas of Markdown notes. Both are experimental in this release. They are ready to use, and they will grow with what you tell me: I'm looking forward to any suggestions for improving them, so please open an issue with what you would change.
+            A fix release for 4.0.0. For what is new in 4.0 (Live and Sheets), see the [v4.0.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.0.0).
 
-            ### Live: write on the page (experimental)
-            - A second way to edit beside Source: the page as the reading view lays it out, with the Markdown showing only in the block you are typing in. The pill at the top of the edit rail switches between them, and so does Ctrl+/; Tinta remembers the choice
-            - Live edits the same text as Source, byte for byte, with the same undo, so switching changes nothing in the file
-            - Typing knows Markdown: lists, numbers and tasks go on and end, Tab nests items and walks table cells, a bracket or mark typed over a selection wraps it, and an address pasted over words links them
-            - A slash menu (`/`) makes every block Tinta draws: headings, lists, callouts, code, maths, Mermaid and PlantUML diagrams, a table, a picture, a link, a footnote and properties. Words selected on a line get a format bar
-            - A right-click menu that knows what is under the pointer: formats, links, pictures, tasks, a table's rows and columns, Turn into and Insert
-            - On a touchscreen a finger held on a word selects it and grows the selection by words, and the menu opens where it lifts
-            - More in [Live: write on the page](https://github.com/oipoistar/tinta/blob/master/docs/live-editor.md)
+            ### Added
+            - Themes can colour bold and italic text, the selection and horizontal rules with `bold=`, `italic=`, `bolditalic=`, `selection=` and `hr=` in `themes.ini`, on the page, in Live and Source and in the exports. See [Theme colours](https://github.com/oipoistar/tinta/blob/master/docs/theme-colours.md). Requested by @Fallgrim (#310)
 
-            ### Sheets: an infinite canvas of notes (experimental)
-            - A sheet (`.smd`) lays out cards that are real Markdown notes in the sheet's folder, joined by arrows and gathered in groups. Make one with **New sheet** on the start page (or press S there), or open the **Sheet tour** among the start page's Learn cards
-            - Semantic zoom: far out a card is its title, close up the rendered note. The arrow keys walk between cards, and Tab grows a mind map
-            - The sheet is its folder: notes added from elsewhere wait in a tray, renamed ones are followed, and links written in the notes show as ghost lines that become arrows with a click
-            - Lanes write a property such as `status:` into the notes dropped in them, so a board and its notes agree
-            - A sheet compiles into one document along its arrows, presents along them (P) and tidies itself (Ctrl+L), and a pasted Mermaid flowchart arrives as cards
-            - Cards are typed in with Live's engine, slash menu and format bar included
-            - Obsidian `.canvas` files open as sheets too, and save back as JSON Canvas
-            - More in [Sheets](https://github.com/oipoistar/tinta/blob/master/docs/sheets.md)
-
-            ### Also new
-            - The source editor shows Markdown in colour: headings, links and code stand out, the marks go faint, and fenced code and the properties take their language's colours. Settings, Editor turns it off. Requested by @derek-price (#268)
-            - A numbered list button on the edit rail. Requested by @nokia5118 (#304)
-            - **Exit editing** in the application menu while editing. Contributed by @SHM-white (#300)
-            - Touch: a finger held in the split preview selects the rendered text and offers Copy, and Help scrolls under a finger. Contributed by @SHM-white (#301, #302)
+            ### Changed
+            - In Live, Ctrl+E shows the page as the reader draws it, and Ctrl+E goes back to the caret; in the reader, Ctrl+E opens the editor. Source keeps Ctrl+E for its preview pane. Requested by @Fallgrim (#308)
 
             ### Fixed
-            - The bullet, task and quote buttons mark every line of a selection, in one Ctrl+Z, instead of only the caret's line, and swap one list mark for another instead of stacking them. Reported by @nokia5118 (#306)
-            - Lines pasted on a list item become items of that list, as Enter makes them, instead of plain paragraphs after the first. Reported by @nokia5118 (#305)
-            - Touch: a finger held in the source editor selects whole words; touches on menus, search controls and panel edges reach them instead of panning the page; a finger that catches a flicked page only stops it; and a pan, a second finger or a change of tab starts over cleanly. Contributed by @SHM-white (#295, #296, #297, #298)
-            - A link to a heading in the split preview moves the source pane with it. Contributed by @SHM-white (#299)
-            - A table's Fit and Copy TSV buttons take a click before the cell under them and stay above a cell being edited. Contributed by @SHM-white (#303)
-            - Ctrl+K makes a link in Source, as the rail's tooltip says
+            - Live's scrollbar can be dragged, and after a switch to Source and back the wheel and Down keep Live's page where they leave it. Reported by @go4399 (#307)
+            - Live no longer sometimes shows a document opened after leaving the editor as Markdown being typed
+            - The Microsoft Store logos are sharp at every display scale instead of enlarged and soft. Reported by @Fallgrim (#309)
+            - Strikethrough and highlight wrap bold, italic, links and code; `~~**bold**~~` and `==*italic*==` used to show their `~~` and `==` as text. As on GitHub, `a == b` and `x ~~ y ~~ z` stay text, and so do escaped signs
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats

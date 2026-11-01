@@ -1,5 +1,19 @@
 # Changelog
 
+## [v4.0.1] - 2026-11-02
+
+### Added
+- Themes can colour bold and italic text, the selection and horizontal rules. `bold=`, `italic=` and `bolditalic=` in `themes.ini` colour emphasised text on the page, in Live and Source and in the HTML and Word exports, while links and inline code keep their own colours. `selection=` tints the selection in the reading view, Source and Live, and `hr=` colours rules, the footnotes' rule included. Each key is optional, and a theme without them looks as before. See [Theme colours](docs/theme-colours.md). Requested by @Fallgrim (#310)
+
+### Changed
+- In Live, Ctrl+E shows the page as the reader draws it, edits not yet saved included, and Ctrl+E there goes back to the caret. In the reader, Ctrl+E opens the editor, as E does. Source keeps Ctrl+E for its preview pane, Ctrl+Shift+E still reads from either editor, and the Read pill and Help list the keys. Requested by @Fallgrim (#308)
+
+### Fixed
+- Live's scrollbar lights up under the pointer and can be dragged; pressing it used to move the caret and select text. After switching to Source and back, the wheel and Down no longer pull Live's page back to where it was. Reported by @go4399 (#307)
+- Live sometimes missed the switch to a document opened after leaving the editor, and showed that document's text from the caret on as Markdown being typed
+- The Microsoft Store logos are drawn from the full-size icon at each display scale. They had been enlarged from a small icon, which left them soft with a white halo, and on displays above 100% Windows enlarged them again. Reported by @Fallgrim (#309)
+- Strikethrough and highlight wrap bold, italic, links, code and images, as GitHub's strikethrough does; `~~**bold**~~`, `==*italic*==`, ``~~`code`~~`` and `==[a link](x)==` used to show their `~~` and `==` as text. As on GitHub, a `~~` or `==` with a space just inside it stays text, so `x ~~ y ~~ z` and `a == b == c` are no longer struck or marked, and an escaped `\~`, `\=` or `\^` stays a plain sign. A code chip inside a strikethrough is struck through like the text around it
+
 ## [v4.0.0] - 2026-11-01
 
 Two new ways to work, both experimental: Live, a WYSIWYG editor that writes on the page as it reads, and Sheets, an infinite canvas of Markdown notes. Suggestions for improving them are very welcome.
