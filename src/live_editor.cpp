@@ -1073,18 +1073,7 @@ bool liveMouseDown(App& app, HWND hwnd, int x, int y) {
     L.e.lastClickMs = now;
     L.pressX = px;
     L.pressY = py;
-    const std::wstring& t = L.e.text;
-    if (L.e.clickCount == 2) {
-        L.e.anchor = live::wordLeft(t, std::min(at + 1, t.size()));
-        L.e.caret = live::wordRight(t, at);
-    } else if (L.e.clickCount >= 3) {
-        L.e.anchor = live::lineStart(t, at);
-        L.e.caret = live::lineEnd(t, at);
-    } else {
-        L.e.caret = at;
-        if (!shift) L.e.anchor = at;
-    }
-    L.e.preferredX = -1;
+    live::pressAt(L.e, at, shift);
     L.e.selectingWithMouse = true;
     L.dragging = true;
     SetCapture(hwnd);
@@ -1108,11 +1097,7 @@ bool liveMouseMove(App& app, HWND hwnd, int x, int y) {
         else if ((float)y > h) app.scrollY = std::min(maxScroll(app), app.scrollY + ((float)y - h) * 0.5f);
         app.targetScrollY = app.scrollY;
         float gx = (float)x - vx + app.scrollX, gy = std::clamp((float)y, top, h) + app.scrollY;
-        size_t at = positionAtShown(app, L, gx, gy, 0);
-        const std::wstring& t = L.e.text;
-        if (L.e.clickCount == 2) L.e.caret = at >= L.e.anchor ? live::wordRight(t, at) : live::wordLeft(t, std::min(at + 1, t.size()));
-        else if (L.e.clickCount >= 3) L.e.caret = at >= L.e.anchor ? live::lineEnd(t, at) : live::lineStart(t, at);
-        else L.e.caret = at;
+        live::dragTo(L.e, positionAtShown(app, L, gx, gy, 0));
         finish(app, hwnd, L);
         SetCursor(beam);
         return true;
@@ -1146,6 +1131,26 @@ bool liveMouseUp(App& app, HWND hwnd, int, int) {
     L.e.selectingWithMouse = false;
     if (GetCapture() == hwnd) ReleaseCapture();
     InvalidateRect(hwnd, nullptr, FALSE);
+    return true;
+}
+
+bool liveTouchHold(App& app, HWND hwnd, int x, int y) {
+    float vx = documentViewportX(app);
+    if (!editorLiveOn(app) || (float)x < vx || (float)y < chromeTopHeight(app) || onQuickNoteButton(app, x, y)) return false;
+    LiveEditor& L = begin(app);
+    float px = (float)x - vx, py = (float)y;
+    // The format bar and the popup's rows take a held finger as a press
+    if (live::hitAt(L.e, px, py) >= 0) return false;
+    if (L.e.popup != LiveText::Popup::None) live::closePopup(L.e);
+    // The word, as a second click takes it; a tap after the hold is a first click
+    L.e.clickCount = 2;
+    L.e.lastClickMs = 0;
+    L.pressX = px;
+    L.pressY = py;
+    live::pressAt(L.e, positionAtShown(app, L, px + app.scrollX, py + app.scrollY, 0), false);
+    L.e.selectingWithMouse = true;
+    L.dragging = true;
+    finish(app, hwnd, L);
     return true;
 }
 

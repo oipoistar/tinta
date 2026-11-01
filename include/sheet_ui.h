@@ -256,6 +256,11 @@ bool sheetKeyUp(App& app, HWND hwnd, WPARAM key);
 bool sheetCharInput(App& app, HWND hwnd, wchar_t ch);
 bool sheetDropFiles(App& app, HWND hwnd, const std::vector<std::wstring>& files, int x, int y);
 void sheetCaptureLost(App& app, HWND hwnd);
+// A finger held in a text box being typed in (touch.cpp) takes its word, as
+// a double-click does, without the mouse's capture; its moves grow the
+// selection by words until it lifts. False elsewhere: there the hold is a
+// press, and its lift opens the sheet's menu
+bool sheetTouchHold(App& app, HWND hwnd, int x, int y);
 void sheetTimer(App& app, HWND hwnd);
 void sheetImagesArrived(App& app);   // a remote or PlantUML image landed: notes redraw
 void sheetLeave(App& app);           // the tab is switching away: commit and save

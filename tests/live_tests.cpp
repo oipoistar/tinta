@@ -1112,29 +1112,63 @@ void performance(App& app, const fs::path& dir) {
     app.editorDirty = false;
 }
 
-// A finger held on the page (#286): Live's page is the document viewport, but
-// the split preview's own hold (#301) stays out of it. The press goes to Live,
-// and Live's menu opens where the finger lifts
+// A finger held on the page (#286) takes the word under it, as a double-click
+// does, and grows the selection by words as it slides, keeping that word
+// whichever way it goes; Live's menu opens where it lifts. Live's page is the
+// document viewport, but the split preview's own hold (#301) stays out of it
 void heldFinger(App& app, const fs::path& doc) {
     openInEditor(app, doc);
     app.scrollY = app.targetScrollY = 0;
-    paint(app);
-    D2D1_POINT_2F w{};
-    check(renderedWord(app, L"paragraph", w), "the page draws a word to hold");
-    const POINT p{(LONG)std::lround(w.x), (LONG)std::lround(w.y)};
+    // With the caret in the paragraph Live shows it as typed, as it does
+    // while a finger selects in it: the words are found as drawn then
+    const size_t word = find(app, L"paragraph");
+    auto spot = [&](size_t pos) {
+        placeCaret(app, pos);
+        D2D1_POINT_2F q = caretOnScreen(app);
+        return D2D1::Point2F(q.x + dpi(app, 2.0f), q.y);
+    };
+    const D2D1_POINT_2F w = spot(word + 3), after = spot(find(app, L"with") + 1), before = spot(find(app, L"A paragraph"));
+    placeCaret(app, word + 3);
+    auto pointOf = [](D2D1_POINT_2F q) { return POINT{(LONG)std::lround(q.x), (LONG)std::lround(q.y)}; };
+    const POINT p = pointOf(w);
     PanelList list;
     check(touchTargetAt(app, p, list) == TouchTarget::Document, "a finger on Live's page drives the page");
-    const size_t word = find(app, L"paragraph");
     const LiveText& L = liveText(app);
+    auto selected = [&] {
+        size_t a = std::min(L.anchor, L.caret), b = std::max(L.anchor, L.caret);
+        return L.text.substr(a, b - a);
+    };
     pauseClicks();
     double ms = touchClockMs();
     check(touchDown(app, app.hwnd, 90, p, ms), "the held finger is taken");
     touchHold(app, app.hwnd);
     check(!app.selecting && !app.hasSelection, "a finger held in Live leaves the preview's selection alone");
-    check(L.caret >= word && L.caret <= word + 9, "a finger held in Live puts its caret in the word");
-    touchUp(app, app.hwnd, 90, p, ms += 700, false);
-    check(liveMenuOpen(app) && !app.showContextMenu, "lifting the finger opens Live's menu there");
+    check(selected() == L"paragraph", "a finger held in Live takes its word: " + narrow(selected()));
+    touchMove(app, app.hwnd, 90, pointOf(after), ms += 100);
+    check(selected() == L"paragraph with", "sliding on takes whole words: " + narrow(selected()));
+    touchMove(app, app.hwnd, 90, pointOf(before), ms += 100);
+    check(selected() == L"A paragraph", "sliding back keeps the word held first: " + narrow(selected()));
+    touchUp(app, app.hwnd, 90, pointOf(before), ms += 100, false);
+    check(liveMenuOpen(app) && !app.showContextMenu && selected() == L"A paragraph",
+          "lifting the finger opens Live's menu over the words");
     liveCloseMenu(app);
+    // A hold cut short keeps its word without the menu, and no drag lingers
+    pauseClicks();
+    touchDown(app, app.hwnd, 92, p, ms += 1000);
+    touchHold(app, app.hwnd);
+    touchCancel(app, app.hwnd);
+    handleMouseMove(app, app.hwnd, at(after));
+    check(selected() == L"paragraph" && !liveMenuOpen(app),
+          "a hold cut short keeps its word, and the pointer drags nothing after it");
+    // A mouse's double-click drawn back keeps its word too
+    pauseClicks();
+    handleMouseMove(app, app.hwnd, at(w));
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, at(w));
+    handleMouseUp(app, app.hwnd, 0, at(w));
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, at(w));
+    handleMouseMove(app, app.hwnd, at(before));
+    handleMouseUp(app, app.hwnd, 0, at(before));
+    check(selected() == L"A paragraph", "a double-click drawn back keeps its word: " + narrow(selected()));
 }
 
 }  // namespace

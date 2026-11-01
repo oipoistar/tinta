@@ -1001,6 +1001,57 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
     check(doc.edit.menu.open && doc.edit.menu.keys, "the menu key opens the card's text menu");
     keystroke(app, VK_ESCAPE);
     check(!doc.edit.menu.open && doc.editing == SheetDoc::Edit::Card, "Esc closes the menu and leaves the card being typed in");
+    // A finger held in the card takes a word, as a double-click does, slides on
+    // by whole words keeping it, and the text's menu opens over them where it
+    // lifts
+    {
+        const std::wstring keptText = doc.edit.text;
+        doc.edit.text = L"alpha beta gamma delta";
+        doc.edit.caret = doc.edit.anchor = 0;
+        paint(app);
+        D2D1_RECT_F hb{};
+        float hs = 1;
+        check(editRect(app, doc, hb, hs), "the card's text box is placed for a finger");
+        auto textPoint = [&](size_t at) {
+            IDWriteTextLayout* layout = editLayout(app, doc, (hb.right - hb.left) / hs);
+            float px = 0, py = 0;
+            DWRITE_HIT_TEST_METRICS m{};
+            if (layout) layout->HitTestTextPosition((UINT32)at, FALSE, &px, &py, &m);
+            return POINT{(LONG)(hb.left + (px + m.width * 0.5f) * hs),
+                         (LONG)(hb.top + (py - doc.edit.scrollY + m.height * 0.5f) * hs)};
+        };
+        auto selection = [&] {
+            size_t a = std::min(doc.edit.anchor, doc.edit.caret), b = std::max(doc.edit.anchor, doc.edit.caret);
+            return doc.edit.text.substr(a, b - a);
+        };
+        const POINT alphaAt = textPoint(1), betaAt = textPoint(7), gammaAt = textPoint(12);
+        PanelList plist;
+        double tms = touchClockMs();
+        check(touchTargetAt(app, betaAt, plist) == TouchTarget::Sheet && touchDown(app, app.hwnd, 20, betaAt, tms),
+              "a finger held in a card being typed in is taken");
+        touchHold(app, app.hwnd);
+        check(selection() == L"beta", "a finger held in a card takes its word: " + toUtf8(selection()));
+        touchMove(app, app.hwnd, 20, gammaAt, tms += 100);
+        check(selection() == L"beta gamma", "sliding on takes whole words: " + toUtf8(selection()));
+        touchMove(app, app.hwnd, 20, alphaAt, tms += 100);
+        check(selection() == L"alpha beta", "sliding back keeps the word held first: " + toUtf8(selection()));
+        touchUp(app, app.hwnd, 20, alphaAt, tms += 100, false);
+        check(doc.edit.menu.open && selection() == L"alpha beta" && doc.gesture == SheetDoc::Gesture::None,
+              "lifting it opens the text's menu over the words");
+        keystroke(app, VK_ESCAPE);
+        // The mouse's double-click drawn back keeps its word in a card too
+        pauseClicks();
+        for (int press = 0; press < 2; ++press) {
+            move(app, D2D1::Point2F((float)betaAt.x, (float)betaAt.y));
+            handleMouseDown(app, app.hwnd, MK_LBUTTON, MAKELPARAM(betaAt.x, betaAt.y));
+            if (press == 0) handleMouseUp(app, app.hwnd, 0, MAKELPARAM(betaAt.x, betaAt.y));
+        }
+        handleMouseMove(app, app.hwnd, MAKELPARAM(alphaAt.x, alphaAt.y));
+        handleMouseUp(app, app.hwnd, 0, MAKELPARAM(alphaAt.x, alphaAt.y));
+        check(selection() == L"alpha beta", "a double-click drawn back in a card keeps its word: " + toUtf8(selection()));
+        doc.edit.text = keptText;
+        doc.edit.caret = doc.edit.anchor = keptText.size();
+    }
     keystroke(app, VK_ESCAPE);
 
     // Peek: far out, a card rested on opens in a lens

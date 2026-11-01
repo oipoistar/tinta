@@ -45,6 +45,44 @@ size_t lineEnd(const std::wstring& t, size_t at) {
     return nl == std::wstring::npos ? t.size() : nl;
 }
 
+void pressAt(LiveText& e, size_t at, bool shift) {
+    const std::wstring& t = e.text;
+    at = std::min(at, t.size());
+    e.preferredX = -1;
+    if (e.clickCount < 2) {
+        e.caret = at;
+        if (!shift) e.anchor = at;
+        return;
+    }
+    if (e.clickCount == 2) {
+        e.pressFrom = wordLeft(t, std::min(at + 1, t.size()));
+        e.pressTo = wordRight(t, at);
+    } else {
+        e.pressFrom = lineStart(t, at);
+        e.pressTo = lineEnd(t, at);
+    }
+    e.anchor = e.pressFrom;
+    e.caret = e.pressTo;
+}
+
+void dragTo(LiveText& e, size_t at) {
+    const std::wstring& t = e.text;
+    at = std::min(at, t.size());
+    if (e.clickCount < 2) {
+        e.caret = at;
+        return;
+    }
+    // Back past the word or line the press took, the selection keeps it
+    const bool words = e.clickCount == 2;
+    if (at >= e.pressFrom) {
+        e.anchor = e.pressFrom;
+        e.caret = std::max(e.pressTo, words ? wordRight(t, at) : lineEnd(t, at));
+    } else {
+        e.anchor = e.pressTo;
+        e.caret = words ? wordLeft(t, std::min(at + 1, t.size())) : lineStart(t, at);
+    }
+}
+
 namespace {
 
 std::wstring_view lineView(const std::wstring& t, size_t begin) {

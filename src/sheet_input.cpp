@@ -2764,17 +2764,7 @@ bool sheetMouseDown(App& app, HWND hwnd, int x, int y) {
             if (t - doc.edit.lastClickMs < GetDoubleClickTime()) doc.edit.clickCount++;
             else doc.edit.clickCount = 1;
             doc.edit.lastClickMs = t;
-            if (doc.edit.clickCount == 2) {
-                doc.edit.anchor = live::wordLeft(doc.edit.text, std::min(at + 1, doc.edit.text.size()));
-                doc.edit.caret = live::wordRight(doc.edit.text, at);
-            } else if (doc.edit.clickCount >= 3) {
-                doc.edit.anchor = live::lineStart(doc.edit.text, at);
-                doc.edit.caret = live::lineEnd(doc.edit.text, at);
-            } else {
-                doc.edit.caret = at;
-                if (!doc.pressShift) doc.edit.anchor = at;
-            }
-            doc.edit.preferredX = -1;
+            live::pressAt(doc.edit, at, doc.pressShift);
             doc.edit.selectingWithMouse = true;
             doc.gesture = SheetDoc::Gesture::EditSelect;
             live::updatePopup(app, doc.edit, editHost(app, doc));
@@ -3027,7 +3017,7 @@ bool sheetMouseMove(App& app, HWND hwnd, int x, int y) {
             D2D1_RECT_F rect{};
             float ts = 1;
             if (editRect(app, doc, rect, ts)) {
-                doc.edit.caret = positionAt(app, doc, (fx - rect.left) / ts, (fy - rect.top) / ts + doc.edit.scrollY);
+                live::dragTo(doc.edit, positionAt(app, doc, (fx - rect.left) / ts, (fy - rect.top) / ts + doc.edit.scrollY));
             }
             break;
         }
@@ -3367,4 +3357,37 @@ void sheetCaptureLost(App& app, HWND hwnd) {
     doc->guidesX.clear();
     doc->guidesY.clear();
     InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+bool sheetTouchHold(App& app, HWND hwnd, int x, int y) {
+    SheetDoc* docPtr = activeSheet(app);
+    if (!docPtr) return false;
+    SheetDoc& doc = *docPtr;
+    if (doc.editing == SheetDoc::Edit::None || doc.editing == SheetDoc::Edit::Find || doc.presenting ||
+        doc.menuOpen)
+        return false;
+    D2D1_RECT_F rect{};
+    float sc = 1;
+    const float fx = (float)x, fy = (float)y;
+    if (!editRect(app, doc, rect, sc) || fx < rect.left || fx > rect.right || fy < rect.top || fy > rect.bottom)
+        return false;
+    // The format bar and the popup's rows take a held finger as a press
+    if (doc.editing == SheetDoc::Edit::Card && live::hitAt(doc.edit, fx, fy) >= 0) return false;
+    live::closePopup(doc.edit);
+    doc.pressX = x;
+    doc.pressY = y;
+    doc.pressed = true;
+    doc.pressShift = doc.pressCtrl = doc.pressAlt = false;
+    doc.gestureMoved = false;
+    // The word, as a second click takes it; a tap after the hold is a first click
+    doc.edit.clickCount = 2;
+    doc.edit.lastClickMs = 0;
+    live::pressAt(doc.edit, positionAt(app, doc, (fx - rect.left) / sc, (fy - rect.top) / sc + doc.edit.scrollY),
+                  false);
+    doc.edit.selectingWithMouse = true;
+    doc.gesture = SheetDoc::Gesture::EditSelect;
+    app.cursorBlinkOn = true;
+    invalidate(app);
+    (void)hwnd;
+    return true;
 }

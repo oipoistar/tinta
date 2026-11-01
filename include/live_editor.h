@@ -26,6 +26,11 @@ bool liveMouseMove(App& app, HWND hwnd, int x, int y);
 bool liveMouseUp(App& app, HWND hwnd, int x, int y);
 // The mouse went elsewhere mid-drag (WM_CAPTURECHANGED, WM_CANCELMODE)
 void liveCaptureLost(App& app);
+// A finger held on the page (touch.cpp) takes its word, as a double-click
+// does, without the mouse's capture; its moves grow the selection by words
+// (liveMouseMove) until it lifts (liveMouseUp). False off the page and on
+// the format bar or a popup, which take the hold as a press
+bool liveTouchHold(App& app, HWND hwnd, int x, int y);
 // The menu on the page (live_text.h): a right-click opens it at the click,
 // with the caret moved there unless the click is in the selection; the
 // menu key and Shift+F10 open it under the caret

@@ -51,6 +51,7 @@ struct LiveText {
     bool selectingWithMouse = false;
     size_t clickCount = 0;
     unsigned long long lastClickMs = 0;
+    size_t pressFrom = 0, pressTo = 0;  // the word or line a double or triple click took
 
     // The slash menu and [[ names under the caret
     enum class Popup { None, Slash, Names };
@@ -115,6 +116,12 @@ size_t wordLeft(const std::wstring& text, size_t at);
 size_t wordRight(const std::wstring& text, size_t at);
 size_t lineStart(const std::wstring& text, size_t at);
 size_t lineEnd(const std::wstring& text, size_t at);
+// A press at `at`, its click the e.clickCount-th: the first puts the caret
+// there (with Shift the anchor stays), the second takes the word, the third
+// the line. A drag on to `at` grows the selection by the same steps and
+// keeps that word or line whichever way it runs
+void pressAt(LiveText& e, size_t at, bool shift);
+void dragTo(LiveText& e, size_t at);
 // The line starting at `begin`: 0 outside a fence, 1 opening one, 2 inside, 3 closing it
 int fenceState(const std::wstring& text, size_t begin);
 // The same for every line at once, given where they start

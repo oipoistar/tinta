@@ -5,6 +5,7 @@
 #include "editor.h"
 #include "editrail.h"
 #include "input.h"
+#include "live_editor.h"
 #include "overlays.h"
 #include "render.h"
 #include "selection.h"
@@ -486,6 +487,11 @@ void touchHold(App& app, HWND hwnd) {
         previewHoldSelection(app, t.start, true);
         return;
     }
+    // Live's page and a sheet's text box take the held word themselves,
+    // without a click's capture, whose loss would end their drag
+    if ((t.target == TouchTarget::Document && liveTouchHold(app, hwnd, t.start.x, t.start.y)) ||
+        (t.target == TouchTarget::Sheet && sheetTouchHold(app, hwnd, t.start.x, t.start.y)))
+        return;
     // The word under the finger, selected as a double-click selects it:
     // the click handlers see a second click at the same place
     const LPARAM point = MAKELPARAM(t.start.x, t.start.y);
@@ -547,7 +553,11 @@ void touchCancel(App& app, HWND hwnd) {
         // Cancel the owned selection directly; a new modal must not receive
         // a synthetic release that could activate one of its controls.
         if (t.target == TouchTarget::Editor) handleEditorMouseUp(app, hwnd, t.last.x, t.last.y);
-        else app.selecting = false;
+        else if (t.target == TouchTarget::Sheet) sheetCaptureLost(app, hwnd);
+        else {
+            app.selecting = false;
+            liveCaptureLost(app);
+        }
         pointerAway(app, hwnd);
     }
     endGesture(t);
