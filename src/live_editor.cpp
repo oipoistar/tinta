@@ -1026,6 +1026,8 @@ bool liveRailCommand(App& app, HWND hwnd, int id) {
 bool liveMouseDown(App& app, HWND hwnd, int x, int y) {
     float vx = documentViewportX(app);
     if (!editorLiveOn(app) || (float)x < vx || (float)y < chromeTopHeight(app) || onQuickNoteButton(app, x, y)) return false;
+    // The scrollbars at the page's edge drag as the reader's (#307)
+    if (documentScrollbarPress(app, hwnd, x, y)) return true;
     LiveEditor& L = begin(app);
     float px = (float)x - vx, py = (float)y;
     int hit = live::hitAt(L.e, px, py);
@@ -1103,6 +1105,9 @@ bool liveMouseMove(App& app, HWND hwnd, int x, int y) {
         SetCursor(beam);
         return true;
     }
+    // The scrollbars light up under the pointer, and leave the text's beam
+    // to the page beside them (#307)
+    if (documentScrollbarHover(app, hwnd, x, y)) return true;
     if ((float)x < vx || (float)y < chromeTopHeight(app) || onQuickNoteButton(app, x, y)) return false;
     int hit = live::hitAt(L.e, (float)x - vx, (float)y);
     if (hit != L.e.hoverHit) {

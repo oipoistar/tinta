@@ -95,6 +95,12 @@ same way on a sheet and in its own tab.
 - **Ctrl+click** follows a link: a note opens in a tab, a heading scrolls
   into view and an address opens in the browser.
 - A right-click opens the menu (below) with the caret at the click.
+- The page scrolls as the reading view does: the wheel scrolls it, the
+  scrollbar at its right edge drags, and a press on the scrollbar's track
+  moves the thumb there. The scrollbar takes the pointer, so a press on it
+  leaves the caret where it is. The page keeps its own place apart from
+  Source's, and a switch between them carries the caret across at its
+  height in the window.
 
 ## Making things
 

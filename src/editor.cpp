@@ -330,9 +330,9 @@ size_t editorTopVisibleLine(App& app) {
 // The other way round from syncPreviewToEditor: the editor scrolls to the
 // source line at the preview's top, and the next sync keeps the preview
 // there. A drag on the preview's scrollbar moves both panes (#280), as the
-// wheel over the preview does.
+// wheel over the preview does. Live's page has no source beside it.
 void editorFollowPreview(App& app) {
-    if (!editorPreviewVisible(app) || app.editorReadingPreview || app.scrollAnchors.empty() ||
+    if (!editSplitPreview(app) || app.scrollAnchors.empty() ||
         app.editorLineByteOffsets.empty() || app.editorLineStarts.empty()) {
         return;
     }
@@ -389,10 +389,12 @@ void editorFollowPreview(App& app) {
 
 // The edit-mode preview follows the editor: the editor's top line maps
 // through the source-offset scroll anchors the layout records to a
-// preview scroll position (#77, #85). Called once per frame.
+// preview scroll position (#77, #85). Called once per frame. Live's page
+// scrolls on its own: following the source, whose height a visit to it
+// had measured, held the page still under the wheel and pulled it back
+// from the caret (#307)
 void syncPreviewToEditor(App& app) {
-    if (editorPreviewVisible(app) && !app.editorReadingPreview && !app.scrollAnchors.empty() &&
-        !app.editorLineByteOffsets.empty()) {
+    if (editSplitPreview(app) && !app.scrollAnchors.empty() && !app.editorLineByteOffsets.empty()) {
         // Find the editor's top visible line (row-aware in wrap mode)
         int topLine = (int)editorTopVisibleLine(app);
         topLine = std::max(0, std::min(topLine, (int)app.editorLineByteOffsets.size() - 1));

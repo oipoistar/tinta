@@ -15,6 +15,7 @@
 #include "overlays.h"
 #include "render.h"
 #include "settings.h"
+#include "sidepanels.h"
 #include "tabs.h"
 #include "touch.h"
 #include "utils.h"
@@ -1242,6 +1243,153 @@ void heldFinger(App& app, const fs::path& doc) {
     check(selected() == L"A paragraph", "a double-click drawn back keeps its word: " + narrow(selected()));
 }
 
+// A frame as the window paints it (main_d2d.cpp), once the layout's chunks
+// have landed: the scrollbar's extent, the source's scroll sync, the scroll
+// held to the page, then Live's page, or the source, which measures the
+// source's height as it draws
+void windowFrame(App& app) {
+    if (app.layoutDirty || !app.layoutComplete) ensureLayoutComplete(app);
+    const bool live = editorLiveOn(app);
+    app.verticalScrollbarVisible = app.contentHeight > app.height;
+    app.scrollbarContentHeight = live ? std::max(app.contentHeight, livePageHeight(app)) : app.contentHeight;
+    syncPreviewToEditor(app);
+    const float page = live ? livePageHeight(app) : app.contentHeight;
+    app.scrollY = std::clamp(app.scrollY, 0.0f, std::max(0.0f, page - (float)app.height));
+    if (live) {
+        paint(app);
+        return;
+    }
+    app.renderTarget->BeginDraw();
+    renderEditor(app, editorPaneWidth(app));
+    app.renderTarget->EndDraw();
+}
+
+HCURSOR cursorAfterMove(App& app, D2D1_POINT_2F p) {
+    SetCursor(nullptr);
+    handleMouseMove(app, app.hwnd, at(p));
+    return GetCursor();
+}
+
+void wheelDown(App& app) {
+    handleMouseWheel(app, app.hwnd, MAKEWPARAM(0, (WORD)(short)-WHEEL_DELTA), MAKELPARAM(500, 400));
+}
+
+// Live's page scrolls as the reader's does (#307): its scrollbar drags and
+// takes presses on the track, leaving the caret where it is, and after a
+// visit to the source the wheel and the arrow keys still move the page,
+// which stays where they leave it, frame after frame
+void scrolling(App& app, const fs::path& dir, const fs::path& out) {
+    const HCURSOR arrow = LoadCursor(nullptr, IDC_ARROW);
+    const HCURSOR beam = LoadCursor(nullptr, IDC_IBEAM);
+    const KeyMods ctrl{true, false, false};
+    openInEditor(app, dir / "Long read.md");
+    check(editorLiveOn(app), "the long read opens in Live");
+    pauseClicks();
+    placeCaret(app, 0);
+    app.scrollY = app.targetScrollY = 0;
+    windowFrame(app);
+    check(app.verticalScrollbarVisible && livePageHeight(app) > app.height * 2.5f,
+          "the long read is several screens long in Live: " + std::to_string((int)livePageHeight(app)));
+    const size_t caret = app.editorCursorPos;
+    auto onScreen = [&](const std::string& what) {
+        D2D1_POINT_2F p = caretOnScreen(app);
+        check(p.y > chromeTopHeight(app) && p.y < app.height,
+              what + ": the caret at " + std::to_string((int)p.y) + ", the page at " + std::to_string((int)app.scrollY));
+    };
+
+    // The thumb: an arrow over it, lit, and a press takes it, not the caret
+    const float barX = documentViewportX(app) + documentViewportWidth(app) - dpi(app, 7.0f);
+    ScrollbarGeometry bar = documentScrollbarV(app);
+    const D2D1_POINT_2F thumb = D2D1::Point2F(barX, bar.thumbStart + bar.thumbLength * 0.5f);
+    check(cursorAfterMove(app, thumb) == arrow && app.scrollbarHovered, "an arrow over Live's scrollbar, and its thumb lights up");
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, at(thumb));
+    check(app.scrollbarDragging && GetCapture() == app.hwnd, "a press on Live's scrollbar takes its thumb");
+    const D2D1_POINT_2F dragTo = D2D1::Point2F(barX, thumb.y + 200.0f);
+    check(cursorAfterMove(app, dragTo) == arrow, "an arrow while the thumb is dragged");
+    check(std::fabs(documentScrollbarV(app).thumbStart - (bar.thumbStart + 200.0f)) < 1.0f, "the thumb moves with the pointer");
+    windowFrame(app);
+    const float dragged = app.scrollY;
+    check(dragged > 0.0f, "dragging the thumb scrolls Live's page");
+    handleMouseUp(app, app.hwnd, 0, at(dragTo));
+    windowFrame(app);
+    check(!app.scrollbarDragging && GetCapture() != app.hwnd, "the release lets the thumb go");
+    check(app.editorCursorPos == caret && !app.editorHasSelection, "the drag leaves the caret and selects nothing");
+    check(std::fabs(app.scrollY - dragged) < 0.5f, "the page stays where the thumb left it");
+    // A press on the track below the thumb takes the thumb there
+    bar = documentScrollbarV(app);
+    const float trackEnd = bar.trackStart + bar.trackLength;
+    const D2D1_POINT_2F track = D2D1::Point2F(barX, (bar.thumbStart + bar.thumbLength + trackEnd) * 0.5f);
+    handleMouseMove(app, app.hwnd, at(track));
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, at(track));
+    handleMouseUp(app, app.hwnd, 0, at(track));
+    windowFrame(app);
+    check(app.scrollY > dragged + 1.0f && app.editorCursorPos == caret, "a press on the track moves the page, not the caret");
+    // Beside the scrollbar the page has its beam again, and the thumb dims
+    check(cursorAfterMove(app, D2D1::Point2F(documentViewportX(app) + documentViewportWidth(app) * 0.5f, 400.0f)) == beam &&
+              !app.scrollbarHovered,
+          "beside the scrollbar the page's beam is back, and the thumb dims");
+    frame(app, out / "live-scrolled.png");
+
+    // A visit to the source measures the source's height
+    placeCaret(app, 0);
+    app.scrollY = app.targetScrollY = 0;
+    keystroke(app, VK_OEM_2, ctrl);
+    check(!editorLiveOn(app), "Ctrl+/ shows the source");
+    windowFrame(app);
+    check(app.editorContentHeight > app.height, "the long read's source is taller than the window");
+    keystroke(app, VK_OEM_2, ctrl);
+    check(editorLiveOn(app), "Ctrl+/ brings Live back");
+    windowFrame(app);
+    // The wheel scrolls, and the next frames leave the page there
+    for (int i = 0; i < 3; ++i) wheelDown(app);
+    windowFrame(app);
+    windowFrame(app);
+    check(app.scrollY > dpi(app, 100.0f), "after the source, the wheel scrolls Live's page: " + std::to_string(app.scrollY));
+    // Down to the end: the page follows the caret and stays with it
+    placeCaret(app, 0);
+    app.scrollY = app.targetScrollY = 0;
+    windowFrame(app);
+    const size_t lastLine = find(app, L"The last line");
+    for (int i = 0; i < 400 && app.editorCursorPos < lastLine; ++i) {
+        keystroke(app, VK_DOWN);
+        windowFrame(app);
+    }
+    windowFrame(app);
+    windowFrame(app);
+    check(app.editorCursorPos >= lastLine, "Down walks to the long read's last line: " + std::to_string(app.editorCursorPos));
+    check(app.scrollY > app.height, "after the source, Down takes the page to the end");
+    onScreen("the page stays with the caret, frame after frame");
+    for (int i = 0; i < 3; ++i) {
+        keystroke(app, VK_UP);
+        windowFrame(app);
+    }
+    windowFrame(app);
+    onScreen("Up from the end keeps the caret on the screen");
+    // With the diagram open the page is taller: the thumb takes it to its
+    // new end, and the wheel there stays at it
+    placeCaret(app, find(app, L"Top --> Middle"));
+    windowFrame(app);
+    float top = 0, bottom = 0, shift = 0;
+    livePageGeometry(app, top, bottom, shift);
+    check(shift > 0.0f && livePageHeight(app) > app.contentHeight, "the open diagram makes the page taller");
+    bar = documentScrollbarV(app);
+    const D2D1_POINT_2F grip = D2D1::Point2F(barX, bar.thumbStart + bar.thumbLength * 0.5f);
+    const D2D1_POINT_2F below = D2D1::Point2F(barX, (float)app.height + 300.0f);
+    handleMouseMove(app, app.hwnd, at(grip));
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, at(grip));
+    handleMouseMove(app, app.hwnd, at(below));
+    handleMouseUp(app, app.hwnd, 0, at(below));
+    windowFrame(app);
+    const float end = std::max(0.0f, livePageHeight(app) - app.height);
+    check(std::fabs(app.scrollY - end) < 1.0f, "the thumb takes the page to its end with the diagram open");
+    wheelDown(app);
+    windowFrame(app);
+    check(std::fabs(app.scrollY - end) < 1.0f,
+          "the wheel at that end stays there: " + std::to_string(app.scrollY) + " vs " + std::to_string(end));
+    frame(app, out / "live-scrolled-end.png");
+    app.editorDirty = false;
+}
+
 }  // namespace
 
 int runLiveTests(const char* fixtureDir) {
@@ -1290,6 +1438,7 @@ int runLiveTests(const char* fixtureDir) {
     menuEngine(app);
     contextMenu(app, dir, out);
     heldFinger(app, doc);
+    scrolling(app, dir, out);
 
     // Two themes at two widths, on the tour
     openInEditor(app, doc);

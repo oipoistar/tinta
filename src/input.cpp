@@ -1044,9 +1044,10 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
         app.targetScrollX = std::max(0.0f, std::min(app.targetScrollX, maxScrollX));
         app.scrollX = app.targetScrollX;
     } else {
-        // Normal scroll
+        // Normal scroll, as far as the scrollbar goes: Live's page grows
+        // with the block open in it
         app.targetScrollY -= delta * dpi(app, 60.0f);
-        float maxScroll = std::max(0.0f, app.contentHeight - app.height);
+        float maxScroll = std::max(0.0f, (editorLiveOn(app) ? livePageHeight(app) : app.contentHeight) - app.height);
         app.targetScrollY = std::max(0.0f, std::min(app.targetScrollY, maxScroll));
         app.scrollY = app.targetScrollY;
     }
@@ -1070,6 +1071,71 @@ void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
     app.scrollX = app.targetScrollX;
 
     InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// The document's scrollbars at a point: the vertical bar's band at the
+// viewport's right edge, which a right-docked TOC pushes left of the
+// window's, and the horizontal bar's along the foot while the content is
+// wider than the viewport
+static void documentScrollbarsAt(const App& app, float x, float y, bool& vertical, bool& horizontal) {
+    const float band = dpi(app, 14.0f);  // hit area
+    const float left = documentViewportX(app);
+    const float width = documentViewportWidth(app);
+    vertical = app.verticalScrollbarVisible && x >= left + width - band && x <= left + width;
+    horizontal = app.contentWidth > width && y >= app.height - band && x >= left && x <= left + width;
+}
+
+// A press on a scrollbar takes its thumb; on the track, off the thumb, the
+// thumb is centred there first
+static void beginDocumentScrollbarDrag(App& app, HWND hwnd, bool vertical) {
+    if (vertical) {
+        app.scrollbarDragging = true;
+        app.scrollbarDragStartY = (float)app.mouseY;
+        app.scrollbarDragStartScroll = app.scrollY;
+        const ScrollbarGeometry bar = documentScrollbarV(app);
+        if (app.mouseY < bar.thumbStart || app.mouseY > bar.thumbStart + bar.thumbLength) {
+            app.scrollY = bar.scrollForThumb((float)app.mouseY - bar.thumbLength / 2);
+            app.targetScrollY = app.scrollY;
+            app.scrollbarDragStartScroll = app.scrollY;
+            if (app.editMode) editorFollowPreview(app);  // as for the drag (#280)
+        }
+    } else {
+        app.hScrollbarDragging = true;
+        app.hScrollbarDragStartX = (float)app.mouseX;
+        app.hScrollbarDragStartScroll = app.scrollX;
+        const ScrollbarGeometry bar = documentScrollbarH(app);
+        if (app.mouseX < bar.thumbStart || app.mouseX > bar.thumbStart + bar.thumbLength) {
+            app.scrollX = bar.scrollForThumb((float)app.mouseX - bar.thumbLength / 2);
+            app.targetScrollX = app.scrollX;
+            app.hScrollbarDragStartScroll = app.scrollX;
+        }
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+bool documentScrollbarHover(App& app, HWND hwnd, int x, int y) {
+    bool vertical = false, horizontal = false;
+    if ((float)y >= chromeTopHeight(app)) documentScrollbarsAt(app, (float)x, (float)y, vertical, horizontal);
+    if (vertical != app.scrollbarHovered || horizontal != app.hScrollbarHovered) {
+        app.scrollbarHovered = vertical;
+        app.hScrollbarHovered = horizontal;
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+    if (!vertical && !horizontal) return false;
+    SetCursor(cursorArrow);
+    return true;
+}
+
+bool documentScrollbarPress(App& app, HWND hwnd, int x, int y) {
+    bool vertical = false, horizontal = false;
+    if ((float)y >= chromeTopHeight(app)) documentScrollbarsAt(app, (float)x, (float)y, vertical, horizontal);
+    if (!vertical && !horizontal) return false;
+    app.mouseDown = true;
+    app.mouseX = x;
+    app.mouseY = y;
+    SetCapture(hwnd);
+    beginDocumentScrollbarDrag(app, hwnd, vertical);
+    return true;
 }
 
 static bool moveDocumentScrollbarDrag(App& app, HWND hwnd) {
@@ -1564,31 +1630,11 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         return;
     }
 
-    // Check vertical scrollbar hover. The bar draws at the viewport's
-    // right edge, which a right-docked TOC pushes left of the window edge.
+    // Check scrollbar hover
     bool wasHovered = app.scrollbarHovered;
-    app.scrollbarHovered = false;
-    if (app.verticalScrollbarVisible) {
-        float sbWidth = dpi(app, 14.0f);  // hit area
-        float sbRight = documentViewportX(app) + documentViewportWidth(app);
-        if (app.mouseX >= sbRight - sbWidth && app.mouseX <= sbRight) {
-            app.scrollbarHovered = true;
-        }
-    }
-
-    // Check horizontal scrollbar hover
     bool wasHHovered = app.hScrollbarHovered;
-    app.hScrollbarHovered = false;
-    float viewportX = documentViewportX(app);
-    float viewportWidth = documentViewportWidth(app);
-    if (app.contentWidth > viewportWidth) {
-        float sbHeight = dpi(app, 14.0f);  // hit area
-        if (app.mouseY >= app.height - sbHeight &&
-            app.mouseX >= viewportX &&
-            app.mouseX <= viewportX + viewportWidth) {
-            app.hScrollbarHovered = true;
-        }
-    }
+    documentScrollbarsAt(app, (float)app.mouseX, (float)app.mouseY,
+                         app.scrollbarHovered, app.hScrollbarHovered);
 
     // Check link hover
     std::string prevHoveredLink = app.hoveredLink;
@@ -2360,21 +2406,9 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             // stale while the mouse is over a panel (its mousemove returns
             // before the hover update), and a stale true here turned panel
             // clicks into scrollbar drags bound to the mouse.
-            float viewportX = documentViewportX(app);
-            float viewportWidth = documentViewportWidth(app);
             bool vClick = false, hClick = false;
-            if (app.verticalScrollbarVisible) {
-                float sbWidth = dpi(app, 14.0f);
-                float sbRight = viewportX + viewportWidth;
-                vClick = (float)app.mouseX >= sbRight - sbWidth &&
-                         (float)app.mouseX <= sbRight;
-            }
-            if (!vClick && app.contentWidth > viewportWidth) {
-                float sbHeight = dpi(app, 14.0f);
-                hClick = (float)app.mouseY >= app.height - sbHeight &&
-                         (float)app.mouseX >= viewportX &&
-                         (float)app.mouseX <= viewportX + viewportWidth;
-            }
+            documentScrollbarsAt(app, (float)app.mouseX, (float)app.mouseY, vClick, hClick);
+            hClick = hClick && !vClick;
             if (!app.showThemeChooser && (vClick || hClick)) {
                 if (app.showFolderBrowser && !app.browserPinned) {
                     app.showFolderBrowser = false;
@@ -2402,37 +2436,12 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
 
     // Check if clicking vertical scrollbar
     if (app.scrollbarHovered && app.verticalScrollbarVisible) {
-        app.scrollbarDragging = true;
-        app.scrollbarDragStartY = (float)app.mouseY;
-        app.scrollbarDragStartScroll = app.scrollY;
-
-        // A click on the track, off the thumb, centres the thumb there
-        const ScrollbarGeometry bar = documentScrollbarV(app);
-        if (app.mouseY < bar.thumbStart || app.mouseY > bar.thumbStart + bar.thumbLength) {
-            app.scrollY = bar.scrollForThumb((float)app.mouseY - bar.thumbLength / 2);
-            app.targetScrollY = app.scrollY;
-            app.scrollbarDragStartScroll = app.scrollY;
-            app.scrollbarDragStartY = (float)app.mouseY;
-            if (app.editMode) editorFollowPreview(app);  // as for the drag (#280)
-        }
-        InvalidateRect(hwnd, nullptr, FALSE);
+        beginDocumentScrollbarDrag(app, hwnd, true);
     }
     // Check if clicking horizontal scrollbar
     else if (app.hScrollbarHovered &&
              app.contentWidth > documentViewportWidth(app)) {
-        app.hScrollbarDragging = true;
-        app.hScrollbarDragStartX = (float)app.mouseX;
-        app.hScrollbarDragStartScroll = app.scrollX;
-
-        // A click on the track, off the thumb, centres the thumb there
-        const ScrollbarGeometry bar = documentScrollbarH(app);
-        if (app.mouseX < bar.thumbStart || app.mouseX > bar.thumbStart + bar.thumbLength) {
-            app.scrollX = bar.scrollForThumb((float)app.mouseX - bar.thumbLength / 2);
-            app.targetScrollX = app.scrollX;
-            app.hScrollbarDragStartScroll = app.scrollX;
-            app.hScrollbarDragStartX = (float)app.mouseX;
-        }
-        InvalidateRect(hwnd, nullptr, FALSE);
+        beginDocumentScrollbarDrag(app, hwnd, false);
     } else {
         // Start page: clicks act on its controls, there is nothing to
         // select underneath. The capture from this press is let go up

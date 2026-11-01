@@ -10,6 +10,11 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam);
 void handleMouseDown(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam);
 void handleMouseUp(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam);
 void cancelDocumentScrollbarDrag(App& app, HWND hwnd);
+// The document's scrollbars below the tab strip, for a page that takes the
+// pointer itself (Live): under the pointer they light up and show the
+// arrow, and a press takes them as in the reader. False off them (#307)
+bool documentScrollbarHover(App& app, HWND hwnd, int x, int y);
+bool documentScrollbarPress(App& app, HWND hwnd, int x, int y);
 void cancelAppMenuPress(App& app, HWND hwnd);
 // True consumes this keystroke's character translation as well (#195).
 bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam);
