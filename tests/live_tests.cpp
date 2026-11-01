@@ -1151,6 +1151,9 @@ void heldFinger(App& app, const fs::path& doc) {
     touchUp(app, app.hwnd, 90, pointOf(before), ms += 100, false);
     check(liveMenuOpen(app) && !app.showContextMenu && selected() == L"A paragraph",
           "lifting the finger opens Live's menu over the words");
+    // While the menu is up a finger works it as the mouse does
+    check(touchTargetAt(app, p, list) == TouchTarget::None && !touchDown(app, app.hwnd, 91, p, ms += 500),
+          "a finger on Live's menu goes to the mouse, not to the page under it");
     liveCloseMenu(app);
     // A hold cut short keeps its word without the menu, and no drag lingers
     pauseClicks();

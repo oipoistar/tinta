@@ -569,6 +569,8 @@ void touch(App& app, SheetDoc& doc) {
     touchHold(app, app.hwnd);
     touchUp(app, app.hwnd, 11, held, ms += 700, false);
     check(doc.menuOpen, "a held finger on open ground opens the sheet's menu");
+    check(touchTargetAt(app, held, list) == TouchTarget::None && !touchDown(app, app.hwnd, 12, held, ms += 500),
+          "while the sheet's menu is up a finger works it as the mouse does");
     keystroke(app, VK_ESCAPE);
     check(!doc.menuOpen, "Esc puts the held finger's menu away");
 }
@@ -1003,7 +1005,7 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
     check(!doc.edit.menu.open && doc.editing == SheetDoc::Edit::Card, "Esc closes the menu and leaves the card being typed in");
     // A finger held in the card takes a word, as a double-click does, slides on
     // by whole words keeping it, and the text's menu opens over them where it
-    // lifts
+    // lifts; while that menu is up a finger works it as the mouse does
     {
         const std::wstring keptText = doc.edit.text;
         doc.edit.text = L"alpha beta gamma delta";
@@ -1038,6 +1040,8 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
         touchUp(app, app.hwnd, 20, alphaAt, tms += 100, false);
         check(doc.edit.menu.open && selection() == L"alpha beta" && doc.gesture == SheetDoc::Gesture::None,
               "lifting it opens the text's menu over the words");
+        check(touchTargetAt(app, betaAt, plist) == TouchTarget::None && !touchDown(app, app.hwnd, 21, betaAt, tms += 500),
+              "while the text's menu is up a finger works it as the mouse does");
         keystroke(app, VK_ESCAPE);
         // The mouse's double-click drawn back keeps its word in a card too
         pauseClicks();

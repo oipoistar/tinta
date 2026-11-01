@@ -51,11 +51,18 @@ bool isExtra(const App::TouchGesture& t, UINT32 pointer) {
     return std::find(t.extra.begin(), t.extra.end(), pointer) != t.extra.end();
 }
 
+// A sheet's menu, or the text menu of a card being typed in
+bool sheetMenuUp(const App& app) {
+    const SheetDoc* doc = activeSheet(const_cast<App&>(app));
+    return doc && (doc->menuOpen || doc->edit.menu.open);
+}
+
 // Menus, dialogs and overlays own their touches through the mouse
 bool overlayUp(const App& app) {
     return app.showSettings || app.showThemeEditor || app.showShortcutEditor ||
            app.showThemeChooser || app.showPrintPreview || app.showLightbox ||
            app.showContextMenu || app.editCtxOpen || app.showTabMenu || app.showTabSwitcher ||
+           liveMenuOpen(app) || sheetMenuUp(app) ||
            app.confirmExitPending || app.createRefPending ||
            (app.annotEditorOpen && !app.editMode) || app.signalTrayOpen || app.gotoLineOpen ||
            app.appMenuPressed || (startPageActive(app) && !app.showHelp);
