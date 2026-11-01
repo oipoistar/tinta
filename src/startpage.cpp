@@ -552,7 +552,7 @@ void renderStartPage(App& app) {
         {"start.open", L"Ctrl+O", true, 1},
         {"start.browse", keyLabel(app.keymap[KA_BROWSE]), false, 3},
         {"start.new", keyLabel(app.keymap[KA_NEWFILE]), false, 2},
-        {"start.new_sheet", L"", false, 6},
+        {"start.new_sheet", L"S", false, 6},
     };
     IDWriteTextLayout* labels[4] = {};
     float widest = 0.0f;
@@ -733,7 +733,8 @@ void renderStartPage(App& app) {
     // --- LEARN column
     if (twoCols) {
         float x1 = x0 + leftW + colGap;
-        float ly = y0 + dpi(app, 118.0f);
+        // Level with the top of the page: its heading beside the icon
+        float ly = y0 + (heroH - iconSize) * 0.5f;
         IDWriteTextLayout* learnH = spLayout(
             app, tr(app, "start.learn"), 11.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD,
             4096.0f, false, false, 1.5f);
@@ -747,12 +748,13 @@ void renderStartPage(App& app) {
             const char* title;
             const char* desc;
         };
-        Card cards[3] = {
+        Card cards[4] = {
             {L"\u270E", "start.learn_sample", "start.learn_sample_d"},
             {L"\u25C8", "start.learn_mermaid", "start.learn_mermaid_d"},
             {L"\u2318", "start.learn_md", "start.learn_md_d"},
+            {L"\u29C9", "start.learn_sheet", "start.learn_sheet_d"},
         };
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             float padX = dpi(app, 16.0f);
             float padY = dpi(app, 14.0f);
             IDWriteTextLayout* title = spLayout(app, tr(app, cards[i].title),

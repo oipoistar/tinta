@@ -2700,6 +2700,8 @@ static void startPageInvoke(App& app, HWND hwnd, int id) {
         }
     } else if (id >= 20 && id < 23) {
         startPageOpenEmbedded(app, hwnd, id - 20);
+    } else if (id == 23) {
+        sheetOpenTour(app, hwnd);
     }
     InvalidateRect(hwnd, nullptr, FALSE);
 }
@@ -4269,6 +4271,12 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             if (!ctrl && keyBindingMatches(app.keymap[KA_NEWFILE], (unsigned)wParam, false)) {
                 startPageInvoke(app, hwnd, 2);
                 return false;
+            }
+            // S makes a sheet, as New sheet's chip says; the key is spent,
+            // so no S reaches the sheet that opens
+            if (!ctrl && wParam == 'S') {
+                startPageInvoke(app, hwnd, 6);
+                return true;
             }
             if (!ctrl && wParam >= '1' && wParam <= '5' &&
                 (int)(wParam - '1') < (int)app.startPageRecents.size()) {

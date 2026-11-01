@@ -1349,15 +1349,12 @@ bool sheetCreateInteractive(App& app, HWND hwnd) {
     return sheetCreateAndOpen(app, hwnd, path);
 }
 
-bool sheetCreateAndOpen(App& app, HWND hwnd, const std::wstring& path) {
-    std::string error;
-    if (!sheetCreateAt(app, path, &error)) {
-        signalPush(app, SIG_ERROR, SIGI_WARNING, tr(app, "sheet.create_failed"));
-        return false;
-    }
-    // An empty tab, the launcher or a new note nothing was typed into,
-    // hands itself to the sheet (as Open a file does); a document keeps
-    // its own
+namespace {
+
+// Opens the sheet at `path`. An empty tab, the launcher or a new note
+// nothing was typed into, hands itself to the sheet (as Open a file does);
+// a document keeps its own
+void openInPlace(App& app, HWND hwnd, const std::wstring& path) {
     bool empty = app.currentFile.empty() && !app.startPageEmbeddedOpen &&
                  (!app.editMode || (app.editorText.empty() && !app.editorDirty));
     tabsInit(app);
@@ -1372,5 +1369,155 @@ bool sheetCreateAndOpen(App& app, HWND hwnd, const std::wstring& path) {
         }
     }
     InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+}  // namespace
+
+bool sheetCreateAndOpen(App& app, HWND hwnd, const std::wstring& path) {
+    std::string error;
+    if (!sheetCreateAt(app, path, &error)) {
+        signalPush(app, SIG_ERROR, SIGI_WARNING, tr(app, "sheet.create_failed"));
+        return false;
+    }
+    openInPlace(app, hwnd, path);
+    return true;
+}
+
+// --- The sheet tour: the start page's Learn card -------------------------
+
+namespace {
+
+// The tour's notes, in its folder; each names itself by its first line
+const struct {
+    const wchar_t* name;
+    const char* text;
+} kTourNotes[] = {
+    {L"Welcome.md", R"(# Welcome
+
+A sheet is a canvas of notes. Every card here is a Markdown note in the folder *Sheet tour* beside this sheet.
+
+- Double-click open ground for a new note, or press **N**.
+- Double-click a card to write in it; **Esc** when done.
+- Drag a card's side dot onto another card to join them.
+)"},
+    {L"Find your way.md", R"(# Find your way
+
+- The **arrow keys** walk from card to card.
+- **Ctrl+wheel** zooms: far out a card is its title, close up the note.
+- **Shift+1** shows everything; the minimap travels (**M** hides it).
+- **F** finds a card by anything in its note.
+- A link like [[Present and compile]] draws a dashed line to its card.
+)"},
+    {L"Grow a mind map.md", R"(# Grow a mind map
+
+Select a card and press **Tab**: a child grows to its right, ready to type in. **Shift+Enter** adds a sibling.
+
+**Ctrl+L** tidies the cards along their arrows, and **Ctrl+Z** puts them back.
+)"},
+    {L"Lanes.md", R"(# Lanes
+
+The three groups to the right are lanes. Drag a note into one and its front matter gets `status:` with the lane's name, so the board and the notes agree.
+)"},
+    {L"Write a note.md", R"(---
+status: To do
+---
+
+# Write a note
+
+Double-click open ground and type. The first line names the note.
+)"},
+    {L"Join two cards.md", R"(---
+status: Doing
+---
+
+# Join two cards
+
+Drag from a card's side dot onto another card.
+)"},
+    {L"Open the tour.md", R"(---
+status: Done
+---
+
+# Open the tour
+
+You are here.
+)"},
+    {L"Present and compile.md", R"(# Present and compile
+
+- **P** presents the sheet along its arrows; **Esc** comes back.
+- **Compile** in the menu makes one document of the sheet, ready for HTML, Word or PDF.
+- **?** lists every key.
+)"},
+};
+
+// The sheet, written out the way Tinta writes sheets (writeSmd)
+const char* const kTourSheet = R"(---
+folder: Sheet tour
+---
+
+# Sheet tour
+
+```json canvas
+{
+	"nodes":[
+		{"id":"welcome","type":"file","file":"Sheet tour/Welcome.md","color":"5","x":0,"y":0,"width":380,"height":400},
+		{"id":"around","type":"file","file":"Sheet tour/Find your way.md","x":440,"y":0,"width":380,"height":400},
+		{"id":"mindmap","type":"file","file":"Sheet tour/Grow a mind map.md","x":880,"y":0,"width":380,"height":400},
+		{"id":"lanes","type":"file","file":"Sheet tour/Lanes.md","x":0,"y":480,"width":380,"height":300},
+		{"id":"todo","type":"group","label":"To do","tintaLane":"status","x":440,"y":460,"width":360,"height":360},
+		{"id":"doing","type":"group","label":"Doing","tintaLane":"status","color":"3","x":820,"y":460,"width":360,"height":360},
+		{"id":"done","type":"group","label":"Done","tintaLane":"status","color":"4","x":1200,"y":460,"width":360,"height":360},
+		{"id":"write","type":"file","file":"Sheet tour/Write a note.md","x":480,"y":540,"width":280,"height":240},
+		{"id":"join","type":"file","file":"Sheet tour/Join two cards.md","x":860,"y":540,"width":280,"height":240},
+		{"id":"open","type":"file","file":"Sheet tour/Open the tour.md","x":1240,"y":540,"width":280,"height":240},
+		{"id":"present","type":"file","file":"Sheet tour/Present and compile.md","x":0,"y":880,"width":380,"height":300},
+		{"id":"text","type":"text","color":"4","text":"**A text card** lives in the sheet itself. Every other card here is a note in the folder *Sheet tour*.","x":440,"y":880,"width":380,"height":160}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"welcome","fromSide":"right","toNode":"around","toSide":"left"},
+		{"id":"e2","fromNode":"around","fromSide":"right","toNode":"mindmap","toSide":"left"},
+		{"id":"e3","fromNode":"welcome","fromSide":"bottom","toNode":"lanes","toSide":"top","label":"then"},
+		{"id":"e4","fromNode":"lanes","fromSide":"right","toNode":"todo","toSide":"left"},
+		{"id":"e5","fromNode":"lanes","fromSide":"bottom","toNode":"present","toSide":"top"}
+	]
+}
+```
+)";
+
+}  // namespace
+
+bool sheetOpenTour(App& app, HWND hwnd, const std::wstring& base) {
+    std::wstring dir = base;
+    if (dir.empty()) {
+        wchar_t temp[MAX_PATH] = {};
+        if (!GetTempPathW(MAX_PATH, temp)) return false;
+        dir = std::wstring(temp) + L"Tinta";
+    }
+    while (!dir.empty() && (dir.back() == L'\\' || dir.back() == L'/')) dir.pop_back();
+    const std::wstring sheetPath = dir + L"\\Sheet tour.smd", folder = dir + L"\\Sheet tour";
+    // An open tour is shown as it is; else a fresh one: the tour's own files
+    // written anew, anything else in its folder left alone
+    bool open = false;
+    for (size_t i = 0; i < app.tabs.size(); ++i) {
+        const std::string& path = (int)i == app.activeTab ? app.currentFile : app.tabs[i].path;
+        if (!path.empty() && _wcsicmp(toWide(path).c_str(), sheetPath.c_str()) == 0) open = true;
+    }
+    if (!open) {
+        Sheet model;
+        SmdInfo info;
+        std::error_code ec;
+        std::filesystem::create_directories(folder, ec);
+        if (!parseSmd(kTourSheet, model, info) || !folderExists(folder)) return false;
+        for (const auto& note : kTourNotes) {
+            if (!writeFileUtf8(folder + L"\\" + note.name, note.text)) return false;
+        }
+        if (!writeFileUtf8(sheetPath, writeSmd(model, info, kTourSheet))) return false;
+        // and it opens fitted to the window, not where the last one was left,
+        // with no undo or selection of an earlier tour this window showed
+        std::wstring ini = sheetsIniPath();
+        if (!ini.empty()) WritePrivateProfileStringW(L"Views", viewKey(toUtf8(sheetPath)).c_str(), nullptr, ini.c_str());
+        app.sheetDocs.erase(lowerKey(toUtf8(sheetPath)));
+    }
+    openInPlace(app, hwnd, sheetPath);
     return true;
 }

@@ -272,6 +272,10 @@ void sheetSetCursor(App& app, int x, int y);
 bool sheetCreateInteractive(App& app, HWND hwnd);
 // Makes the sheet at `path` and opens it; an empty tab gives it its place
 bool sheetCreateAndOpen(App& app, HWND hwnd, const std::wstring& path);
+// The start page's sheet tour: "Sheet tour.smd" and its notes, written
+// fresh in `dir` (by default a Tinta folder in the temp folder) unless the
+// tour is open already, then opened as sheetCreateAndOpen opens a sheet
+bool sheetOpenTour(App& app, HWND hwnd, const std::wstring& dir = {});
 // Creates the sheet file and folder; false when the file could not be written
 bool sheetCreateAt(App& app, const std::wstring& sheetPath, std::string* error = nullptr);
 

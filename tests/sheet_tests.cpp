@@ -9,6 +9,7 @@
 #include "input.h"
 #include "keystroke.h"
 #include "overlays.h"
+#include "save_picker.h"
 #include "settings.h"
 #include "sheet_ui.h"
 #include "startpage.h"
@@ -1154,8 +1155,9 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
 }
 
 // The start page's four buttons stand two by two, of one width: Open a file
-// and Browse over New document and New sheet. Drawn at two widths in a dark
-// and a light theme for a look.
+// and Browse over New document and New sheet. Beside them, where there is
+// room, Learn's four cards start level with the top. Drawn at two widths in
+// a dark and a light theme for a look.
 void startPage(App& app, const fs::path& out) {
     auto width = [](const D2D1_RECT_F& r) { return r.right - r.left; };
     for (int theme : {5, 0}) {
@@ -1165,9 +1167,10 @@ void startPage(App& app, const fs::path& out) {
             app.height = w == 1050 ? 800 : 620;
             std::string name = std::string("start-") + (theme == 0 ? "paper" : "midnight") + "-" + std::to_string(w);
             check(saveFramePreview(app, out / (name + ".png"), [&] { renderStartPage(app); }), "frame saved: " + name);
-            D2D1_RECT_F at[7] = {};
+            D2D1_RECT_F at[7] = {}, learn[4] = {};
             for (const auto& hit : app.startPageHits) {
                 if (hit.second >= 1 && hit.second <= 6) at[hit.second] = hit.first;
+                if (hit.second >= 20 && hit.second <= 23) learn[hit.second - 20] = hit.first;
             }
             const D2D1_RECT_F &open = at[1], &newDoc = at[2], &browse = at[3], &sheet = at[6];
             check(width(open) > 0 && width(newDoc) > 0 && width(browse) > 0 && width(sheet) > 0,
@@ -1179,6 +1182,12 @@ void startPage(App& app, const fs::path& out) {
             check(std::fabs(width(open) - width(browse)) < 0.5f && std::fabs(width(open) - width(newDoc)) < 0.5f &&
                       std::fabs(width(open) - width(sheet)) < 0.5f,
                   name + ": of one width");
+            if (w == 1050) {
+                bool stacked = true;
+                for (int i = 1; i < 4; ++i) stacked = stacked && width(learn[i]) > 0 && learn[i].top > learn[i - 1].bottom;
+                check(width(learn[0]) > 0 && stacked, name + ": Learn has four cards, the sheet tour last");
+                check(learn[0].top < at[1].top, name + ": Learn starts level with the top, above the buttons");
+            }
         }
     }
     app.width = 1050;
@@ -1187,6 +1196,92 @@ void startPage(App& app, const fs::path& out) {
 
 // The new tab's empty page offers New sheet beside Open a file, under it
 // when the pane is narrow; a sheet made from it takes the empty tab's place
+// From the start page: S makes a sheet through the Save dialog, as New
+// sheet's chip says, and the Learn card's sheet tour opens a fresh copy of
+// itself with every card's note on disk, unless the tour is open already
+void startPageSheets(App& app, const fs::path& dir, const fs::path& out) {
+    keystroke(app, 'T', {true, false, false});
+    check(startPageActive(app), "Ctrl+T shows the start page");
+    const fs::path made = dir / "Pressed S.smd";
+    const SavePickerProbe probe = withSavePicker(made.wstring().c_str(), [&] { keystroke(app, 'S'); });
+    SheetDoc* pressed = activeSheet(app);
+    check(probe.shown == 1 && fs::exists(made) && pressed && pressed->model.nodes.empty() &&
+              pressed->editing == SheetDoc::Edit::None,
+          "S on the start page names a sheet in the Save dialog and opens it, no S typed into it");
+
+    // The tour goes in a temp folder of the test's own: Windows finds the
+    // temp folder through TMP and TEMP
+    wchar_t tmp[MAX_PATH] = {}, temp[MAX_PATH] = {};
+    GetEnvironmentVariableW(L"TMP", tmp, MAX_PATH);
+    GetEnvironmentVariableW(L"TEMP", temp, MAX_PATH);
+    const fs::path ownTemp = dir / "temp";
+    fs::create_directories(ownTemp);
+    SetEnvironmentVariableW(L"TMP", ownTemp.wstring().c_str());
+    SetEnvironmentVariableW(L"TEMP", ownTemp.wstring().c_str());
+    const fs::path tour = ownTemp / "Tinta" / "Sheet tour.smd";
+    const fs::path welcome = ownTemp / "Tinta" / "Sheet tour" / "Welcome.md";
+    auto tourCard = [&] {
+        app.renderTarget->BeginDraw();
+        renderStartPage(app);
+        app.renderTarget->EndDraw();
+        for (const auto& hit : app.startPageHits) {
+            if (hit.second == 23) return D2D1::Point2F((hit.first.left + hit.first.right) * 0.5f, (hit.first.top + hit.first.bottom) * 0.5f);
+        }
+        return D2D1::Point2F(-1, -1);
+    };
+    auto onTour = [&] {
+        return sheetActive(app) && _wcsicmp(toWide(app.currentFile).c_str(), tour.wstring().c_str()) == 0;
+    };
+    keystroke(app, 'T', {true, false, false});
+    size_t tabs = app.tabs.size();
+    D2D1_POINT_2F card = tourCard();
+    check(card.x > 0, "the start page's Learn has the sheet tour");
+    click(app, card);
+    SheetDoc* doc = activeSheet(app);
+    check(onTour() && doc && app.tabs.size() == tabs, "the sheet tour opens in the start page's place, from the temp folder");
+    if (doc) {
+        int notes = 0, lanes = 0, texts = 0;
+        bool onDisk = true, agree = true;
+        for (const Node& n : doc->model.nodes) {
+            if (n.type == NodeType::File) {
+                ++notes;
+                onDisk = onDisk && fs::exists(absolutePath(*doc, n.file));
+            }
+            if (n.type == NodeType::Text) ++texts;
+            if (n.type != NodeType::Group || n.laneKey.empty()) continue;
+            ++lanes;
+            for (const Node& m : doc->model.nodes) {
+                if (m.type == NodeType::File && insideGroup(n, m))
+                    agree = agree && frontmatterValue(noteText(*doc, m.id), n.laneKey) == n.label;
+            }
+        }
+        check(notes == 8 && lanes == 3 && texts == 1 && doc->model.edges.size() == 5,
+              "the tour has its 8 notes, 3 lanes, a text card and 5 arrows");
+        check(onDisk && agree && doc->unplaced.empty(),
+              "every note is on disk, each lane's notes say their lane, and none waits in the tray");
+        frame(app, out / "sheet-tour.png");
+        doc->zoom = 3.0f;
+        doc->placed = true;
+    }
+    // Open already: the card goes to it as it is, and the start page's tab goes
+    writeBytes(welcome, "# Welcome\n\nChanged.\n");
+    keystroke(app, 'T', {true, false, false});
+    tabs = app.tabs.size();
+    click(app, tourCard());
+    check(onTour() && app.tabs.size() == tabs - 1 && readBytes(welcome) == "# Welcome\n\nChanged.\n",
+          "with the tour open, its card goes to it and leaves it as it is");
+    // Closed: the next one starts over, its notes and its view
+    tabCloseIndex(app, app.hwnd, app.activeTab);
+    keystroke(app, 'T', {true, false, false});
+    click(app, tourCard());
+    doc = activeSheet(app);
+    paint(app);
+    check(onTour() && doc && readBytes(welcome).find("Changed.") == std::string::npos && doc->zoom < 1.5f,
+          "once closed, the tour comes back fresh and fitted to the window");
+    SetEnvironmentVariableW(L"TMP", tmp[0] ? tmp : nullptr);
+    SetEnvironmentVariableW(L"TEMP", temp[0] ? temp : nullptr);
+}
+
 void newTabPage(App& app, const fs::path& dir, const fs::path& out) {
     size_t tabs = app.tabs.size();
     tabOpenQuickNote(app, app.hwnd);
@@ -1290,6 +1385,7 @@ int runSheetTests(const char* fixtureDir) {
     naming(app, dir);
     tenMore(app, dir, out);
     newTabPage(app, dir, out);
+    startPageSheets(app, dir, out);
     performance(app, dir);
 
     DestroyWindow(app.hwnd);
