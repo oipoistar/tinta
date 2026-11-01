@@ -182,11 +182,14 @@ the arrows size the table.
 
 The pill is at the top of the edit rail: **#** for Source and **Aa** for
 Live, with a knob that slides to the one showing. Clicking either side
-switches, as does **Ctrl+/**. **Ctrl+E** in Live shows Source with its
-preview beside it. Ctrl+Shift+E opens the reading view from either. Live
-fills the window beside the rail, in the reading view's column. A plain
-text, Mermaid or PlantUML file is its own source: it opens in Source, and
-the pill's Live side is dimmed.
+switches, as does **Ctrl+/**. **Ctrl+E** in Live opens the reading view,
+the page as the reader shows it with the edits not yet saved, and Ctrl+E
+there comes back to the caret. Ctrl+Shift+E does the same from Live or
+Source; in Source, Ctrl+E shows and hides the preview beside it. In the
+reader, Ctrl+E opens the editor, as E does. Live fills the window beside
+the rail, in the reading view's column. A plain text, Mermaid or PlantUML
+file is its own source: it opens in Source, and the pill's Live side is
+dimmed.
 
 ## Sheets
 

@@ -1977,8 +1977,11 @@ void renderHelpOverlay(App& app) {
     std::wstring kTheme = keyLabel(app.keymap[KA_THEME]);
     std::wstring kStats = keyLabel(app.keymap[KA_STATS]);
     std::wstring kHelp = keyLabel(app.keymap[KA_HELP]);
-    std::wstring kEdit = keyLabel(app.keymap[KA_EDIT]);
+    std::wstring kEdit = keyLabel(app.keymap[KA_EDIT]) + L" / Ctrl+E";
     std::wstring kQuit = keyLabel(app.keymap[KA_QUIT]);
+    // Ctrl+E reads in Live and shows Source's preview pane (#308): the
+    // keys of the editor E opens
+    const bool live = app.editorLive;
 
     const HelpEntry navEntries[] = {
         {kDown.c_str(),   tr(app, "help.nav.scroll_down")},
@@ -2011,9 +2014,9 @@ void renderHelpOverlay(App& app) {
         {L"Shift+F10",    tr(app, "help.edit.menu")},
         {L"[[",           tr(app, "help.sheet.link")},
         {L"Ctrl+K",       tr(app, "help.edit.link")},
-        {L"Ctrl+E",       tr(app, "help.edit.preview")},
+        {live ? L"Ctrl+/, Ctrl+E" : L"Ctrl+E", tr(app, "help.edit.preview")},
         {L"Ctrl+W",       tr(app, "help.edit.word_wrap")},
-        {L"Ctrl+Shift+E", tr(app, "editor.read_help")},
+        {live ? L"Ctrl+E" : L"Ctrl+Shift+E", tr(app, "editor.read_help")},
         {L"ESC ESC",      tr(app, "help.edit.exit_edit")},
         {L"Alt+\x2191 / Alt+\x2193", tr(app, "help.edit.move_line")},
         {L"Ctrl+Alt+\x2191 / \x2193", tr(app, "help.edit.add_caret")},

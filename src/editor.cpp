@@ -1861,16 +1861,24 @@ void setEditorReadingPreview(App& app, bool reading) {
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
-// The pill names its shortcut, so it grows to fit its label: Read carries
-// Ctrl+Shift+E since Esc leaves edit mode again (#242). It never sits over
-// the text for good (#245): see editorReadingButtonShown.
+// The pill names its shortcut: Read carries Ctrl+Shift+E since Esc leaves
+// edit mode again (#242), and Ctrl+E in Live, where that reads (#308)
+std::wstring editorReadingButtonLabel(const App& app) {
+    std::wstring label = tr(app, app.editorReadingPreview ? "editor.resume" : "editor.read");
+    size_t at = label.find(L"Ctrl+Shift+E");
+    if (editorLiveOn(app) && at != std::wstring::npos) label.replace(at, 12, L"Ctrl+E");
+    return label;
+}
+
+// The pill grows to fit its label. It never sits over the text for good
+// (#245): see editorReadingButtonShown.
 D2D1_RECT_F editorReadingButtonRect(const App& app) {
     float width = dpi(app, 132);
     if (app.dwriteFactory && app.codeFormat) {
-        const wchar_t* label = tr(app, app.editorReadingPreview ? "editor.resume" : "editor.read");
+        const std::wstring label = editorReadingButtonLabel(app);
         Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
         DWRITE_TEXT_METRICS metrics{};
-        if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(label, static_cast<UINT32>(wcslen(label)),
+        if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(label.c_str(), static_cast<UINT32>(label.size()),
                 app.codeFormat, 4096.0f, 256.0f, layout.GetAddressOf()))) {
             useUiFontFallback(app, layout.Get());
             if (SUCCEEDED(layout->GetMetrics(&metrics)))
@@ -1945,9 +1953,9 @@ void renderEditorReadingButton(App& app) {
     D2D1_COLOR_F ink = app.theme.accent;
     ink.a *= alpha;
     app.brush->SetColor(ink);
-    auto label=tr(app,app.editorReadingPreview ? "editor.resume" : "editor.read");
+    const std::wstring label=editorReadingButtonLabel(app);
     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
-    if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(label,static_cast<UINT32>(wcslen(label)),app.codeFormat,r.right-r.left,r.bottom-r.top,layout.GetAddressOf()))) {
+    if (SUCCEEDED(app.dwriteFactory->CreateTextLayout(label.c_str(),static_cast<UINT32>(label.size()),app.codeFormat,r.right-r.left,r.bottom-r.top,layout.GetAddressOf()))) {
         useUiFontFallback(app, layout.Get());
         layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
         layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);

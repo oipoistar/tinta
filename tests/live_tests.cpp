@@ -1419,6 +1419,46 @@ void documentsSwitched(App& app, const fs::path& dir) {
     app.editorDirty = false;
 }
 
+// #308: Ctrl+E edits from the reader, as E does; in Live it reads the page
+// as the reader shows it, and Ctrl+E there comes back, as Ctrl+Shift+E
+// does. Source keeps Ctrl+E for its preview pane
+void readingToggle(App& app, const fs::path& dir) {
+    const KeyMods ctrl{true, false, false}, ctrlShift{true, true, false};
+    app.editorDirty = false;
+    exitEditMode(app);
+    check(openDocumentInViewer(app, (dir / "Reading toggle.md").wstring()) && !app.editMode, "#308: the fixture opens in the reader");
+    keystroke(app, 'E', ctrl);
+    check(app.editMode && editorLiveOn(app), "#308: Ctrl+E in the reader opens the editor, Live as remembered");
+    check(app.editorText.find(L'\x05') == std::wstring::npos, "#308: and types nothing");
+    const size_t caret = find(app, L"Caret_spot") + 3;
+    placeCaret(app, caret);
+    check(editorReadingButtonLabel(app).find(L"Ctrl+E") != std::wstring::npos &&
+              editorReadingButtonLabel(app).find(L"Shift") == std::wstring::npos,
+          "#308: Live's Read pill names Ctrl+E");
+    keystroke(app, 'E', ctrl);
+    check(app.editMode && app.editorReadingPreview && !editorLiveOn(app), "#308: Ctrl+E in Live opens the reading view");
+    check(editorReadingButtonLabel(app) == tr(app, "editor.resume"), "#308: the pill there leads back");
+    paint(app);
+    keystroke(app, 'E', ctrl);
+    check(!app.editorReadingPreview && editorLiveOn(app), "#308: Ctrl+E in the reading view comes back to Live");
+    check(app.editorCursorPos == caret && !app.editorDirty, "#308: the caret is where it was, the text as it was");
+    keystroke(app, 'E', ctrlShift);
+    check(app.editorReadingPreview, "#308: Ctrl+Shift+E reads from Live too");
+    keystroke(app, 'E', ctrlShift);
+    check(editorLiveOn(app), "#308: and comes back");
+    // Source: Ctrl+E shows or hides the preview beside it, as before
+    keystroke(app, VK_OEM_2, ctrl);
+    check(!editorLiveOn(app) && editorReadingButtonLabel(app).find(L"Ctrl+Shift+E") != std::wstring::npos,
+          "#308: Source's Read pill keeps Ctrl+Shift+E");
+    const bool pane = app.editorShowPreview;
+    keystroke(app, 'E', ctrl);
+    check(!app.editorReadingPreview && app.editorShowPreview != pane, "#308: Ctrl+E in Source shows or hides the preview");
+    keystroke(app, 'E', ctrl);
+    check(app.editorShowPreview == pane && !app.editorReadingPreview, "#308: and puts it back");
+    keystroke(app, VK_OEM_2, ctrl);
+    check(editorLiveOn(app), "Live again");
+}
+
 bool closeTo(D2D1_COLOR_F a, D2D1_COLOR_F b, float within = 0.002f) {
     return std::fabs(a.r - b.r) <= within && std::fabs(a.g - b.g) <= within && std::fabs(a.b - b.b) <= within;
 }
@@ -1570,6 +1610,7 @@ int runLiveTests(const char* fixtureDir) {
     heldFinger(app, doc);
     scrolling(app, dir, out);
     documentsSwitched(app, dir);
+    readingToggle(app, dir);
     themeColours(app);
 
     // Two themes at two widths, on the tour

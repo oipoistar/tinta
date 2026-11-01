@@ -898,15 +898,15 @@ bool liveKeyDown(App& app, HWND hwnd, WPARAM key, bool& consumed) {
         }
     }
     bool ctrl = keyDown(VK_CONTROL), shift = keyDown(VK_SHIFT);
-    // Ctrl+/ shows the source; Ctrl+E the source with its preview beside it
+    // Ctrl+/ shows the source. Ctrl+E reads the page as the reader does,
+    // and Ctrl+E there comes back (#308), as Ctrl+Shift+E does
     if (ctrl && key == VK_OEM_2) {
         setEditorLive(app, hwnd, false);
         consumed = true;
         return true;
     }
     if (ctrl && !shift && key == 'E') {
-        app.editorShowPreview = true;
-        setEditorLive(app, hwnd, false);
+        setEditorReadingPreview(app, true);
         consumed = true;
         return true;
     }

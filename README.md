@@ -125,14 +125,14 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Page Up/Down` | Page scroll |
 | `Home/End` | Jump to start/end |
 | `Ctrl+G` | Go to a line by its number, in the editor or the reading view |
-| `:` | Enter edit mode |
+| `:` / `Ctrl+E` | Enter edit mode |
 | `ESC` `ESC` | Exit edit mode |
 | `Ctrl+N` | New quick note — a fresh window, start typing right away; `Ctrl+S` names it via the save dialog. While the note is still empty, an **Open a file** button (`Ctrl+O`) in the preview pane picks an existing file instead |
 | `Ctrl+S` | Save (in edit mode) |
 | `Ctrl+Shift+S` | Save As: the editor writes the buffer to a new path, the viewer saves a copy, and the document continues under the new name |
 | `Ctrl+H` | Find and replace (in edit mode): Tab switches fields, Enter replaces, Ctrl+Enter replaces all |
 | `Ctrl+P` | Print / export to PDF; the preview picks the paper, orientation and margins |
-| `Ctrl+E` | Show/hide preview pane (in edit mode) |
+| `Ctrl+E` | In Source, show/hide the preview pane; in Live, read the page at full width, and `Ctrl+E` again to go back |
 | `Ctrl+Shift+E` | Read the unsaved edits at full width; `Esc` returns to the source (in edit mode) |
 | `Ctrl+W` | Toggle word wrap (in edit mode) |
 | `Alt+↑` / `Alt+↓` | Move the current line, or the selected lines, up or down (in edit mode) |

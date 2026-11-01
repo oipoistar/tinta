@@ -14,6 +14,8 @@ void enterRecoveredDraft(App& app, HWND hwnd, const std::string& content,
                          const std::string& origPath);
 void exitEditMode(App& app);
 void setEditorReadingPreview(App& app, bool reading);
+// The Read pill's words, with the shortcut that reads where it is shown
+std::wstring editorReadingButtonLabel(const App& app);
 // The Read button (#236) fades in for a hint session's intro and while the
 // pointer rests on it, and is hidden and click-through otherwise (#245)
 D2D1_RECT_F editorReadingButtonRect(const App& app);

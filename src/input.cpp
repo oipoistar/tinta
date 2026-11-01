@@ -4149,6 +4149,14 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
 
     if (ctrl) {
         switch (wParam) {
+            case 'E':
+                // Ctrl+E edits, as E does; in Live the same key reads (#308)
+                if (!app.showSearch && (!app.showFolderBrowser || app.browserPinned) &&
+                    (!app.showToc || app.tocPinned)) {
+                    enterEditMode(app);
+                    return true;
+                }
+                break;
             case 'P':
                 // Print preview (edit mode handles its own Ctrl+P in the
                 // editor path)
