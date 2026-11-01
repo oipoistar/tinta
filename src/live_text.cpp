@@ -1095,47 +1095,87 @@ void setHeading(LiveText& e, int level) {
     e.preferredX = -1;
 }
 
+std::vector<MarkEdit> lineMarkEdits(const std::wstring& t, const std::vector<size_t>& lines, LineMark::Kind kind) {
+    const bool quote = kind == LineMark::Quote;
+    // A quote goes around what a line holds, a list mark inside its quote
+    auto markAt = [&](size_t ls) { return quote ? ls : ls + quoteLength(t, ls); };
+    bool all = !lines.empty();
+    wchar_t bullet = 0;  // the lines' own bullet, which the rest take so the list stays one
+    for (size_t ls : lines) {
+        LineMark m = lineMark(t, markAt(ls));
+        if (quote ? quoteLength(t, ls) == 0 : m.kind != kind) all = false;
+        if (!bullet && (m.kind == LineMark::Bullet || m.kind == LineMark::Task)) bullet = m.symbol;
+    }
+    if (!bullet) bullet = L'-';
+    std::vector<MarkEdit> edits;
+    std::vector<std::pair<size_t, int>> counts;  // a numbered list's indents and their next numbers
+    for (size_t ls : lines) {
+        size_t at = markAt(ls);
+        LineMark m = lineMark(t, at);
+        if (quote) {
+            // In, or a level out: the first > and the space after it
+            size_t mark = ls + m.indent;
+            if (!all) edits.push_back({mark, 0, L"> "});
+            else edits.push_back({mark, mark + 1 < t.size() && t[mark + 1] == L' ' ? 2u : 1u, L""});
+            continue;
+        }
+        // A task stays a task, its box as ticked, when the others join it
+        if (kind == LineMark::Task && m.kind == LineMark::Task && !all) continue;
+        std::wstring with;
+        if (!all) {
+            switch (kind) {
+                case LineMark::Bullet: with = std::wstring(1, bullet) + L" "; break;
+                case LineMark::Task: with = std::wstring(1, bullet) + L" [ ] "; break;
+                default:
+                    while (!counts.empty() && counts.back().first > m.indent) counts.pop_back();
+                    if (counts.empty() || counts.back().first < m.indent) counts.push_back({m.indent, 1});
+                    with = std::to_wstring(counts.back().second++) + L". ";
+                    break;
+            }
+        }
+        size_t removed = listKind(m.kind) ? m.length : 0;
+        if (t.compare(at + m.indent, removed, with) != 0) edits.push_back({at + m.indent, removed, with});
+    }
+    return edits;
+}
+
+std::wstring markedSpan(const std::wstring& t, const std::vector<MarkEdit>& edits) {
+    std::wstring out;
+    size_t at = edits.empty() ? 0 : edits.front().at;
+    for (const MarkEdit& m : edits) {
+        out.append(t, at, m.at - at);
+        out += m.with;
+        at = m.at + m.removed;
+    }
+    return out;
+}
+
+size_t throughMarks(size_t p, const std::vector<MarkEdit>& edits) {
+    ptrdiff_t shift = 0;
+    for (const MarkEdit& m : edits) {
+        if (p < m.at) break;
+        if (p <= m.at + m.removed) return m.at + shift + m.with.size();
+        shift += (ptrdiff_t)m.with.size() - (ptrdiff_t)m.removed;
+    }
+    return (size_t)((ptrdiff_t)p + shift);
+}
+
 void toggleLineMark(LiveText& e, LineMark::Kind kind) {
     size_t first = 0, last = 0;
     selectedLines(e, first, last);
-    const bool quote = kind == LineMark::Quote;
-    // A quote goes around what a line holds, a list mark inside its quote
-    auto markAt = [&](size_t ls) { return quote ? ls : ls + quoteLength(e.text, ls); };
-    bool all = true;
-    eachLineBack(e, first, last, [&](size_t at) {
-        if (blank(lineView(e.text, at)) && first != last) return;
-        if (quote ? quoteLength(e.text, at) == 0 : lineMark(e.text, markAt(at)).kind != kind) all = false;
-    });
-    // Marks are worked out top down (numbers count on) and written bottom up
-    std::vector<std::pair<size_t, std::wstring>> marks;
-    int number = 1;
+    std::vector<size_t> lines;
     for (size_t at = first;; at = lineEnd(e.text, at) + 1) {
-        if (!(blank(lineView(e.text, at)) && first != last)) {
-            switch (kind) {
-                case LineMark::Bullet: marks.push_back({at, L"- "}); break;
-                case LineMark::Number: marks.push_back({at, std::to_wstring(number++) + L". "}); break;
-                case LineMark::Task: marks.push_back({at, L"- [ ] "}); break;
-                default: marks.push_back({at, L"> "}); break;
-            }
-        }
+        if (!(blank(lineView(e.text, at)) && first != last)) lines.push_back(at);
         if (at >= last || lineEnd(e.text, at) >= e.text.size()) break;
     }
+    // One splice over the lines, however many: the caret and the selection
+    // keep to the text after the marks
+    std::vector<MarkEdit> edits = lineMarkEdits(e.text, lines, kind);
+    if (edits.empty()) return;
+    size_t caret = throughMarks(e.caret, edits), anchor = throughMarks(e.anchor, edits);
     pushUndo(e, false);
-    for (auto it = marks.rbegin(); it != marks.rend(); ++it) {
-        size_t at = markAt(it->first);
-        LineMark m = lineMark(e.text, at);
-        if (quote) {
-            // In, or a level out: the first > and the space after it
-            size_t mark = it->first + m.indent;
-            if (!all) spliceMark(e, mark, 0, it->second);
-            else spliceMark(e, mark, mark + 1 < e.text.size() && e.text[mark + 1] == L' ' ? 2 : 1, L"");
-            continue;
-        }
-        // A task stays a task when it turns into a list of tasks
-        if (kind == LineMark::Task && m.kind == LineMark::Task && !all) continue;
-        spliceMark(e, at + m.indent, listKind(m.kind) ? m.length : 0, all ? std::wstring() : it->second);
-    }
-    e.preferredX = -1;
+    splice(e, edits.front().at, edits.back().at + edits.back().removed - edits.front().at, markedSpan(e.text, edits));
+    settle(e, caret, anchor);
 }
 
 void toggleTask(LiveText& e, size_t lineBegin) {

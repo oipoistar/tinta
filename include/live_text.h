@@ -214,7 +214,22 @@ bool undo(LiveText& e, bool redo);
 void toggleWrap(LiveText& e, const std::wstring& mark);
 void makeLink(LiveText& e);
 void setHeading(LiveText& e, int level);       // the same level again: a paragraph
+// The rail's list and quote buttons, on every line of the selection
 void toggleLineMark(LiveText& e, LineMark::Kind kind);
+// A line's mark put on, swapped or taken off
+struct MarkEdit {
+    size_t at = 0, removed = 0;
+    std::wstring with;
+};
+// What toggleLineMark makes of these lines (their starts, top down), for the
+// source editor's own text: the mark on each one, or off them all when they
+// all have it. Numbers count on at each indent; the edits come top down.
+std::vector<MarkEdit> lineMarkEdits(const std::wstring& text, const std::vector<size_t>& lines, LineMark::Kind kind);
+// The text from the first edit's start to the last one's end as they leave
+// it, to put in with one splice; and a position through them (at or inside
+// a mark, after the mark that takes its place)
+std::wstring markedSpan(const std::wstring& text, const std::vector<MarkEdit>& edits);
+size_t throughMarks(size_t at, const std::vector<MarkEdit>& edits);
 void toggleTask(LiveText& e, size_t lineBegin);
 void moveLines(LiveText& e, bool up);          // the caret's lines past the one above or below
 // The selection's lines made a block of another kind: their marks go and

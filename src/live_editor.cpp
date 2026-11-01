@@ -997,6 +997,7 @@ bool liveRailCommand(App& app, HWND hwnd, int id) {
         case 4: live::applyFormat(L.e, live::FMT_CODE); break;
         case 5: live::applyFormat(L.e, live::FMT_LINK); break;
         case 10: live::toggleLineMark(L.e, live::LineMark::Bullet); break;
+        case 13: live::toggleLineMark(L.e, live::LineMark::Number); break;
         case 11: live::toggleLineMark(L.e, live::LineMark::Task); break;
         case 12: live::toggleLineMark(L.e, live::LineMark::Quote); break;
         case 20:

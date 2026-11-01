@@ -1467,6 +1467,11 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             SetCursor(cursorArrow);
             return;
         }
+        // A pointer gone from the rail to Live's page leaves no name behind
+        if (app.editRailHover && (float)app.mouseX >= editRailWidth(app)) {
+            app.editRailHover = 0;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
         if (liveMouseMove(app, hwnd, app.mouseX, app.mouseY)) return;
         handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
         if (app.editCtxOpen) return;

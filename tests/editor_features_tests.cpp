@@ -1,14 +1,19 @@
 #include "d2d_init.h"
 #include "drafts.h"
 #include "editor.h"
+#include "editrail.h"
+#include "i18n.h"
 #include "input.h"
 #include "keystroke.h"
 #include "render.h"
 #include "settings.h"
 #include "tabs.h"
 #include "utils.h"
+#include "frame_preview.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -17,8 +22,9 @@
 #include <memory>
 #include <vector>
 
-// Editor conveniences (#251), the word count (#240) and draft recovery
-// after a close without asking (#252), driven through the real handlers
+// Editor conveniences (#251), the rail's list marks (#304, #306), the word
+// count (#240) and draft recovery after a close without asking (#252),
+// driven through the real handlers
 namespace {
 int failures = 0, checks = 0;
 void check(bool ok, const char* message) {
@@ -288,6 +294,199 @@ void caretClipboardText(App& app) {
     check(app.editorText == L"ax by cz", "a paste at every caret is one undo step");
 }
 
+// The rail's list and quote buttons act on every line a selection or a caret
+// takes in (#306), and its numbered list counts on across them (#304)
+void railLineMarks(App& app) {
+    const std::wstring plain = L"line one\nline two\nline three";
+    const std::wstring bullets = L"- line one\n- line two\n- line three";
+    setText(app, plain, 0);
+    select(app, 0, plain.size());
+    editRailInvoke(app, app.hwnd, 10);
+    check(app.editorText == bullets && app.editorHasSelection && app.editorSelStart == 2 &&
+          app.editorSelEnd == bullets.size(),
+          "the bullet button marks every selected line, the selection kept on their text");
+    editRailInvoke(app, app.hwnd, 10);
+    check(app.editorText == plain, "pressed again it takes every mark off");
+    key(app, 'Z', {true});
+    check(app.editorText == bullets, "one Ctrl+Z puts the marks back");
+    key(app, 'Z', {true});
+    check(app.editorText == plain, "and one more takes them off: each press is one step");
+    setText(app, plain, 0);
+    select(app, plain.size(), 0);
+    editRailInvoke(app, app.hwnd, 13);
+    check(app.editorText == L"1. line one\n2. line two\n3. line three",
+          "the numbered list button numbers the selected lines, whichever way they were selected");
+    editRailInvoke(app, app.hwnd, 13);
+    check(app.editorText == plain, "pressed again it leaves plain text");
+    for (int id : {11, 12}) {
+        setText(app, plain, 0);
+        select(app, 0, plain.size());
+        editRailInvoke(app, app.hwnd, id);
+        check(app.editorText == (id == 11 ? L"- [ ] line one\n- [ ] line two\n- [ ] line three"
+                                          : L"> line one\n> line two\n> line three"),
+              "the task and quote buttons mark every selected line too");
+    }
+    setText(app, L"a\nb\nc", 0);
+    select(app, 0, 4);
+    editRailInvoke(app, app.hwnd, 10);
+    check(app.editorText == L"- a\n- b\nc", "a selection ending at a line's start leaves that line alone");
+    setText(app, L"* one\ntwo\n\nthree", 0);
+    select(app, 0, 16);
+    editRailInvoke(app, app.hwnd, 10);
+    check(app.editorText == L"* one\n* two\n\n* three",
+          "the other lines take the list's own bullet, and a blank line inside stays blank");
+    setText(app, L"a\n- b", 0);
+    select(app, 0, 5);
+    editRailInvoke(app, app.hwnd, 12);
+    check(app.editorText == L"> a\n> - b", "a quote goes around a list item");
+    editRailInvoke(app, app.hwnd, 12);
+    check(app.editorText == L"a\n- b", "and comes off again");
+
+    // One caret: its line, blank or not; a list mark gives way to another
+    setText(app, L"text\n\nmore", 5);
+    editRailInvoke(app, app.hwnd, 10);
+    check(app.editorText == L"text\n- \nmore" && app.editorCursorPos == 7, "a caret on a blank line starts a list there");
+    setText(app, L"- [ ] task", 10);
+    editRailInvoke(app, app.hwnd, 10);
+    check(app.editorText == L"- task", "the bullet button makes a task a bullet, not [ ] task");
+    setText(app, L"- item", 6);
+    editRailInvoke(app, app.hwnd, 11);
+    check(app.editorText == L"- [ ] item", "the task button makes a bullet a task, not - [ ] - item");
+    setText(app, L"- a\n  - b\n  - c\n- d", 0);
+    select(app, 0, 19);
+    editRailInvoke(app, app.hwnd, 13);
+    check(app.editorText == L"1. a\n  1. b\n  2. c\n2. d", "numbers count on at each level of a nested list");
+
+    // Several carets: each line once, the numbers counting on, one undo step
+    setText(app, L"a\nb\nc", 0);
+    key(app, VK_DOWN, {true, false, true});
+    key(app, VK_DOWN, {true, false, true});
+    editRailInvoke(app, app.hwnd, 13);
+    check(app.editorText == L"1. a\n2. b\n3. c" && carets(app) == std::vector<size_t>({3, 8, 13}),
+          "numbers count on across several carets, each caret after its number");
+    key(app, 'Z', {true});
+    check(app.editorText == L"a\nb\nc", "one Ctrl+Z takes back the numbers at every caret");
+    setText(app, L"a\nb\nc", 0);
+    key(app, VK_DOWN, {true, false, true});
+    key(app, VK_DOWN, {true, false, true});
+    editRailInvoke(app, app.hwnd, 10);
+    check(app.editorText == L"- a\n- b\n- c", "bullets go on at every caret's line, as before (#251)");
+    editRailInvoke(app, app.hwnd, 10);
+    check(app.editorText == L"a\nb\nc", "and come off again");
+    setText(app, L"ab\nc", 0);
+    addCaret(app, 1, 1);
+    editRailInvoke(app, app.hwnd, 10);
+    check(app.editorText == L"- ab\nc", "two carets on a line mark it once");
+}
+
+// A list button on every line of a long document is one replace, quick to
+// make and to take back
+void railLongDocument(App& app) {
+    std::wstring text;
+    for (int i = 0; i < 20000; ++i) text += L"line " + std::to_wstring(i) + L"\n";
+    setText(app, text, 0);
+    select(app, 0, text.size());
+    const auto start = std::chrono::steady_clock::now();
+    editRailInvoke(app, app.hwnd, 13);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    std::cout << "Numbering 20,000 lines: " << (int)ms << " ms\n";
+    check(app.editorText.compare(0, 13, L"1. line 0\n2. ") == 0 && app.undoStack.size() == 1,
+          "numbers on 20,000 selected lines are one replace");
+    check(ms < 250.0, "and quick to make");
+    key(app, 'Z', {true});
+    check(app.editorText == text, "one Ctrl+Z takes them all off");
+}
+
+// The rail's numbered list button: between the bullets and the tasks, named,
+// clicked; in a short window the buttons sit closer, the last above the foot
+void railNumberButton(App& app) {
+    auto paintRail = [&] {
+        app.editRailAnim = 1.0f;
+        app.renderTarget->BeginDraw();
+        renderEditRail(app);
+        app.renderTarget->EndDraw();
+    };
+    auto hit = [&](int id) {
+        for (const auto& h : app.editRailHits) {
+            if (h.second == id) return h.first;
+        }
+        return D2D1_RECT_F{};
+    };
+    paintRail();
+    const D2D1_RECT_F bullets = hit(10), numbers = hit(13), tasks = hit(11);
+    check(numbers.bottom > numbers.top && numbers.top >= bullets.bottom && numbers.bottom <= tasks.top,
+          "the numbered list button sits between the bullets and the tasks");
+    check(std::fabs(numbers.bottom - numbers.top - dpi(app, 32.0f)) < 0.5f, "a tall window keeps the buttons' size");
+    setText(app, L"one\ntwo", 0);
+    select(app, 0, 7);
+    if (numbers.bottom > numbers.top) {
+        const int x = (int)((numbers.left + numbers.right) * 0.5f), y = (int)((numbers.top + numbers.bottom) * 0.5f);
+        handleMouseMove(app, app.hwnd, MAKELPARAM(x, y));
+        check(app.editRailHover == 13 && std::wstring(tr(app, "rail.numbers")) == L"Numbered list",
+              "it is named Numbered list");
+        handleMouseDown(app, app.hwnd, MK_LBUTTON, MAKELPARAM(x, y));
+        handleMouseUp(app, app.hwnd, 0, MAKELPARAM(x, y));
+    }
+    check(app.editorText == L"1. one\n2. two", "a click on it numbers the selected lines");
+    app.editRailHover = 0;
+    // With and without Pandoc's export button at the rail's foot
+    const int height = app.height;
+    const std::wstring pandoc = app.pandocExe;
+    const bool pandocChecked = app.pandocChecked;
+    for (bool foot : {false, true}) {
+        app.pandocChecked = true;
+        app.pandocExe = foot ? L"pandoc.exe" : L"";
+        for (int h : {900, 600, 540}) {
+            app.height = h;
+            paintRail();
+            const D2D1_RECT_F last = hit(22), export_ = hit(23), first = hit(1);
+            check((export_.bottom > export_.top) == foot, "the foot shows Pandoc's export button only when it is found");
+            const float limit = foot ? export_.top - dpi(app, 8.0f) : (float)h;
+            check(last.bottom > last.top && last.bottom <= limit + 0.5f,
+                  "the rail's last button stays above its foot and the window's bottom");
+            check(first.bottom - first.top >= dpi(app, 24.0f) - 0.5f, "a short window's buttons stay a finger wide");
+            const std::string name = "rail-" + std::to_string(h) + (foot ? "-pandoc" : "") + ".png";
+            check(saveFramePreview(app, std::filesystem::current_path() / name, [&] { renderEditRail(app); }),
+                  "the rail's frame is saved");
+        }
+    }
+    app.pandocExe = pandoc;
+    app.pandocChecked = pandocChecked;
+    app.height = height;
+}
+
+// The mixed fixture of list marks in the editor, as it is on disk
+std::wstring openListFixture(App& app) {
+    app.editorDirty = false;
+    exitEditMode(app);
+    app.currentFile = TINTA_LIST_MARKS_FIXTURE;
+    enterEditMode(app);
+    check(app.editMode && app.editorText.find(L"Milk\nEggs\nBread") != std::wstring::npos,
+          "the list marks fixture opens in the editor");
+    return app.editorText;
+}
+
+// The buttons on the lines the mixed fixture names, the rest of it untouched
+void railFixture(App& app) {
+    const std::wstring original = openListFixture(app);
+    const size_t milk = original.find(L"Milk\nEggs\nBread"), wake = original.find(L"Wake up\nMake coffee\nRead the news");
+    if (milk == std::wstring::npos || wake == std::wstring::npos) return;
+    select(app, milk, milk + 15);
+    editRailInvoke(app, app.hwnd, 10);
+    std::wstring expected = original;
+    expected.replace(milk, 15, L"- Milk\n- Eggs\n- Bread");
+    check(app.editorText == expected, "in the fixture the bullets go on those three lines and nowhere else");
+    key(app, 'Z', {true});
+    select(app, wake, wake + 33);
+    editRailInvoke(app, app.hwnd, 13);
+    expected = original;
+    expected.replace(wake, 33, L"1. Wake up\n2. Make coffee\n3. Read the news");
+    check(app.editorText == expected, "and the numbers on those three");
+    key(app, 'Z', {true});
+    check(app.editorText == original, "Ctrl+Z leaves the fixture as it was");
+    app.editorDirty = false;
+}
+
 void wordCount(App& app) {
     app.showWordCount = true;
     setText(app, L"# Title\n\nHello **bold** world", 0);
@@ -425,7 +624,11 @@ int runEditorFeatureTests() {
         clickCarets(app);
         nextOccurrence(app);
         caretClipboardText(app);
+        railLineMarks(app);
     }
+    railNumberButton(app);
+    railLongDocument(app);
+    railFixture(app);
     wordCount(app);
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;

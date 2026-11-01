@@ -1,6 +1,7 @@
 #include "frontmatter_ui.h"
 #include "editor.h"
 #include "live_editor.h"
+#include "live_text.h"
 #include "document.h"
 #include "drafts.h"
 #include "signals.h"
@@ -3140,29 +3141,58 @@ static void editorToggleInlineMark(App& app, HWND hwnd,
 
 // --- Edit rail actions (design t8) --------------------------------------
 
-// Toggle a prefix ("- ", "> ", "- [ ] ") at the caret line's start
-static void editorToggleLinePrefix(App& app, HWND hwnd,
-                                   const std::wstring& prefix) {
-    size_t line = getLineFromPos(app, app.editorCursorPos);
-    size_t ls = app.editorLineStarts[line];
-    bool has = app.editorText.size() >= ls + prefix.size() &&
-               app.editorText.compare(ls, prefix.size(), prefix) == 0;
-    size_t before = app.editorCursorPos;
-    if (has) {
-        std::wstring removed = app.editorText.substr(ls, prefix.size());
-        app.editorText.erase(ls, prefix.size());
-        app.editorCursorPos =
-            before >= ls + prefix.size() ? before - prefix.size() : ls;
-        pushUndo(app, App::EditAction::Delete, ls, removed, before,
-                 app.editorCursorPos);
-    } else {
-        app.editorText.insert(ls, prefix);
-        app.editorCursorPos = before + prefix.size();
-        pushUndo(app, App::EditAction::Insert, ls, prefix, before,
-                 app.editorCursorPos);
+// A list or quote mark on every line a caret is on or a selection takes in
+// (#251, #306), or off them all when they all have it, as Live's rail makes
+// it: one undo step, the carets keeping to the text after the marks
+static void editorToggleLineMarks(App& app, HWND hwnd, live::LineMark::Kind kind) {
+    std::vector<App::EditorCaret> carets = editorAllCarets(app);
+    const std::wstring& t = app.editorText;
+    auto blankLine = [&](size_t line) {
+        size_t ls = app.editorLineStarts[line], le = t.find(L'\n', ls);
+        for (size_t i = ls; i < std::min(le, t.size()); ++i) {
+            if (t[i] != L' ' && t[i] != L'\t') return false;
+        }
+        return true;
+    };
+    // Each caret's lines; a selection ending at a line's start leaves it out
+    std::vector<std::pair<size_t, size_t>> spans;
+    size_t top = (size_t)-1, bottom = 0;
+    for (const auto& caret : carets) {
+        size_t a = caretStart(caret), b = caretEnd(caret);
+        size_t first = getLineFromPos(app, a), last = getLineFromPos(app, b);
+        if (b > a && last > first && app.editorLineStarts[last] == b) --last;
+        spans.push_back({first, last});
+        top = std::min(top, first);
+        bottom = std::max(bottom, last);
     }
+    // A blank line inside a selection of several lines is passed over; a
+    // caret's own line takes the mark even when blank
+    std::vector<char> take(bottom - top + 1, 0);  // 1: unless blank, 2: always
+    for (const auto& [first, last] : spans) {
+        for (size_t line = first; line <= last; ++line) {
+            take[line - top] = std::max(take[line - top], first != last ? (char)1 : (char)2);
+        }
+    }
+    std::vector<size_t> starts;
+    for (size_t line = top; line <= bottom; ++line) {
+        const char want = take[line - top];
+        if (want == 2 || (want == 1 && !blankLine(line))) starts.push_back(app.editorLineStarts[line]);
+    }
+    const std::vector<live::MarkEdit> edits = live::lineMarkEdits(t, starts, kind);
+    if (edits.empty()) return;
+    // One replace over the lines, however many
+    const size_t primary = carets.size() - 1, before = app.editorCursorPos;
+    for (auto& caret : carets) {
+        caret.pos = live::throughMarks(caret.pos, edits);
+        caret.anchor = live::throughMarks(caret.anchor, edits);
+        caret.desiredCol = -1;
+    }
+    const size_t from = edits.front().at, to = edits.back().at + edits.back().removed;
+    const std::wstring marked = live::markedSpan(t, edits);
+    pushReplaceUndo(app, from, t.substr(from, to - from), marked, before, carets[primary].pos);
+    app.editorText.replace(from, to - from, marked);
+    editorStoreCarets(app, std::move(carets), primary);
     rebuildLineStarts(app);
-    app.editorDesiredCol = -1;
     scheduleReparse(app);
     editorEnsureCursorVisible(app);
     InvalidateRect(hwnd, nullptr, FALSE);
@@ -3498,14 +3528,11 @@ void editRailInvoke(App& app, HWND hwnd, int id) {
         return;
     }
     if (editorLiveOn(app) && liveRailCommand(app, hwnd, id)) return;
-    // Marks act at every caret and line prefixes on every caret line
-    // (#251); links, snippets and flyouts work at the primary caret
+    // Marks act at every caret, and list and quote marks on every line the
+    // carets and the selections take in (#251, #306); links, snippets and
+    // flyouts work at the primary caret
     auto mark = [&](const wchar_t* text) {
         editorEditAtCarets(app, [&](size_t) { editorToggleInlineMark(app, hwnd, text); });
-    };
-    auto prefix = [&](const wchar_t* text) {
-        editorOneCaretPerLine(app);
-        editorEditAtCarets(app, [&](size_t) { editorToggleLinePrefix(app, hwnd, text); });
     };
     switch (id) {
         case 1: mark(L"**"); break;
@@ -3513,9 +3540,10 @@ void editRailInvoke(App& app, HWND hwnd, int id) {
         case 3: mark(L"~~"); break;
         case 4: mark(L"`"); break;
         case 5: editorInsertLink(app, hwnd); break;
-        case 10: prefix(L"- "); break;
-        case 11: prefix(L"- [ ] "); break;
-        case 12: prefix(L"> "); break;
+        case 10: editorToggleLineMarks(app, hwnd, live::LineMark::Bullet); break;
+        case 13: editorToggleLineMarks(app, hwnd, live::LineMark::Number); break;
+        case 11: editorToggleLineMarks(app, hwnd, live::LineMark::Task); break;
+        case 12: editorToggleLineMarks(app, hwnd, live::LineMark::Quote); break;
         case 20: openEditRailFlyout(app, hwnd, 1); break;  // size grid
         case 21: openEditRailFlyout(app, hwnd, 2); break;  // templates
         case 23: openEditRailFlyout(app, hwnd, 3); break;  // pandoc

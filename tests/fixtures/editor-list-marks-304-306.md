@@ -1,0 +1,58 @@
+# List marks from the rail (#304, #306)
+
+The edit rail's **block buttons** mark *every* line a selection takes in, and
+a fourth one, under the bullets, numbers them. Live does the same
+([Live's notes](../../docs/live-editor.md)).
+
+## Lines to turn into a list (#306)
+
+Select the three lines below and press the rail's bullet button: each one
+gets a bullet. Pressing it again takes them all off. Each press is one
+Ctrl+Z.
+
+Milk
+Eggs
+Bread
+
+## Lines to number (#304)
+
+The numbered list button numbers them 1, 2, 3, across a selection or across
+several carets (Ctrl+Alt+Down), and pressing it again leaves plain text.
+
+Wake up
+Make coffee
+Read the news
+
+## Lists already there
+
+The buttons leave these as they are while none of their lines is selected.
+
+- Apples
+- Pears
+
+1. First
+2. Second
+
+- [ ] Write the notes
+- [x] Send them
+
+> A quoted line
+
+## Around them
+
+| Kind | Mark |
+| --- | --- |
+| Bullet | `- ` |
+| Number | `1. ` |
+| Task | `- [ ] ` |
+| Quote | `> ` |
+
+```text
+Code keeps its lines as they are:
+- not a list here
+```
+
+- Nested lists keep their levels
+  - like this one
+  - and this one
+- back out

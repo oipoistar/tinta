@@ -1112,6 +1112,43 @@ void performance(App& app, const fs::path& dir) {
     app.editorDirty = false;
 }
 
+// A short document of lists, opened in Live
+void openLists(App& app, const fs::path& dir) {
+    const fs::path path = dir / "Lists.md";
+    std::ofstream(path, std::ios::binary)
+        << "# Lists\n\nMilk\nEggs\nBread\n\n1. First\n2. Second\n3. Third\n\n- Apples\n\n> Quoted\n\nThe end.\n";
+    openInEditor(app, path);
+    check(editorLiveOn(app), "the lists open in Live");
+}
+
+// The rail's numbered list in Live, on every selected line (#304, #306)
+void railNumbers(App& app, const fs::path& dir, const fs::path& out) {
+    const auto npos = std::wstring::npos;
+    openLists(app, dir);
+    const size_t milk = find(app, L"Milk\nEggs\nBread");
+    app.editorSelStart = milk;
+    app.editorSelEnd = app.editorCursorPos = milk + 15;
+    app.editorHasSelection = true;
+    paint(app);
+    D2D1_RECT_F numbers{};
+    for (const auto& hit : app.editRailHits) {
+        if (hit.second == 13) numbers = hit.first;
+    }
+    check(numbers.right > numbers.left, "Live's rail shows the numbered list button");
+    if (numbers.right > numbers.left) {
+        click(app, D2D1::Point2F((numbers.left + numbers.right) * 0.5f, (numbers.top + numbers.bottom) * 0.5f));
+        check(app.editRailHover == 13, "the pointer on it shows its name");
+        // Straight onto the page, past the rail's edge in one move
+        handleMouseMove(app, app.hwnd, at(D2D1::Point2F(documentViewportX(app) + 200.0f, 300.0f)));
+        check(app.editRailHover == 0, "and on Live's page leaves no name behind");
+    }
+    check(find(app, L"\n1. Milk\n2. Eggs\n3. Bread\n") != npos, "it numbers every selected line in Live: " + textNear(app, L"Milk"));
+    frame(app, out / "live-rail-numbers.png");
+    keystroke(app, 'Z', {true, false, false});
+    check(find(app, L"\nMilk\nEggs\nBread\n") != npos, "one Ctrl+Z takes the numbers back");
+    app.editorDirty = false;
+}
+
 // A finger held on the page (#286) takes the word under it, as a double-click
 // does, and grows the selection by words as it slides, keeping that word
 // whichever way it goes; Live's menu opens where it lifts. Live's page is the
@@ -1217,6 +1254,7 @@ int runLiveTests(const char* fixtureDir) {
     switching(app, out);
     drawings(app, dir, out);
     reviewed(app, dir);
+    railNumbers(app, dir, out);
     menuEngine(app);
     contextMenu(app, dir, out);
     heldFinger(app, doc);

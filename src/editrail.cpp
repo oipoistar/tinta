@@ -13,6 +13,7 @@
 #include "tabs.h"
 
 #include <algorithm>
+#include <iterator>
 #include <string>
 
 // --- Small helpers (same one-shot layout pattern as the start page) ----
@@ -105,6 +106,8 @@ static const RailBtn kTextBtns[] = {
 static const RailBtn kBlockBtns[] = {
     {10, L"\u2022\u2261", 12.0f, DWRITE_FONT_WEIGHT_NORMAL,
      DWRITE_FONT_STYLE_NORMAL, L"Segoe UI", false, "rail.bullets", L""},
+    {13, L"1\u2261", 12.0f, DWRITE_FONT_WEIGHT_NORMAL,
+     DWRITE_FONT_STYLE_NORMAL, L"Segoe UI", false, "rail.numbers", L""},
     {11, L"\u2611", 13.0f, DWRITE_FONT_WEIGHT_NORMAL,
      DWRITE_FONT_STYLE_NORMAL, L"Segoe UI", false, "rail.tasks", L""},
     {12, L"\u275D", 13.0f, DWRITE_FONT_WEIGHT_NORMAL,
@@ -260,12 +263,16 @@ void renderEditRail(App& app) {
         y += dpi(app, 9.0f);
     }
 
-    // Tool groups: text style, blocks, insert
-    float btn = dpi(app, 32.0f);
+    // Tool groups: text style, blocks, insert. A window too short for them
+    // sets them closer, down to 26 DIP apart, so the last stays above the foot
+    const bool foot = pandocAvailable(app);
+    const float room = H - y - dpi(app, 30.0f) - dpi(app, foot ? 60.0f : 8.0f);
+    const size_t count = std::size(kTextBtns) + std::size(kBlockBtns) + std::size(kInsertBtns);
+    const float pitch = std::clamp(room / (float)count, dpi(app, 26.0f), dpi(app, 34.0f));
+    float btn = pitch - dpi(app, 2.0f);
     float bx = (railW - btn) * 0.5f;
-    auto group = [&](const RailBtn* btns, int count) {
-        for (int i = 0; i < count; i++) {
-            const RailBtn& b = btns[i];
+    auto group = [&](const auto& btns) {
+        for (const RailBtn& b : btns) {
             D2D1_RECT_F r = D2D1::RectF(bx, y, bx + btn, y + btn);
             bool hov = app.editRailHover == b.id;
             if (hov) {
@@ -281,19 +288,19 @@ void renderEditRail(App& app) {
             y += btn + dpi(app, 2.0f);
         }
     };
-    group(kTextBtns, 5);
+    group(kTextBtns);
     y += dpi(app, 7.0f);
     sep(y);
     y += dpi(app, 8.0f);
-    group(kBlockBtns, 3);
+    group(kBlockBtns);
     y += dpi(app, 7.0f);
     sep(y);
     y += dpi(app, 8.0f);
-    group(kInsertBtns, 3);
+    group(kInsertBtns);
 
     // Foot: the pandoc export button, pinned to the rail's bottom and
     // present only when an executable is available
-    if (pandocAvailable(app)) {
+    if (foot) {
         float fy = H - dpi(app, 12.0f) - btn;
         sep(fy - dpi(app, 8.0f));
         const RailBtn& b = kFootBtns[0];
