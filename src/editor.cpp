@@ -4359,7 +4359,7 @@ static void editorFillRangeRects(App& app, IDWriteTextLayout* layout,
 static void editorFillExtraSelections(App& app, IDWriteTextLayout* layout,
                                       float originX, float lineY, size_t lineStart,
                                       size_t lineLen, float lineHeight, float charWidth) {
-    const D2D1_COLOR_F color = D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f);
+    const D2D1_COLOR_F color = themeSelectionColor(app.theme, D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f));
     for (const auto& caret : app.editorExtraCarets) {
         if (!caret.hasSelection) continue;
         const size_t start = caretStart(caret), end = caretEnd(caret);
@@ -4478,7 +4478,7 @@ static void renderEditorWrapped(App& app, float editorWidth) {
         if (app.editorHasSelection && selMax > lineStart && selMin < lineStart + lineLen + 1) {
             size_t hlStart = (selMin > lineStart) ? selMin - lineStart : 0;
             size_t hlEnd = std::min(selMax - lineStart, lineLen);
-            D2D1_COLOR_F selColor = D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f);
+            D2D1_COLOR_F selColor = themeSelectionColor(app.theme, D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f));
             editorFillRangeRects(app, lineLayout, textX, lineY, hlStart, hlEnd - hlStart, selColor);
             if (selMax > lineStart + lineLen && selMin <= lineStart + lineLen) {
                 // Newline included: mark one cell past the end of the last row
@@ -4636,7 +4636,7 @@ void renderEditor(App& app, float editorWidth) {
             } else {
                 hlX2 = textBase + editorColToX(app, lineLayout, hlEnd);
             }
-            app.brush->SetColor(D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f));
+            app.brush->SetColor(themeSelectionColor(app.theme, D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f)));
             app.renderTarget->FillRectangle(
                 D2D1::RectF(hlX1, lineY, hlX2, lineY + lineHeight), app.brush);
         }

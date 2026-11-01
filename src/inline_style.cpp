@@ -133,6 +133,8 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                 st.bold = st.bold || elem->type == ElementType::Strong;
                 st.italic = st.italic || elem->type == ElementType::Emphasis;
                 if (!st.fixedSize) st.format = emphasisFormat(app, st.format, st.bold, st.italic);
+                // The theme's bold and italic colours (#310); a link keeps its own
+                if (auto color = themeEmphasisColor(app.theme, st.bold, st.italic); color && !st.isLink) st.color = *color;
                 break;
 
             case ElementType::Strikethrough:

@@ -14,6 +14,7 @@
 #include <wrl/client.h>
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -322,6 +323,9 @@ struct Look {
     float listIndent = 0.0f;            // a list item's text past its mark, as the page has it; 0: as typed
     D2D1_COLOR_F text{}, accent{}, link{}, code{}, codeBack{}, inlineCodeBack{}, quote{}, mark{};
     D2D1_COLOR_F heading[6]{};
+    // The theme's colours for bold and italic, the selection and a rule
+    // (#310); missing keeps the text's, the accent's and the text's
+    std::optional<D2D1_COLOR_F> bold, italic, selection, rule;
     bool markdown = true;               // false: a plain field on one line
 };
 // The look of the page around it: the reading view's faces, sizes and colours

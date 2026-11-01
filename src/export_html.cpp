@@ -1576,7 +1576,7 @@ std::string themeCss(const App& app, const std::string& bodyFont,
     css += "th,td{border:1px solid " + colorCss(border) +
            ";padding:6px 13px;}";
     css += "th{background:" + colorCss(t.codeBackground) + ";}";
-    css += "hr{border:none;border-top:1px solid " + colorCss(border) +
+    css += "hr{border:none;border-top:1px solid " + colorCss(t.rule ? *t.rule : border) +
            ";margin:24px 0;}";
     css += "img{max-width:100%;}";
     css += "li.task{list-style:none;margin-left:-20px;}";
@@ -1587,6 +1587,14 @@ std::string themeCss(const App& app, const std::string& bodyFont,
     css += "mark{background:" +
            colorCss(themeHighlightBackground(t)) +
            ";color:" + (t.highlightText ? colorCss(*t.highlightText) : "inherit") + ";padding:0 2px;}";
+    // The theme's bold and italic colours (#310); a link's words keep its own
+    const auto bold = themeEmphasisColor(t, true, false), italic = themeEmphasisColor(t, false, true),
+               both = themeEmphasisColor(t, true, true);
+    if (bold) css += "strong{color:" + colorCss(*bold) + ";}";
+    if (italic) css += "em{color:" + colorCss(*italic) + ";}";
+    if (both) css += "strong em,em strong{color:" + colorCss(*both) + ";}a strong,a em{color:inherit;}";
+    if (t.selection)
+        css += "::selection{background:" + colorCss(themeSelectionColor(t, D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f))) + ";}";
     return css;
 }
 

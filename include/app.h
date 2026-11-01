@@ -127,6 +127,15 @@ struct D2DTheme {
     std::optional<D2D1_COLOR_F> headingColors[6]{};
     std::optional<D2D1_COLOR_F> highlightBackground = std::nullopt;
     std::optional<D2D1_COLOR_F> highlightText = std::nullopt;
+    // Optional colours for bold, italic and text that is both (#310);
+    // missing keeps the colour around them
+    std::optional<D2D1_COLOR_F> boldText = std::nullopt;
+    std::optional<D2D1_COLOR_F> italicText = std::nullopt;
+    std::optional<D2D1_COLOR_F> boldItalicText = std::nullopt;
+    // The selection's hue, drawn as translucent as each view's own; and
+    // the horizontal rule's colour, else blockquoteBorder
+    std::optional<D2D1_COLOR_F> selection = std::nullopt;
+    std::optional<D2D1_COLOR_F> rule = std::nullopt;
 };
 
 inline D2D1_COLOR_F themeInlineCodeColor(const D2DTheme& theme) {
@@ -145,6 +154,26 @@ inline D2D1_COLOR_F themeHighlightBackground(const D2DTheme& theme) {
     return theme.highlightBackground.value_or(theme.isDark
         ? D2D1::ColorF(0.98f, 0.80f, 0.25f, 0.28f)
         : D2D1::ColorF(1.00f, 0.88f, 0.20f, 0.45f));
+}
+// The colour of bold and/or italic text, if the theme sets one. Text that
+// is both takes bolditalic=, else bold=, else italic=
+inline std::optional<D2D1_COLOR_F> themeEmphasisColor(const D2DTheme& theme, bool bold, bool italic) {
+    if (bold && italic) {
+        if (theme.boldItalicText) return theme.boldItalicText;
+        return theme.boldText ? theme.boldText : theme.italicText;
+    }
+    return bold ? theme.boldText : italic ? theme.italicText : std::nullopt;
+}
+inline D2D1_COLOR_F themeRuleColor(const D2DTheme& theme) {
+    return theme.rule.value_or(theme.blockquoteBorder);
+}
+// A view's selection fill: the theme's selection= at the view's own
+// strength, or the view's own colour
+inline D2D1_COLOR_F themeSelectionColor(const D2DTheme& theme, D2D1_COLOR_F own) {
+    if (!theme.selection) return own;
+    D2D1_COLOR_F color = *theme.selection;
+    color.a = own.a;
+    return color;
 }
 
 // Helper to create color from hex

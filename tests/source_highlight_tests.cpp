@@ -403,6 +403,19 @@ int runSourceHighlightTests(const char* fixture) {
     app.editorHighlight = true;
     paint(app);
     colours(app, out, "highlight-theme0");
+    // #310: a theme's bold= and italic= colour bold and italic words, as on
+    // the page; their marks stay faint
+    app.theme.boldText = hexColor(0xAA2200);
+    app.theme.italicText = hexColor(0x007755);
+    app.clearEditorLineLayoutCache();
+    paint(app);
+    colour(app, L"**bold**", 2, *app.theme.boldText, "#310: bold words take bold=");
+    colour(app, L"**bold**", 0, muted(app), "#310: a bold's asterisks stay faint");
+    colour(app, L"*italic*", 1, *app.theme.italicText, "#310: italic words take italic=");
+    applyTheme(app, 0);
+    app.clearEditorLineLayoutCache();
+    paint(app);
+    colour(app, L"**bold**", 2, app.theme.text, "#310: without bold= bold words keep the text colour");
     // Another theme: every line takes the new colours
     applyTheme(app, 5);
     colour(app, L"# Highlighting tour", 2, themeHeadingColor(app.theme, 1), "a new theme gives the heading its own colour");

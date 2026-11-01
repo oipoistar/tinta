@@ -25,6 +25,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -1418,6 +1419,107 @@ void documentsSwitched(App& app, const fs::path& dir) {
     app.editorDirty = false;
 }
 
+bool closeTo(D2D1_COLOR_F a, D2D1_COLOR_F b, float within = 0.002f) {
+    return std::fabs(a.r - b.r) <= within && std::fabs(a.g - b.g) <= within && std::fabs(a.b - b.b) <= within;
+}
+
+// The pixels `draw` leaves, drawn into a bitmap the window's size
+std::vector<D2D1_COLOR_F> pixelsAfter(App& app, const std::function<void()>& draw) {
+    using Microsoft::WRL::ComPtr;
+    ComPtr<ID2D1DeviceContext> dc;
+    ComPtr<ID2D1Bitmap1> target, readable;
+    const auto format = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
+    const D2D1_SIZE_U size = D2D1::SizeU((UINT)app.width, (UINT)app.height);
+    if (FAILED(app.renderTarget->QueryInterface(IID_PPV_ARGS(&dc))) ||
+        FAILED(dc->CreateBitmap(size, nullptr, 0, D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET, format), &target)) ||
+        FAILED(dc->CreateBitmap(size, nullptr, 0,
+                                D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW, format),
+                                &readable))) {
+        return {};
+    }
+    ComPtr<ID2D1Image> previous;
+    dc->GetTarget(&previous);
+    dc->SetTarget(target.Get());
+    dc->BeginDraw();
+    draw();
+    dc->EndDraw();
+    dc->SetTarget(previous.Get());
+    D2D1_MAPPED_RECT mapped{};
+    std::vector<D2D1_COLOR_F> pixels;
+    if (FAILED(readable->CopyFromBitmap(nullptr, target.Get(), nullptr)) || FAILED(readable->Map(D2D1_MAP_OPTIONS_READ, &mapped)))
+        return pixels;
+    for (UINT y = 0; y < size.height; ++y) {
+        const BYTE* row = mapped.bits + y * mapped.pitch;
+        for (UINT x = 0; x < size.width; ++x)
+            pixels.push_back(D2D1::ColorF(row[x * 4 + 2] / 255.0f, row[x * 4 + 1] / 255.0f, row[x * 4] / 255.0f));
+    }
+    readable->Unmap();
+    return pixels;
+}
+
+// #310: the theme's bold and italic colours, its selection and its rule, in
+// the text Live and the sheets type in. A line's spans do not nest there,
+// so ***words*** read as bold until the caret leaves them for the page
+void themeColours(App& app) {
+    using Microsoft::WRL::ComPtr;
+    applyTheme(app, 0);
+    D2DTheme& t = app.theme;
+    t.boldText = hexColor(0xAA2200);
+    t.italicText = hexColor(0x007755);
+    t.boldItalicText = hexColor(0x7722AA);
+    t.selection = hexColor(0xCC0000);
+    t.rule = hexColor(0x00AA44);
+    LiveText e;
+    e.text = L"Words **Bold_live**, __Under_live__, *Italic_live*, _Lower_live_, [Link_live](x), `Code_live`, ==Marked_live== "
+             L"and plain_live\n\n---\n\nAfter the rule\n";
+    e.anchor = e.text.find(L"plain_live");
+    e.caret = e.anchor + 10;
+    const live::Look look = live::pageLook(app);
+    live::LayoutCache cache;
+    IDWriteTextLayout* layout = live::layoutOf(app, e, 0, e.text.size(), 900.0f, look, cache, (size_t)-1);
+    check(layout != nullptr, "#310: Live lays the text out");
+    if (!layout) return;
+    auto colorOf = [&](const wchar_t* word) {
+        ComPtr<IUnknown> effect;
+        layout->GetDrawingEffect((UINT32)e.text.find(word), &effect, nullptr);
+        ComPtr<ID2D1SolidColorBrush> brush;
+        if (effect) effect.As(&brush);
+        return brush ? brush->GetColor() : look.text;
+    };
+    check(closeTo(colorOf(L"Bold_live"), *t.boldText) && closeTo(colorOf(L"Under_live"), *t.boldText), "#310: Live draws bold in bold=");
+    check(closeTo(colorOf(L"Italic_live"), *t.italicText) && closeTo(colorOf(L"Lower_live"), *t.italicText),
+          "#310: Live draws italic in italic=");
+    check(closeTo(colorOf(L"Link_live"), look.link) && closeTo(colorOf(L"Code_live"), look.code) &&
+              closeTo(colorOf(L"Marked_live"), look.text) && closeTo(colorOf(L"plain_live"), look.text),
+          "#310: Live's links, code, marks and plain words keep their colours");
+
+    const std::vector<D2D1_COLOR_F> pixels = pixelsAfter(app, [&] {
+        app.renderTarget->Clear(t.background);
+        live::draw(app, e, layout, cache, 0, look, false, 1.0f);
+    });
+    // The selection: the top of its line, above the letters
+    DWRITE_HIT_TEST_METRICS hit{};
+    UINT32 hits = 0;
+    layout->HitTestTextRange((UINT32)e.anchor, 10, 0, 0, &hit, 1, &hits);
+    const size_t sx = (size_t)(hit.left + hit.width / 2), sy = (size_t)(hit.top + 2);
+    D2D1_COLOR_F blend = t.background;
+    for (float* c : {&blend.r, &blend.g, &blend.b}) *c *= 0.72f;
+    blend.r += 0.8f * 0.28f;
+    check(pixels.size() == (size_t)app.width * app.height && closeTo(pixels[sy * app.width + sx], blend, 0.02f),
+          "#310: Live's selection is the theme's selection=, as translucent as before");
+    // The rule: green in its line, not the text's faint grey
+    float x = 0, y = 0;
+    DWRITE_HIT_TEST_METRICS rule{};
+    layout->HitTestTextPosition((UINT32)e.text.find(L"---"), FALSE, &x, &y, &rule);
+    float green = 0;
+    for (size_t row = (size_t)rule.top; row < (size_t)(rule.top + rule.height) && !pixels.empty(); ++row) {
+        const D2D1_COLOR_F& p = pixels[row * app.width + (size_t)(rule.left + 40)];
+        green = std::max(green, p.g - p.r);
+    }
+    check(green > 0.2f, "#310: Live draws a rule in hr=");
+    applyTheme(app, 0);
+}
+
 }  // namespace
 
 int runLiveTests(const char* fixtureDir) {
@@ -1468,6 +1570,7 @@ int runLiveTests(const char* fixtureDir) {
     heldFinger(app, doc);
     scrolling(app, dir, out);
     documentsSwitched(app, dir);
+    themeColours(app);
 
     // Two themes at two widths, on the tour
     openInEditor(app, doc);

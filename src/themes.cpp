@@ -326,6 +326,13 @@ void applyThemeKey(CustomTheme& ct, const std::string& key, const std::string& v
         if (parseHexColor(value, color))
             (key == "highlightbackground" ? t.highlightBackground : t.highlightText) = color;
     }
+    else if (key == "bold" || key == "italic" || key == "bolditalic" || key == "selection" || key == "hr") {
+        D2D1_COLOR_F color;
+        if (parseHexColor(value, color)) {
+            (key == "bold" ? t.boldText : key == "italic" ? t.italicText
+             : key == "bolditalic" ? t.boldItalicText : key == "selection" ? t.selection : t.rule) = color;
+        }
+    }
     else if (key == "link") parseHexColor(value, t.link);
     else if (key == "code") parseHexColor(value, t.code);
     else if (key == "inlinecode") {
@@ -362,6 +369,8 @@ void writeThemesIni() {
     file << "; Optional inlinecode overrides code for inline spans only.\n";
     file << "; Optional inlinecodebackground (a colour, or none) overrides\n";
     file << "; codebackground for inline spans only.\n";
+    file << "; Optional bold, italic and bolditalic colour emphasised text;\n";
+    file << "; selection tints the selection and hr colours horizontal rules.\n";
     file << "; An empty headingfont= sets headings in font=.\n";
     for (const auto& ct : g_customThemes) {
         const D2DTheme& t = ct->theme;
@@ -380,6 +389,11 @@ void writeThemesIni() {
             if (t.headingColors[i]) file << "h" << i + 1 << "=" << colorToHex(*t.headingColors[i]) << "\n";
         if (t.highlightBackground) file << "highlightbackground=" << colorToHex(*t.highlightBackground) << "\n";
         if (t.highlightText) file << "highlighttext=" << colorToHex(*t.highlightText) << "\n";
+        if (t.boldText) file << "bold=" << colorToHex(*t.boldText) << "\n";
+        if (t.italicText) file << "italic=" << colorToHex(*t.italicText) << "\n";
+        if (t.boldItalicText) file << "bolditalic=" << colorToHex(*t.boldItalicText) << "\n";
+        if (t.selection) file << "selection=" << colorToHex(*t.selection) << "\n";
+        if (t.rule) file << "hr=" << colorToHex(*t.rule) << "\n";
         file << "link=" << colorToHex(t.link) << "\n";
         file << "code=" << colorToHex(t.code) << "\n";
         if (t.inlineCode) file << "inlinecode=" << colorToHex(*t.inlineCode) << "\n";
@@ -424,6 +438,9 @@ const char* themesIniTemplate() {
            "; accent=2B6CB0\n"
            "; highlightbackground=FEF3C7\n"
            "; highlighttext=2D3748\n"
+           "; bold=1A365D              (italic=, and bolditalic= for both)\n"
+           "; selection=2B6CB0         (drawn as a translucent tint)\n"
+           "; hr=A0C4E8                (horizontal rules; else blockquoteborder)\n"
            "; syntaxkeyword=, syntaxstring=, syntaxcomment=, syntaxnumber=,\n"
            "; syntaxfunction=, syntaxtype=, syntaxcontrolflow= color code blocks\n";
 }

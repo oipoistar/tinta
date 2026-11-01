@@ -32,8 +32,8 @@ class MarkObject final : public IDWriteInlineObject {
 public:
     enum Kind { Hidden, Bullet, Box, Checked, Quote, Rule, Space };
     MarkObject(Kind kind, float size, float width, ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush, D2D1_COLOR_F text,
-               D2D1_COLOR_F accent)
-        : kind_(kind), size_(size), width_(width), target_(target), brush_(brush), text_(text), accent_(accent) {}
+               D2D1_COLOR_F accent, std::optional<D2D1_COLOR_F> rule = std::nullopt)
+        : kind_(kind), size_(size), width_(width), target_(target), brush_(brush), text_(text), accent_(accent), rule_(rule) {}
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
         if (riid == __uuidof(IUnknown) || riid == __uuidof(IDWriteInlineObject)) {
@@ -80,7 +80,9 @@ public:
             color(accent_, 0.6f);
             target_->FillRectangle(D2D1::RectF(x + u * 0.08f, y - u * 0.2f, x + u * 0.2f, y + u * 1.25f), brush_);
         } else if (kind_ == Rule) {
-            color(text_, 0.3f);
+            // The theme's hr= as the page draws it, else the text faintly
+            if (rule_) color(*rule_, 1.0f);
+            else color(text_, 0.3f);
             target_->FillRectangle(D2D1::RectF(x, mid, x + width_, mid + std::max(1.0f, u * 0.07f)), brush_);
         }
         return S_OK;
@@ -110,6 +112,7 @@ private:
     ID2D1RenderTarget* target_;
     ID2D1SolidColorBrush* brush_;
     D2D1_COLOR_F text_, accent_;
+    std::optional<D2D1_COLOR_F> rule_;
 };
 
 // Formats the engine lays text out with, kept for the factory's life
@@ -163,7 +166,14 @@ std::wstring lookKey(const Look& look) {
     wchar_t buf[96];
     swprintf_s(buf, L"|%.2f|%.2f|%.2f|%.2f|%d|%.3f%.3f%.3f", look.size, look.codeSize, look.headingSize[0], look.lineHeight,
                look.markdown ? 1 : 0, look.text.r, look.accent.g, look.code.b);
-    return look.face + L"|" + look.headingFace + L"|" + look.codeFace + buf;
+    std::wstring key = look.face + L"|" + look.headingFace + L"|" + look.codeFace + buf;
+    // The theme's emphasis and rule colours are drawn into the layout too
+    for (const auto* color : {&look.bold, &look.italic, &look.rule}) {
+        wchar_t part[40] = L"|-";
+        if (*color) swprintf_s(part, L"|%.3f%.3f%.3f", (*color)->r, (*color)->g, (*color)->b);
+        key += part;
+    }
+    return key;
 }
 
 bool blankLine(std::wstring_view s) { return s.find_first_not_of(L" \t") == std::wstring_view::npos; }
@@ -210,6 +220,10 @@ Look pageLook(const App& app) {
     look.inlineCodeBack = themeInlineCodeBackground(th);
     look.quote = th.blockquoteBorder;
     look.mark = themeHighlightBackground(th);
+    look.bold = themeEmphasisColor(th, true, false);
+    look.italic = themeEmphasisColor(th, false, true);
+    look.selection = th.selection;
+    look.rule = th.rule;
     return look;
 }
 
@@ -293,7 +307,7 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
             return;
         }
         MarkObject* object = new MarkObject(kind, lineSize, objectWidth, app.renderTarget, cache.glyphBrush.Get(), look.text,
-                                            look.accent);
+                                            look.accent, look.rule);
         layout->SetInlineObject(object, range(at, length));
         object->Release();
     };
@@ -490,11 +504,14 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
                     case INL_STRONG:
                         layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range(at, n));
                         if (span.kind == INL_STRONG_MARK) mark(at, n, MarkObject::Hidden);
+                        // The theme's bold colour (#310); a line's spans do not nest
+                        else if (look.bold) layout->SetDrawingEffect(tokenBrush(*look.bold), range(at, n));
                         break;
                     case INL_EM_MARK:
                     case INL_EM:
                         layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range(at, n));
                         if (span.kind == INL_EM_MARK) mark(at, n, MarkObject::Hidden);
+                        else if (look.italic) layout->SetDrawingEffect(tokenBrush(*look.italic), range(at, n));
                         break;
                     case INL_STRIKE:
                         layout->SetStrikethrough(TRUE, range(at, n));
@@ -590,7 +607,7 @@ void draw(App& app, const LiveText& e, IDWriteTextLayout* layout, const LayoutCa
         size_t a = std::max(e.selStart(), from), b = std::min(e.selEnd(), from + length);
         if (b > a) {
             rects(a - from, b - a, hits);
-            app.brush->SetColor(paint::alpha(look.accent, 0.28f));
+            app.brush->SetColor(paint::alpha(look.selection ? *look.selection : look.accent, 0.28f));
             for (const auto& h : hits) {
                 rt->FillRectangle(D2D1::RectF(h.left, h.top, h.left + std::max(h.width, 4 * pixel), h.top + h.height), app.brush);
             }

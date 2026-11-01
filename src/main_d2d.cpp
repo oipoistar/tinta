@@ -922,7 +922,7 @@ render_document:
         std::vector<D2D1_RECT_F> bars;
         selectionHighlightRects(app, selA, selB, bars);
 
-        app.brush->SetColor(D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f));
+        app.brush->SetColor(themeSelectionColor(app.theme, D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f)));
         float viewTop = app.scrollY - 50.0f;
         float viewBottom = app.scrollY + app.height + 50.0f;
         for (const auto& bar : bars) {

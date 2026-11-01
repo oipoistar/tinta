@@ -309,7 +309,7 @@ The [Frontmatter settings](docs/frontmatter.md) page controls property display a
 
 Named, repeated and multiline [footnotes](docs/footnotes.md) include native navigation and HTML/DOCX export.
 
-Individual H1-H6 and marked-text overrides are described in [Heading and highlight colours](docs/theme-colours.md).
+Individual H1-H6, marked-text, bold, italic, selection and rule colours are described in [Theme colours](docs/theme-colours.md).
 
 ## Dependencies
 

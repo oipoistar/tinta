@@ -3683,7 +3683,7 @@ static void layoutHorizontalRule(App& app, float& y, float indent, float maxWidt
     y += 16 * scale;
     app.layoutLines.push_back({D2D1::Point2F(indent, y),
                                D2D1::Point2F(indent + maxWidth, y),
-                               app.theme.blockquoteBorder, scale});
+                               themeRuleColor(app.theme), scale});
     y += 16 * scale;
 }
 

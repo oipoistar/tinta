@@ -59,6 +59,7 @@ struct State {
     unsigned long long key = 0, painted = 0;
     bool keepsWidth = false;
     ComPtr<ID2D1SolidColorBrush> mark, accent, link, code, inlineCode, comment, heading[6];
+    ComPtr<ID2D1SolidColorBrush> bold, italic;  // the theme's own, if it has them (#310)
     std::vector<std::pair<unsigned, ComPtr<ID2D1SolidColorBrush>>> tokens;
     // What the lines are, for one revision of the text, from the top down
     unsigned long long revision = ~0ull;
@@ -281,6 +282,10 @@ unsigned long long paletteKey(const App& app) {
                               th.syntaxKeyword, th.syntaxString, th.syntaxNumber, th.syntaxFunction, th.syntaxType,
                               th.syntaxControlFlow};
     h = mix(h, colours, sizeof colours);
+    for (const auto& c : {th.boldText, th.italicText}) {
+        D2D1_COLOR_F colour = c.value_or(D2D1::ColorF(0, 0, 0, 0));
+        h = mix(h, &colour, sizeof colour);
+    }
     if (th.codeFontFamily) h = mix(h, th.codeFontFamily, wcslen(th.codeFontFamily) * sizeof(wchar_t));
     float size = app.editorTextFormat ? app.editorTextFormat->GetFontSize() : 0.0f;
     h = mix(h, &size, sizeof size);
@@ -333,6 +338,10 @@ bool palette(App& app, State& S) {
     make(S.inlineCode, themeInlineCodeColor(th));
     make(S.comment, th.syntaxComment);
     for (int i = 0; i < 6; ++i) make(S.heading[i], themeHeadingColor(th, i + 1));
+    S.bold.Reset();
+    S.italic.Reset();
+    if (th.boldText) make(S.bold, *th.boldText);
+    if (th.italicText) make(S.italic, *th.italicText);
     S.tokens.clear();
     S.keepsWidth = keepsWidth(app);
     return S.mark != nullptr;
@@ -476,9 +485,11 @@ void styleText(App& app, State& S, IDWriteTextLayout* layout, std::wstring_view 
                 break;
             case live::INL_STRONG:
                 bold(span.at, span.length);
+                if (S.bold) paint(S.bold.Get(), span.at, span.length);
                 break;
             case live::INL_EM:
                 italic(span.at, span.length);
+                if (S.italic) paint(S.italic.Get(), span.at, span.length);
                 break;
             case live::INL_STRIKE:
                 if (span.length) layout->SetStrikethrough(TRUE, {(UINT32)span.at, (UINT32)span.length});

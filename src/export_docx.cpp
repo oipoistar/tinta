@@ -596,6 +596,7 @@ struct RunProps {
     bool superScript = false;
     bool subScript = false;
     std::string color;  // hex override (links, wiki links)
+    bool emphasisColor = false;  // color is bold's or italic's, which code keeps out of
     bool underline = false;
 };
 
@@ -614,6 +615,8 @@ struct DocxCtx {
     // Theme palette, guarded so dark themes stay readable on paper
     std::string textHex, headingHex, mutedHex, codeBgHex, borderHex;
     std::string headingColors[6], highlightBgHex, highlightTextHex;
+    // Explicit bold, italic and bold-italic colours (#310), and the rules'
+    std::string boldHex, italicHex, boldItalicHex, ruleHex;
     std::string accentHex, linkHex, quoteBorderHex;
     std::string inlineCodeHex;  // explicit override; legacy paper colors otherwise
     // Shading behind inline code; empty when the theme asks for none (#278)
@@ -673,7 +676,8 @@ std::string runPropsXml(const DocxCtx& ctx, const RunProps& props) {
     if (props.strike) xml += "<w:strike/>";
     if (props.code && !props.isLink && !ctx.inlineCodeHex.empty())
         xml += "<w:color w:val=\"" + ctx.inlineCodeHex + "\"/>";
-    else if (!props.color.empty()) xml += "<w:color w:val=\"" + props.color + "\"/>";
+    else if (!props.color.empty() && !(props.code && props.emphasisColor))
+        xml += "<w:color w:val=\"" + props.color + "\"/>";
     if (props.code) xml += "<w:sz w:val=\"21\"/><w:szCs w:val=\"21\"/>";
     if (props.highlight && ctx.highlightBgHex.empty()) xml += "<w:highlight w:val=\"yellow\"/>";
     if (props.underline) xml += "<w:u w:val=\"single\"/>";
@@ -781,19 +785,19 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
             }
             break;
         }
-        case ElementType::Emphasis: {
-            RunProps italic = props;
-            italic.italic = true;
-            for (const auto& child : elem->children) {
-                walkInline(ctx, child, italic, out);
-            }
-            break;
-        }
+        case ElementType::Emphasis:
         case ElementType::Strong: {
-            RunProps bold = props;
-            bold.bold = true;
+            RunProps emphasis = props;
+            (elem->type == ElementType::Strong ? emphasis.bold : emphasis.italic) = true;
+            // The theme's bold and italic colours (#310); a link keeps its own
+            const std::string& color = emphasis.bold && emphasis.italic ? ctx.boldItalicHex
+                                       : emphasis.bold ? ctx.boldHex : ctx.italicHex;
+            if (!color.empty() && !emphasis.isLink) {
+                emphasis.color = color;
+                emphasis.emphasisColor = true;
+            }
             for (const auto& child : elem->children) {
-                walkInline(ctx, child, bold, out);
+                walkInline(ctx, child, emphasis, out);
             }
             break;
         }
@@ -802,7 +806,7 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
         case ElementType::FootnoteReference: {
             std::string number = std::to_string(elem->level);
             std::string bookmark = "_tinta_fn_" + number;
-            RunProps ref = props; ref.superScript = true; ref.color = ctx.linkHex;
+            RunProps ref = props; ref.superScript = true; ref.color = ctx.linkHex; ref.emphasisColor = false;
             if (ctx.emittedFootnotes.insert(elem->level).second) {
                 out += "<w:bookmarkStart w:id=\"" + number + "\" w:name=\"" + bookmark + "\"/>";
                 out += "<w:r>" + runPropsXml(ctx, ref) + "<w:footnoteReference w:id=\"" + number + "\"/></w:r>";
@@ -817,7 +821,7 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
         case ElementType::Highlight: {
             RunProps mark = props;
             mark.highlight = true;
-            if (!ctx.highlightTextHex.empty()) mark.color = ctx.highlightTextHex;
+            if (!ctx.highlightTextHex.empty()) { mark.color = ctx.highlightTextHex; mark.emphasisColor = false; }
             for (const auto& child : elem->children) {
                 walkInline(ctx, child, mark, out);
             }
@@ -866,6 +870,7 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
                 RunProps wikiProps = props;
                 wikiProps.isLink = true;
                 wikiProps.color = ctx.linkHex;
+                wikiProps.emphasisColor = false;
                 for (const auto& child : elem->children) {
                     walkInline(ctx, child, wikiProps, out);
                 }
@@ -874,6 +879,7 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
                 RunProps linkProps = props;
                 linkProps.isLink = true;
                 linkProps.color = ctx.linkHex;
+                linkProps.emphasisColor = false;
                 linkProps.underline = true;
                 out += "<w:hyperlink r:id=\"rId" + std::to_string(rel) +
                        "\" w:history=\"1\">";
@@ -1407,7 +1413,7 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
         case ElementType::HorizontalRule:
             ctx.body += "<w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" "
                         "w:sz=\"6\" w:space=\"1\" w:color=\"" +
-                        ctx.borderHex + "\"/></w:pBdr></w:pPr></w:p>";
+                        ctx.ruleHex + "\"/></w:pBdr></w:pPr></w:p>";
             break;
         case ElementType::Table: {
             ctx.body +=
@@ -1617,6 +1623,9 @@ bool exportDocxFile(App& app, const std::wstring& path) {
         ctx.headingColors[i] = theme.headingColors[i] ? hex6(*theme.headingColors[i]) : ctx.headingHex;
     if (theme.highlightBackground) ctx.highlightBgHex = hex6(*theme.highlightBackground);
     if (theme.highlightText) ctx.highlightTextHex = hex6(*theme.highlightText);
+    if (auto c = themeEmphasisColor(theme, true, false)) ctx.boldHex = hex6(*c);
+    if (auto c = themeEmphasisColor(theme, false, true)) ctx.italicHex = hex6(*c);
+    if (auto c = themeEmphasisColor(theme, true, true)) ctx.boldItalicHex = hex6(*c);
     D2D1_COLOR_F muted = theme.text;
     muted.a = 0.65f;
     ctx.mutedHex = dark ? "555555" : hexOver(muted, theme.background);
@@ -1632,6 +1641,7 @@ bool exportDocxFile(App& app, const std::wstring& path) {
     D2D1_COLOR_F border = theme.text;
     border.a = 0.25f;
     ctx.borderHex = dark ? "C8C8C8" : hexOver(border, theme.background);
+    ctx.ruleHex = theme.rule ? hex6(*theme.rule) : ctx.borderHex;
     ctx.accentHex = hex6(theme.accent);
     ctx.linkHex = hex6(theme.link);
     ctx.quoteBorderHex =
