@@ -1390,6 +1390,34 @@ void scrolling(App& app, const fs::path& dir, const fs::path& out) {
     app.editorDirty = false;
 }
 
+// Live notices every document parsed past it, another file or a reload,
+// whatever address the new parse is given. It knew the parse it had laid
+// out by its address alone, and the next document's could be given the
+// freed one's: the page then kept the old document's text, and drew
+// everything from the caret to the first difference as being typed in.
+// The menu's, the footnotes' and a key's timing checks above failed now
+// and then for it. Each switch is a fresh chance at the old address: with
+// the address alone about one in thirty went unnoticed, so 250 switches
+// all but always find one.
+void documentsSwitched(App& app, const fs::path& dir) {
+    const fs::path docs[] = {dir / "Switch A.md", dir / "Switch B.md"};
+    std::ofstream(docs[0], std::ios::binary) << "# Alpha\n\nOne.\n\nTwo.\n\nThree.\n\nFour.\n";
+    std::ofstream(docs[1], std::ios::binary) << "# Beta\n\nFive.\n\nSix.\n\nSeven.\n\nEight.\n";
+    int missed = 0;
+    float tallest = 0;
+    for (int i = 0; i < 250 && !missed; ++i) {
+        openInEditor(app, docs[i % 2]);
+        placeCaret(app, 2);
+        float top = 0, bottom = 0, shift = 0;
+        livePageGeometry(app, top, bottom, shift);
+        tallest = std::max(tallest, bottom - top);
+        if (bottom - top > dpi(app, 90.0f)) missed = i + 1;
+    }
+    check(!missed, "Live notices each document opened past it, and opens the title alone: switch " + std::to_string(missed) +
+                       ", " + std::to_string((int)tallest) + " DIP open");
+    app.editorDirty = false;
+}
+
 }  // namespace
 
 int runLiveTests(const char* fixtureDir) {
@@ -1439,6 +1467,7 @@ int runLiveTests(const char* fixtureDir) {
     contextMenu(app, dir, out);
     heldFinger(app, doc);
     scrolling(app, dir, out);
+    documentsSwitched(app, dir);
 
     // Two themes at two widths, on the tour
     openInEditor(app, doc);

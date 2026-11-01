@@ -55,7 +55,9 @@ struct LiveEditor {
     // today's text that holds every change
     std::wstring parsed;
     std::vector<size_t> parsedLines, parsedBytes;
-    const void* parsedRoot = nullptr;
+    // The parse it was laid out from, held weakly: by its address alone, a
+    // later document's parse given the freed one's address went unnoticed
+    std::weak_ptr<Element> parsedRoot;
     bool dirty = false;
     size_t dirtyFrom = 0, dirtyTo = 0;
     std::ptrdiff_t delta = 0;
@@ -345,9 +347,9 @@ void buildBlocks(App& app, LiveEditor& L) {
 
 void refreshBlocks(App& app, LiveEditor& L) {
     // A document parsed past this editor (a reload, another tab) is parsed again
-    if (app.root.get() != L.parsedRoot) {
+    if (L.parsedRoot.lock() != app.root) {
         editorReparse(app, true);
-        if (app.root.get() != L.parsedRoot) liveTextParsed(app);
+        if (L.parsedRoot.lock() != app.root) liveTextParsed(app);
     }
     if (app.layoutDirty) {
         // The stretch in view first, the rest in the background, as render() lays out
@@ -746,7 +748,7 @@ void liveTextParsed(App& app) {
     L.parsed = app.editorText;
     L.parsedLines = app.editorLineStarts;
     L.parsedBytes = app.editorLineByteOffsets;
-    L.parsedRoot = app.root.get();
+    L.parsedRoot = app.root;
     if (L.e.text != app.editorText) {
         L.e.text = app.editorText;
         live::closePopup(L.e);
