@@ -227,6 +227,10 @@ void tabActivate(App& app, HWND hwnd, int index) {
         restoreEditBuffer(app, tab.editorText, tab.editorDirty,
                           tab.editorScrollY, tab.editorCursor, tab.editorBom);
         tab.editorText.clear();  // ownership moved back to the app
+        // The buffer is the file as it was when parked: a change on disk
+        // since then still reloads it or asks (#311), though the viewer
+        // just read the file's time as it is now
+        app.lastFileWriteTime = tab.lastWrite;
     }
     app.showTabSwitcher = false;
     // An open search follows to the new document: its highlights, count
@@ -288,6 +292,7 @@ void tabCloseIndex(App& app, HWND hwnd, int index) {
         if (app.activeTab != index) return;
         app.pendingTabClose = index;
         app.confirmExitPending = true;
+        app.confirmExitExternal = false;
         app.confirmExitOpenedAt = std::chrono::steady_clock::now();
         InvalidateRect(hwnd, nullptr, FALSE);
         return;

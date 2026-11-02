@@ -3333,11 +3333,13 @@ void renderConfirmExitDialog(App& app) {
         app.activeTab < (int)app.tabs.size()) {
         name = app.tabs[app.activeTab].title;
     }
-    std::wstring title = tr(app, "confirm.title");
-    if (!name.empty()) title += L" \u2014 " + name;
+    // Asking about a file changed on disk under unsaved edits (#311)
+    const bool external = app.confirmExitExternal;
+    std::wstring title = tr(app, external ? "changed.title" : "confirm.title");
+    if (!name.empty()) title += L" \x2014 " + name;
 
-    std::wstring saveLbl = tr(app, "confirm.save");
-    std::wstring discardLbl = tr(app, "confirm.discard");
+    std::wstring saveLbl = tr(app, external ? "changed.reload" : "confirm.save");
+    std::wstring discardLbl = tr(app, external ? "changed.keep" : "confirm.discard");
     const wchar_t* stays = tr(app, "signal.stays");
 
     float pad = dpi(app, 12.0f);

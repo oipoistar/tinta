@@ -4099,10 +4099,13 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             if (liveKeyDown(app, hwnd, wParam, consumed)) return consumed;
         }
         const bool wasReading=app.editorReadingPreview;
+        // A key the unsaved-changes dialog takes types nothing after it:
+        // Keep mine leaves the editor open under it (#311)
+        const bool asking = app.confirmExitPending;
         handleEditorKeyDown(app, hwnd, wParam);
         // Save As runs a modal loop: Ctrl may already be released when it
         // returns. Do not translate its original S into newly typed text (#206).
-        return (ctrl && wParam == 'S') || (wasReading && !app.editorReadingPreview);
+        return asking || (ctrl && wParam == 'S') || (wasReading && !app.editorReadingPreview);
     }
 
     // Folder browser path/name input captures the keyboard while active
@@ -4805,8 +4808,8 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
     if (missingChanged) InvalidateRect(hwnd, nullptr, FALSE);
 
     // External edits to a file that has unsaved changes in some tab surface
-    // immediately: jump to that tab and raise the unsaved-changes dialog
-    // (Save and exit = your version wins, Discard = the disk version loads)
+    // immediately: jump to that tab and ask, Reload (the disk version, one
+    // Ctrl+Z from yours) or Keep mine (#311)
     if (!app.confirmExitPending) {
         for (size_t i = 0; i < app.tabs.size(); i++) {
             bool isActive = (int)i == app.activeTab;
@@ -4833,6 +4836,7 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
                     app.lastFileWriteTime = current;
                 }
                 app.confirmExitPending = true;
+                app.confirmExitExternal = true;
                 app.confirmExitOpenedAt = std::chrono::steady_clock::now();
                 InvalidateRect(hwnd, nullptr, FALSE);
                 break;
@@ -4840,7 +4844,8 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
         }
     }
 
-    if (app.currentFile.empty() || !app.fileWatchEnabled || app.editMode) return;
+    if (app.currentFile.empty() || !app.fileWatchEnabled) return;
+    if (app.editMode && (app.editorDirty || app.confirmExitPending)) return;
 
     std::wstring widePath = toWide(app.currentFile);
     HANDLE h = CreateFileW(widePath.c_str(), GENERIC_READ,
@@ -4849,6 +4854,18 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
         FILETIME ft;
         GetFileTime(h, nullptr, nullptr, &ft);
         CloseHandle(h);
+        if (CompareFileTime(&ft, &app.lastFileWriteTime) != 0 && app.editMode) {
+            // An editor with nothing unsaved, Source or Live, takes the new
+            // text as the reader does, the caret where it was; Ctrl+Z
+            // takes it back (#311)
+            app.lastFileWriteTime = ft;
+            if (editorReloadFromDisk(app, hwnd) && !app.tabs.empty() && app.activeTab >= 0 &&
+                app.activeTab < (int)app.tabs.size()) {
+                signalHint(app, SIGI_FILE, std::wstring(tr(app, "toast.reloaded")) + L" \x2014 ",
+                           app.tabs[app.activeTab].title);
+            }
+            return;
+        }
         if (CompareFileTime(&ft, &app.lastFileWriteTime) != 0) {
             app.lastFileWriteTime = ft;
             // Reload file

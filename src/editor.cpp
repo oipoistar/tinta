@@ -1545,6 +1545,24 @@ static void editHintSessionBegin(App& app) {
     editorReadingButtonIntro(app);
 }
 
+// A file's bytes as the editor holds them: without the byte order mark,
+// which writeEditorFile puts back, and with \r\n and a lone \r as \n
+static std::wstring editorTextOfFile(const std::string& content, bool& bom) {
+    bom = startsWithUtf8Bom(content);
+    const std::wstring raw = fromUtf8(content.substr(bom ? UTF8_BOM.size() : 0));
+    std::wstring text;
+    text.reserve(raw.size());
+    for (size_t i = 0; i < raw.size(); i++) {
+        if (raw[i] == L'\r') {
+            text += L'\n';
+            if (i + 1 < raw.size() && raw[i + 1] == L'\n') i++;
+        } else {
+            text += raw[i];
+        }
+    }
+    return text;
+}
+
 // intro = false when a parked edit buffer comes back on a tab switch: the
 // session goes on, it does not start over
 static void enterEditModeWithContent(App& app, const std::string& content,
@@ -1572,19 +1590,7 @@ static void enterEditModeWithContent(App& app, const std::string& content,
     // A byte order mark belongs to the file, not the text: nothing typed
     // can land ahead of it, and writeEditorFile puts it back. The walks
     // below still count its bytes, as the reading view's offsets do.
-    app.editorBom = startsWithUtf8Bom(content);
-    app.editorText = fromUtf8(content.substr(app.editorBom ? UTF8_BOM.size() : 0));
-    // Normalize \r\n to \n
-    std::wstring normalized;
-    normalized.reserve(app.editorText.size());
-    for (size_t i = 0; i < app.editorText.size(); i++) {
-        if (app.editorText[i] == L'\r') {
-            normalized += L'\n';
-            if (i + 1 < app.editorText.size() && app.editorText[i + 1] == L'\n') i++;
-        } else {
-            normalized += app.editorText[i];
-        }
-    }
+    std::wstring normalized = editorTextOfFile(content, app.editorBom);
     // Map the current reading position to a source line so the editor opens
     // where the user was, not at the top (#77). Anchors carry UTF-8 offsets
     // into the text the reading view parsed, which the viewer reads in text
@@ -1800,6 +1806,7 @@ void exitEditMode(App& app) {
         // timestamp opens a grace window so smashed Esc presses land on a
         // stable dialog instead of instantly cancelling it.
         app.confirmExitPending = true;
+        app.confirmExitExternal = false;
         app.confirmExitOpenedAt = std::chrono::steady_clock::now();
         InvalidateRect(app.hwnd, nullptr, FALSE);
         return;
@@ -2425,11 +2432,72 @@ void saveFileAs(App& app, HWND hwnd) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
+bool editorReloadFromDisk(App& app, HWND hwnd) {
+    if (app.currentFile.empty()) return false;
+    std::ifstream in(toWide(app.currentFile), std::ios::binary);
+    if (!in) return false;
+    const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    bool bom = false;
+    const std::wstring text = editorTextOfFile(content, bom);
+    app.editorBom = bom;
+    if (text != app.editorText) {
+        // Only what changed is replaced: carets before it stay, carets
+        // after it move with the text, and one Ctrl+Z brings back the rest
+        size_t begin = 0, oldEnd = app.editorText.size(), newEnd = text.size();
+        while (begin < oldEnd && begin < newEnd && app.editorText[begin] == text[begin]) ++begin;
+        while (oldEnd > begin && newEnd > begin && app.editorText[oldEnd - 1] == text[newEnd - 1]) {
+            --oldEnd;
+            --newEnd;
+        }
+        auto shifted = [&](size_t position) {
+            if (position <= begin) return position;
+            if (position < oldEnd) return std::min(position, newEnd);
+            return position - oldEnd + newEnd;
+        };
+        const size_t cursor = shifted(app.editorCursorPos);
+        pushReplaceUndo(app, begin, app.editorText.substr(begin, oldEnd - begin),
+                        text.substr(begin, newEnd - begin), app.editorCursorPos, cursor);
+        app.editorSelStart = shifted(app.editorSelStart);
+        app.editorSelEnd = shifted(app.editorSelEnd);
+        app.editorHasSelection = app.editorHasSelection && app.editorSelStart != app.editorSelEnd;
+        for (auto& caret : app.editorExtraCarets) {
+            caret.pos = shifted(caret.pos);
+            caret.anchor = shifted(caret.anchor);
+            caret.hasSelection = caret.hasSelection && caret.pos != caret.anchor;
+        }
+        app.editorText = text;
+        app.editorCursorPos = cursor;
+        app.editorDesiredCol = -1;
+        app.editorDocCountsStale = true;
+        rebuildLineStarts(app);
+        app.editorRowMetricsWidth = -1.0f;
+    }
+    app.editorDirty = false;
+    updateFileWriteTime(app);
+    app.sourceText = content;
+    editorReparse(app, true);
+    updateWindowTitle(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+    return true;
+}
+
 // --- Input handlers ---
 
 // Unsaved-changes dialog outcomes (shared by keyboard and mouse):
 // 1 = save and exit, 2 = discard changes, 3 = keep editing
 void confirmExitAction(App& app, HWND hwnd, int action) {
+    // Asked about the file changed on disk (#311): Reload takes the disk's
+    // text, as one step Ctrl+Z takes back; Keep mine goes on editing, and a
+    // save then writes these edits over the other program's
+    if (app.confirmExitExternal) {
+        app.confirmExitPending = false;
+        app.confirmExitExternal = false;
+        app.escPressedOnce = false;
+        if (action == 1) editorReloadFromDisk(app, hwnd);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
     if (action == 1) {
         app.confirmExitPending = false;
         saveEditorFile(app, hwnd);
@@ -2794,7 +2862,12 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         auto sinceOpen = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - app.confirmExitOpenedAt).count();
         bool inGrace = sinceOpen < 600;
-        if (wParam == 'Y' || wParam == VK_RETURN || (ctrl && wParam == 'S')) {
+        // The question about a file changed on disk comes up unasked, maybe
+        // mid-word: Y and Enter wait out the grace as well, and Ctrl+S,
+        // which saves, does not answer Reload (#311)
+        const bool external = app.confirmExitExternal;
+        if (((wParam == 'Y' || wParam == VK_RETURN) && !(external && inGrace)) ||
+            (ctrl && wParam == 'S' && !external)) {
             confirmExitAction(app, hwnd, 1);
         } else if (wParam == 'N' && !inGrace) {
             confirmExitAction(app, hwnd, 2);

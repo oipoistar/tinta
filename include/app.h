@@ -1413,6 +1413,9 @@ struct App {
     std::chrono::steady_clock::time_point lastEscTime;
     bool escPressedOnce = false;
     bool confirmExitPending = false;  // Unsaved-changes dialog is showing
+    // It asks about the file changed on disk under unsaved edits: Reload
+    // or Keep mine, instead of Save and exit or Discard (#311)
+    bool confirmExitExternal = false;
     // Dialog open time: keys arriving within the grace window are ignored
     // so ESC-smashing lands on a visible, stable dialog
     std::chrono::steady_clock::time_point confirmExitOpenedAt;

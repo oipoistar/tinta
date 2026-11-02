@@ -1406,6 +1406,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // save still remembers them
             if (app && app->confirmExitPending) {
                 app->pendingWindowClose = true;  // dialog is already asking
+                // about leaving, even if it asked about a change on disk
+                app->confirmExitExternal = false;
+                InvalidateRect(hwnd, nullptr, FALSE);
                 return 0;
             }
             if (app) {
@@ -1420,6 +1423,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     }
                     app->pendingWindowClose = true;
                     app->confirmExitPending = true;
+                    app->confirmExitExternal = false;
                     app->confirmExitOpenedAt = std::chrono::steady_clock::now();
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return 0;
