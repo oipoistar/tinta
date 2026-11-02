@@ -52,6 +52,88 @@ void bucketRange(const App& app, const App::LineBucket& b, size_t& lo, size_t& h
     }
 }
 
+// The selected span of one run, from DirectWrite: the exact horizontal
+// extent of the range, the same model used by native text views
+bool runPiece(const App::LayoutTextRun& run, size_t start, size_t end, D2D1_RECT_F& out) {
+    size_t lo = std::max(start, run.docStart);
+    size_t hi = std::min(end, run.docStart + run.docLength);
+    if (lo >= hi) return false;
+
+    DWRITE_HIT_TEST_METRICS metrics{};
+    UINT32 metricCount = 0;
+    HRESULT hr = run.layout->HitTestTextRange(
+        (UINT32)(lo - run.docStart), (UINT32)(hi - lo),
+        run.pos.x, run.pos.y, &metrics, 1, &metricCount);
+    if (SUCCEEDED(hr) && metricCount == 1 && metrics.width > 0.0f) {
+        out = D2D1::RectF(metrics.left, run.bounds.top,
+                          metrics.left + metrics.width, run.bounds.bottom);
+        return true;
+    }
+
+    // These runs are normally single-line layouts. If DirectWrite
+    // returns no single range metric, caret positions still give an
+    // exact boundary without falling back to the whole line.
+    FLOAT x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+    DWRITE_HIT_TEST_METRICS edge{};
+    if (FAILED(run.layout->HitTestTextPosition(
+            (UINT32)(lo - run.docStart), FALSE, &x0, &y0, &edge)) ||
+        FAILED(run.layout->HitTestTextPosition(
+            (UINT32)(hi - run.docStart), FALSE, &x1, &y1, &edge))) {
+        return false;
+    }
+    out = D2D1::RectF(run.pos.x + std::min(x0, x1), run.bounds.top,
+                      run.pos.x + std::max(x0, x1), run.bounds.bottom);
+    return true;
+}
+
+// Syntax-highlighted code lines and atomic math boxes do not have a
+// covering text layout: their selected span is interpolated
+bool rectPiece(const App::TextRect& tr, size_t start, size_t end, D2D1_RECT_F& out) {
+    size_t lo = std::max(start, tr.docStart);
+    size_t hi = std::min(end, tr.docStart + tr.docLength);
+    float width = tr.rect.right - tr.rect.left;
+    if (lo >= hi || width <= 0.0f) return false;
+    float x0 = tr.rect.left + (float)(lo - tr.docStart) / (float)tr.docLength * width;
+    float x1 = tr.rect.left + (float)(hi - tr.docStart) / (float)tr.docLength * width;
+    out = D2D1::RectF(x0, tr.rect.top, x1, tr.rect.bottom);
+    return true;
+}
+
+bool sameLine(const D2D1_RECT_F& a, const D2D1_RECT_F& b) {
+    return std::abs(a.top - b.top) < 0.5f && std::abs(a.bottom - b.bottom) < 0.5f;
+}
+
+// The selected part of the space between two text rects of a line that
+// belong to different runs. A run ends at its last word, so the spaces
+// between two runs ("sit **amet**", "*commodo* consequat", a soft line
+// break) and the padding after a code chip belong to none; filling them
+// runs the selection on over bold, italic, links and code (#313). Table
+// cells are apart by a tab in docText and stay apart.
+bool gapPiece(const App& app, const App::TextRect& left, const App::TextRect& right,
+              size_t start, size_t end, D2D1_RECT_F& out) {
+    // Words of one run: its own span covers the spaces between them
+    if (right.runIndex == left.runIndex && right.runIndex < app.layoutTextRuns.size()) return false;
+    const size_t gapLo = left.docStart + left.docLength, gapHi = right.docStart;
+    if (gapLo > gapHi || gapHi < start || gapLo > end || !sameLine(left.rect, right.rect)) return false;
+    const float x0 = left.rect.right, x1 = right.rect.left;
+    if (x1 - x0 < 0.01f) return false;
+    for (size_t i = gapLo; i < gapHi; i++) {
+        if (app.docText[i] != L' ') return false;
+    }
+    float from = x0, to = x1;
+    if (gapLo < gapHi) {
+        const size_t lo = std::max(start, gapLo), hi = std::min(end, gapHi);
+        if (lo >= hi) return false;
+        const float perChar = (x1 - x0) / (float)(gapHi - gapLo);
+        from = x0 + perChar * (float)(lo - gapLo);
+        to = x0 + perChar * (float)(hi - gapLo);
+    } else if (start >= gapLo || end <= gapHi) {
+        return false;  // padding alone, between runs that meet in docText
+    }
+    out = D2D1::RectF(from, left.rect.top, to, left.rect.bottom);
+    return true;
+}
+
 } // namespace
 
 size_t selectionOffsetAtPoint(const App& app, float docX, float docY) {
@@ -130,78 +212,49 @@ bool selectionLineRange(const App& app, size_t offset, size_t& start, size_t& en
 void selectionHighlightRects(const App& app, size_t start, size_t end,
                              std::vector<D2D1_RECT_F>& out) {
     if (start >= end) return;
+    const size_t first = out.size();
 
     // A line-wide bar is visibly wrong for tables: it paints the padding and
-    // the gaps between cells. Mark the runs that have a selectable text rect,
-    // then ask DirectWrite for the exact horizontal span of the selected
-    // range in each run. This is the same model used by native text views.
-    std::vector<bool> runHasTextRect(app.layoutTextRuns.size(), false);
-    for (const App::TextRect& tr : app.textRects) {
-        if (tr.runIndex < runHasTextRect.size()) {
-            runHasTextRect[tr.runIndex] = true;
-        }
-    }
-
-    for (size_t i = 0; i < app.layoutTextRuns.size(); i++) {
-        const App::LayoutTextRun& run = app.layoutTextRuns[i];
-        if (!run.layout || run.docLength == 0 || !runHasTextRect[i]) continue;
-
-        size_t lo = std::max(start, run.docStart);
-        size_t hi = std::min(end, run.docStart + run.docLength);
-        if (lo >= hi) continue;
-
-        DWRITE_HIT_TEST_METRICS metrics{};
-        UINT32 metricCount = 0;
-        HRESULT hr = run.layout->HitTestTextRange(
-            (UINT32)(lo - run.docStart), (UINT32)(hi - lo),
-            run.pos.x, run.pos.y, &metrics, 1, &metricCount);
-        if (SUCCEEDED(hr) && metricCount == 1 && metrics.width > 0.0f) {
-            out.push_back(D2D1::RectF(
-                metrics.left, run.bounds.top,
-                metrics.left + metrics.width, run.bounds.bottom));
-            continue;
-        }
-
-        // These runs are normally single-line layouts. If DirectWrite
-        // returns no single range metric, caret positions still give an
-        // exact boundary without falling back to the whole line.
-        FLOAT x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
-        DWRITE_HIT_TEST_METRICS edge{};
-        if (SUCCEEDED(run.layout->HitTestTextPosition(
-                (UINT32)(lo - run.docStart), FALSE, &x0, &y0, &edge)) &&
-            SUCCEEDED(run.layout->HitTestTextPosition(
-                (UINT32)(hi - run.docStart), FALSE, &x1, &y1, &edge))) {
-            float left = run.pos.x + std::min(x0, x1);
-            float right = run.pos.x + std::max(x0, x1);
-            if (right > left) {
-                out.push_back(D2D1::RectF(left, run.bounds.top,
-                                          right, run.bounds.bottom));
+    // the gaps between cells. Each run with a selectable text rect gives the
+    // span of its selected range, and the spaces between runs are filled.
+    // Text rects follow the layout, so a line's pieces come left to right;
+    // those that meet join into one rectangle. The colour is translucent,
+    // so two would leave an antialiased seam where they meet and a darker
+    // strip where they overlap.
+    auto add = [&](const D2D1_RECT_F& piece) {
+        if (piece.right <= piece.left) return;
+        if (out.size() > first) {
+            D2D1_RECT_F& last = out.back();
+            if (sameLine(last, piece) && piece.left <= last.right + 0.5f &&
+                piece.right >= last.left - 0.5f) {
+                last.left = std::min(last.left, piece.left);
+                last.right = std::max(last.right, piece.right);
+                return;
             }
         }
-    }
+        out.push_back(piece);
+    };
 
-    // Syntax-highlighted code lines and atomic math boxes do not have a
-    // covering text layout. Keep their existing geometry fallback, but never
-    // use it for a run already handled above.
+    const App::TextRect* prev = nullptr;
+    size_t prevRun = SIZE_MAX;
+    D2D1_RECT_F piece{};
     for (const App::TextRect& tr : app.textRects) {
-        if (tr.runIndex < app.layoutTextRuns.size() &&
-            app.layoutTextRuns[tr.runIndex].docLength > 0) {
-            continue;
-        }
-        size_t lo = std::max(start, tr.docStart);
-        size_t hi = std::min(end, tr.docStart + tr.docLength);
-        if (lo >= hi) continue;
-
-        float width = tr.rect.right - tr.rect.left;
-        if (width <= 0.0f || tr.docLength == 0) continue;
-        float x0 = tr.rect.left +
-                   (float)(lo - tr.docStart) / (float)tr.docLength * width;
-        float x1 = tr.rect.left +
-                   (float)(hi - tr.docStart) / (float)tr.docLength * width;
-        if (x1 > x0) {
-            out.push_back(D2D1::RectF(x0, tr.rect.top, x1, tr.rect.bottom));
+        if (tr.docLength == 0) continue;
+        if (prev && gapPiece(app, *prev, tr, start, end, piece)) add(piece);
+        prev = &tr;
+        if (const App::LayoutTextRun* run = runFor(app, tr)) {
+            // The words of a run share its span
+            if (tr.runIndex != prevRun && runPiece(*run, start, end, piece)) add(piece);
+            prevRun = tr.runIndex;
+        } else if (rectPiece(tr, start, end, piece)) {
+            add(piece);
         }
     }
+}
+
+D2D1_RECT_F selectionBarOnScreen(const D2D1_RECT_F& bar, float scrollX, float scrollY) {
+    return D2D1::RectF(bar.left - scrollX, std::round(bar.top - scrollY),
+                       bar.right - scrollX, std::round(bar.bottom - scrollY));
 }
 
 bool selectionRangeRect(const App& app, const App::TextRect& tr,

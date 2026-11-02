@@ -1,5 +1,6 @@
 #include "d2d_init.h"
 #include "render.h"
+#include "selection.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -15,7 +16,8 @@
 
 // A ==highlight== split into several runs (scripts, strikethrough, links,
 // inline math) must paint one even band: its colour is translucent, so
-// overlapping pieces show as darker strips and gaps as pale ones.
+// overlapping pieces show as darker strips and gaps as pale ones. A
+// selection over such runs, or over bold and italic words, must too (#313).
 
 namespace {
 int failures = 0;
@@ -50,9 +52,8 @@ bool layout(App& app, const std::string& source) {
     return true;
 }
 
-// No two highlight bands paint the same pixels
-void checkNoOverlap(const App& app) {
-    const auto bands = highlightBands(app);
+// No two bands paint the same pixels
+void checkNoOverlap(const std::vector<D2D1_RECT_F>& bands, const char* message) {
     for (size_t i = 0; i < bands.size(); ++i) {
         for (size_t j = i + 1; j < bands.size(); ++j) {
             const auto& a = bands[i];
@@ -61,10 +62,14 @@ void checkNoOverlap(const App& app) {
             const float h = std::min(a.bottom, b.bottom) - std::max(a.top, b.top);
             if (w > 0.01f && h > 0.01f) {
                 std::cerr << "  overlap " << w << " x " << h << " px at x " << b.left << ", y " << b.top << '\n';
-                check(false, "highlight bands do not overlap");
+                check(false, message);
             }
         }
     }
+}
+
+void checkNoOverlap(const App& app) {
+    checkNoOverlap(highlightBands(app), "highlight bands do not overlap");
 }
 
 // Software raster of one pixel row of the highlight bands alone, so text and
@@ -85,11 +90,11 @@ public:
                SUCCEEDED(target_->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush_));
     }
     // Pixel row y of the bands drawn over the page background
-    bool row(const App& app, const std::vector<D2D1_RECT_F>& bands, int y) {
+    bool row(const App& app, const std::vector<D2D1_RECT_F>& bands, int y, D2D1_COLOR_F colour) {
         target_->BeginDraw();
         target_->Clear(app.theme.background);
         target_->SetTransform(D2D1::Matrix3x2F::Translation(0, 1.0f - y));
-        brush_->SetColor(themeHighlightBackground(app.theme));
+        brush_->SetColor(colour);
         for (const auto& band : bands) target_->FillRectangle(band, brush_.Get());
         target_->SetTransform(D2D1::Matrix3x2F::Identity());
         if (FAILED(target_->EndDraw())) return false;
@@ -176,7 +181,10 @@ void checkContinuous(App& app, BandRaster& raster, const wchar_t* first, const w
         // The raster agrees: one colour along the middle of the band
         if (!raster.contains(onLine.back().right + 2)) continue;
         const int y = static_cast<int>((rowTop + rowBottom) / 2);
-        if (!raster.row(app, onLine, y)) { check(false, "highlight raster draws"); continue; }
+        if (!raster.row(app, onLine, y, themeHighlightBackground(app.theme))) {
+            check(false, "highlight raster draws");
+            continue;
+        }
         const int x0 = static_cast<int>(std::ceil(onLine.front().left)) + 1;
         const int x1 = static_cast<int>(std::floor(onLine.back().right)) - 2;
         const UINT32 expected = raster.at(x0);
@@ -210,6 +218,173 @@ void checkSeparate(App& app) {
     for (const auto& band : highlightBands(app))
         check(!(band.left < middle && band.right > middle && band.top < left->rect.bottom && band.bottom > left->rect.top),
               "separate highlights keep the space between them");
+}
+
+D2D1_COLOR_F selectionColour(const App& app) {
+    return themeSelectionColor(app.theme, D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f));
+}
+
+std::vector<D2D1_RECT_F> selectionBands(const App& app, size_t start, size_t end) {
+    std::vector<D2D1_RECT_F> bands;
+    selectionHighlightRects(app, start, end, bands);
+    return bands;
+}
+
+// The text rect that starts with the word
+const App::TextRect* wordRect(const App& app, const wchar_t* word) {
+    const size_t at = app.docText.find(word);
+    for (const auto& rect : app.textRects)
+        if (at != std::wstring::npos && rect.docStart == at) return &rect;
+    return nullptr;
+}
+
+// A selection from `first` to `last` (both whole words) paints each of its
+// lines as one even band from the line's first selected character to its
+// last. A run ends at its last word, so the spaces between two runs ("sit
+// **amet**", "*commodo* consequat", a soft line break) and the padding
+// after a code chip belong to none: the band bridges them (#313).
+void checkSelection(App& app, BandRaster& raster, const wchar_t* first, const wchar_t* last) {
+    const size_t from = app.docText.find(first);
+    const size_t to = app.docText.find(last, from == std::wstring::npos ? 0 : from);
+    check(from != std::wstring::npos && to != std::wstring::npos, "selected words are laid out");
+    if (from == std::wstring::npos || to == std::wstring::npos) return;
+    const size_t end = to + wcslen(last);
+
+    struct Line { float top, bottom, left, right; };
+    std::vector<Line> lines;
+    for (const auto& rect : app.textRects) {
+        if (rect.docStart < from || rect.docStart >= end) continue;
+        auto line = std::find_if(lines.begin(), lines.end(),
+                                 [&](const Line& l) { return std::abs(l.top - rect.rect.top) < 0.01f; });
+        if (line == lines.end()) {
+            lines.push_back({rect.rect.top, rect.rect.bottom, rect.rect.left, rect.rect.right});
+        } else {
+            line->bottom = std::max(line->bottom, rect.rect.bottom);
+            line->left = std::min(line->left, rect.rect.left);
+            line->right = std::max(line->right, rect.rect.right);
+        }
+    }
+    check(!lines.empty(), "the selection has text rects");
+
+    const auto bands = selectionBands(app, from, end);
+    checkNoOverlap(bands, "selection pieces do not overlap");
+    // On screen, at any scroll, the bands sit on whole pixels and those of
+    // lines that meet share their edge: no antialiased seam between lines
+    for (float scroll : {0.0f, 0.37f, 0.5f, 0.83f, 120.25f}) {
+        for (const auto& band : bands) {
+            const D2D1_RECT_F above = selectionBarOnScreen(band, 0.0f, scroll);
+            check(above.top == std::round(above.top) && above.bottom == std::round(above.bottom),
+                  "selection bands sit on whole pixels");
+            for (const auto& next : bands) {
+                if (std::abs(band.bottom - next.top) > 0.01f) continue;
+                check(above.bottom == selectionBarOnScreen(next, 0.0f, scroll).top,
+                      "the lines of a selection meet without a seam");
+            }
+        }
+    }
+    for (const auto& line : lines) {
+        std::vector<D2D1_RECT_F> onLine;
+        for (const auto& band : bands)
+            if (band.top < line.bottom - 0.01f && band.bottom > line.top + 0.01f) onLine.push_back(band);
+        if (onLine.size() != 1) std::cerr << "  " << onLine.size() << " selection pieces at y " << line.top << '\n';
+        check(onLine.size() == 1, "the selection paints each line as one band");
+        if (onLine.empty()) continue;
+        float left = onLine.front().left, right = onLine.front().right;
+        for (const auto& band : onLine) {
+            left = std::min(left, band.left);
+            right = std::max(right, band.right);
+        }
+        check(std::abs(left - line.left) < 0.05f, "the selection starts at the line's first selected character");
+        check(std::abs(right - line.right) < 0.05f, "the selection ends at the line's last selected character");
+
+        if (!raster.contains(right + 2)) continue;
+        const int y = static_cast<int>((line.top + line.bottom) / 2);
+        if (!raster.row(app, onLine, y, selectionColour(app))) {
+            check(false, "selection raster draws");
+            continue;
+        }
+        const int x0 = static_cast<int>(std::ceil(left)) + 1;
+        const int x1 = static_cast<int>(std::floor(right)) - 2;
+        const UINT32 expected = raster.at(x0);
+        int uneven = 0;
+        for (int x = x0; x <= x1; ++x) {
+            if (!samePixel(raster.at(x), expected)) {
+                if (!uneven) std::cerr << "  uneven selection pixel " << std::hex << raster.at(x) << " vs "
+                                       << expected << std::dec << " at x " << x << ", y " << y << '\n';
+                ++uneven;
+            }
+        }
+        check(uneven == 0, "the selection paints one even colour");
+    }
+}
+
+// In "alpha sit **amet** omega" a selection that starts or ends at the
+// space beside the bold word covers just as much of it
+void checkSelectionEdges(App& app) {
+    const App::TextRect* sit = wordRect(app, L"sit");
+    const App::TextRect* amet = wordRect(app, L"amet");
+    const App::TextRect* omega = wordRect(app, L"omega");
+    check(sit && amet && omega && std::abs(sit->rect.top - omega->rect.top) < 0.01f,
+          "the words around the bold one share a line");
+    if (!sit || !amet || !omega) return;
+    const size_t sitEnd = sit->docStart + sit->docLength, ametEnd = amet->docStart + amet->docLength;
+    struct Span { size_t start, end; float left, right; const char* message; };
+    const Span spans[] = {
+        {sitEnd, ametEnd, sit->rect.right, amet->rect.right, "the space before a bold word is selected with it"},
+        {sit->docStart, amet->docStart, sit->rect.left, amet->rect.left, "a word is selected with the space after it"},
+        {amet->docStart, ametEnd, amet->rect.left, amet->rect.right, "a bold word alone is selected without its spaces"},
+        {ametEnd, omega->docStart, amet->rect.right, omega->rect.left, "the space after a bold word is selected alone"},
+    };
+    for (const auto& span : spans) {
+        const auto bands = selectionBands(app, span.start, span.end);
+        check(bands.size() == 1 && std::abs(bands[0].left - span.left) < 0.05f &&
+                  std::abs(bands[0].right - span.right) < 0.05f,
+              span.message);
+    }
+}
+
+// In "alpha sit  **amet** omega" a selection from the second of the two
+// spaces takes the half of the gap that holds it
+void checkHalfGap(App& app) {
+    const App::TextRect* sit = wordRect(app, L"sit");
+    const App::TextRect* amet = wordRect(app, L"amet");
+    check(sit && amet && amet->docStart == sit->docStart + sit->docLength + 2, "two spaces part the words");
+    if (!sit || !amet) return;
+    const auto bands = selectionBands(app, amet->docStart - 1, amet->docStart + amet->docLength);
+    check(bands.size() == 1 && std::abs(bands[0].left - (sit->rect.right + amet->rect.left) / 2) < 0.05f &&
+              std::abs(bands[0].right - amet->rect.right) < 0.05f,
+          "a selection from the second of two spaces takes half the gap");
+}
+
+// In "alpha `chip`, omega" the chip selected alone keeps to its text; the
+// padding after it joins the band only when the selection runs on past it
+void checkChipAlone(App& app) {
+    const App::TextRect* chip = wordRect(app, L"chip");
+    const App::TextRect* omega = wordRect(app, L"omega");
+    check(chip && omega, "the code chip is laid out");
+    if (!chip || !omega) return;
+    const size_t chipEnd = chip->docStart + chip->docLength;
+    auto bands = selectionBands(app, chip->docStart, chipEnd);
+    check(bands.size() == 1 && std::abs(bands[0].left - chip->rect.left) < 0.05f &&
+              std::abs(bands[0].right - chip->rect.right) < 0.05f,
+          "a code chip selected alone paints just its text");
+    bands = selectionBands(app, chip->docStart, chipEnd + 1);
+    check(bands.size() == 1 && bands[0].right > chip->rect.right + 1.0f,
+          "a code chip selected with the comma after it paints its padding too");
+}
+
+// Cells keep the gap between them: a selection over a row paints only the
+// text of each cell
+void checkCellsApart(App& app) {
+    const App::TextRect* one = wordRect(app, L"one");
+    const App::TextRect* two = wordRect(app, L"two");
+    check(one && two && std::abs(one->rect.top - two->rect.top) < 0.01f, "both cells share a row");
+    if (!one || !two) return;
+    const float middle = (one->rect.right + two->rect.left) / 2;
+    for (const auto& band : selectionBands(app, app.docText.find(L"alpha"), app.docText.find(L"omega") + 5))
+        check(!(band.left < middle && band.right > middle && band.top < one->rect.bottom &&
+                band.bottom > one->rect.top),
+              "a selection over a row keeps the gap between its cells");
 }
 
 std::string read(const std::filesystem::path& path) {
@@ -273,6 +448,31 @@ int runHighlightLayoutTests() {
             {longHighlight.c_str(), 3},
         };
 
+        // Selections over runs of every kind, outside a highlight (#313)
+        const std::string selectionFixture = read(fixtures / "selection-over-emphasis-313.md");
+        check(!selectionFixture.empty(), "fixture loads");
+        const std::string longSelection =
+            "alpha keeps **bold words**, *italic words*, ***both at once***, `code` and [a link](#target) "
+            "while it wraps, then **more bold** and *more italic* beside `more code`, and $x^2$ over "
+            "several lines in a narrow window until the omega\n";
+        const char* selections[] = {
+            "alpha sit **amet**, consectetur omega\n",
+            "alpha nisi *ut aliquip* consequat omega\n",
+            "alpha ***both*** and __bold__ and _italic_ omega\n",
+            "alpha [a link](#target) and **[bold link](#target)** omega\n",
+            "alpha [[Wiki Page]] omega\n",
+            "alpha one\ntwo **three**\n*four* omega\n",
+            "alpha `code` and `chip`, omega\n",
+            "alpha $x$ and $\\sqrt{y}$ omega\n",
+            "alpha ~~struck~~ and ==marked== omega\n",
+            "alpha x^2^ and H~2~O omega\n",
+            "# alpha **bold** *italic* omega\n",
+            "> alpha **bold** *italic* omega\n",
+            "- alpha **bold** *italic* omega\n",
+            "| Head |\n| --- |\n| alpha **bold** *italic* omega |\n",
+            longSelection.c_str(),
+        };
+
         for (int theme : {0, 5}) {  // Paper, Midnight
             applyTheme(app, theme);
             for (float scale : {1.0f, 1.5f, 2.0f}) {
@@ -292,6 +492,32 @@ int runHighlightLayoutTests() {
                             if (!layout(app, c.source)) continue;
                             checkNoOverlap(app);
                             checkContinuous(app, raster, L"alpha", L"omega", width == 420 ? c.lines : 0);
+                            checkSelection(app, raster, L"alpha", L"omega");
+                        }
+                        for (const char* source : selections) {
+                            scenario = where + ": select " + source;
+                            scenario.pop_back();
+                            if (layout(app, source)) checkSelection(app, raster, L"alpha", L"omega");
+                        }
+                        scenario = where + ": select beside a bold word";
+                        if (layout(app, "alpha sit **amet** omega\n")) checkSelectionEdges(app);
+                        scenario = where + ": select from the second of two spaces";
+                        if (layout(app, "alpha sit  **amet** omega\n")) checkHalfGap(app);
+                        scenario = where + ": select a code chip";
+                        if (layout(app, "alpha `chip`, omega\n")) checkChipAlone(app);
+                        scenario = where + ": select over a table row";
+                        if (layout(app, "| alpha one | two omega |\n| --- | --- |\n")) checkCellsApart(app);
+                        scenario = where + ": selection-over-emphasis-313.md";
+                        if (layout(app, selectionFixture)) {
+                            checkSelection(app, raster, L"Lorem", L"laborum.");
+                            checkSelection(app, raster, L"Bold beside", L"this paragraph.");
+                            checkSelection(app, raster, L"metin", L"kleri.");
+                            checkSelection(app, raster, L"A heading with", L"italic words");
+                            checkSelection(app, raster, L"A quote with", L"inside it.");
+                            checkSelection(app, raster, L"A long item", L"the end.");
+                            checkSelection(app, raster, L"The last paragraph", L"italic words.");
+                            checkNoOverlap(selectionBands(app, 0, app.docText.size()),
+                                           "selection pieces do not overlap");
                         }
                         scenario = where + ": separate highlights";
                         if (layout(app, "==first== ==second== and ==third==, ==fourth==\n")) {

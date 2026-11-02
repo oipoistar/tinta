@@ -25,10 +25,16 @@ void selectionWordRange(const App& app, size_t offset, size_t& start, size_t& en
 bool selectionLineRange(const App& app, size_t offset, size_t& start, size_t& end);
 
 // Exact text-run highlight rectangles for [start, end), document coordinates.
-// Each rectangle covers only the selected glyph range; table-cell padding and
-// gaps between cells are not included.
+// Each covers the selected glyph range of a stretch of line, the spaces
+// between its runs included; table-cell padding and gaps between cells are
+// not.
 void selectionHighlightRects(const App& app, size_t start, size_t end,
                              std::vector<D2D1_RECT_F>& out);
+
+// One of those rectangles on screen at the given scroll. Its top and bottom
+// fall on whole pixels, so the lines of a selection meet without an
+// antialiased seam between their bands.
+D2D1_RECT_F selectionBarOnScreen(const D2D1_RECT_F& bar, float scrollX, float scrollY);
 
 // Precise rect for the docText range [start, end) clipped to one text rect
 // (search match highlighting shares the selection machinery). Vertical

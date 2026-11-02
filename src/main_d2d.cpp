@@ -927,10 +927,8 @@ render_document:
         float viewBottom = app.scrollY + app.height + 50.0f;
         for (const auto& bar : bars) {
             if (bar.bottom < viewTop || bar.top > viewBottom) continue;
-            app.renderTarget->FillRectangle(
-                D2D1::RectF(bar.left - app.scrollX, bar.top - app.scrollY,
-                            bar.right - app.scrollX, bar.bottom - app.scrollY),
-                app.brush);
+            app.renderTarget->FillRectangle(selectionBarOnScreen(bar, app.scrollX, app.scrollY),
+                                            app.brush);
             app.drawCalls++;
         }
     }
