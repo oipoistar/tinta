@@ -793,13 +793,25 @@ static void editorUpdateSelEnd(App& app) {
 
 // --- Word boundary helpers ---
 
+// Letters, digits and marks of every alphabetic script, and _: a Turkish,
+// Greek or Cyrillic word is one word, as an English one is (#313). CJK,
+// kana and Hangul, from U+2E80, run on without spaces and keep a class of
+// their own below.
 static bool isEditorWordChar(wchar_t c) {
-    return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') ||
-           (c >= L'0' && c <= L'9') || c == L'_';
+    if (c < 0x80) {
+        return (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z') ||
+               (c >= L'0' && c <= L'9') || c == L'_';
+    }
+    if (c >= 0x2E80) return false;
+    WORD kind = 0;
+    if (GetStringTypeW(CT_CTYPE1, &c, 1, &kind) && (kind & (C1_ALPHA | C1_DIGIT))) return true;
+    // An accent typed after its letter (e + U+0301) and a vowel sign belong to it
+    return GetStringTypeW(CT_CTYPE3, &c, 1, &kind) &&
+           (kind & (C3_ALPHA | C3_NONSPACING | C3_VOWELMARK));
 }
 
 // Character class for double-click selection: 0 = whitespace/ASCII
-// punctuation, 1 = ASCII word chars, 2 = CJK and any other non-ASCII text.
+// punctuation, 1 = word chars, 2 = CJK and any other non-ASCII text.
 // Double-click selects a contiguous run of the same class.
 static int editorCharClass(wchar_t c) {
     if (isEditorWordChar(c)) return 1;
@@ -833,6 +845,19 @@ static void editorWordAt(const App& app, size_t pos, size_t& start, size_t& end)
     if (cls == 0) return;
     while (start > 0 && editorCharClass(app.editorText[start - 1]) == cls) start--;
     while (end < app.editorText.size() && editorCharClass(app.editorText[end]) == cls) end++;
+}
+
+// What a double-click (unit 2) or a triple-click (unit 3) at pos takes:
+// the word as above, or the line with its newline
+static void editorUnitAt(const App& app, size_t pos, int unit, size_t& first, size_t& last) {
+    if (unit == 2) {
+        editorWordAt(app, pos, first, last);
+        return;
+    }
+    size_t line = getLineFromPos(app, pos);
+    first = app.editorLineStarts[line];
+    last = getLineEnd(app, line);
+    if (last < app.editorText.size()) last++;
 }
 
 // --- Extra carets (#251) ---
@@ -4103,36 +4128,23 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
     app.lastClickX = x;
     app.lastClickY = y;
 
-    if (app.clickCount == 2) {
+    if (app.clickCount >= 2) {
         app.editorCaretUpstreamPos = std::wstring::npos;
-        // Double-click: select run of same character class (handles CJK,
-        // which has no spaces between words)
-        size_t wordStart = clickPos;
-        size_t wordEnd = clickPos;
-        int cls = 0;
-        if (clickPos < app.editorText.size()) cls = editorCharClass(app.editorText[clickPos]);
-        if (cls == 0 && clickPos > 0) {
-            // Clicked just past the end of a word: select the run before
-            cls = editorCharClass(app.editorText[clickPos - 1]);
-            if (cls != 0) { wordStart = clickPos - 1; wordEnd = clickPos; }
-        }
-        if (cls != 0) {
-            while (wordStart > 0 && editorCharClass(app.editorText[wordStart - 1]) == cls) wordStart--;
-            while (wordEnd < app.editorText.size() && editorCharClass(app.editorText[wordEnd]) == cls) wordEnd++;
-        }
-        app.editorSelStart = wordStart;
-        app.editorSelEnd = wordEnd;
-        app.editorCursorPos = wordEnd;
-        app.editorHasSelection = (wordStart != wordEnd);
-    } else if (app.clickCount == 3) {
-        app.editorCaretUpstreamPos = std::wstring::npos;
-        // Triple-click: select line
-        size_t line = getLineFromPos(app, clickPos);
-        app.editorSelStart = app.editorLineStarts[line];
-        app.editorSelEnd = getLineEnd(app, line);
-        if (app.editorSelEnd < app.editorText.size()) app.editorSelEnd++; // include \n
-        app.editorCursorPos = app.editorSelEnd;
-        app.editorHasSelection = true;
+        // Double-click: the run of one character class, as CJK has no
+        // spaces between words; triple-click: the line, its newline too
+        size_t first = clickPos, last = clickPos;
+        editorUnitAt(app, clickPos, app.clickCount, first, last);
+        app.editorSelStart = first;
+        app.editorSelEnd = last;
+        app.editorCursorPos = last;
+        app.editorHasSelection = (first != last);
+        // A drag on from here grows the selection by words or lines, as
+        // Live's does (#313)
+        app.editorSelectUnit = app.clickCount;
+        app.editorUnitFrom = first;
+        app.editorUnitTo = last;
+        app.editorSelecting = true;
+        SetCapture(hwnd);
     } else {
         // Single click
         if (shift && app.editorHasSelection) {
@@ -4161,6 +4173,7 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
             app.editorSelEnd = clickPos;
             app.editorHasSelection = false;
         }
+        app.editorSelectUnit = 1;
         app.editorSelecting = true;
         SetCapture(hwnd);
     }
@@ -4258,8 +4271,22 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
         static HCURSOR cursorIBeam = LoadCursor(nullptr, IDC_IBEAM);
         SetCursor(cursorIBeam);
         size_t pos = editorPosFromClick(app, x, y);
-        app.editorSelEnd = pos;
-        app.editorCursorPos = pos;
+        if (app.editorSelectUnit < 2) {
+            app.editorSelEnd = pos;
+            app.editorCursorPos = pos;
+        } else {
+            // By whole words or lines, keeping the one the clicks took
+            // whichever way the drag runs (#313)
+            size_t first = pos, last = pos;
+            editorUnitAt(app, pos, app.editorSelectUnit, first, last);
+            if (first < app.editorUnitFrom) {
+                app.editorSelStart = app.editorUnitTo;
+                app.editorSelEnd = app.editorCursorPos = first;
+            } else {
+                app.editorSelStart = app.editorUnitFrom;
+                app.editorSelEnd = app.editorCursorPos = std::max(last, app.editorUnitTo);
+            }
+        }
         app.editorHasSelection = (app.editorSelStart != app.editorSelEnd);
         InvalidateRect(hwnd, nullptr, FALSE);
         return;

@@ -260,6 +260,99 @@ void viewerCopies(App& app) {
               "the table's Copy waits for a clipboard held for a moment");
     }
 }
+
+// #313: a word of any alphabetic script is one word to a double-click and
+// to Ctrl+arrows, and a drag after a double- or triple-click grows the
+// selection by whole words or lines, keeping what the clicks took
+void wordsOfEveryScript(App& app) {
+    app.editorDirty = false;
+    if (app.editMode) exitEditMode(app);
+    app.currentFile = std::string(TINTA_SOURCE_DIR) + "/tests/fixtures/live/Selecting words.md";
+    app.editorLive = false;
+    enterEditMode(app); editorReparse(app);
+    const std::wstring text = app.editorText;
+    check(app.editMode && !editorLiveOn(app) && text.find(L"| Kelime |") != std::wstring::npos,
+          "#313: the fixture opens in Source");
+    app.editorShowPreview = false; app.editorWordWrap = true; app.width = 1050;
+    app.editorScrollY = app.editorScrollX = 0; updateTextFormats(app); rebuildLineStarts(app);
+    auto selected = [&] {
+        size_t a = std::min(app.editorSelStart,app.editorSelEnd), b = std::max(app.editorSelStart,app.editorSelEnd);
+        return app.editorHasSelection ? text.substr(a,b-a) : std::wstring();
+    };
+    const wchar_t* words[] = {
+        L"de\u011fi\u015fiklik", L"g\u00fczelle\u015ftirmek", L"\u00e7al\u0131\u015fkanl\u0131k",
+        L"\u00f6\u011frencilerimizden", L"I\u011fd\u0131r", L"\u015e\u0131rnak", L"A\u011fr\u0131",
+        L"\u03ba\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1", L"\u0437\u0434\u0440\u0430\u0432\u0441\u0442\u0432\u0443\u0439",
+        L"ng\u01b0\u1eddi", L"cafe\u0301", L"g\u00f6\u011f\u00fcs", L"de\u011fi\u015fken_ad\u0131"};
+    for (const wchar_t* word : words) {
+        const size_t at = text.find(word);
+        check(at != std::wstring::npos, "#313: the fixture holds each word");
+        if (at == std::wstring::npos) continue;
+        // On its first letter, on a letter past the ASCII range and on its last
+        for (size_t into : {(size_t)0, wcslen(word) / 2, wcslen(word) - 1}) {
+            auto point = characterPoint(app,at+into);
+            app.editorScrollY = std::max(0.0f,point.y+app.editorScrollY-200.0f);
+            point = characterPoint(app,at+into);
+            doubleClick(app,point);
+            check(selected() == word, "#313: double-click selects the whole word, letters past ASCII and all");
+        }
+    }
+    // CJK stays a run of its own beside Latin words
+    const size_t chinese = text.find(L"\u4e2d\u6587\u6d4b\u8bd5");
+    auto chinesePoint = characterPoint(app,chinese+1);
+    app.editorScrollY = std::max(0.0f,chinesePoint.y+app.editorScrollY-200.0f);
+    doubleClick(app,characterPoint(app,chinese+1));
+    check(selected() == L"\u4e2d\u6587\u6d4b\u8bd5", "#313: double-click on Chinese still takes the Chinese run alone");
+
+    // Ctrl+Right and Ctrl+Left step over whole Turkish words
+    app.editorScrollY = 0;
+    const size_t line = text.find(L"T\u00fcrk\u00e7e");
+    app.editorCursorPos = app.editorSelStart = app.editorSelEnd = line; app.editorHasSelection = false;
+    key(app,VK_RIGHT,false,true);
+    check(app.editorCursorPos == line + 6, "#313: Ctrl+Right steps over a Turkish word whole");
+    key(app,VK_RIGHT,false,true);
+    check(app.editorCursorPos == line + 16, "#313: and over the next");
+    const size_t change = text.find(L"de\u011fi\u015fiklik");
+    app.editorCursorPos = app.editorSelStart = app.editorSelEnd = change + 10; app.editorHasSelection = false;
+    key(app,VK_LEFT,false,true);
+    check(app.editorCursorPos == change, "#313: Ctrl+Left steps back over a Turkish word whole");
+
+    // A drag after a double-click grows by words both ways and keeps the word
+    auto screen = [&](size_t pos) { auto p = characterPoint(app,pos,0.2f); return POINT{(LONG)p.x,(LONG)p.y}; };
+    auto doubleThenDrag = [&](size_t press, size_t to, int clicks) {
+        POINT p = screen(press), q = screen(to);
+        app.lastClickTime = {}; app.clickCount = 0;
+        for (int i = 1; i < clicks; ++i) {
+            handleEditorMouseDown(app,app.hwnd,p.x,p.y); handleEditorMouseUp(app,app.hwnd,p.x,p.y);
+        }
+        handleEditorMouseDown(app,app.hwnd,p.x,p.y);
+        check(app.editorSelecting, "#313: the last click of a double- or triple-click holds on to the pointer");
+        handleEditorMouseMove(app,app.hwnd,q.x,q.y);
+        handleEditorMouseUp(app,app.hwnd,q.x,q.y);
+    };
+    const size_t pretty = text.find(L"g\u00fczelle\u015ftirmek"), selects = text.find(L"se\u00e7ilir");
+    doubleThenDrag(change+3, pretty+4, 2);
+    check(app.editorSelStart == change && app.editorSelEnd == pretty + 14 && app.editorCursorPos == pretty + 14,
+          "#313: a drag on after a double-click takes whole words up to the pointer's");
+    doubleThenDrag(change+3, selects+2, 2);
+    check(std::min(app.editorSelStart,app.editorSelEnd) == selects && std::max(app.editorSelStart,app.editorSelEnd) == change + 10 &&
+              app.editorCursorPos == selects,
+          "#313: a drag back takes whole words back and keeps the double-clicked one");
+    doubleThenDrag(change+3, change+5, 2);
+    check(selected() == L"de\u011fi\u015fiklik", "#313: a drag within the word keeps just the word");
+    // A triple-click's drag takes whole lines
+    const size_t second = text.find(L'\n', line) + 1, third = text.find(L'\n', second) + 1;
+    doubleThenDrag(line+3, second+3, 3);
+    check(app.editorSelStart == line && app.editorSelEnd == third, "#313: a drag after a triple-click takes whole lines");
+    // A plain click's drag still goes letter by letter (away from a
+    // selection, which a press would move instead, #289)
+    app.editorCursorPos = app.editorSelStart = app.editorSelEnd = 0; app.editorHasSelection = false;
+    app.lastClickTime = {}; app.clickCount = 0;
+    POINT p = screen(change+2), q = screen(change+5);
+    handleEditorMouseDown(app,app.hwnd,p.x,p.y); handleEditorMouseMove(app,app.hwnd,q.x,q.y); handleEditorMouseUp(app,app.hwnd,q.x,q.y);
+    check(app.editorSelStart == change + 2 && app.editorSelEnd == change + 5, "#313: a plain drag still selects letter by letter");
+    app.editorDirty = false;
+}
 }
 
 int runEditorContextTests() {
@@ -347,6 +440,7 @@ int runEditorContextTests() {
     clipboardActions(app,source);
     app.editorText = source; app.editorDirty = false;
     viewerCopies(app);
+    wordsOfEveryScript(app);
     DestroyWindow(app.hwnd); app.hwnd = nullptr; state.reset(); CoUninitialize();
     OleUninitialize();
     std::cout << "Editor context menu: " << cases << " selection cases, " << failures << " failures\n";

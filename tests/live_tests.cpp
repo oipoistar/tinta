@@ -1560,6 +1560,86 @@ void themeColours(App& app) {
     applyTheme(app, 0);
 }
 
+// #313: a selection over lines of bold and italic words is one even band a
+// line, and the line it started from keeps its Markdown while it grows, so
+// the words do not move under it
+void selectingLines(App& app, const fs::path& dir) {
+    openInEditor(app, dir / "Selecting words.md");
+    const size_t first = find(app, L"1. For example");
+    check(editorLiveOn(app) && first != std::wstring::npos, "#313: the fixture opens in Live");
+    if (first == std::wstring::npos) return;
+    // Through the keys: from the list's first line down over the next two
+    placeCaret(app, first + 5);
+    const float height = livePageHeight(app);
+    const KeyMods shift{false, true, false};
+    keystroke(app, VK_DOWN, shift);
+    keystroke(app, VK_DOWN, shift);
+    paint(app);
+    const LiveText& live = liveText(app);
+    const size_t firstLine = (size_t)std::count(live.text.begin(), live.text.begin() + (std::ptrdiff_t)first, L'\n');
+    check(live.anchor == first + 5 && live.caret >= find(app, L"3. **xx**"), "#313: Shift+Down grows the selection over the list");
+    check(live::caretLineOf(live, 0, live.text.size()) == firstLine, "#313: the line it started from keeps its Markdown");
+    check(std::fabs(livePageHeight(app) - height) < 0.5f, "#313: and the page keeps its height");
+    keystroke(app, VK_RIGHT);
+    check(live::caretLineOf(liveText(app), 0, liveText(app).text.size()) > firstLine,
+          "#313: once the selection is gone the caret's line shows its Markdown");
+
+    // The engine, as Live and the cards lay a text out
+    applyTheme(app, 0);
+    LiveText e;
+    e.text = L"1. For example, **if I use syntax** and *try to select* two or more lines.\n"
+             L"2. bla bla **bla bla** bla.\n3. **xx** xxx\n";
+    const live::Look look = live::pageLook(app);
+    live::LayoutCache cache;
+    auto layout = [&] { return live::layoutOf(app, e, 0, e.text.size(), 900.0f, look, cache, live::caretLineOf(e, 0, e.text.size())); };
+    auto xOf = [&](size_t at) {
+        float x = 0, y = 0, h = 0;
+        live::caretPoint(layout(), 0, at, x, y, h);
+        return x;
+    };
+    const size_t syntax = e.text.find(L"syntax"), xx = e.text.find(L"xxx");
+    e.anchor = e.caret = 5;
+    const float typed = xOf(syntax);
+    e.caret = xx;
+    check(std::fabs(xOf(syntax) - typed) < 0.5f, "#313: a selection grown down leaves its first line's words where they were");
+    e.anchor = e.caret = xx;
+    const float shown = xOf(syntax);
+    check(shown < typed - 1.0f, "#313: that line's ** shows only while it is being typed in");
+
+    // A selection over the first line drawn as the page reads it, its **
+    // hidden: one even band
+    e.anchor = e.text.find(L"2. bla");
+    e.caret = 0;
+    IDWriteTextLayout* drawn = live::layoutOf(app, e, 0, e.text.size(), 900.0f, look, cache, (size_t)-1);
+    check(drawn != nullptr, "#313: Live lays the lines out");
+    if (!drawn) return;
+    const std::vector<D2D1_COLOR_F> pixels = pixelsAfter(app, [&] {
+        app.renderTarget->Clear(app.theme.background);
+        live::draw(app, e, drawn, cache, 0, look, false, 1.0f);
+    });
+    UINT32 count = 0;
+    drawn->HitTestTextRange(0, (UINT32)e.text.find(L'\n'), 0, 0, nullptr, 0, &count);
+    std::vector<DWRITE_HIT_TEST_METRICS> hits(count);
+    drawn->HitTestTextRange(0, (UINT32)e.text.find(L'\n'), 0, 0, hits.data(), count, &count);
+    float left = 1e9f, right = -1e9f, top = hits.empty() ? 0 : hits[0].top;
+    for (const auto& h : hits) {
+        if (std::fabs(h.top - top) > 0.5f) continue;
+        left = std::min(left, h.left);
+        right = std::max(right, h.left + h.width);
+    }
+    check(hits.size() > 2 && right - left > 300.0f, "#313: the first line's selection spans its words");
+    const size_t row = (size_t)(top + 2), from = (size_t)std::ceil(left + 1), to = (size_t)(right - 1);
+    float spread = 0;
+    if (pixels.size() == (size_t)app.width * app.height && to > from) {
+        const D2D1_COLOR_F base = pixels[row * app.width + from];
+        for (size_t x = from; x < to; ++x) {
+            const D2D1_COLOR_F& p = pixels[row * app.width + x];
+            spread = std::max({spread, std::fabs(p.r - base.r), std::fabs(p.g - base.g), std::fabs(p.b - base.b)});
+        }
+    }
+    check(!pixels.empty() && spread < 0.01f, "#313: no darker strip where the hidden ** and * sit, " + std::to_string(spread));
+}
+
 }  // namespace
 
 int runLiveTests(const char* fixtureDir) {
@@ -1612,6 +1692,7 @@ int runLiveTests(const char* fixtureDir) {
     documentsSwitched(app, dir);
     readingToggle(app, dir);
     themeColours(app);
+    selectingLines(app, dir);
 
     // Two themes at two widths, on the tour
     openInEditor(app, doc);

@@ -1517,6 +1517,10 @@ struct App {
     int editorDesiredCol = -1;
     float editorDesiredX = -1.0f;  // desired caret x for Up/Down in wrap mode
     bool editorSelecting = false;
+    // What a double- or triple-click took, which a drag after it keeps
+    // while it grows by words (2) or lines (3); 1 for a plain click (#313)
+    int editorSelectUnit = 1;
+    size_t editorUnitFrom = 0, editorUnitTo = 0;
     size_t editorSelStart = 0;
     size_t editorSelEnd = 0;
     bool editorHasSelection = false;

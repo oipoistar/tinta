@@ -356,6 +356,7 @@ struct LayoutCache {
 // `caretLine`: the line shown as typed, counted from `from`; -1 for none
 IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to, float width, const Look& look,
                             LayoutCache& cache, size_t caretLine);
+// That line for e: the caret's, or a selection's anchor's
 size_t caretLineOf(const LiveText& e, size_t from, size_t to);
 // Where text position `at` is in a layout of text from `from`
 bool caretPoint(IDWriteTextLayout* layout, size_t from, size_t at, float& x, float& y, float& height);

@@ -228,8 +228,12 @@ Look pageLook(const App& app) {
 }
 
 size_t caretLineOf(const LiveText& e, size_t from, size_t to) {
-    if (e.caret < from || e.caret > to) return (size_t)-1;
-    return (size_t)std::count(e.text.begin() + (std::ptrdiff_t)from, e.text.begin() + (std::ptrdiff_t)e.caret, L'\n');
+    // A selection keeps the Markdown on the line it started from: the lines
+    // it grows over stay as the page reads them, so nothing reflows under
+    // the pointer or the keys while it grows (#313)
+    const size_t at = e.hasSelection() ? e.anchor : e.caret;
+    if (at < from || at > to) return (size_t)-1;
+    return (size_t)std::count(e.text.begin() + (std::ptrdiff_t)from, e.text.begin() + (std::ptrdiff_t)at, L'\n');
 }
 
 IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to, float width, const Look& look,
@@ -602,14 +606,28 @@ void draw(App& app, const LiveText& e, IDWriteTextLayout* layout, const LayoutCa
             }
         }
     }
-    // The selection
+    // The selection, one band a line: the pieces of a line join first, as
+    // a hidden ** between bold and plain words is a piece of no width, and
+    // each one drawn alone laid a darker strip there (#313)
     if (e.hasSelection()) {
         size_t a = std::max(e.selStart(), from), b = std::min(e.selEnd(), from + length);
         if (b > a) {
             rects(a - from, b - a, hits);
+            std::sort(hits.begin(), hits.end(), [](const DWRITE_HIT_TEST_METRICS& p, const DWRITE_HIT_TEST_METRICS& q) {
+                return p.top != q.top ? p.top < q.top : p.left < q.left;
+            });
             app.brush->SetColor(paint::alpha(look.selection ? *look.selection : look.accent, 0.28f));
-            for (const auto& h : hits) {
-                rt->FillRectangle(D2D1::RectF(h.left, h.top, h.left + std::max(h.width, 4 * pixel), h.top + h.height), app.brush);
+            for (size_t i = 0; i < hits.size();) {
+                float left = hits[i].left, right = left + hits[i].width;
+                float top = hits[i].top, bottom = top + hits[i].height;
+                size_t j = i + 1;
+                for (; j < hits.size() && std::fabs(hits[j].top - hits[i].top) < pixel && hits[j].left <= right + pixel; ++j) {
+                    right = std::max(right, hits[j].left + hits[j].width);
+                    bottom = std::max(bottom, hits[j].top + hits[j].height);
+                }
+                // A selected empty line still shows
+                rt->FillRectangle(D2D1::RectF(left, top, std::max(right, left + 4 * pixel), bottom), app.brush);
+                i = j;
             }
         }
     }

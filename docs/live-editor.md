@@ -85,7 +85,10 @@ same way on a sheet and in its own tab.
   clicked. A double-click selects a word and a triple-click selects a line.
   Dragging selects, across blocks too, and the page scrolls along at the
   window's edges; a drag after a double- or triple-click goes by words or
-  lines, and keeps the first one whichever way it runs.
+  lines, and keeps the first one whichever way it runs. While a selection
+  grows, by the mouse or with Shift, the line it started from keeps its
+  Markdown and the lines it reaches stay as the page reads them, so no
+  words move under it.
 - On a touchscreen a finger pans the page and a tap clicks. A finger held on
   a word selects it, the selection grows by words as the finger slides, and
   the menu (below) opens over them where it lifts. While the menu is up, a
