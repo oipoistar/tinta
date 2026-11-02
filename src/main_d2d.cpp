@@ -1912,6 +1912,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // newer one with launch-time data.
                 if (app->sessionOwner) {
                     settings.sessionTabs.clear();
+                    settings.sessionPinned.clear();
                     settings.sessionActive = 0;
                     for (size_t i = 0; i < app->tabs.size(); i++) {
                         const std::string& path =
@@ -1923,11 +1924,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                 (int)settings.sessionTabs.size();
                         }
                         settings.sessionTabs.push_back(path);
+                        if (app->tabs[i].pinned) settings.sessionPinned.push_back(path);
                     }
                 } else {
                     Settings onDisk = loadSettings();
                     settings.sessionTabs = onDisk.sessionTabs;
                     settings.sessionActive = onDisk.sessionActive;
+                    settings.sessionPinned = onDisk.sessionPinned;
                 }
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
@@ -2022,6 +2025,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
     app.keepDeletedTabs = savedSettings.keepDeletedTabs;
+    // The title bar's pin as last pressed (#312); applied once the window shows
+    app.alwaysOnTop = savedSettings.alwaysOnTop;
     // Persisted when toggled and kept as on disk at exit, like openInTabs
     app.showNotifications = savedSettings.showNotifications;
     app.editorAssists = savedSettings.editorAssists;
@@ -2392,6 +2397,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     // session rebuilds the whole row in its saved order
     if (restoreSession && !app.currentFile.empty()) {
         tabsSeedSession(app, sessionPaths);
+        tabsPinPaths(app, savedSettings.sessionPinned);
     } else {
         tabsInit(app);
     }
@@ -2406,6 +2412,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         ShowWindow(app.hwnd, SW_SHOWMAXIMIZED);
     } else {
         ShowWindow(app.hwnd, nCmdShow);
+    }
+    if (app.alwaysOnTop) {
+        SetWindowPos(app.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     UpdateWindow(app.hwnd);
     app.metrics.showWindowUs = usElapsed(t0);

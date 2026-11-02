@@ -13,6 +13,11 @@ void tabsInit(App& app);                       // adopt the startup document
 void tabsSetKeepDeleted(App& app, bool enabled);
 // Rebuild the row from last session's paths (startup doc becomes active)
 void tabsSeedSession(App& app, const std::vector<std::string>& paths);
+// Pinned tabs (#312) lead the row: how many, pinning or unpinning one (it
+// moves to the end of the pinned ones), and a session's pinned paths again
+int tabsPinnedCount(const App& app);
+void tabSetPinned(App& app, HWND hwnd, int index, bool pinned);
+void tabsPinPaths(App& app, const std::vector<std::string>& paths);
 void tabActivate(App& app, HWND hwnd, int index);
 void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
                  bool activate = true, int insertBefore = -1);

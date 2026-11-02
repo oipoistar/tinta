@@ -31,6 +31,7 @@ void persistCloseKeepsDrafts(const App& app);
 void persistPrintMargin(const App& app);
 void persistSearchScopes(const App& app);
 void persistOpenInTabs(const App& app);
+void persistAlwaysOnTop(const App& app);
 
 // The configuration home: the exe's folder in portable mode (a
 // settings.ini beside tinta.exe opts in, #147), else %APPDATA%\Tinta

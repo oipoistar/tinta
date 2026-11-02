@@ -41,6 +41,7 @@ void saveSettings(const Settings& settings) {
     file << "windowWidth=" << settings.windowWidth << "\n";
     file << "windowHeight=" << settings.windowHeight << "\n";
     file << "windowMaximized=" << (settings.windowMaximized ? 1 : 0) << "\n";
+    file << "alwaysOnTop=" << (settings.alwaysOnTop ? 1 : 0) << "\n";
     file << "hasAskedFileAssociation=" << (settings.hasAskedFileAssociation ? 1 : 0) << "\n";
     file << "editorShowPreview=" << (settings.editorShowPreview ? 1 : 0) << "\n";
     file << "editorWordWrap=" << (settings.editorWordWrap ? 1 : 0) << "\n";
@@ -107,6 +108,9 @@ void saveSettings(const Settings& settings) {
         file << "sessionActive=" << settings.sessionActive << "\n";
         for (const auto& tabPath : settings.sessionTabs) {
             file << "tab=" << tabPath << "\n";
+        }
+        for (const auto& tabPath : settings.sessionPinned) {
+            file << "pinnedTab=" << tabPath << "\n";
         }
     }
 
@@ -207,6 +211,14 @@ void persistSearchScopes(const App& app) {
 void persistOpenInTabs(const App& app) {
     Settings settings = loadSettings();
     settings.openInTabs = app.openInTabs;
+    saveSettings(settings);
+}
+
+// The title bar's pin is kept when pressed, as openInTabs is, so the next
+// window opens on top or not as this one was left (#312)
+void persistAlwaysOnTop(const App& app) {
+    Settings settings = loadSettings();
+    settings.alwaysOnTop = app.alwaysOnTop;
     saveSettings(settings);
 }
 
@@ -374,6 +386,8 @@ Settings loadSettings() {
             if (idx >= 0) settings.darkThemeIndex = idx;
         } else if (key == "windowMaximized") {
             settings.windowMaximized = (value == "1");
+        } else if (key == "alwaysOnTop") {
+            settings.alwaysOnTop = (value == "1");
         } else if (key == "hasAskedFileAssociation") {
             settings.hasAskedFileAssociation = (value == "1");
         } else if (key == "editorShowPreview") {
@@ -415,6 +429,10 @@ Settings loadSettings() {
         } else if (key == "tab") {
             if (!value.empty() && settings.sessionTabs.size() < 64) {
                 settings.sessionTabs.push_back(value);
+            }
+        } else if (key == "pinnedTab") {
+            if (!value.empty() && settings.sessionPinned.size() < 64) {
+                settings.sessionPinned.push_back(value);
             }
         } else if (key == "recent") {
             // when(FILETIME)|path, most recent first

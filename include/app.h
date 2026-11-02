@@ -245,6 +245,9 @@ struct Settings {
     int windowWidth = 1024;
     int windowHeight = 768;
     bool windowMaximized = false;
+    // The title bar's pin, kept from the last time it was pressed: a window
+    // opens on top when it was left so (#312)
+    bool alwaysOnTop = false;
     bool hasAskedFileAssociation = false;
     bool editorShowPreview = true;
     bool editorWordWrap = false;
@@ -272,6 +275,8 @@ struct Settings {
     // Last session's open tabs, restored on the next plain launch
     std::vector<std::string> sessionTabs;
     int sessionActive = 0;
+    // Which of them were pinned, first in the row again (#312)
+    std::vector<std::string> sessionPinned;
     // Reading positions: most-recent-first, capped (#77). zoom = 0 means
     // "no per-document zoom": the document keeps the current zoom.
     struct ReadingPosition { std::string path; float scrollY; float zoom = 0.0f; };
@@ -570,6 +575,9 @@ struct App {
         bool fileMissing = false;  // deleted/renamed on disk (red-grey dot)
         std::optional<std::string> viewerSource;
         FILETIME lastWrite{};      // for external-change conflicts (dirty tabs)
+        // Pinned (#312): first in the row, narrow, spared by Close others
+        // and the left and right sweeps, and back with the session
+        bool pinned = false;
         std::wstring editorText;   // parked edit buffer (editMode only)
         bool editorBom = false;    // its file starts with a byte order mark
         float editorScrollY = 0.0f;
@@ -611,8 +619,8 @@ struct App {
         D2D1_RECT_F labelRect{};  // room the title had (zero: none drawn)
     };
     std::vector<TabHit> tabHits;       // refreshed by renderTabStrip
-    // Pin button in the title bar: keeps this window above every other
-    // (per-window, not persisted)
+    // Pin button in the title bar: keeps this window above every other,
+    // and is remembered for the next window when pressed (#312)
     bool alwaysOnTop = false;
 
     // Update-available chip (bottom right): non-blocking, once per

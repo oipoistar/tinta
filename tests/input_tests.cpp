@@ -180,6 +180,7 @@ int runTabDropTests();
 int runTabHoverCardTests();
 int runDeletedTabTests();
 int runFileChangeTests();
+int runPinnedTabTests();
 int runSearchPanelTests();
 int runTableInputTests();
 int runDockedPreviewTests();
@@ -212,6 +213,7 @@ int runSourceHighlightTests(const char* fixture);
 int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--deleted-tab-tests") return runDeletedTabTests();
     if (argc == 2 && std::string(argv[1]) == "--file-change-tests") return runFileChangeTests();
+    if (argc == 2 && std::string(argv[1]) == "--pinned-tab-tests") return runPinnedTabTests();
     if (argc == 2 && std::string(argv[1]) == "--editor-feature-tests") return runEditorFeatureTests();
     if (argc == 2 && std::string(argv[1]) == "--ui-font-tests") return runUiFontTests();
     if (argc == 2 && std::string(argv[1]) == "--print-export-tests") return runPrintExportTests();

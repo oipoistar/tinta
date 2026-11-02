@@ -19,12 +19,14 @@
 #include "i18n.h"
 #include "sheet_ui.h"
 #include "input.h"
+#include "settings.h"
 #include "utils.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cwctype>
 #include <fstream>
 #include <sstream>
 #include <shellapi.h>
@@ -172,6 +174,54 @@ void tabsSeedSession(App& app, const std::vector<std::string>& paths) {
     }
 }
 
+int tabsPinnedCount(const App& app) {
+    int count = 0;
+    while (count < (int)app.tabs.size() && app.tabs[count].pinned) ++count;
+    return count;
+}
+
+namespace {
+
+// The pinned tabs first, each group in its order; the active tab stays so
+void keepPinnedFirst(App& app) {
+    const bool hasActive = app.activeTab >= 0 && app.activeTab < (int)app.tabs.size();
+    const int activeId = hasActive ? app.tabs[app.activeTab].id : 0;
+    std::stable_partition(app.tabs.begin(), app.tabs.end(),
+                          [](const App::DocTab& tab) { return tab.pinned; });
+    for (int i = 0; hasActive && i < (int)app.tabs.size(); ++i) {
+        if (app.tabs[i].id == activeId) app.activeTab = i;
+    }
+}
+
+}  // namespace
+
+void tabSetPinned(App& app, HWND hwnd, int index, bool pinned) {
+    tabsInit(app);
+    if (index < 0 || index >= (int)app.tabs.size() || app.tabs[index].pinned == pinned) return;
+    // Pinned, it goes after the other pinned tabs; unpinned, just after them
+    App::DocTab tab = std::move(app.tabs[index]);
+    app.tabs.erase(app.tabs.begin() + index);
+    tab.pinned = pinned;
+    const int at = tabsPinnedCount(app);
+    app.tabs.insert(app.tabs.begin() + at, std::move(tab));
+    if (app.activeTab == index) {
+        app.activeTab = at;
+    } else {
+        if (app.activeTab > index) --app.activeTab;
+        if (app.activeTab >= at) ++app.activeTab;
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void tabsPinPaths(App& app, const std::vector<std::string>& paths) {
+    for (auto& tab : app.tabs) {
+        for (const auto& path : paths) {
+            if (!tab.path.empty() && _stricmp(tab.path.c_str(), path.c_str()) == 0) tab.pinned = true;
+        }
+    }
+    keepPinnedFirst(app);
+}
+
 void tabActivate(App& app, HWND hwnd, int index) {
     tabsInit(app);
     if (index < 0 || index >= (int)app.tabs.size()) return;
@@ -265,6 +315,7 @@ void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
     if (!utf8Path.empty() && !tab.viewerSource && !std::ifstream(toWide(utf8Path))) return;
     int index = insertBefore < 0 ? (int)app.tabs.size()
                                : std::min(insertBefore, (int)app.tabs.size());
+    index = std::max(index, tabsPinnedCount(app));  // never among the pinned (#312)
     app.tabs.insert(app.tabs.begin() + index, std::move(tab));
     // Keep the old active document attached to its tab until activation
     // parks its editor buffer; insertion may have shifted that tab right.
@@ -463,8 +514,14 @@ struct StripMetrics {
     bool compressed = false;  // chevron shown
     float plusX = 0.0f;
     float chevronX = 0.0f;
-    int firstVisible = 0;
-    int visibleCount = 0;
+    int firstVisible = 0;     // the first of the other tabs in view
+    int visibleCount = 0;     // how many of them
+    // Pinned tabs (#312) lead the row, narrow and always in view; the
+    // others start after them
+    int pinnedCount = 0;
+    float pinnedWidth = 0.0f;
+    float unpinnedLeft = 0.0f;
+    float gap = 0.0f;
 };
 
 StripMetrics stripMetrics(const App& app) {
@@ -475,12 +532,17 @@ StripMetrics stripMetrics(const App& app) {
                           editRailWidth(app) + dpi(app, 8.0f));
     float plusW = dpi(app, 30.0f);
     float chevronW = dpi(app, 32.0f);
-    float gap = dpi(app, 2.0f);
-    int count = std::max((int)app.tabs.size(), 1);
+    float gap = m.gap = dpi(app, 2.0f);
+    m.pinnedCount = tabsPinnedCount(app);
+    m.pinnedWidth = dpi(app, 40.0f);
+    m.unpinnedLeft = m.tabsLeft + (m.pinnedWidth + gap) * (float)m.pinnedCount;
+    const int total = (int)app.tabs.size();
+    const int unpinned = total - m.pinnedCount;
+    int count = std::max(unpinned, 1);
 
     // The tab row ends where the title bar's drag gap begins
     float rowRight = titleDragRect(app).left;
-    float available = std::max(0.0f, rowRight - m.tabsLeft - plusW - dpi(app, 4.0f));
+    float available = std::max(0.0f, rowRight - m.unpinnedLeft - plusW - dpi(app, 4.0f));
     float natural = dpi(app, 190.0f);
     float minimum = dpi(app, 60.0f);
     float per = (available - gap * (count - 1)) / (float)count;
@@ -490,16 +552,41 @@ StripMetrics stripMetrics(const App& app) {
     }
     // Overflow uses the existing switcher rather than covering the drag
     // region or caption buttons. Keep the active tab in the visible range.
-    m.visibleCount = std::min(count, std::max(1, (int)((available + gap) / (minimum + gap))));
-    m.tabWidth = std::min(natural, (available - gap * (m.visibleCount - 1)) / m.visibleCount);
-    m.firstVisible = std::clamp(app.tabFirstVisible, 0, count - m.visibleCount);
-    const int active = std::clamp(app.activeTab, 0, count - 1);
-    if (active < m.firstVisible) m.firstVisible = active;
-    if (active >= m.firstVisible + m.visibleCount) m.firstVisible = active - m.visibleCount + 1;
-    m.tabsRight = m.tabsLeft + (m.tabWidth + gap) * m.visibleCount - gap;
+    m.visibleCount = unpinned <= 0 ? 0 : std::min(count, std::max(1, (int)((available + gap) / (minimum + gap))));
+    const int shown = std::max(m.visibleCount, 1);
+    m.tabWidth = std::max(0.0f, std::min(natural, (available - gap * (shown - 1)) / shown));
+    m.firstVisible = std::clamp(app.tabFirstVisible, m.pinnedCount, std::max(m.pinnedCount, total - m.visibleCount));
+    const int active = std::clamp(app.activeTab, 0, std::max(total - 1, 0));
+    if (active >= m.pinnedCount && m.visibleCount > 0) {
+        if (active < m.firstVisible) m.firstVisible = active;
+        if (active >= m.firstVisible + m.visibleCount) m.firstVisible = active - m.visibleCount + 1;
+    }
+    m.tabsRight = m.visibleCount > 0 ? m.unpinnedLeft + (m.tabWidth + gap) * m.visibleCount - gap
+                                     : m.unpinnedLeft - (m.pinnedCount > 0 ? gap : 0.0f);
     m.plusX = m.tabsRight + dpi(app, 4.0f);
     m.chevronX = m.plusX + plusW + gap;
     return m;
+}
+
+// Where tab i sits in the row as laid out above, and how wide it is
+float tabLeftAt(const StripMetrics& m, int i) {
+    if (i < m.pinnedCount) return m.tabsLeft + (m.pinnedWidth + m.gap) * (float)i;
+    return m.unpinnedLeft + (m.tabWidth + m.gap) * (float)(i - m.firstVisible);
+}
+float tabWidthAt(const StripMetrics& m, int i) { return i < m.pinnedCount ? m.pinnedWidth : m.tabWidth; }
+
+// A pinned tab shows the first letter or digit of its name
+std::wstring pinnedTabLetter(const std::wstring& title) {
+    for (size_t i = 0; i < title.size(); ++i) {
+        wchar_t c = title[i];
+        if (c >= 0xD800 && c <= 0xDBFF && i + 1 < title.size()) return title.substr(i, 2);
+        if (iswalnum(c) || c > 0x2E7F) {
+            std::wstring letter(1, c);
+            CharUpperBuffW(letter.data(), 1);
+            return letter;
+        }
+    }
+    return title.empty() ? std::wstring(L"?") : title.substr(0, 1);
 }
 
 }  // namespace
@@ -511,9 +598,10 @@ int tabDropInsertionIndex(const App& app, POINT clientPoint) {
         clientPoint.x < 0 || clientPoint.x >= captionIslandLeft(app)) {
         return count;
     }
-    const float step = m.tabWidth + dpi(app, 2.0f);
+    // Among the other tabs, never the pinned ones (#312)
+    const float step = m.tabWidth + m.gap;
     for (int i = 0; i < m.visibleCount; ++i) {
-        if (clientPoint.x < m.tabsLeft + step * i + m.tabWidth / 2) return m.firstVisible + i;
+        if (clientPoint.x < m.unpinnedLeft + step * i + m.tabWidth / 2) return m.firstVisible + i;
     }
     return m.firstVisible + m.visibleCount;
 }
@@ -805,21 +893,29 @@ void renderTabStrip(App& app) {
             D2D1::RectF(m.tabsLeft - haloReach, 0, m.tabsRight + haloReach, stripH),
             D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
-        for (int i = m.firstVisible; i < m.firstVisible + m.visibleCount; i++) {
+        // The pinned tabs, all of them, then the others in view (#312)
+        std::vector<int> shown;
+        for (int i = 0; i < m.pinnedCount; i++) shown.push_back(i);
+        for (int i = m.firstVisible; i < m.firstVisible + m.visibleCount; i++) shown.push_back(i);
+        for (int i : shown) {
             // Pulled clear of the strip: the slot stays as a gap while
             // the tab rides along as the ghost card
             if (app.tabDragDetached && (int)i == app.tabDragIndex) continue;
             bool active = (int)i == app.activeTab;
             bool hovered = (int)i == app.hoveredTab;
-            float x = m.tabsLeft + (m.tabWidth + gap) * (i - m.firstVisible);
+            const bool pinned = i < m.pinnedCount;
+            const float width = tabWidthAt(m, i);
+            float x = tabLeftAt(m, i);
             if (app.tabDragging && (int)i == app.tabDragIndex) {
-                // The dragged tab follows the pointer within the row
+                // The dragged tab follows the pointer within the row, a
+                // pinned one among the pinned and another among the others
                 float follow = (float)app.mouseX - app.tabDragOffsetX;
-                x = std::max(m.tabsLeft,
-                             std::min(follow, m.tabsRight - m.tabWidth));
+                float lo = pinned ? m.tabsLeft : m.unpinnedLeft;
+                float hi = pinned ? m.unpinnedLeft - gap : m.tabsRight;
+                x = std::max(lo, std::min(follow, hi - width));
             }
             float top = active ? dpi(app, 6.0f) : dpi(app, 10.0f);
-            D2D1_RECT_F r = D2D1::RectF(x, top, x + m.tabWidth, stripH);
+            D2D1_RECT_F r = D2D1::RectF(x, top, x + width, stripH);
 
             if (active) {
                 // The active tab drops a soft shadow onto its neighbors
@@ -846,13 +942,46 @@ void renderTabStrip(App& app) {
                                 : (app.tabs[i].editMode &&
                                    app.tabs[i].editorDirty);
             bool missing = app.tabs[i].fileMissing && !app.tabs[i].path.empty();
-            bool showClose = (active || hovered) && m.tabWidth >= dpi(app, 48.0f);
+            bool showClose = (active || hovered) && width >= dpi(app, 48.0f);
             // Status dot: orange = unsaved changes, red-grey = the file
             // vanished from disk
             bool showDot = dirty || missing;
             D2D1_COLOR_F dotColor =
                 dirty ? D2D1::ColorF(0.94f, 0.56f, 0.12f)
                       : D2D1::ColorF(0.74f, 0.36f, 0.34f);
+
+            if (pinned) {
+                // A pinned tab is its name's first letter, centred, its dot
+                // in the corner and no close button; its card names it
+                const std::wstring letter = pinnedTabLetter(app.tabs[i].title);
+                IDWriteTextLayout* layout = nullptr;
+                if (app.folderBrowserFormat) {
+                    app.dwriteFactory->CreateTextLayout(letter.c_str(), (UINT32)letter.size(),
+                                                        app.folderBrowserFormat, width, stripH, &layout);
+                }
+                if (layout) {
+                    DWRITE_TEXT_METRICS tm{};
+                    layout->GetMetrics(&tm);
+                    app.brush->SetColor(active ? text : muted);
+                    app.renderTarget->DrawTextLayout(
+                        D2D1::Point2F(r.left + (width - tm.width) * 0.5f,
+                                      top + (stripH - top - tm.height) * 0.5f),
+                        layout, app.brush);
+                    layout->Release();
+                }
+                if (showDot) {
+                    app.brush->SetColor(dotColor);
+                    float dotR = dpi(app, 3.0f);
+                    app.renderTarget->FillEllipse(
+                        D2D1::Ellipse(D2D1::Point2F(r.right - dpi(app, 8.0f), top + dpi(app, 8.0f)), dotR, dotR),
+                        app.brush);
+                }
+                App::TabHit hit;
+                hit.rect = r;
+                hit.index = (int)i;
+                app.tabHits.push_back(hit);
+                continue;
+            }
 
             // Label, ellipsis-trimmed, leaving room for the close/dot
             float labelRight = r.right - dpi(app, showClose ? 30.0f : 20.0f);
@@ -1512,6 +1641,8 @@ bool tabStripMouseDown(App& app, HWND hwnd, int x, int y, bool middle) {
                              app.alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
                              0, 0, 0, 0,
                              SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                // Kept for the next window, as pressed (#312)
+                persistAlwaysOnTop(app);
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return true;
@@ -1567,6 +1698,7 @@ enum TabMenuItem {
     TM_CLOSE_OTHERS,
     TM_CLOSE_LEFT,
     TM_CLOSE_RIGHT,
+    TM_PIN,
     TM_COPY_PATH,
     TM_REVEAL,
     TM_ITEM_COUNT,
@@ -1583,6 +1715,7 @@ const TabMenuEntry TAB_MENU[TM_ITEM_COUNT] = {
     { "tab.menu.close_others", L"",       false },
     { "tab.menu.close_left",   L"",       false },
     { "tab.menu.close_right",  L"",       true  },
+    { "tab.menu.pin",          L"",       true  },
     { "tab.menu.copy_path",    L"",       false },
     { "ctx.reveal",            L"",       false },
 };
@@ -1605,14 +1738,23 @@ float tabMenuTotalHeight(const App& app) {
     return tabMenuItemTop(app, TM_ITEM_COUNT) + tabMenuPadding(app);
 }
 
+// A tab in [from, to) that the sweeps would close: pinned ones stay (#312)
+bool sweepable(const App& app, int from, int to, int skip) {
+    for (int i = std::max(from, 0); i < std::min(to, (int)app.tabs.size()); i++) {
+        if (i != skip && !app.tabs[i].pinned) return true;
+    }
+    return false;
+}
+
 bool tabMenuItemEnabled(const App& app, int item) {
     int index = app.tabMenuIndex;
     if (index < 0 || index >= (int)app.tabs.size()) return false;
     switch (item) {
         case TM_CLOSE:        return true;
-        case TM_CLOSE_OTHERS: return app.tabs.size() > 1;
-        case TM_CLOSE_LEFT:   return index > 0;
-        case TM_CLOSE_RIGHT:  return index + 1 < (int)app.tabs.size();
+        case TM_CLOSE_OTHERS: return sweepable(app, 0, (int)app.tabs.size(), index);
+        case TM_CLOSE_LEFT:   return sweepable(app, 0, index, index);
+        case TM_CLOSE_RIGHT:  return sweepable(app, index + 1, (int)app.tabs.size(), index);
+        case TM_PIN:          return true;
         case TM_COPY_PATH:
         case TM_REVEAL:
             return !(index == app.activeTab ? app.currentFile : app.tabs[index].path).empty();
@@ -1645,12 +1787,14 @@ void tabBulkCloseStep(App& app, HWND hwnd) {
             app.tabBulkCloseMode = 0;
             return;
         }
+        // Everything left of the kept tab, one by one, then everything to
+        // its right; pinned tabs stay (#312)
         int victim = -1;
-        if (app.tabBulkCloseMode != 3 && keep > 0) {
-            victim = 0;  // everything left of the kept tab, one by one
-        } else if (app.tabBulkCloseMode != 2 &&
-                   keep + 1 < (int)app.tabs.size()) {
-            victim = keep + 1;  // everything to its right
+        for (int i = 0; app.tabBulkCloseMode != 3 && i < keep && victim < 0; i++) {
+            if (!app.tabs[i].pinned) victim = i;
+        }
+        for (int i = keep + 1; app.tabBulkCloseMode != 2 && i < (int)app.tabs.size() && victim < 0; i++) {
+            if (!app.tabs[i].pinned) victim = i;
         }
         if (victim < 0) {
             app.tabBulkCloseMode = 0;
@@ -1756,7 +1900,8 @@ void renderTabMenu(App& app) {
         textColor.a = (enabled ? 1.0f : 0.35f) * anim;
         app.brush->SetColor(textColor);
         float textY = top + (itemH - dpi(app, 18.0f)) / 2;
-        const wchar_t* label = tr(app, TAB_MENU[i].key);
+        const bool unpin = i == TM_PIN && app.tabs[app.tabMenuIndex].pinned;
+        const wchar_t* label = tr(app, unpin ? "tab.menu.unpin" : TAB_MENU[i].key);
         app.renderTarget->DrawText(
             label, (UINT32)wcslen(label), format,
             D2D1::RectF(x + inset, textY, x + w - inset, top + itemH),
@@ -1807,14 +1952,16 @@ bool tabMenuMouseDown(App& app, HWND hwnd, int x, int y) {
             if (tabMenuItemEnabled(a, TM_CLOSE)) tabCloseIndex(a, hwnd, index);
             break;
         case TM_CLOSE_OTHERS:
-            if (a.tabs.size() > 1) tabBulkCloseBegin(a, hwnd, 1, index);
+            if (tabMenuItemEnabled(a, TM_CLOSE_OTHERS)) tabBulkCloseBegin(a, hwnd, 1, index);
             break;
         case TM_CLOSE_LEFT:
-            if (index > 0) tabBulkCloseBegin(a, hwnd, 2, index);
+            if (tabMenuItemEnabled(a, TM_CLOSE_LEFT)) tabBulkCloseBegin(a, hwnd, 2, index);
             break;
         case TM_CLOSE_RIGHT:
-            if (index + 1 < (int)a.tabs.size())
-                tabBulkCloseBegin(a, hwnd, 3, index);
+            if (tabMenuItemEnabled(a, TM_CLOSE_RIGHT)) tabBulkCloseBegin(a, hwnd, 3, index);
+            break;
+        case TM_PIN:
+            tabSetPinned(a, hwnd, index, !a.tabs[index].pinned);
             break;
         case TM_COPY_PATH:
             copyFilePath(a, hwnd, path);
@@ -2024,11 +2171,17 @@ void tabDragMove(App& app, HWND hwnd, int x, int y) {
         InvalidateRect(hwnd, nullptr, FALSE);
     }
 
-    // Reorder: the dragged tab claims the slot under the pointer
+    // Reorder: the dragged tab claims the slot under the pointer, a pinned
+    // tab among the pinned and another among the others (#312)
     StripMetrics m = stripMetrics(app);
-    float gap = dpi(app, 2.0f);
-    int slot = m.firstVisible + (int)(((float)x - m.tabsLeft) / (m.tabWidth + gap));
-    slot = std::clamp(slot, m.firstVisible, m.firstVisible + m.visibleCount - 1);
+    int slot;
+    if (app.tabs[app.tabDragIndex].pinned) {
+        slot = (int)(((float)x - m.tabsLeft) / (m.pinnedWidth + m.gap));
+        slot = std::clamp(slot, 0, std::max(m.pinnedCount - 1, 0));
+    } else {
+        slot = m.firstVisible + (int)(((float)x - m.unpinnedLeft) / (m.tabWidth + m.gap));
+        slot = std::clamp(slot, m.firstVisible, m.firstVisible + std::max(m.visibleCount, 1) - 1);
+    }
     if (slot != app.tabDragIndex) {
         App::DocTab moved = std::move(app.tabs[app.tabDragIndex]);
         app.tabs.erase(app.tabs.begin() + app.tabDragIndex);
