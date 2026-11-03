@@ -21,6 +21,7 @@ enum Flag : uint16_t {
     Superscript = 8,
     Subscript = 16,
     Underline = 32,
+    Missing = 64,  // "@key?": a key the library lacks, drawn in the warning colour
 };
 
 // A stretch of output text in one format

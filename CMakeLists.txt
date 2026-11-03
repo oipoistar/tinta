@@ -788,6 +788,14 @@ if(BUILD_TESTING)
     target_compile_definitions(css_tests PRIVATE
         TINTA_CSS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/theme-css")
     add_test(NAME css_engine COMMAND css_tests)
+
+    # Scholar's CSL processor and XML reader against the bundled styles
+    # (docs/specs/scholar.md); a console program, no window
+    add_executable(csl_tests tests/csl_tests.cpp
+        src/xml.cpp src/bib.cpp src/json.cpp src/csl_text.cpp src/csl_style.cpp src/csl_render.cpp src/csl_process.cpp)
+    target_include_directories(csl_tests PRIVATE include src)
+    target_compile_definitions(csl_tests PRIVATE TINTA_CSL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources/csl")
+    add_test(NAME csl_processor COMMAND csl_tests)
 endif()
 
 # Install
