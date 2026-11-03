@@ -1,0 +1,45 @@
+/* Ink: one sheet that follows Windows between light and dark */
+@import "ink-base.css";
+@import url("ink-print.css") print;
+@font-face {
+  font-family: "Literata";
+  src: url("fonts/Literata.ttf") format("truetype"), local("Literata Regular");
+  font-weight: 200 900;
+  font-style: normal;
+}
+
+:root {
+  color-scheme: light dark;
+  accent-color: oklch(55% 0.15 250);
+  --ink: light-dark(#1f2328, #d8dee9);
+  --paper: light-dark(#fbf8f1, #1b1d22);
+}
+body {
+  color: var(--ink);
+  background: var(--paper);
+  font: 17px/1.65 "Literata", "Source Han Serif SC", serif;
+  max-width: 44em;
+}
+h1, h2 { font-family: "Inter", system-ui; letter-spacing: -0.01em; }
+h2 { border-bottom: 1px solid color-mix(in oklab, var(--ink) 15%, transparent); }
+a { color: var(--accent, #3366cc); text-underline-offset: 3px; }
+code { background: none; color: light-dark(#b35900, #f0a35e); }
+pre { border-radius: 8px; padding: 12px 16px; }
+blockquote { border-left: 3px solid #b35900; font-style: italic; }
+ul ul > li::marker { content: "- "; }
+tr:nth-child(even) td { background: color-mix(in oklab, var(--ink) 4%, transparent); }
+.callout[data-callout="warning"] { border-color: #d97706; }
+.token.keyword { color: #a626a4; }
+
+@media (prefers-color-scheme: dark) {
+  img { opacity: 0.9; }
+}
+@media (max-width: 600px) {
+  body { font-size: 15px; }
+}
+@supports (color: oklch(50% 0.1 200)) {
+  mark { background-color: oklch(92% 0.08 95); }
+}
+@supports (display: grid) {
+  table { color: red; }
+}

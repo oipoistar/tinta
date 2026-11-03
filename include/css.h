@@ -121,6 +121,7 @@ struct ComputedStyle {
     std::vector<FontFeature> fontFeatures;    // font-feature-settings and font-variant-*
     std::vector<FontFeature> fontVariations;  // font-variation-settings
     float lineHeight = 0;                 // px; 0 is normal
+    float lineHeightFactor = 0;           // a unitless line-height, which children inherit as the factor; else 0
     float letterSpacing = 0;              // px
     TextAlign textAlign = TextAlign::Start;
     float textIndent = 0;                 // px
@@ -152,8 +153,9 @@ struct ComputedStyle {
     // A custom property read as a colour (`--ui-accent: #3366cc`)
     std::optional<Color> customColor(std::string_view name) const;
 
-    // Shared, copy-on-write, per context
+    // Shared, copy-on-write, per context; sorted by name
     std::shared_ptr<const std::vector<std::pair<std::string, std::string>>> customs;
+    bool dark = false;  // the media it was computed for, which light-dark() in customColor() follows
 };
 
 // --- Sheets --------------------------------------------------------------------
@@ -211,6 +213,7 @@ struct Element {
     int index = 0, count = 0;          // 1-based place among element siblings, and their number
     int typeIndex = 0, typeCount = 0;  // the same among siblings with this tag
     bool checked = false;              // a done task's checkbox, or its list item
+    bool empty = false;                // no children and no text, for :empty
 };
 
 enum class Pseudo : uint8_t { Before, After, Marker, Selection };

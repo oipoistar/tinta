@@ -1,0 +1,3 @@
+/* Ink on paper: imported for print only */
+body { font-size: 11pt !important; }
+a::after { content: " (" attr(href) ")"; }
