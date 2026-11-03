@@ -1162,6 +1162,14 @@ static void layoutMathBlock(App& app, const ElementPtr& elem, float& y,
     }
     float scale = app.contentScale * app.zoomFactor;
     y += 6 * scale;
+    // Its \label names, {#eq:id} among them, are places @eq:id and
+    // #eq:id links scroll to (Scholar)
+    for (size_t at = elem->text.find("\\label{"); at != std::string::npos;
+         at = elem->text.find("\\label{", at + 7)) {
+        const size_t close = elem->text.find('}', at + 7);
+        if (close == std::string::npos) break;
+        app.footnoteAnchors[elem->text.substr(at + 7, close - at - 7)] = y;
+    }
     float w = mathBoxWidth(box);
     float x = indent + std::max(0.0f, (maxWidth - w) / 2);
     // Its \tag's number at the line's right (#314). The equation moves off
@@ -2795,6 +2803,8 @@ static bool isInlineElement(ElementType type) {
         case ElementType::Strikethrough:
         case ElementType::Underline:
         case ElementType::MathInline:
+        case ElementType::Citation:
+        case ElementType::CrossReference:
             return true;
         case ElementType::MathDisplay:
             // Tight lists expose $$...$$ directly; route it through inline layout.
@@ -3780,6 +3790,29 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
         case ElementType::Heading:
             layoutHeading(app, elem, y, indent, maxWidth);
             break;
+        case ElementType::Figure:
+            // A numbered figure or captioned table (Scholar): its id is a
+            // place a reference scrolls to
+            if (!elem->title.empty()) app.footnoteAnchors[elem->title] = y;
+            for (const auto& child : elem->children) {
+                // The picture itself, with its caption close under it
+                // rather than past a paragraph's empty last line
+                if (child->type == ElementType::Paragraph && child->children.size() == 1 &&
+                    child->children[0]->type == ElementType::Image) {
+                    layoutImage(app, child->children[0], y, indent, maxWidth);
+                    continue;
+                }
+                layoutElement(app, child, y, indent, maxWidth);
+            }
+            break;
+        case ElementType::Caption: {
+            D2D1_COLOR_F muted = app.theme.text;
+            muted.a *= 0.8f;
+            layoutInlineContent(app, elem->children, indent, y, maxWidth, app.textFormat, muted);
+            app.docText += L"\n\n";
+            y += 14 * app.contentScale * app.zoomFactor;
+            break;
+        }
         case ElementType::CodeBlock:
             layoutCodeBlock(app, elem, y, indent, maxWidth);
             break;

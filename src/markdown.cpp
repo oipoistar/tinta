@@ -1027,7 +1027,9 @@ static size_t heightOf(const Element* elem) {
 // whole.
 class SiblingRun {
 public:
-    SiblingRun(const ElementPtr& parent, size_t begin, size_t end)
+    // breaksAsSpaces: a soft line break reads as the space it stands for
+    // (a citation may run onto the next line), still moved whole
+    SiblingRun(const ElementPtr& parent, size_t begin, size_t end, bool breaksAsSpaces = false)
         : parent_(parent), begin_(begin) {
         if (end == begin + 1 && parent->children[begin]->type == ElementType::Text) {
             single_ = &parent->children[begin]->text;  // the usual case: no copy
@@ -1037,6 +1039,7 @@ public:
         for (size_t j = begin; j < end; ++j) {
             const auto& part = parent->children[j];
             if (part->type == ElementType::Text) combined_ += part->text;
+            else if (breaksAsSpaces && part->type == ElementType::SoftBreak) combined_ += ' ';
             else combined_ += '\x01';
             offsets_.push_back(combined_.size());
         }
@@ -1256,6 +1259,79 @@ static void splitWikiLinks(const ElementPtr& parent) {
         if (!any) {
             rebuilt.insert(rebuilt.end(), parent->children.begin() + begin,
                            parent->children.begin() + i);
+            continue;
+        }
+        changed = true;
+        run.append(cursor, text.size(), parent, rebuilt);
+    }
+    if (changed) parent->children = std::move(rebuilt);
+}
+
+// Citations and cross-references (Scholar, docs/specs/scholar.md): where the
+// finder parseDocument hands over says a run of text cites, those bytes
+// become a Citation or CrossReference holding the Markdown as written;
+// scholar.cpp gives it what it reads as. Runs after the wiki links, so
+// [[a@b]] stays a link, and before file references and emoji shortcodes,
+// which would take @tbl:x.csv or :100: apart.
+static void splitCitations(const ElementPtr& parent, const CitationFinder& find) {
+    switch (parent->type) {
+        case ElementType::Code:
+        case ElementType::CodeBlock:
+        case ElementType::MermaidDiagram:
+        case ElementType::Link:
+        case ElementType::Image:
+        case ElementType::MathInline:
+        case ElementType::MathDisplay:
+        case ElementType::HtmlBlock:
+            return;
+        default:
+            break;
+    }
+    auto inRun = [](ElementType type) {
+        return type == ElementType::Text || type == ElementType::SoftBreak || isInlineHtmlSpan(type);
+    };
+    std::vector<ElementPtr> rebuilt;
+    bool changed = false;
+    for (size_t i = 0; i < parent->children.size();) {
+        auto child = parent->children[i];
+        if (!inRun(child->type)) {
+            splitCitations(child, find);
+            rebuilt.push_back(child);
+            ++i;
+            continue;
+        }
+        size_t begin = i;
+        bool anyText = false;
+        while (i < parent->children.size() && inRun(parent->children[i]->type)) {
+            if (parent->children[i]->type == ElementType::Text) anyText = true;
+            else if (parent->children[i]->type != ElementType::SoftBreak) splitCitations(parent->children[i], find);
+            ++i;
+        }
+        SiblingRun run(parent, begin, i, true);
+        const std::string& text = run.text();
+        std::vector<CitationSpan> spans;
+        if (anyText && text.find('@') != std::string::npos) spans = find(text);
+        size_t cursor = 0;
+        bool any = false;
+        for (const auto& span : spans) {
+            if (span.begin < cursor || span.end <= span.begin || span.end > text.size()) continue;
+            std::string written = text.substr(span.begin, span.end - span.begin);
+            if (written.find('\x01') != std::string::npos) continue;  // spans an element: not ours
+            any = true;
+            run.append(cursor, span.begin, parent, rebuilt);
+            auto cite = std::make_shared<Element>(span.crossReference ? ElementType::CrossReference
+                                                                       : ElementType::Citation);
+            cite->parent = parent.get();
+            cite->text = written;
+            cite->children.push_back(makeTextElement(written, cite.get()));
+            // The parts it spans go with it: their bytes are in its text
+            std::vector<ElementPtr> spanned;
+            run.append(span.begin, span.end, cite, spanned);
+            rebuilt.push_back(std::move(cite));
+            cursor = span.end;
+        }
+        if (!any) {
+            rebuilt.insert(rebuilt.end(), parent->children.begin() + begin, parent->children.begin() + i);
             continue;
         }
         changed = true;
@@ -1581,10 +1657,177 @@ static void splitFileRefs(const ElementPtr& parent) {
 
 } // namespace
 
+// --- pandoc-crossref figures, table captions and equation ids (Scholar,
+// docs/specs/scholar.md). Numbers come later, in document order, from the
+// front matter's words (scholar.cpp) ---
+
+// A copy of an element and everything under it, owned by `parent`
+static ElementPtr cloneElement(const ElementPtr& elem, Element* parent) {
+    auto copy = std::make_shared<Element>(*elem);
+    copy->parent = parent;
+    for (auto& child : copy->children) child = cloneElement(child, copy.get());
+    return copy;
+}
+
+// Text that is nothing but {#prefix:name ...}, maybe with spaces around:
+// the id, else empty. Attributes after the id are pandoc's and ignored
+static std::string attributeId(const std::string& text, const char* prefix) {
+    size_t begin = text.find_first_not_of(" \t\r\n");
+    size_t end = text.find_last_not_of(" \t\r\n");
+    if (begin == std::string::npos || text[begin] != '{' || text[end] != '}') return {};
+    std::string inner = text.substr(begin + 1, end - begin - 1);
+    const std::string head = std::string("#") + prefix + ":";
+    if (inner.compare(0, head.size(), head) != 0) return {};
+    size_t stop = inner.find_first_of(" \t}", 1);
+    std::string id = inner.substr(1, stop == std::string::npos ? std::string::npos : stop - 1);
+    return id.size() > head.size() - 1 ? id : std::string();
+}
+
+// Drops a trailing {#prefix:name} from the end of the last text child;
+// returns the id, else empty
+static std::string takeTrailingId(const ElementPtr& block, const char* prefix) {
+    for (size_t i = block->children.size(); i-- > 0;) {
+        auto& last = block->children[i];
+        if (last->type == ElementType::SoftBreak) continue;
+        if (last->type != ElementType::Text) return {};
+        size_t open = last->text.rfind('{');
+        if (open == std::string::npos) return {};
+        std::string id = attributeId(last->text.substr(open), prefix);
+        if (id.empty()) return {};
+        last->text.erase(open);
+        while (!last->text.empty() && (last->text.back() == ' ' || last->text.back() == '\t')) last->text.pop_back();
+        if (last->text.empty()) block->children.erase(block->children.begin() + i);
+        return id;
+    }
+    return {};
+}
+
+// "Table: caption" or ": caption" (pandoc), the marker dropped
+static bool takeTableCaption(const ElementPtr& paragraph) {
+    if (paragraph->type != ElementType::Paragraph || paragraph->children.empty()) return false;
+    auto& first = paragraph->children.front();
+    if (first->type != ElementType::Text) return false;
+    std::string& text = first->text;
+    size_t skip = 0;
+    if (text.compare(0, 6, "Table:") == 0) skip = 6;
+    else if (text.size() > 2 && text[0] == ':' && text[1] == ' ') skip = 1;
+    else return false;
+    while (skip < text.size() && text[skip] == ' ') ++skip;
+    text.erase(0, skip);
+    if (text.empty()) paragraph->children.erase(paragraph->children.begin());
+    return true;
+}
+
+static bool startsTableCaption(const ElementPtr& block) {
+    if (block->type != ElementType::Paragraph || block->children.empty()) return false;
+    const auto& first = block->children.front();
+    return first->type == ElementType::Text &&
+           (first->text.compare(0, 6, "Table:") == 0 ||
+            (first->text.size() > 2 && first->text[0] == ':' && first->text[1] == ' '));
+}
+
+static ElementPtr makeCaption(const ElementPtr& paragraph, Element* parent) {
+    auto caption = std::make_shared<Element>(ElementType::Caption);
+    caption->parent = parent;
+    caption->sourceOffset = paragraph->sourceOffset;
+    caption->children = std::move(paragraph->children);
+    for (auto& child : caption->children) child->parent = caption.get();
+    return caption;
+}
+
+static void attachCaptions(const ElementPtr& parent) {
+    switch (parent->type) {
+        case ElementType::Document:
+        case ElementType::BlockQuote:
+        case ElementType::List:
+        case ElementType::ListItem:
+        case ElementType::Footnotes:
+        case ElementType::FootnoteDefinition:
+            break;
+        default:
+            return;
+    }
+    std::vector<ElementPtr> rebuilt;
+    bool changed = false;
+    auto& kids = parent->children;
+    for (size_t i = 0; i < kids.size(); ++i) {
+        const ElementPtr& child = kids[i];
+        attachCaptions(child);
+        // $$...$$ {#eq:id}: the id names the equation
+        if (child->type == ElementType::Paragraph) {
+            for (size_t k = 0; k + 1 < child->children.size(); ++k) {
+                if (child->children[k]->type != ElementType::MathDisplay) continue;
+                size_t next = k + 1;
+                while (next < child->children.size() && child->children[next]->type == ElementType::SoftBreak) ++next;
+                if (next >= child->children.size() || child->children[next]->type != ElementType::Text) continue;
+                std::string id = attributeId(child->children[next]->text, "eq");
+                if (id.empty()) continue;
+                child->children[k]->title = id;
+                child->children.erase(child->children.begin() + k + 1, child->children.begin() + next + 1);
+            }
+        }
+        // ![caption](image){#fig:id}, alone in its paragraph
+        if (child->type == ElementType::Paragraph) {
+            std::vector<ElementPtr> parts;
+            for (const auto& part : child->children) {
+                if (part->type == ElementType::SoftBreak) continue;
+                if (part->type == ElementType::Text && part->text.find_first_not_of(" \t") == std::string::npos) continue;
+                parts.push_back(part);
+            }
+            std::string id = parts.size() == 2 && parts[0]->type == ElementType::Image &&
+                                     parts[1]->type == ElementType::Text
+                                 ? attributeId(parts[1]->text, "fig")
+                                 : std::string();
+            if (!id.empty()) {
+                auto figure = std::make_shared<Element>(ElementType::Figure);
+                figure->parent = parent.get();
+                figure->language = "fig";
+                figure->title = id;
+                figure->sourceOffset = child->sourceOffset;
+                child->children = {parts[0]};
+                child->parent = figure.get();
+                auto caption = std::make_shared<Element>(ElementType::Caption);
+                caption->parent = figure.get();
+                for (const auto& alt : parts[0]->children) caption->children.push_back(cloneElement(alt, caption.get()));
+                figure->children = {child, caption};
+                rebuilt.push_back(figure);
+                changed = true;
+                continue;
+            }
+        }
+        // A table with a caption paragraph right before or after it
+        const bool captionFirst = startsTableCaption(child) && i + 1 < kids.size() &&
+                                  kids[i + 1]->type == ElementType::Table;
+        const bool captionAfter = child->type == ElementType::Table && i + 1 < kids.size() &&
+                                  startsTableCaption(kids[i + 1]);
+        if (captionFirst || captionAfter) {
+            const ElementPtr& paragraph = captionFirst ? child : kids[i + 1];
+            const ElementPtr& table = captionFirst ? kids[i + 1] : child;
+            auto figure = std::make_shared<Element>(ElementType::Figure);
+            figure->parent = parent.get();
+            figure->language = "tbl";
+            takeTableCaption(paragraph);
+            figure->title = takeTrailingId(paragraph, "tbl");
+            auto caption = makeCaption(paragraph, figure.get());
+            table->parent = figure.get();
+            if (captionFirst) figure->children = {caption, table};
+            else figure->children = {table, caption};
+            figure->sourceOffset = captionFirst ? paragraph->sourceOffset : table->sourceOffset;
+            rebuilt.push_back(figure);
+            changed = true;
+            ++i;
+            continue;
+        }
+        rebuilt.push_back(child);
+    }
+    if (changed) parent->children = std::move(rebuilt);
+}
+
 MarkdownParser::MarkdownParser() = default;
 MarkdownParser::~MarkdownParser() = default;
 
-static ParseResult parseCore(const std::string& markdown, FootnoteData* notes) {
+static ParseResult parseCore(const std::string& markdown, FootnoteData* notes,
+                             const CitationFinder& citations) {
     ParseResult result;
 
     auto startTime = std::chrono::high_resolution_clock::now();
@@ -1635,9 +1878,11 @@ static ParseResult parseCore(const std::string& markdown, FootnoteData* notes) {
     splitInlineExtensions(ctx.root);
     if (ctx.escapedSigns) restoreEscapedSigns(ctx.root);
     splitWikiLinks(ctx.root);
+    if (citations) splitCitations(ctx.root, citations);
     splitFileRefs(ctx.root);
     splitEmojiShortcodes(ctx.root);
     detectGitHubAlerts(ctx.root);
+    attachCaptions(ctx.root);
     result.root = ctx.root;
     result.success = true;
     return result;
@@ -1645,9 +1890,9 @@ static ParseResult parseCore(const std::string& markdown, FootnoteData* notes) {
 
 ParseResult MarkdownParser::parse(const std::string& markdown) {
     auto notes = extractFootnotes(markdown);
-    auto result = parseCore(notes.source, &notes);
+    auto result = parseCore(notes.source, &notes, m_citations);
     if (result.success) appendFootnotes(result.root, notes, [&](const std::string& body) {
-        return parseCore(body, nullptr); // Nested footnote references stay literal.
+        return parseCore(body, nullptr, m_citations); // Nested footnote references stay literal.
     });
     return result;
 }

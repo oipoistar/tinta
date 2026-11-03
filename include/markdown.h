@@ -4,6 +4,7 @@
 #include "types.h"
 #include "frontmatter.h"
 #include <string>
+#include <string_view>
 #include <vector>
 #include <memory>
 #include <functional>
@@ -51,7 +52,23 @@ enum class ElementType {
     Underline,     // inline HTML <ins> or <u> (#263)
     // LaTeX math spans (#80): text carries the raw TeX source
     MathInline,    // $...$
-    MathDisplay,   // $$...$$ (rendered as a centered block)
+    MathDisplay,   // $$...$$ (rendered as a centered block); title holds
+                   // its {#eq:id}
+    // Scholar (docs/specs/scholar.md). A figure (language "fig": the image's
+    // paragraph, then its Caption) or a captioned table (language "tbl":
+    // the Table and its Caption in the order written); title is its id,
+    // level its number once given. A Caption holds its label and text
+    Figure,
+    Caption,
+    // A citation, or a reference to a figure, table or equation: text is
+    // the Markdown as written, children what it reads as, url where a
+    // click goes
+    Citation,
+    CrossReference,
+    // The references after the last block: BibEntry children, each with
+    // its anchor in title (ref-key) and its number column in text
+    Bibliography,
+    BibEntry,
 };
 
 // Forward declaration
@@ -91,7 +108,18 @@ struct ParseResult {
     bool success = false;
     std::string error;
     size_t parseTimeUs = 0; // microseconds
+    // What Scholar could not resolve (docs/specs/scholar.md), a line each
+    std::vector<std::string> problems;
 };
+
+// Where a run of inline text cites (Scholar, docs/specs/scholar.md): the
+// bytes [begin, end) become a Citation, or a CrossReference for @fig:id
+// and friends
+struct CitationSpan {
+    size_t begin = 0, end = 0;
+    bool crossReference = false;
+};
+using CitationFinder = std::function<std::vector<CitationSpan>(std::string_view text)>;
 
 // Markdown parser using MD4C
 class MarkdownParser {
@@ -101,6 +129,9 @@ public:
 
     ParseResult parse(const std::string& markdown);
     ParseResult parseFile(const std::string& path);
+
+    // Set by parseDocument for a document that may cite; empty finds none
+    void setCitationFinder(CitationFinder finder) { m_citations = std::move(finder); }
 
     // Options
     void setTabWidth(int width) { m_tabWidth = width; }
@@ -117,6 +148,7 @@ private:
     bool m_tables = true;
     bool m_strikethrough = true;
     bool m_taskLists = true;
+    CitationFinder m_citations;
 };
 
 // File-reference extension gate (#127/#141/#162): true when the path

@@ -1,4 +1,7 @@
 #include "document.h"
+#include "scholar.h"
+
+#include <windows.h>
 
 #include <chrono>
 #include <memory>
@@ -261,6 +264,15 @@ static void insertProperties(qmd::ParseResult& result, const std::string& conten
     result.root->children.insert(result.root->children.begin(), std::move(props));
 }
 
+// Figures, tables and equations numbered, citations and references
+// formatted (docs/specs/scholar.md); what went wrong rides along
+static void finishScholar(qmd::ParseResult& result, const std::wstring& path) {
+    if (!result.success || !result.root) return;
+    const size_t slash = path.find_last_of(L"\\/");
+    const std::wstring folder = slash == std::wstring::npos ? std::wstring() : path.substr(0, slash);
+    result.problems = scholar::process(result.root, folder);
+}
+
 qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
                                const std::string& content,
                                std::string_view path) {
@@ -270,12 +282,17 @@ qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
         return createPlainTextDocument(content, plainTextLanguage(path));
     }
     std::string cleaned;
+    qmd::ParseResult result;
     if (blankPreamble(content, cleaned)) {
-        auto result = parser.parse(cleaned);
+        result = parser.parse(cleaned);
         insertProperties(result, content);
-        return result;
+    } else {
+        result = parser.parse(content);
     }
-    return parser.parse(content);
+    std::wstring wide(path.size(), L'\0');
+    wide.resize((size_t)MultiByteToWideChar(CP_UTF8, 0, path.data(), (int)path.size(), wide.data(), (int)wide.size()));
+    finishScholar(result, wide);
+    return result;
 }
 
 qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
@@ -287,10 +304,13 @@ qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
         return createPlainTextDocument(content, plainTextLanguage(path));
     }
     std::string cleaned;
+    qmd::ParseResult result;
     if (blankPreamble(content, cleaned)) {
-        auto result = parser.parse(cleaned);
+        result = parser.parse(cleaned);
         insertProperties(result, content);
-        return result;
+    } else {
+        result = parser.parse(content);
     }
-    return parser.parse(content);
+    finishScholar(result, std::wstring(path));
+    return result;
 }

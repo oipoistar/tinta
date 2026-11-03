@@ -1250,6 +1250,18 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
             break;
         case ElementType::Properties:
             break;  // frontmatter stays out of the export, like print
+        case ElementType::Figure:
+            ctx.out += elem->language == "tbl" ? "<figure class=\"table\"" : "<figure";
+            if (!elem->title.empty()) ctx.out += " id=\"" + htmlEscape(elem->title) + "\"";
+            ctx.out += ">\n";
+            walkChildren(ctx, elem);
+            ctx.out += "</figure>\n";
+            break;
+        case ElementType::Caption:
+            ctx.out += "<figcaption>";
+            walkChildren(ctx, elem);
+            ctx.out += "</figcaption>\n";
+            break;
         case ElementType::Paragraph:
             ctx.out += elem->language == "footnote-backlinks" ? "<p class=\"footnote-backlinks\">" : "<p>";
             walkChildren(ctx, elem);
@@ -1577,6 +1589,11 @@ std::string themeCss(const App& app, const std::string& bodyFont,
         }
     }
     css += "table{border-collapse:collapse;margin:1em 0;}";
+    // Scholar's numbered figures and captioned tables
+    D2D1_COLOR_F captionText = t.text;
+    captionText.a = 0.8f;
+    css += "figure{margin:1em 0;}figure p{margin:0;}figure table{margin:.4em 0;}"
+           "figcaption{color:" + colorCss(captionText) + ";margin:.4em 0 1em;}";
     css += "th,td{border:1px solid " + colorCss(border) +
            ";padding:6px 13px;}";
     css += "th{background:" + colorCss(t.codeBackground) + ";}";

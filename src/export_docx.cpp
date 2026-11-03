@@ -1057,6 +1057,8 @@ bool isInlineElement(ElementType type) {
         case ElementType::Strikethrough:
         case ElementType::Underline:
         case ElementType::MathInline:
+        case ElementType::Citation:
+        case ElementType::CrossReference:
             return true;
         default:
             return false;
@@ -1321,6 +1323,15 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
         case ElementType::Paragraph:
             emitParagraph(ctx, elem, props);
             break;
+        case ElementType::Figure:
+            for (const auto& child : elem->children) walkBlocks(ctx, child, props, listDepth);
+            break;
+        case ElementType::Caption: {
+            ParaProps caption = props;
+            caption.styleId = "Caption";
+            emitParagraph(ctx, elem, caption);
+            break;
+        }
         case ElementType::Heading: {
             int level = std::max(1, std::min(6, elem->level));
             ParaProps heading = props;
@@ -1588,6 +1599,11 @@ std::string stylesXml(const DocxCtx& ctx) {
            ctx.codeBgHex + "\"/><w:spacing w:after=\"160\"/></w:pPr>"
            "<w:rPr>" + rFontsXml(ctx.monoFont, ctx.monoEastAsia) +
            "<w:sz w:val=\"21\"/><w:szCs w:val=\"21\"/></w:rPr></w:style>";
+    // Figure and table captions (Scholar), as Word names its own
+    xml += "<w:style w:type=\"paragraph\" w:styleId=\"Caption\">"
+           "<w:name w:val=\"caption\"/><w:basedOn w:val=\"Normal\"/>"
+           "<w:pPr><w:spacing w:after=\"200\"/></w:pPr>"
+           "<w:rPr><w:i/><w:sz w:val=\"20\"/><w:szCs w:val=\"20\"/></w:rPr></w:style>";
     xml += "<w:style w:type=\"character\" w:styleId=\"Hyperlink\">"
            "<w:name w:val=\"Hyperlink\"/><w:rPr><w:color w:val=\"" +
            ctx.linkHex + "\"/><w:u w:val=\"single\"/></w:rPr></w:style>";
