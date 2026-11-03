@@ -694,6 +694,14 @@ if(BUILD_TESTING)
     target_link_libraries(config_path_tests PRIVATE shell32)
     target_compile_definitions(config_path_tests PRIVATE UNICODE _UNICODE)
     add_test(NAME config_paths COMMAND config_path_tests)
+
+    # Scholar's CSL processor and XML reader against the bundled styles
+    # (docs/specs/scholar.md); a console program, no window
+    add_executable(csl_tests tests/csl_tests.cpp
+        src/xml.cpp src/bib.cpp src/csl_text.cpp src/csl_style.cpp src/csl_render.cpp src/csl_process.cpp)
+    target_include_directories(csl_tests PRIVATE include src)
+    target_compile_definitions(csl_tests PRIVATE TINTA_CSL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources/csl")
+    add_test(NAME csl_processor COMMAND csl_tests)
 endif()
 
 # Install
