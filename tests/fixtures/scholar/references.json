@@ -1,0 +1,148 @@
+[
+  {
+    "id": "knuth1984",
+    "type": "article-journal",
+    "title": "Literate Programming",
+    "container-title": "The Computer Journal",
+    "publisher": "Oxford University Press",
+    "volume": "27",
+    "issue": 2,
+    "page": "97-111",
+    "DOI": "10.1093/comjnl/27.2.97",
+    "author": [{"family": "Knuth", "given": "Donald E."}],
+    "issued": {"date-parts": [[1984, 5]]}
+  },
+  {
+    "id": "doe2024",
+    "type": "article-journal",
+    "title": "Ink Flow in <span class=\"nocase\">DNA</span>-Printed Nibs: A <span class=\"nocase\">Monte Carlo</span> Study",
+    "container-title": "Journal of Ink Studies",
+    "container-title-short": "J. Ink Stud.",
+    "volume": "12",
+    "issue": "3",
+    "page": "33-51",
+    "DOI": "10.5555/ink.2024.0033",
+    "ISSN": "1234-5679",
+    "language": "en",
+    "author": [{"family": "Doe", "given": "Jane"}],
+    "issued": {"date-parts": [["2024", "3", "1"]]}
+  },
+  {
+    "id": "garcia2022",
+    "type": "article-journal",
+    "title": "Ink Pigments in <i>Sepia officinalis</i>",
+    "container-title": "Journal of Marine Chemistry",
+    "volume": 8,
+    "issue": 1,
+    "page": "1-19",
+    "DOI": "10.5555/jmc.2022.008",
+    "note": "Open access",
+    "author": [
+      {"family": "García", "given": "Ana"},
+      {"family": "Müller", "given": "Klaus"},
+      {"family": "Okafor", "given": "Chidi"}
+    ],
+    "issued": {"date-parts": [[2022]]}
+  },
+  {
+    "id": "vaswani2017",
+    "type": "paper-conference",
+    "title": "Attention Is All You Need",
+    "container-title": "Advances in Neural Information Processing Systems",
+    "publisher": "Curran Associates",
+    "publisher-place": "Red Hook, NY",
+    "volume": "30",
+    "page": "5998-6008",
+    "event-title": "31st Conference on Neural Information Processing Systems (NIPS 2017)",
+    "event-place": "Long Beach, CA, USA",
+    "URL": "https://papers.nips.cc/paper/7181-attention-is-all-you-need",
+    "author": [
+      {"family": "Vaswani", "given": "Ashish"},
+      {"family": "Shazeer", "given": "Noam"},
+      {"family": "Parmar", "given": "Niki"},
+      {"family": "Uszkoreit", "given": "Jakob"},
+      {"family": "Jones", "given": "Llion"},
+      {"family": "Gomez", "given": "Aidan N."},
+      {"family": "Kaiser", "given": "\u0141ukasz"},
+      {"family": "Polosukhin", "given": "Illia"}
+    ],
+    "issued": {"date-parts": [[2017]]},
+    "event-date": {"date-parts": [[2017, 12, 4], [2017, 12, 9]]}
+  },
+  {
+    "id": "vanrossum2009",
+    "type": "book",
+    "title": "Python 3 Reference Manual",
+    "publisher": "CreateSpace",
+    "publisher-place": "Scotts Valley, CA",
+    "ISBN": "978-1-4414-1269-0",
+    "author": [
+      {"family": "van Rossum", "given": "Guido"},
+      {"family": "Drake", "given": "Fred L."}
+    ],
+    "issued": {"date-parts": [[2009]]}
+  },
+  {
+    "id": "lafontaine1668",
+    "type": "book",
+    "title": "Fables choisies, mises en vers",
+    "publisher": "Claude Barbin",
+    "publisher-place": "Paris",
+    "language": "fr-FR",
+    "author": [{"family": "La Fontaine", "given": "Jean", "dropping-particle": "de"}],
+    "issued": {"date-parts": [[1668]]}
+  },
+  {
+    "id": "who2023",
+    "type": "report",
+    "title": "Global Tuberculosis Report 2023",
+    "publisher": "World Health Organization",
+    "publisher-place": "Geneva",
+    "ISBN": "978-92-4-008385-1",
+    "URL": "https://www.who.int/publications/i/item/9789240083851",
+    "author": [{"literal": "World Health Organization"}],
+    "issued": {"date-parts": [[2023]]}
+  },
+  {
+    "id": "macfarlane2024",
+    "type": "webpage",
+    "title": "Pandoc User\u2019s Guide",
+    "container-title": "pandoc.org",
+    "URL": "https://pandoc.org/MANUAL.html",
+    "author": [{"family": "MacFarlane", "given": "John"}],
+    "issued": {"date-parts": [["2024"]]},
+    "accessed": {"raw": "2026-10-01"}
+  },
+  {
+    "id": "zhang2020",
+    "type": "article-journal",
+    "title": "基于深度学习的中文分词研究",
+    "container-title": "计算机学报",
+    "volume": "43",
+    "issue": "5",
+    "page": "812-826",
+    "DOI": "10.5555/cjc.2020.00812",
+    "language": "zh-CN",
+    "author": [
+      {"family": "张", "given": "三"},
+      {"family": "李", "given": "四"}
+    ],
+    "issued": {"date-parts": [[2020]]}
+  },
+  {
+    "id": 42,
+    "type": "book",
+    "title": "The Hitchhiker’s Guide to the Galaxy",
+    "publisher": "Pan Books",
+    "publisher-place": "London",
+    "author": [{"family": "Adams", "given": "Douglas"}],
+    "issued": {"date-parts": [[1979, 10, 12]]}
+  },
+  {
+    "id": "pliny77",
+    "type": "book",
+    "title": "Naturalis Historia",
+    "author": [{"literal": "Pliny the Elder"}],
+    "issued": {"date-parts": [[77]], "circa": true}
+  }
+]

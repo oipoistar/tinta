@@ -1,0 +1,350 @@
+% Scholar's test library (docs/specs/scholar.md): BibTeX and BibLaTeX as
+% Zotero, JabRef, Google Scholar and arxiv.org write them, with every entry
+% type and field Tinta maps to CSL. The bib, CSL and app tests cite these
+% keys: keep them stable. Entries for real works carry their real data;
+% the rest are made up (example.com, 10.5555 DOIs).
+
+@preamble{ "\newcommand{\noopsort}[1]{}" }
+
+@string{ cj   = {The Computer Journal} }
+@string{ acm  = "Association for Computing Machinery" }
+@string{ inkj = "Journal of " # "Ink " # {{Studies}} }
+@string( aw   = "Addison-Wesley" )
+
+@comment{ JabRef and Zotero keep notes in comments; @article{notanentry,
+  title = {an entry in a comment}} is no entry. }
+
+% --- Journal articles -----------------------------------------------------
+
+@article{knuth1984,
+  author    = {Knuth, Donald E.},
+  title     = {Literate Programming},
+  journal   = cj,
+  year      = 1984,
+  month     = may,
+  volume    = {27},
+  number    = {2},
+  pages     = {97--111},
+  doi       = {10.1093/comjnl/27.2.97},
+  publisher = {Oxford University Press},
+}
+
+@article{doe2024,
+  author       = {Doe, Jane},
+  title        = {Ink Flow in {DNA}-Printed Nibs},
+  subtitle     = {A {Monte Carlo} Study},
+  journaltitle = inkj,
+  shortjournal = {J. Ink Stud.},
+  date         = {2024-03-01},
+  volume       = {12},
+  number       = {3},
+  pages        = {33--51},
+  doi          = {https://doi.org/10.5555/ink.2024.0033},
+  issn         = {1234-5679},
+  langid       = {english},
+  keywords     = {ink, nibs, simulation},
+  abstract     = {We model ink in nibs \& show that {DNA} printing changes the flow by 5\%.},
+}
+
+@article{garcia2022,
+  author  = {Garc{\'\i}a, Ana and M{\"u}ller, Klaus and Okafor, Chidi},
+  title   = {Ink Pigments in \textit{Sepia officinalis}},
+  journal = {Journal of Marine Chemistry},
+  year    = {2022},
+  volume  = {8},
+  number  = {1},
+  pages   = {1--19},
+  doi     = {10.5555/jmc.2022.008},
+  note    = {Open access},
+}
+
+@article{consortium2022,
+  author       = {Abe, Ana and Baker, Ben and Chen, Chao and Diallo, Dalia and
+                  Eriksson, Erik and Fischer, Fritz and Gupta, Gita and
+                  Hern{\'a}ndez, Hugo and Ivanova, Irina and Jensen, Jonas and
+                  Kim, Kyung and López, Lucía and M{\"u}ller, Klaus and
+                  Nakamura, Naoko and O'Brien, Owen and Petrov, Pavel and
+                  Quinn, Quentin and Rossi, Roberto and Sato, Sachiko and
+                  Tanaka, Taro and Ueda, Ume and Varga, Vera},
+  title        = {The {Ink Atlas}: Viscosity of 1,200 Writing Inks},
+  journaltitle = {Data in Ink},
+  date         = {2022-11},
+  volume       = {9},
+  pages        = {1--14},
+  doi          = {10.5555/inkatlas.2022},
+}
+
+@article{hart2023,
+  author       = {Hart, Rosa},
+  title        = {The Last Fountain Pen Factory},
+  journaltitle = {Ink Monthly},
+  entrysubtype = {magazine},
+  date         = {2023-03},
+  pages        = {54--61},
+}
+
+% --- Books, edited books and their chapters -------------------------------
+
+@book{smith2020,
+  author    = {John Q. Smith},
+  title     = {Rivers of Ink},
+  subtitle  = {A History of Writing Fluids},
+  publisher = {Oxford University Press},
+  address   = {Oxford},
+  year      = {2020},
+  edition   = {2},
+  series    = {Studies in Material Culture},
+  number    = {14},
+  isbn      = {978-0-19-000000-2},
+}
+
+@book(brooks1995,
+  author    = "Brooks, Jr., Frederick P.",
+  title     = "The Mythical Man-Month",
+  subtitle  = "Essays on Software Engineering",
+  edition   = "Anniversary",
+  publisher = aw,
+  address   = "Reading, " # "MA",
+  year      = 1995,
+  isbn      = "0-201-83595-9",
+)
+
+@manual{vanrossum2009,
+  author       = {van Rossum, Guido and Drake, Fred L.},
+  title        = {Python 3 Reference Manual},
+  organization = {CreateSpace},
+  address      = {Scotts Valley, CA},
+  year         = {2009},
+  isbn         = {978-1-4414-1269-0},
+  options      = {useprefix=true},
+}
+
+@book{lafontaine1668,
+  author    = {Jean de La Fontaine},
+  title     = {Fables choisies, mises en vers},
+  publisher = {Claude Barbin},
+  address   = {Paris},
+  year      = {1668},
+  langid    = {french},
+}
+
+@book{calvino1981,
+  author     = {Calvino, Italo},
+  title      = {If on a Winter's Night a Traveler},
+  translator = {Weaver, William},
+  publisher  = {Harcourt Brace Jovanovich},
+  location   = {New York},
+  date       = {1981},
+  origdate   = {1979},
+}
+
+@collection{frank2019,
+  editor    = {Frank, Ilse},
+  title     = {Pens and Their Makers},
+  subtitle  = {An Illustrated History},
+  publisher = {Thames \& Hudson},
+  location  = {London},
+  date      = {2019},
+  isbn      = {978-0-500-00000-1},
+  pagetotal = {320},
+}
+
+% A chapter that takes its book, editor, publisher and year from frank2019
+@incollection{smith2019,
+  author   = {Smith, Anna},
+  title    = {Iron Gall Ink},
+  chapter  = {3},
+  pages    = {45--67},
+  crossref = {frank2019},
+}
+
+@incollection{delafuente2019,
+  author    = {de la Fuente, Mar{\'\i}a},
+  title     = {Inks of the {Spanish} {Golden Age}},
+  booktitle = {Pens and Their Makers},
+  editor    = {Frank, Ilse},
+  publisher = {Thames \& Hudson},
+  address   = {London},
+  year      = {2019},
+  pages     = {69--88},
+}
+
+@inbook{taylor2019,
+  author     = {Taylor, Morgan},
+  bookauthor = {Okafor, Chidi},
+  title      = {Foreword},
+  booktitle  = {Ink and the Hand},
+  publisher  = {Polity},
+  location   = {Cambridge},
+  date       = {2019},
+  pages      = {ix--xii},
+}
+
+% --- Conferences ----------------------------------------------------------
+
+@inproceedings{vaswani2017,
+  author     = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and
+                Jones, Llion and Gomez, Aidan N. and Kaiser, {\L}ukasz and Polosukhin, Illia},
+  title      = {Attention Is All You Need},
+  booktitle  = {Advances in Neural Information Processing Systems},
+  volume     = {30},
+  pages      = {5998--6008},
+  publisher  = {Curran Associates},
+  address    = {Red Hook, NY},
+  year       = {2017},
+  eventtitle = {31st Conference on Neural Information Processing Systems ({NIPS} 2017)},
+  venue      = {Long Beach, CA, USA},
+  eventdate  = {2017-12-04/2017-12-09},
+  url        = {https://papers.nips.cc/paper/7181-attention-is-all-you-need},
+}
+
+% The same first author and year as doe2024; book, editors and year from
+% inkconf2024, which comes after it as BibTeX wants
+@conference{doe2024b,
+  author   = {Doe, Jane},
+  title    = {Why Nibs Skip},
+  pages    = {7--12},
+  crossref = {inkconf2024},
+}
+
+@proceedings{inkconf2024,
+  title      = {Proceedings of the Third Ink Conference},
+  editor     = {Frank, Ilse and Smith, Anna},
+  publisher  = acm,
+  location   = {New York},
+  date       = {2024},
+  eventtitle = {Third Ink Conference},
+  venue      = {Lisbon, Portugal},
+  eventdate  = {2024-06-03/2024-06-05},
+}
+
+% --- Theses and reports ---------------------------------------------------
+
+@thesis{okafor2021,
+  author      = {Okafor, Chidi},
+  title       = {Capillary Flow in Fountain Pens},
+  type        = {phdthesis},
+  institution = {University of Edinburgh},
+  location    = {Edinburgh},
+  date        = {2021-07},
+  url         = {https://example.com/theses/okafor2021.pdf},
+}
+
+@techreport{who2023,
+  author      = {{World Health Organization}},
+  title       = {Global Tuberculosis Report 2023},
+  institution = {World Health Organization},
+  address     = {Geneva},
+  year        = {2023},
+  isbn        = {978-92-4-008385-1},
+  url         = {https://www.who.int/publications/i/item/9789240083851},
+}
+
+@unpublished{okafor2025,
+  author = {Okafor, Chidi},
+  title  = {Ink That Remembers},
+  note   = {Manuscript in preparation},
+  year   = {2025},
+}
+
+@patent{tanaka2018,
+  author = {Tanaka, Hiroshi},
+  title  = {Fountain Pen with an Ink Level Window},
+  number = {US 10,000,001 B2},
+  date   = {2018-06-19},
+  holder = {Nibworks Co.},
+}
+
+% --- The web, data and software -------------------------------------------
+
+@online{macfarlane2024,
+  author       = {MacFarlane, John},
+  title        = {Pandoc User's Guide},
+  organization = {pandoc.org},
+  date         = {2024},
+  url          = {https://pandoc.org/MANUAL.html},
+  urldate      = {2026-10-01},
+}
+
+@misc{unicode2023,
+  author       = {{The Unicode Consortium}},
+  title        = {The {Unicode} Standard, Version 15.1.0},
+  howpublished = {\url{https://www.unicode.org/versions/Unicode15.1.0/}},
+  year         = {2023},
+  month        = sep,
+  day          = {12},
+  note         = {Accessed 2026-10-01},
+}
+
+@dataset{lindqvist2023,
+  author    = {Lindqvist, {\AA}sa and Okafor, Chidi},
+  title     = {Viscosity of Fountain Pen Inks at 10--40\,{\textdegree}C},
+  publisher = {Zenodo},
+  version   = {2.1},
+  date      = {2023-09-14},
+  doi       = {10.5281/zenodo.0000000},
+}
+
+@software{rcore2024,
+  author       = {{R Core Team}},
+  title        = {R: A Language and Environment for Statistical Computing},
+  organization = {R Foundation for Statistical Computing},
+  location     = {Vienna, Austria},
+  version      = {4.4.0},
+  date         = {2024},
+  url          = {https://www.R-project.org/},
+}
+
+@misc{devlin2018,
+  title         = {{BERT}: Pre-training of Deep Bidirectional Transformers for Language Understanding},
+  author        = {Jacob Devlin and Ming-Wei Chang and Kenton Lee and Kristina Toutanova},
+  year          = {2018},
+  eprint        = {1810.04805},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.CL},
+}
+
+% --- In Chinese, for GB/T 7714 --------------------------------------------
+
+@article{zhang2020,
+  author   = {张三 and 李四},
+  title    = {基于深度学习的中文分词研究},
+  journal  = {计算机学报},
+  year     = {2020},
+  volume   = {43},
+  number   = {5},
+  pages    = {812--826},
+  doi      = {10.5555/cjc.2020.00812},
+  language = {zh},
+}
+
+@book{wang2019,
+  author    = {王五},
+  title     = {数字出版导论},
+  edition   = {2},
+  publisher = {高等教育出版社},
+  address   = {北京},
+  year      = {2019},
+  language  = {zh},
+}
+
+@mastersthesis{li2021,
+  author   = {李, 明},
+  title    = {墨水流变特性的实验研究},
+  type     = {硕士学位论文},
+  school   = {复旦大学},
+  address  = {上海},
+  year     = {2021},
+  language = {zh},
+}
+
+@online{chen2023,
+  author   = {陈静},
+  title    = {汉字排版的行距与字距},
+  date     = {2023-05-20},
+  url      = {https://example.com/hanzi-paiban},
+  urldate  = {2026-10-12},
+  language = {zh},
+}
+
+@Comment{jabref-meta: databaseType:biblatex;}

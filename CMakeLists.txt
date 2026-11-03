@@ -132,6 +132,7 @@ set(SOURCES
     src/plantuml_app.cpp
     src/wordcount.cpp
     src/sheet_model.cpp
+    src/json.cpp
     src/sheet_doc.cpp
     src/sheet_render.cpp
     src/sheet_input.cpp
@@ -585,6 +586,7 @@ if(BUILD_TESTING)
     add_executable(sheet_model_tests
         tests/sheet_model_tests.cpp
         src/sheet_model.cpp
+        src/json.cpp
         src/frontmatter.cpp
         src/mermaid.cpp
         src/mermaid_ext.cpp
@@ -764,6 +766,20 @@ if(BUILD_TESTING)
     target_link_libraries(config_path_tests PRIVATE shell32)
     target_compile_definitions(config_path_tests PRIVATE UNICODE _UNICODE)
     add_test(NAME config_paths COMMAND config_path_tests)
+
+    # Scholar: BibTeX, BibLaTeX and CSL-JSON read into references
+    add_executable(bib_tests tests/bib_tests.cpp src/bib.cpp src/json.cpp)
+    target_include_directories(bib_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(bib_tests PRIVATE
+        TINTA_SCHOLAR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scholar")
+    add_test(NAME bibliography COMMAND bib_tests)
+
+    # Scholar: pandoc's citation syntax, against the fixture library's keys
+    add_executable(cite_tests tests/cite_tests.cpp src/cite.cpp src/bib.cpp src/json.cpp)
+    target_include_directories(cite_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(cite_tests PRIVATE
+        TINTA_SCHOLAR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scholar")
+    add_test(NAME citation_syntax COMMAND cite_tests)
 endif()
 
 # Install

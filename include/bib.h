@@ -10,11 +10,13 @@
 
 namespace bib {
 
-// A person or an organisation, split as CSL splits names
+// A person or an organisation, split as CSL splits names. Plain UTF-8 text,
+// not rich text. BibTeX's "and others" reads as a last name whose literal is
+// "others": et al.
 struct Name {
     std::string family, given;
-    std::string droppingParticle;     // "de" in "Jean de La Fontaine"
-    std::string nonDroppingParticle;  // "van" in "Ludwig van Beethoven"
+    std::string droppingParticle;     // "de" in "Jean de La Fontaine": BibTeX's von part
+    std::string nonDroppingParticle;  // "van" in "van Gogh": von with useprefix=true
     std::string suffix;               // "Jr."
     std::string literal;              // an organisation: never split or shortened
     bool commaSuffix = false;         // "Smith, Jr., John" keeps its comma
@@ -26,12 +28,13 @@ struct DateParts {
     int year = 0, month = 0, day = 0;
 };
 
-// A date, a range (to.year set), or text that is no date
+// A date, a range (to.year set, or openEnd), or text that is no date
 struct Date {
     DateParts from, to;
-    int season = 0;       // 1 spring, 2 summer, 3 autumn, 4 winter
-    bool circa = false;
-    std::string literal;  // printed as written when the parts are empty
+    int season = 0;        // 1 spring, 2 summer, 3 autumn, 4 winter
+    bool circa = false;    // ~ or ? in EDTF, circa in CSL-JSON
+    bool openEnd = false;  // a range still running: 2020/.. reads "2020-"
+    std::string literal;   // printed as written when the parts are empty
     bool empty() const { return from.year == 0 && literal.empty(); }
 };
 
