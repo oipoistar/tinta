@@ -120,7 +120,17 @@ void mend(Pieces& out, std::string& next, bool punctuationInQuote) {
             if (keep == 1) place = false;
             else if (keep == 2) out[inside].text.pop_back();
         }
-        if (place && inside >= 0) out[inside].text += b;
+        if (place && inside >= 0) {
+            // The mark takes the quotation mark's format, not an italic title's
+            if (out[inside].flags == before.flags && !out[inside].link) {
+                out[inside].text += b;
+            } else {
+                Piece mark;
+                mark.text = std::string(1, b);
+                mark.flags = before.flags;
+                out.insert(out.begin() + last, std::move(mark));
+            }
+        }
         next.erase(0, 1);
         return;
     }
@@ -325,6 +335,7 @@ std::string plainText(const Pieces& pieces) {
 }
 
 std::string stripMarkup(std::string_view rich) {
+    if (rich.find_first_of("<&") == std::string_view::npos) return std::string(rich);
     Pieces pieces;
     parseRich(rich, 0, pieces);
     return plainText(pieces);
@@ -471,16 +482,30 @@ void stripPeriods(Pieces& pieces) {
 }
 
 Rich toRich(const Pieces& pieces) {
+    // Pieces in one format make one run, its text sized once
     Rich rich;
-    rich.reserve(pieces.size() < 8 ? pieces.size() : 8);
-    for (const Piece& piece : pieces) {
-        if (piece.text.empty()) continue;
-        std::string_view link = piece.link ? std::string_view(*piece.link) : std::string_view();
-        if (!rich.empty() && rich.back().flags == piece.flags && rich.back().link == link) {
-            rich.back().text += piece.text;
-            continue;
+    size_t i = 0, n = pieces.size();
+    while (i < n) {
+        const Piece& first = pieces[i];
+        size_t end = i + 1, length = first.text.size();
+        while (end < n && (pieces[end].text.empty() ||
+                           (pieces[end].flags == first.flags && pieces[end].link == first.link))) {
+            length += pieces[end].text.size();
+            ++end;
         }
-        rich.push_back({piece.text, piece.flags, std::string(link)});
+        if (length > 0) {
+            Run run;
+            run.text.reserve(length);
+            for (size_t k = i; k < end; ++k) run.text += pieces[k].text;
+            run.flags = first.flags;
+            if (first.link) run.link = *first.link;
+            if (!rich.empty() && rich.back().flags == run.flags && rich.back().link == run.link) {
+                rich.back().text += run.text;
+            } else {
+                rich.push_back(std::move(run));
+            }
+        }
+        i = end;
     }
     return rich;
 }
@@ -529,6 +554,12 @@ bool hasSeveral(std::string_view text) {
     bool inPart = false;
     for (size_t i = 0; i < text.size();) {
         size_t separator = separatorAt(text, i);
+        // A thousands comma, as in 10,000,001, joins one number
+        if (separator && text[i] == ',' && i > 0 && digit(text[i - 1]) && i + 3 < text.size() &&
+            digit(text[i + 1]) && digit(text[i + 2]) && digit(text[i + 3]) &&
+            (i + 4 == text.size() || !digit(text[i + 4]))) {
+            separator = 0;
+        }
         if (separator) {
             inPart = false;
             i += separator;

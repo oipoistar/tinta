@@ -250,8 +250,23 @@ private:
     bool piq;
     Scratch& pool;
     bool english = true;
-    std::vector<int> suppressed;        // variables a substitute took
-    std::vector<int>* tracked = nullptr;  // variables printed while substituting
+    // A few variable slots, kept without allocating; a substitute takes a
+    // handful at most
+    struct Slots {
+        int slots[32];
+        int count = 0;
+        void add(int slot) {
+            if (count < 32 && !has(slot)) slots[count++] = slot;
+        }
+        bool has(int slot) const {
+            for (int k = 0; k < count; ++k) {
+                if (slots[k] == slot) return true;
+            }
+            return false;
+        }
+    };
+    Slots suppressed;          // variables a substitute took
+    Slots* tracked = nullptr;  // variables printed while substituting
     const NamesSpec* borrowed = nullptr;  // what a shorthand <names> borrows
     int namesDepth = 0;
     int depth = 0;
@@ -272,11 +287,11 @@ private:
     const Pieces* printedTo = nullptr;  // where the last one went
 
     bool isSuppressed(int slot) const {
-        return !suppressed.empty() && std::find(suppressed.begin(), suppressed.end(), slot) != suppressed.end();
+        return suppressed.count && suppressed.has(slot);
     }
 
     void track(int slot) {
-        if (tracked && slot >= 0) tracked->push_back(slot);
+        if (tracked && slot >= 0) tracked->add(slot);
     }
 
     const void* at(int slot) const {
@@ -481,10 +496,13 @@ private:
         if (e.var < 0) return;
         uint8_t kind = style.variableKinds[e.var];
         if (kind == VarName || kind == VarDate) return;
-        stats.called = true;
+        // A year suffix is no variable to a group, as citeproc has it: the
+        // "n.d." beside an empty one in APA's and Chicago's dates stays
+        bool counts = kind != VarYearSuffix;
+        if (counts) stats.called = true;
         std::string_view v = value(e.var, e.shortVar);
         if (v.empty()) return;
-        stats.filled = true;
+        if (counts) stats.filled = true;
         track(e.var);
         if (e.var == style.slotPage || (kind == VarLocator && pageLocator())) {
             plainPiece(content, formatPages(stripMarkup(v), style.pageFormat, eng.pageDelimiter), flags);
@@ -677,6 +695,11 @@ private:
         std::string given = n.given;
         if (!given.empty() && level < 2 && (o.has & NameOptions::HasInitializeWith)) {
             given = initials(given, o.initializeWith, o.initialize, style.initializeWithHyphen);
+        }
+        if (n.family.empty()) {
+            // One name only, as Plato or Madonna: whole in every form
+            namePart(spec.givenFmt, n.given, flags, out);
+            return;
         }
         if (shortForm) {
             namePart(spec.familyFmt, particle(n.nonDroppingParticle, n.family), flags, out);
@@ -883,8 +906,8 @@ private:
         const NamesSpec* saved = borrowed;
         borrowed = &look;
         for (const Element& sub : spec.substitute) {
-            std::vector<int> seen;
-            std::vector<int>* outer = tracked;
+            Slots seen;
+            Slots* outer = tracked;
             tracked = &seen;
             Stats subStats;
             Buffer partBuffer(pool);
@@ -893,9 +916,9 @@ private:
             tracked = outer;
             if (part.empty()) continue;
             // What stood in is not printed again in this entry
-            for (int slot : seen) {
-                suppressed.push_back(slot);
-                if (outer) outer->push_back(slot);
+            for (int k = 0; k < seen.count; ++k) {
+                suppressed.add(seen.slots[k]);
+                if (outer) outer->add(seen.slots[k]);
             }
             content.swap(part);
             break;
@@ -1195,11 +1218,30 @@ private:
 };
 }
 
+namespace {
+
+// Moves what a render made into the caller's list. The scratch list keeps
+// its room for the next render, where swapping would hand it away
+void handOver(Pieces& from, Pieces& to, bool punctuationInQuote) {
+    if (!to.empty()) {
+        join(to, from, punctuationInQuote);
+        return;
+    }
+    to.reserve(from.size());
+    for (Piece& piece : from) {
+        if (!piece.text.empty()) to.push_back(std::move(piece));
+    }
+    from.clear();
+}
+}
+
 void render(const RenderJob& job, const std::vector<Element>& elements, uint16_t flags, Pieces& out) {
     Renderer renderer(job);
     Stats stats;
     bool any = false;
-    renderer.list(elements, {}, flags, out, stats, any);
+    Buffer made(scratch());
+    renderer.list(elements, {}, flags, made.p, stats, any);
+    handOver(made.p, out, job.engine->punctuationInQuote);
 }
 
 void renderSplit(const RenderJob& job, const std::vector<Element>& elements, uint16_t flags, Pieces& first,
@@ -1207,13 +1249,18 @@ void renderSplit(const RenderJob& job, const std::vector<Element>& elements, uin
     Renderer renderer(job);
     Stats stats;
     bool any = false;
-    renderer.split(elements, flags, first, rest, stats, any);
+    Buffer madeFirst(scratch()), madeRest(scratch());
+    renderer.split(elements, flags, madeFirst.p, madeRest.p, stats, any);
+    handOver(madeFirst.p, first, job.engine->punctuationInQuote);
+    handOver(madeRest.p, rest, job.engine->punctuationInQuote);
 }
 
 void renderElement(const RenderJob& job, const Element& element, uint16_t flags, Pieces& out) {
     Renderer renderer(job);
     Stats stats;
-    renderer.element(element, flags, out, stats);
+    Buffer made(scratch());
+    renderer.element(element, flags, made.p, stats);
+    handOver(made.p, out, job.engine->punctuationInQuote);
 }
 
 std::string sortValue(const RenderJob& job, const SortKey& key) {
