@@ -6,6 +6,9 @@
 #include <windows.h>
 #include <compressapi.h>
 
+#include <map>
+#include <mutex>
+
 namespace {
 
 struct Bundled {
@@ -18,28 +21,37 @@ const Bundled kBundled[] = {
 #include "csl_bundle.inc"
 };
 
+std::string unpack(const Bundled& bundled) {
+    // RT_RCDATA, in its wide form whatever the target's UNICODE setting
+    HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(bundled.id), MAKEINTRESOURCEW(10));
+    HGLOBAL handle = resource ? LoadResource(nullptr, resource) : nullptr;
+    const void* data = handle ? LockResource(handle) : nullptr;
+    const DWORD size = resource ? SizeofResource(nullptr, resource) : 0;
+    if (!data || !size) return {};
+    DECOMPRESSOR_HANDLE decompressor = nullptr;
+    if (!CreateDecompressor(COMPRESS_ALGORITHM_MSZIP, nullptr, &decompressor)) return {};
+    SIZE_T needed = 0;
+    Decompress(decompressor, data, size, nullptr, 0, &needed);
+    std::string xml(needed, '\0');
+    SIZE_T written = 0;
+    const BOOL ok = Decompress(decompressor, data, size, xml.data(), needed, &written);
+    CloseDecompressor(decompressor);
+    if (!ok) return {};
+    xml.resize(written);
+    return xml;
+}
+
 }  // namespace
 
 std::string bundledCsl(std::string_view name) {
+    // Unpacked once: the processor keys its prepared styles on the locale's
+    // text, and every citation pass asks for it again
+    static std::mutex lock;
+    static std::map<std::string, std::string, std::less<>> unpacked;
+    std::lock_guard<std::mutex> guard(lock);
+    if (auto found = unpacked.find(name); found != unpacked.end()) return found->second;
     for (const auto& bundled : kBundled) {
-        if (name != bundled.name) continue;
-        // RT_RCDATA, in its wide form whatever the target's UNICODE setting
-        HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(bundled.id), MAKEINTRESOURCEW(10));
-        HGLOBAL handle = resource ? LoadResource(nullptr, resource) : nullptr;
-        const void* data = handle ? LockResource(handle) : nullptr;
-        const DWORD size = resource ? SizeofResource(nullptr, resource) : 0;
-        if (!data || !size) return {};
-        DECOMPRESSOR_HANDLE decompressor = nullptr;
-        if (!CreateDecompressor(COMPRESS_ALGORITHM_MSZIP, nullptr, &decompressor)) return {};
-        SIZE_T needed = 0;
-        Decompress(decompressor, data, size, nullptr, 0, &needed);
-        std::string xml(needed, '\0');
-        SIZE_T written = 0;
-        const BOOL ok = Decompress(decompressor, data, size, xml.data(), needed, &written);
-        CloseDecompressor(decompressor);
-        if (!ok) return {};
-        xml.resize(written);
-        return xml;
+        if (name == bundled.name) return unpacked.emplace(std::string(name), unpack(bundled)).first->second;
     }
     return {};
 }

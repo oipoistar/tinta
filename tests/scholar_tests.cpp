@@ -244,6 +244,10 @@ void citationsWithout(const fs::path& fixtures) {
           "a broken library, an unknown style, a missing key and a missing figure are each reported");
     auto cites = all(broken.root, ElementType::Citation);
     check(cites.size() == 2, "both citations still format");
+    check(cites.size() == 2 && cites[0]->level == 1 && cites[1]->level == 0,
+          "the one with a missing key is marked for the warning colour, the other not");
+    auto missingRef = all(broken.root, ElementType::CrossReference);
+    check(missingRef.size() == 1 && missingRef[0]->level == 1, "and so is a reference to a missing figure");
     check(bibliographyOf(broken.root) != nullptr, "with the references of the keys that exist");
 }
 }  // namespace

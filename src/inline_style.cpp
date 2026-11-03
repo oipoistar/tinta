@@ -182,6 +182,8 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                     st.isLink = true;
                     st.anchorId = elem->title;
                 }
+                // A key or figure that is not there, in the notices' warning colour
+                if (elem->level) st.color = app.theme.isDark ? hexColor(0xF0C27A) : hexColor(0xA66A12);
                 if (elem->type == ElementType::Citation) app.citationKeys[elem->title] = elem->language;
                 break;
 

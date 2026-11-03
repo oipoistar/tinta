@@ -244,10 +244,13 @@ std::string renderReference(const cite::Citation& citation, const Words& words,
 
 // --- Citations -----------------------------------------------------------------
 
-// What a CSL run reads as, in Tinta's inline elements
-void appendRich(const csl::Rich& rich, Element* parent, std::vector<ElementPtr>& out, bool links) {
+// What a CSL run reads as, in Tinta's inline elements; true when a run
+// is a key the library lacks
+bool appendRich(const csl::Rich& rich, Element* parent, std::vector<ElementPtr>& out, bool links) {
+    bool missing = false;
     for (const auto& run : rich) {
         if (run.text.empty()) continue;
+        missing |= (run.flags & csl::Missing) != 0;
         ElementPtr node = text(run.text, nullptr);
         auto wrap = [&](ElementType type) {
             auto outer = std::make_shared<Element>(type);
@@ -267,6 +270,7 @@ void appendRich(const csl::Rich& rich, Element* parent, std::vector<ElementPtr>&
         node->parent = parent;
         out.push_back(node);
     }
+    return missing;
 }
 
 void collect(const ElementPtr& elem, ElementType type, std::vector<ElementPtr>& out) {
@@ -523,6 +527,7 @@ std::vector<std::string> finish(const ElementPtr& root, const Session& session) 
         ref->children = {text(reads, ref.get())};
         ref->url = first.empty() ? std::string() : "#" + first;
         ref->title = "xref-" + std::to_string(i + 1);
+        ref->level = reads.find('?') != std::string::npos;  // names something missing
     }
 
     // Citations, formatted all at once: numbers, disambiguation and ibid
@@ -550,7 +555,7 @@ std::vector<std::string> finish(const ElementPtr& root, const Session& session) 
     for (size_t i = 0; i < cited.size() && i < result.citations.size(); ++i) {
         const ElementPtr& elem = cited[i];
         std::vector<ElementPtr> kids;
-        appendRich(result.citations[i], elem.get(), kids, false);
+        elem->level = appendRich(result.citations[i], elem.get(), kids, false);  // cites a missing key
         elem->children = std::move(kids);
         std::string keys;
         for (const auto& item : citations[i].items) keys += (keys.empty() ? "" : " ") + item.id;

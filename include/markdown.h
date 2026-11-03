@@ -62,7 +62,7 @@ enum class ElementType {
     Caption,
     // A citation, or a reference to a figure, table or equation: text is
     // the Markdown as written, children what it reads as, url where a
-    // click goes
+    // click goes, level 1 when it names something missing
     Citation,
     CrossReference,
     // The references after the last block: BibEntry children, each with
