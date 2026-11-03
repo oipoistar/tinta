@@ -124,6 +124,7 @@ set(SOURCES
     src/plantuml_app.cpp
     src/wordcount.cpp
     src/sheet_model.cpp
+    src/json.cpp
     src/sheet_doc.cpp
     src/sheet_render.cpp
     src/sheet_input.cpp
@@ -530,6 +531,7 @@ if(BUILD_TESTING)
     add_executable(sheet_model_tests
         tests/sheet_model_tests.cpp
         src/sheet_model.cpp
+        src/json.cpp
         src/frontmatter.cpp
         src/mermaid.cpp
         src/mermaid_ext.cpp
