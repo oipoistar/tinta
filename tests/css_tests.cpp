@@ -1172,6 +1172,12 @@ void diagnosticTests() {
     check(hasDiagnostic(more, "did you mean `color`?", 1, 5) && hasDiagnostic(more, "did you mean `background-color`?", 1, 16) &&
           hasDiagnostic(more, "unknown property `zzzzzz`", 1, 38) && !hasDiagnostic(more, "zzzzzz`: did you mean") && more.size() == 3,
           "suggestions only for names close to one\n" + dump(more));
+    std::vector<Diagnostic> families;
+    sheetOf("p { transform-style: flat; grid-template-columns: 1fr; mask-image: none; scroll-margin-top: 4px }", &families);
+    check(hasDiagnostic(families, "`transform-style` has no effect: Tinta does not animate") &&
+          hasDiagnostic(families, "`grid-template-columns` has no effect: Tinta lays out blocks itself") &&
+          hasDiagnostic(families, "`mask-image` is not drawn by Tinta") &&
+          hasDiagnostic(families, "`scroll-margin-top` has no effect"), "families of properties Tinta leaves alone\n" + dump(families));
 }
 
 // --- Interning ---------------------------------------------------------------------------------------

@@ -738,14 +738,25 @@ const std::vector<Prop>& longhands(int shorthand) {
 }
 
 const char* ignoredReason(std::string_view lowerName) {
+    // Families of properties by their prefix, for the members not listed
+    static const Ignored families[] = {
+        {"flex-", 'b'}, {"grid-", 'b'}, {"align-", 'b'}, {"justify-", 'b'}, {"place-", 'b'},
+        {"inset-", 'b'}, {"overflow-", 'b'}, {"column-", 'b'}, {"break-", 'b'}, {"page-", 'b'},
+        {"scroll-", 'b'}, {"overscroll-", 'b'}, {"container", 'b'}, {"animation-", 'a'},
+        {"transition-", 'a'}, {"transform-", 'a'}, {"offset-", 'a'}, {"view-transition", 'a'},
+        {"mask-", 'd'}, {"outline-", 'd'}, {"scrollbar-", 'd'}, {"text-emphasis-", 'd'},
+        {"font-synthesis-", 'd'},
+    };
+    char why = 0;
     for (const Ignored& ignored : ignoredProperties) {
-        if (lowerName == ignored.name) {
-            return ignored.why == 'b' ? "has no effect: Tinta lays out blocks itself"
-                 : ignored.why == 'a' ? "has no effect: Tinta does not animate"
-                                      : "is not drawn by Tinta";
-        }
+        if (lowerName == ignored.name) why = ignored.why;
     }
-    return nullptr;
+    for (const Ignored& family : families) {
+        if (!why && startsWithLower(lowerName, family.name)) why = family.why;
+    }
+    return why == 'b' ? "has no effect: Tinta lays out blocks itself"
+         : why == 'a' ? "has no effect: Tinta does not animate"
+         : why == 'd' ? "is not drawn by Tinta" : nullptr;
 }
 
 std::string suggestProperty(std::string_view lowerName) {
