@@ -1230,13 +1230,23 @@ void internTests() {
     td.typeIndex = 1;
     td.typeCount = 3;
     check(engine.child(tbody.kids[7].ctx, td) == tbody.kids[7].kids[0].ctx, "a lone child() call finds the same context");
+    std::vector<Element> trs(2000);
+    for (int r = 0; r < 2000; ++r) {
+        trs[r].tag = "tr";
+        trs[r].index = trs[r].typeIndex = r + 1;
+        trs[r].count = trs[r].typeCount = 2000;
+    }
+    auto childStart = std::chrono::steady_clock::now();
+    for (int r = 0; r < 2000; ++r) engine.child(tbody.ctx, trs[r], trs.data(), (size_t)r);
+    double childUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - childStart).count() / 2000;
     Engine plain;
     plain.load({sheetOf("td { padding: 4px } p + p { color: red }")}, Media());
     layout(plain, page);
     std::set<Engine::Context> plainRows;
     for (El& tr : tbody.kids) plainRows.insert(tr.ctx);
     check(plainRows.size() == 1, "without positional selectors every row is one context");
-    std::cout << "  interning: " << (6000 + 500 + 1002) << " elements laid out in " << ms << " ms\n";
+    std::cout << "  interning: " << (6000 + 500 + 1002) << " elements laid out in " << ms << " ms; child() takes "
+              << childUs << " us\n";
 }
 
 // --- The fixture themes ----------------------------------------------------------------------------
