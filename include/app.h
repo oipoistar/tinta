@@ -674,12 +674,39 @@ struct App {
     int tabMenuHover = -1;
     float tabMenuX = 0.0f;
     float tabMenuY = 0.0f;
+    float tabMenuW = 0.0f;          // measured as it opens: the widest label
+                                    // with its shortcut, in any language
     float tabMenuAnimation = 0.0f;
     // Bulk close (others / left / right) survives the per-tab
     // unsaved-changes dialogs by re-finding the kept tab by id
     int tabBulkCloseMode = 0;       // 0 none, 1 others, 2 left, 3 right
     int tabBulkKeepId = 0;
     int tabIdCounter = 0;           // DocTab.id source
+    // Closed tabs for Ctrl+Shift+T, newest last: where each stood and,
+    // closed in the editor, its buffer. The tabs one sweep closes share a
+    // group and reopen together. Memory only: nothing goes to disk
+    struct ClosedTab {
+        std::string path;           // empty: an untitled note
+        std::string after;          // the file to its left, if any: it goes back beside it
+        int index = 0;
+        int group = 0;
+        bool pinned = false;
+        bool editMode = false;
+        bool editorDirty = false;
+        std::wstring editorText;
+        bool editorBom = false;
+        float editorScrollY = 0.0f;
+        size_t editorCursor = 0;
+        bool wordWrap = true;
+        FILETIME lastWrite{};
+    };
+    std::vector<ClosedTab> closedTabs;
+    int closedTabGroups = 0;        // the last group number handed out
+    int tabBulkCloseGroup = 0;      // the group of the sweep under way
+    // The buffer "Don't save" threw away, for the tab close it answered:
+    // reopened, the text comes back unsaved (tab id 0: nothing kept)
+    ClosedTab discardedEdit;
+    int discardedEditTabId = 0;
     // Drag-out satellites keep the tab row even with a single tab
     bool forceTabStrip = false;
     // Quick-note empty state: "Open a file" button in the preview pane of

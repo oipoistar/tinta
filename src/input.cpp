@@ -2706,7 +2706,7 @@ static void startPageInvoke(App& app, HWND hwnd, int id) {
                 tabOpenPath(app, hwnd, path);
                 for (int i = 0; i < (int)app.tabs.size(); i++) {
                     if (app.tabs[i].id == shellId) {
-                        tabCloseIndex(app, hwnd, i);
+                        tabCloseIndex(app, hwnd, i, TabClose::Internal);
                         break;
                     }
                 }
@@ -4008,7 +4008,12 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             // New tab = the start page (browser-style new-tab page); its
             // Open/Browse/recents land in this tab. The old open-into-a-
             // new-tab browser flow lives on as Ctrl+click in the browser.
-            tabOpenStartPage(app, hwnd);
+            // With Shift, the tab closed last comes back
+            if (shift) {
+                tabReopenClosed(app, hwnd);
+            } else {
+                tabOpenStartPage(app, hwnd);
+            }
             return false;
         }
         if (wParam >= '1' && wParam <= '9' && app.tabs.size() > 1) {

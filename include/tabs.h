@@ -25,7 +25,17 @@ void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
 int tabDropInsertionIndex(const App& app, POINT clientPoint);
 bool tabReceiveCopyData(App& app, HWND hwnd, const COPYDATASTRUCT& data);
 bool tabSendDrop(HWND target, const std::string& utf8Path, POINT screenPoint);
-void tabCloseIndex(App& app, HWND hwnd, int index);
+// The user's closes are remembered for Ctrl+Shift+T; the ones Tinta makes
+// itself (an empty start page giving way, a tab dragged to another
+// window) are not
+enum class TabClose { User, Internal };
+void tabCloseIndex(App& app, HWND hwnd, int index, TabClose how = TabClose::User);
+// Ctrl+Shift+T: reopens app.closedTabs[entry], or with -1 the newest close
+// and the rest of its sweep, where they stood. False when none could open
+bool tabReopenClosed(App& app, HWND hwnd, int entry = -1);
+// "Don't save" in the unsaved-changes dialog keeps the buffer it throws
+// away for the tab close it answers
+void tabKeepDiscardedEdit(App& app);
 void tabCycle(App& app, HWND hwnd, int direction);
 
 // Title-bar geometry shared by rendering and non-client hit testing

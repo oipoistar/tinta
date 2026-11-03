@@ -2079,7 +2079,7 @@ void openFileDialog(App& app, HWND hwnd) {
     tabOpenPath(app, hwnd, toUtf8(path));
     for (int i = 0; i < (int)app.tabs.size(); i++) {
         if (app.tabs[i].id == untitledId) {
-            tabCloseIndex(app, hwnd, i);
+            tabCloseIndex(app, hwnd, i, TabClose::Internal);
             break;
         }
     }
@@ -2523,6 +2523,8 @@ void confirmExitAction(App& app, HWND hwnd, int action) {
         // continues — the failure toast explains itself
     } else if (action == 2) {
         app.confirmExitPending = false;
+        // Closing the tab, the text thrown away stays reopenable
+        tabKeepDiscardedEdit(app);
         app.editorDirty = false;
         exitEditMode(app);
     } else {
@@ -2563,6 +2565,9 @@ void confirmExitAction(App& app, HWND hwnd, int action) {
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
         }
     }
+    // Kept only for the close it answered
+    app.discardedEditTabId = 0;
+    app.discardedEdit = {};
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 

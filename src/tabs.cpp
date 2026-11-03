@@ -327,7 +327,75 @@ void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
     }
 }
 
-void tabCloseIndex(App& app, HWND hwnd, int index) {
+namespace {
+
+constexpr size_t kClosedTabsKept = 25;
+
+// A tab the user closes, kept for Ctrl+Shift+T: its place, its pin and,
+// closed in the editor, its buffer. A dirty buffer has been through the
+// unsaved-changes dialog by now; what "Don't save" threw away comes back
+// unsaved. The start page and an empty note leave nothing to keep
+void rememberClosedTab(App& app, int index) {
+    if (index < 0 || index >= (int)app.tabs.size()) return;
+    const App::DocTab& tab = app.tabs[index];
+    const bool active = index == app.activeTab;
+    App::ClosedTab closed;
+    if (app.discardedEditTabId == tab.id) {
+        closed = std::move(app.discardedEdit);
+        closed.editMode = true;
+        closed.editorDirty = true;
+    } else if (active ? app.editMode : tab.editMode) {
+        closed.path = active ? app.currentFile : tab.path;
+        closed.editMode = true;
+        if (active) {
+            closed.editorText = app.editorText;
+            closed.editorBom = app.editorBom;
+            closed.editorScrollY = app.editorScrollY;
+            closed.editorCursor = app.editorCursorPos;
+            closed.wordWrap = app.editorWordWrap;
+            closed.lastWrite = app.lastFileWriteTime;
+        } else {
+            closed.editorText = tab.editorText;
+            closed.editorBom = tab.editorBom;
+            closed.editorScrollY = tab.editorScrollY;
+            closed.editorCursor = tab.editorCursor;
+            closed.wordWrap = tab.wordWrap;
+            closed.lastWrite = tab.lastWrite;
+        }
+    } else {
+        closed.path = active ? app.currentFile : tab.path;
+    }
+    app.discardedEditTabId = 0;
+    app.discardedEdit = {};
+    if (closed.path.empty() && closed.editorText.empty()) return;
+    closed.index = index;
+    if (index > 0) closed.after = index - 1 == app.activeTab ? app.currentFile : app.tabs[index - 1].path;
+    closed.pinned = tab.pinned;
+    closed.group = app.tabBulkCloseMode ? app.tabBulkCloseGroup : ++app.closedTabGroups;
+    app.closedTabs.push_back(std::move(closed));
+    if (app.closedTabs.size() > kClosedTabsKept) app.closedTabs.erase(app.closedTabs.begin());
+}
+
+void becomeStartPage(App& app, HWND hwnd);
+
+}  // namespace
+
+void tabKeepDiscardedEdit(App& app) {
+    if (app.tabs.empty() || !app.editMode) return;
+    if (app.pendingTabClose < 0 && !app.tabBulkCloseMode) return;
+    App::ClosedTab& kept = app.discardedEdit;
+    kept = {};
+    kept.path = app.currentFile;
+    kept.editorText = app.editorText;
+    kept.editorBom = app.editorBom;
+    kept.editorScrollY = app.editorScrollY;
+    kept.editorCursor = app.editorCursorPos;
+    kept.wordWrap = app.editorWordWrap;
+    kept.lastWrite = app.lastFileWriteTime;
+    app.discardedEditTabId = app.tabs[app.activeTab].id;
+}
+
+void tabCloseIndex(App& app, HWND hwnd, int index, TabClose how) {
     tabsInit(app);
     if (index < 0 || index >= (int)app.tabs.size()) return;
     if (index==app.activeTab) tableEditCommit(app);
@@ -349,6 +417,7 @@ void tabCloseIndex(App& app, HWND hwnd, int index) {
         return;
     }
 
+    if (how == TabClose::User) rememberClosedTab(app, index);
     // The closed tab's crash-recovery draft goes with it
     draftsDeleteForTab(app, app.tabs[index].id);
 
@@ -358,7 +427,7 @@ void tabCloseIndex(App& app, HWND hwnd, int index) {
         if (startPageActive(app)) {
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
         } else {
-            tabBecomeStartPage(app, hwnd);
+            becomeStartPage(app, hwnd);
         }
         return;
     }
@@ -381,7 +450,7 @@ void tabCloseIndex(App& app, HWND hwnd, int index) {
         if (app.activeTab == index) {
             // Keep unavailable tabs intact; replace the closed document with
             // a launcher so no stale document or out-of-range index survives.
-            tabBecomeStartPage(app, hwnd);
+            becomeStartPage(app, hwnd);
             return;
         }
         int erase = index;
@@ -413,6 +482,13 @@ void tabCycle(App& app, HWND hwnd, int direction) {
 // vanishing. Idempotent — a tab that is already the launcher stays one.
 void tabBecomeStartPage(App& app, HWND hwnd) {
     tabsInit(app);
+    rememberClosedTab(app, app.activeTab);
+    becomeStartPage(app, hwnd);
+}
+
+namespace {
+
+void becomeStartPage(App& app, HWND hwnd) {
     parkActiveEditBuffer(app);  // clean editor teardown if one was open
     persistLeavingPosition(app);  // reopened later, it resumes there (#279)
     App::DocTab& tab = app.tabs[app.activeTab];
@@ -438,6 +514,107 @@ void tabBecomeStartPage(App& app, HWND hwnd) {
     app.hoveredTab = -1;
     updateWindowTitle(app);
     InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// One closed tab back where it stood: a file that is open already gets
+// its tab activated, a file gone with no text to restore is reported. An
+// editor tab comes back parked with its buffer, which activation restores
+// as it does any parked tab; a reader tab reads its file and resumes at
+// its reading position. The new index, or -1
+int reopenClosedTab(App& app, HWND hwnd, App::ClosedTab& closed) {
+    if (!closed.path.empty()) {
+        for (size_t i = 0; i < app.tabs.size(); i++) {
+            const std::string& open = (int)i == app.activeTab ? app.currentFile : app.tabs[i].path;
+            if (_stricmp(open.c_str(), closed.path.c_str()) == 0) {
+                tabActivate(app, hwnd, (int)i);
+                return (int)i;
+            }
+        }
+        std::wstring wide = toWide(closed.path);
+        if (!closed.editMode && GetFileAttributesW(wide.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            signalPushKey(app, SIG_WARN, SIGI_FILE, "toast.file_missing",
+                          titleForPath(app, closed.path), wide);
+            return -1;
+        }
+    }
+    App::DocTab tab;
+    tab.id = ++app.tabIdCounter;
+    tab.path = closed.path;
+    tab.title = titleForPath(app, closed.path);
+    tab.pinned = closed.pinned;
+    tab.editMode = closed.editMode;
+    tab.editorDirty = closed.editorDirty;
+    tab.editorText = std::move(closed.editorText);
+    tab.editorBom = closed.editorBom;
+    tab.editorScrollY = closed.editorScrollY;
+    tab.editorCursor = closed.editorCursor;
+    tab.wordWrap = closed.wordWrap;
+    tab.lastWrite = closed.lastWrite;
+    if (!tab.editMode) cacheViewerSource(app, tab);
+    // Beside the file that was to its left, wherever that is now; else at
+    // the index it left
+    int index = std::clamp(closed.index, 0, (int)app.tabs.size());
+    for (size_t i = 0; !closed.after.empty() && i < app.tabs.size(); i++) {
+        const std::string& open = (int)i == app.activeTab ? app.currentFile : app.tabs[i].path;
+        if (_stricmp(open.c_str(), closed.after.c_str()) == 0) {
+            index = (int)i + 1;
+            break;
+        }
+    }
+    const int pinned = tabsPinnedCount(app);
+    index = tab.pinned ? std::min(index, pinned) : std::max(index, pinned);
+    app.tabs.insert(app.tabs.begin() + index, std::move(tab));
+    if (app.activeTab >= index) ++app.activeTab;
+    tabActivate(app, hwnd, index);
+    if (app.activeTab != index) {
+        // The file could not be read after all
+        app.tabs.erase(app.tabs.begin() + index);
+        if (app.activeTab > index) --app.activeTab;
+        return -1;
+    }
+    return index;
+}
+
+}  // namespace
+
+bool tabReopenClosed(App& app, HWND hwnd, int entry) {
+    tabsInit(app);
+    if (app.confirmExitPending || app.pendingTabClose >= 0 || app.tabBulkCloseMode) return false;
+    // An empty start page gives way, as it does to a file opened from it
+    const int launcher = startPageActive(app) ? app.tabs[app.activeTab].id : 0;
+    int reopened = -1;
+    while (reopened < 0 && !app.closedTabs.empty()) {
+        // The newest close and the rest of its sweep, newest first: each
+        // goes back to the index it left, which rebuilds the old order
+        std::vector<App::ClosedTab> batch;
+        if (entry >= 0) {
+            if (entry >= (int)app.closedTabs.size()) return false;
+            batch.push_back(std::move(app.closedTabs[entry]));
+            app.closedTabs.erase(app.closedTabs.begin() + entry);
+        } else {
+            const int group = app.closedTabs.back().group;
+            while (!app.closedTabs.empty() && app.closedTabs.back().group == group) {
+                batch.push_back(std::move(app.closedTabs.back()));
+                app.closedTabs.pop_back();
+            }
+        }
+        for (auto& closed : batch) {
+            int index = reopenClosedTab(app, hwnd, closed);
+            if (index >= 0) reopened = index;
+        }
+        if (entry >= 0) break;
+    }
+    if (reopened < 0) return false;
+    if (launcher) {
+        for (int i = 0; i < (int)app.tabs.size(); i++) {
+            if (app.tabs[i].id == launcher && i != app.activeTab) {
+                tabCloseIndex(app, hwnd, i, TabClose::Internal);
+                break;
+            }
+        }
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+    return true;
 }
 
 // Ctrl+T: a fresh empty viewer tab, which is the start page (the
@@ -1701,6 +1878,7 @@ enum TabMenuItem {
     TM_PIN,
     TM_COPY_PATH,
     TM_REVEAL,
+    TM_REOPEN,
     TM_ITEM_COUNT,
 };
 
@@ -1717,25 +1895,39 @@ const TabMenuEntry TAB_MENU[TM_ITEM_COUNT] = {
     { "tab.menu.close_right",  L"",       true  },
     { "tab.menu.pin",          L"",       true  },
     { "tab.menu.copy_path",    L"",       false },
-    { "ctx.reveal",            L"",       false },
+    { "ctx.reveal",            L"",       true  },
+    { "tab.menu.reopen",       L"Ctrl+Shift+T", false },
 };
+
+// Below Reopen closed tab, the last few closed tabs by name, newest
+// first: rows TM_ITEM_COUNT and on
+constexpr int kTabMenuRecent = 5;
+
+int tabMenuRows(const App& app) {
+    return TM_ITEM_COUNT + std::min((int)app.closedTabs.size(), kTabMenuRecent);
+}
+
+// The closed tab a recent row names, as an index into app.closedTabs
+int tabMenuClosedEntry(const App& app, int row) {
+    return (int)app.closedTabs.size() - 1 - (row - TM_ITEM_COUNT);
+}
 
 float tabMenuItemHeight(const App& app) { return dpi(app, 30.0f); }
 float tabMenuSeparator(const App& app) { return dpi(app, 9.0f); }
-float tabMenuWidth(const App& app) { return dpi(app, 235.0f); }
+float tabMenuWidth(const App& app) { return app.tabMenuW > 0 ? app.tabMenuW : dpi(app, 235.0f); }
 float tabMenuPadding(const App& app) { return dpi(app, 6.0f); }
 
 float tabMenuItemTop(const App& app, int index) {
     float y = tabMenuPadding(app);
     for (int i = 0; i < index; i++) {
         y += tabMenuItemHeight(app);
-        if (TAB_MENU[i].separatorAfter) y += tabMenuSeparator(app);
+        if (i < TM_ITEM_COUNT && TAB_MENU[i].separatorAfter) y += tabMenuSeparator(app);
     }
     return y;
 }
 
 float tabMenuTotalHeight(const App& app) {
-    return tabMenuItemTop(app, TM_ITEM_COUNT) + tabMenuPadding(app);
+    return tabMenuItemTop(app, tabMenuRows(app)) + tabMenuPadding(app);
 }
 
 // A tab in [from, to) that the sweeps would close: pinned ones stay (#312)
@@ -1749,7 +1941,9 @@ bool sweepable(const App& app, int from, int to, int skip) {
 bool tabMenuItemEnabled(const App& app, int item) {
     int index = app.tabMenuIndex;
     if (index < 0 || index >= (int)app.tabs.size()) return false;
+    if (item >= TM_ITEM_COUNT) return item < tabMenuRows(app);
     switch (item) {
+        case TM_REOPEN:       return !app.closedTabs.empty();
         case TM_CLOSE:        return true;
         case TM_CLOSE_OTHERS: return sweepable(app, 0, (int)app.tabs.size(), index);
         case TM_CLOSE_LEFT:   return sweepable(app, 0, index, index);
@@ -1773,6 +1967,7 @@ void tabBulkCloseBegin(App& app, HWND hwnd, int mode, int keepIndex) {
     if (keepIndex < 0 || keepIndex >= (int)app.tabs.size()) return;
     app.tabBulkCloseMode = mode;
     app.tabBulkKeepId = app.tabs[keepIndex].id;
+    app.tabBulkCloseGroup = ++app.closedTabGroups;  // one Ctrl+Shift+T reopens them all
     tabBulkCloseStep(app, hwnd);
 }
 
@@ -1815,7 +2010,22 @@ void tabBulkCloseStep(App& app, HWND hwnd) {
 }
 
 void openTabMenu(App& app, int tabIndex, float x, float y) {
-    float w = tabMenuWidth(app);
+    // Wide enough for the longest label and its shortcut in the interface
+    // language; a long closed file's name is trimmed instead
+    float w = dpi(app, 235.0f);
+    if (app.folderBrowserFormat) {
+        const float inset = dpi(app, 12.0f);
+        for (int i = 0; i <= TM_ITEM_COUNT; i++) {
+            const char* key = i < TM_ITEM_COUNT ? TAB_MENU[i].key : "tab.menu.unpin";
+            float need = measureText(app, tr(app, key), app.folderBrowserFormat);
+            if (i < TM_ITEM_COUNT && TAB_MENU[i].shortcut[0]) {
+                need += dpi(app, 24.0f) +
+                        measureText(app, TAB_MENU[i].shortcut, app.folderBrowserFormat);
+            }
+            w = std::max(w, need + 2.0f * inset);
+        }
+    }
+    app.tabMenuW = w;
     float h = tabMenuTotalHeight(app);
     app.tabMenuIndex = tabIndex;
     app.tabMenuX = std::max(0.0f, std::min(x, (float)app.width - w));
@@ -1836,7 +2046,7 @@ void closeTabMenu(App& app) {
 int tabMenuItemAt(const App& app, float x, float y) {
     if (x < app.tabMenuX || x > app.tabMenuX + tabMenuWidth(app)) return -1;
     float rel = y - app.tabMenuY;
-    for (int i = 0; i < TM_ITEM_COUNT; i++) {
+    for (int i = 0; i < tabMenuRows(app); i++) {
         float top = tabMenuItemTop(app, i);
         if (rel >= top && rel < top + tabMenuItemHeight(app)) return i;
     }
@@ -1882,7 +2092,7 @@ void renderTabMenu(App& app) {
     float pad = tabMenuPadding(app);
     float itemH = tabMenuItemHeight(app);
     float inset = dpi(app, 12.0f);
-    for (int i = 0; i < TM_ITEM_COUNT; i++) {
+    for (int i = 0; i < tabMenuRows(app); i++) {
         float top = y + tabMenuItemTop(app, i);
         bool enabled = tabMenuItemEnabled(app, i);
 
@@ -1900,6 +2110,19 @@ void renderTabMenu(App& app) {
         textColor.a = (enabled ? 1.0f : 0.35f) * anim;
         app.brush->SetColor(textColor);
         float textY = top + (itemH - dpi(app, 18.0f)) / 2;
+        if (i >= TM_ITEM_COUNT) {
+            // A recently closed tab: its name, set in under the command
+            const App::ClosedTab& closed = app.closedTabs[tabMenuClosedEntry(app, i)];
+            std::wstring name = titleForPath(app, closed.path);
+            if (closed.editorDirty) name += L" \x2022";
+            textColor.a *= 0.8f;
+            app.brush->SetColor(textColor);
+            app.renderTarget->DrawText(
+                name.c_str(), (UINT32)name.size(), format,
+                D2D1::RectF(x + inset + dpi(app, 14.0f), textY, x + w - inset, top + itemH),
+                app.brush);
+            continue;
+        }
         const bool unpin = i == TM_PIN && app.tabs[app.tabMenuIndex].pinned;
         const wchar_t* label = tr(app, unpin ? "tab.menu.unpin" : TAB_MENU[i].key);
         app.renderTarget->DrawText(
@@ -1946,8 +2169,15 @@ bool tabMenuMouseDown(App& app, HWND hwnd, int x, int y) {
     // Re-validate against the surviving tab row (indices can shift while
     // the menu is up only via external means; the guard is cheap)
     App& a = app;
+    if (item >= TM_ITEM_COUNT) {
+        if (tabMenuItemEnabled(a, item)) tabReopenClosed(a, hwnd, tabMenuClosedEntry(a, item));
+        return true;
+    }
     const std::string& path = index == a.activeTab ? a.currentFile : a.tabs[index].path;
     switch (item) {
+        case TM_REOPEN:
+            tabReopenClosed(a, hwnd);
+            break;
         case TM_CLOSE:
             if (tabMenuItemEnabled(a, TM_CLOSE)) tabCloseIndex(a, hwnd, index);
             break;
@@ -2114,8 +2344,9 @@ void dragCloseLocal(App& app, HWND hwnd, int index) {
         return;
     }
     // A transferred tab is clean; use the same guarded neighbor selection
-    // and launcher fallback as a normal close.
-    tabCloseIndex(app, hwnd, index);
+    // and launcher fallback as a normal close. It lives on elsewhere, so
+    // there is nothing to reopen here
+    tabCloseIndex(app, hwnd, index, TabClose::Internal);
 }
 
 }  // namespace

@@ -1363,7 +1363,7 @@ void openInPlace(App& app, HWND hwnd, const std::wstring& path) {
     if (empty) {
         for (int i = 0; i < (int)app.tabs.size(); i++) {
             if (app.tabs[i].id == shellId && i != app.activeTab) {
-                tabCloseIndex(app, hwnd, i);
+                tabCloseIndex(app, hwnd, i, TabClose::Internal);
                 break;
             }
         }
