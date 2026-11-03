@@ -44,6 +44,9 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y);
 // A held finger extends the original word, without arming a text drag.
 void editorTouchSelection(App& app, int x, int y, bool begin);
 void handleEditorMouseWheel(App& app, HWND hwnd, float delta);
+// Pans long unwrapped lines by dx, as far as the widest reaches (#314):
+// the horizontal wheel and Shift+wheel. False with nothing to pan.
+bool editorScrollHorizontally(App& app, HWND hwnd, float dx);
 // A dragged selection (#289): TIMER_EDITOR_DRAG_SCROLL scrolls the editor
 // while the pointer is past its top or bottom edge; Esc, a lost capture or
 // a cancelled mode put the drag away and leave the text as it was

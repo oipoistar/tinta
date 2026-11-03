@@ -29,6 +29,9 @@ ScrollbarGeometry documentScrollbarH(const App& app);
 // The editor's bar at its pane's right edge, on a track like the
 // document's: from below the tab strip to the window's foot (#291)
 ScrollbarGeometry editorScrollbarV(const App& app);
+// The editor's bar along its foot, under the text column, while unwrapped
+// lines run past the pane (#314); a maxScroll of 0 when they do not
+ScrollbarGeometry editorScrollbarH(const App& app);
 
 // A side panel's list and the thin bar at the card's right edge, once the
 // list outgrows its room. The bar drags and takes track clicks like the

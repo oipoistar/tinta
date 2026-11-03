@@ -212,17 +212,32 @@ static size_t editorNextCharEnd(const App& app, size_t pos) {
 
 static void rebuildEditorRowMetrics(App& app);
 
+// A letter the width of two in a monospaced face: Hangul, CJK, full-width forms
+static bool wideColumn(wchar_t c) {
+    return (c >= 0x1100 && c <= 0x115F) || (c >= 0x2E80 && c <= 0xA4CF) || (c >= 0xAC00 && c <= 0xD7A3) ||
+           (c >= 0xF900 && c <= 0xFAFF) || (c >= 0xFE30 && c <= 0xFE4F) || (c >= 0xFF00 && c <= 0xFF60) ||
+           (c >= 0xFFE0 && c <= 0xFFE6);
+}
+
 void rebuildLineStarts(App& app) {
     app.editorCaretUpstreamPos = std::wstring::npos;
     ++app.editorTextRevision;
     app.clearEditorLineLayoutCache();
     app.editorLineStarts.clear();
     app.editorLineStarts.push_back(0);
+    size_t columns = 0;
+    app.editorWidestColumns = 0;
     for (size_t i = 0; i < app.editorText.size(); i++) {
-        if (app.editorText[i] == L'\n') {
+        const wchar_t c = app.editorText[i];
+        if (c == L'\n') {
             app.editorLineStarts.push_back(i + 1);
+            app.editorWidestColumns = std::max(app.editorWidestColumns, columns);
+            columns = 0;
+        } else {
+            columns += c == L'\t' ? 4 : wideColumn(c) ? 2 : 1;
         }
     }
+    app.editorWidestColumns = std::max(app.editorWidestColumns, columns);
     rebuildEditorRowMetrics(app);
 }
 
@@ -4122,6 +4137,29 @@ static bool overEditorScrollbar(const App& app, float x, float y) {
            x <= editorWidth - dpi(app, 2.0f) && y >= chromeTopHeight(app);
 }
 
+ScrollbarGeometry editorScrollbarH(const App& app) {
+    ScrollbarGeometry bar;
+    if (editorWrapOn(app) || !app.editorTextFormat) return bar;
+    // As far as the caret follows a line's end: the widest line by its
+    // columns, or past it when the caret took the pane further
+    const float charWidth = app.editorCharWidth > 0 ? app.editorCharWidth : app.editorTextFormat->GetFontSize() * 0.6f;
+    const float view = editorTextMaxWidth(app) - dpi(app, 12.0f);
+    bar.maxScroll = std::max(0.0f, std::max((float)app.editorWidestColumns * charWidth - view, app.editorScrollX));
+    bar.trackStart = editorTextX(app);
+    bar.trackLength = std::max(0.0f, editorPaneWidth(app) - dpi(app, 14.0f) - bar.trackStart);
+    if (bar.maxScroll <= 0) return bar;
+    bar.thumbLength = std::max(bar.trackLength * view / (view + bar.maxScroll), dpi(app, 30.0f));
+    bar.thumbStart = bar.trackStart + std::clamp(app.editorScrollX / bar.maxScroll, 0.0f, 1.0f) * (bar.trackLength - bar.thumbLength);
+    return bar;
+}
+
+// The band the bar along the editor's foot takes presses in (#314)
+static bool overEditorScrollbarH(const App& app, float x, float y) {
+    const ScrollbarGeometry bar = editorScrollbarH(app);
+    return bar.maxScroll > 0 && y >= (float)app.height - dpi(app, 14.0f) && x >= bar.trackStart &&
+           x <= bar.trackStart + bar.trackLength;
+}
+
 void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
     float editorWidth = editorPaneWidth(app);
 
@@ -4144,6 +4182,20 @@ void handleEditorMouseDown(App& app, HWND hwnd, int x, int y) {
         app.editorScrollbarDragging = true;
         app.editorScrollbarDragStartY = (float)y;
         app.editorScrollbarDragStartScroll = app.editorScrollY;
+        SetCapture(hwnd);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    // The bar along the foot, as the side one: long unwrapped lines could
+    // be read across only by following the caret (#314)
+    if (overEditorScrollbarH(app, (float)x, (float)y)) {
+        const ScrollbarGeometry bar = editorScrollbarH(app);
+        if ((float)x < bar.thumbStart || (float)x > bar.thumbStart + bar.thumbLength) {
+            app.editorScrollX = bar.scrollForThumb((float)x - bar.thumbLength * 0.5f);
+        }
+        app.editorScrollbarHDragging = true;
+        app.editorScrollbarHDragStartX = (float)x;
+        app.editorScrollbarHDragStartScroll = app.editorScrollX;
         SetCapture(hwnd);
         InvalidateRect(hwnd, nullptr, FALSE);
         return;
@@ -4260,8 +4312,8 @@ void handleEditorMouseUp(App& app, HWND hwnd, int x, int y) {
         editorTextDragRelease(app, hwnd, x, y);
         return;
     }
-    if (app.editorScrollbarDragging) {
-        app.editorScrollbarDragging = false;
+    if (app.editorScrollbarDragging || app.editorScrollbarHDragging) {
+        app.editorScrollbarDragging = app.editorScrollbarHDragging = false;
         ReleaseCapture();
         return;
     }
@@ -4301,19 +4353,8 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
         return;
     }
 
-    // Insert-menu hover: rows highlight, parents open their submenu
-    if (editCtxMouseMove(app, x, y)) {
-        SetCursor(LoadCursor(nullptr, IDC_ARROW));
-        return;
-    }
-
-    // Rail hover (design t8/t11)
-    if (editRailMouseMove(app, hwnd, x, y)) {
-        SetCursor(LoadCursor(nullptr,
-                             app.editRailHover ? IDC_HAND : IDC_ARROW));
-        return;
-    }
-
+    // A dragged scrollbar owns the pointer wherever it goes, over the
+    // rail too
     if (app.editorScrollbarDragging) {
         // The pointer stays an arrow for the whole drag, over the text too (#280)
         SetCursor(LoadCursor(nullptr, IDC_ARROW));
@@ -4325,6 +4366,30 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
             app.editorScrollY = std::clamp(app.editorScrollbarDragStartScroll + delta, 0.0f, bar.maxScroll);
         }
         InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    if (app.editorScrollbarHDragging) {
+        SetCursor(LoadCursor(nullptr, IDC_ARROW));
+        const ScrollbarGeometry bar = editorScrollbarH(app);
+        const float travel = bar.trackLength - bar.thumbLength;
+        if (bar.maxScroll > 0 && travel > 0) {
+            const float delta = ((float)x - app.editorScrollbarHDragStartX) / travel * bar.maxScroll;
+            app.editorScrollX = std::clamp(app.editorScrollbarHDragStartScroll + delta, 0.0f, bar.maxScroll);
+        }
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
+    // Insert-menu hover: rows highlight, parents open their submenu
+    if (editCtxMouseMove(app, x, y)) {
+        SetCursor(LoadCursor(nullptr, IDC_ARROW));
+        return;
+    }
+
+    // Rail hover (design t8/t11)
+    if (editRailMouseMove(app, hwnd, x, y)) {
+        SetCursor(LoadCursor(nullptr,
+                             app.editRailHover ? IDC_HAND : IDC_ARROW));
         return;
     }
 
@@ -4378,7 +4443,7 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
         (float)x < editorWidth + editSeamWidth(app)) {
         SetCursor(cursorSizeWE);
         return;
-    } else if (overEditorScrollbar(app, (float)x, (float)y)) {
+    } else if (overEditorScrollbar(app, (float)x, (float)y) || overEditorScrollbarH(app, (float)x, (float)y)) {
         SetCursor(cursorArrow);  // a control, not text (#280)
         return;
     } else if (x < editorWidth) {
@@ -4388,11 +4453,19 @@ void handleEditorMouseMove(App& app, HWND hwnd, int x, int y) {
     // Preview pane cursor is handled by the normal handleMouseMove.
 }
 
+bool editorScrollHorizontally(App& app, HWND hwnd, float dx) {
+    const ScrollbarGeometry bar = editorScrollbarH(app);
+    if (bar.maxScroll <= 0) return false;
+    app.editorScrollX = std::clamp(app.editorScrollX + dx, 0.0f, bar.maxScroll);
+    InvalidateRect(hwnd, nullptr, FALSE);
+    return true;
+}
+
 void handleEditorMouseWheel(App& app, HWND hwnd, float delta) {
-    // Shift+wheel pans long unwrapped lines horizontally (#77)
+    // Shift+wheel pans long unwrapped lines horizontally (#77), as far as
+    // the widest one reaches (#314)
     if (!editorWrapOn(app) && (GetKeyState(VK_SHIFT) & 0x8000)) {
-        app.editorScrollX = std::max(0.0f, app.editorScrollX - delta * dpi(app, 60.0f));
-        InvalidateRect(hwnd, nullptr, FALSE);
+        editorScrollHorizontally(app, hwnd, -delta * dpi(app, 60.0f));
         return;
     }
     app.editorScrollY -= delta * dpi(app, 60.0f);
@@ -4836,6 +4909,16 @@ void renderEditor(App& app, float editorWidth) {
                               editorBottomClearance(app, lineHeight);
 
     renderEditorScrollbar(app, editorWidth);
+    // And along the foot, while lines run past the pane (#314)
+    const ScrollbarGeometry across = editorScrollbarH(app);
+    if (across.maxScroll > 0) {
+        float shade = app.theme.isDark ? 1.0f : 0.0f;
+        app.brush->SetColor(D2D1::ColorF(shade, shade, shade, app.editorScrollbarHDragging ? 0.45f : 0.3f));
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(across.thumbStart, (float)app.height - dpi(app, 10.0f),
+                                           across.thumbStart + across.thumbLength, (float)app.height - dpi(app, 4.0f)), 3, 3),
+            app.brush);
+    }
 
     app.renderTarget->PopAxisAlignedClip();
 }

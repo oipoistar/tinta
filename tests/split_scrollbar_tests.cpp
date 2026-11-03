@@ -182,7 +182,65 @@ void aboveFirstBlock(App& app, const char* path, int width, bool wrap) {
 }
 }  // namespace
 
-int runSplitScrollbarTests(const char* path, const char* frontMatterPath) {
+// #314: long unwrapped lines get a bar along the editor's foot. It drags,
+// takes track clicks and the horizontal wheel, and goes with wrapping on
+void acrossBar(App& app, const char* path, int width) {
+    const std::string where = " (" + std::to_string(width) + ")";
+    const HCURSOR arrow = LoadCursor(nullptr, IDC_ARROW);
+    app.width = width;
+    check(openDocumentInViewer(app, toWide(path)), "the long lines open" + where);
+    enterEditMode(app);
+    app.editorShowPreview = true;
+    app.editorWordWrap = false;
+    app.editorScrollX = 0.0f;
+    rebuildLineStarts(app);
+    frame(app);
+    ScrollbarGeometry bar = editorScrollbarH(app);
+    check(bar.maxScroll > 0 && bar.thumbLength < bar.trackLength && closeTo(bar.thumbStart, bar.trackStart),
+          "lines past the pane get a bar along its foot, its thumb at the start" + where);
+    check(bar.trackStart + bar.trackLength <= editorPaneWidth(app) - dpi(app, 8.0f),
+          "the bar keeps clear of the side bar's corner" + where);
+    const float y = (float)app.height - dpi(app, 7.0f), grab = bar.thumbStart + dpi(app, 10.0f);
+    check(cursorAfterMove(app, grab, y) == arrow, "an arrow over the bar" + where);
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, MAKELPARAM((int)grab, (int)y));
+    check(app.editorScrollbarHDragging, "a press on the thumb drags it" + where);
+    check(cursorAfterMove(app, grab + 60.0f, y - 300.0f) == arrow, "still an arrow when the drag strays up" + where);
+    check(app.editorScrollX > 0.0f && closeTo(editorScrollbarH(app).thumbStart, bar.thumbStart + 60.0f),
+          "the thumb follows the pointer and the lines pan" + where);
+    cursorAfterMove(app, (float)app.width + 400.0f, y);
+    bar = editorScrollbarH(app);
+    check(closeTo(app.editorScrollX, bar.maxScroll) && closeTo(bar.thumbStart + bar.thumbLength, bar.trackStart + bar.trackLength),
+          "dragged to the end, the widest line's end is in view" + where);
+    cursorAfterMove(app, -400.0f, y);
+    check(app.editorScrollX <= 0.5f, "dragged back, the lines' starts are in view" + where);
+    handleMouseUp(app, app.hwnd, 0, MAKELPARAM(0, (int)y));
+    check(!app.editorScrollbarHDragging, "the release ends the drag" + where);
+    // A click on the track centres the thumb there
+    const float click = std::floor(bar.trackStart + bar.trackLength * 0.7f);
+    handleMouseDown(app, app.hwnd, MK_LBUTTON, MAKELPARAM((int)click, (int)y));
+    bar = editorScrollbarH(app);
+    check(closeTo(bar.thumbStart + bar.thumbLength * 0.5f, click), "a click on the track centres the thumb there" + where);
+    handleMouseUp(app, app.hwnd, 0, MAKELPARAM((int)click, (int)y));
+    // The horizontal wheel over the source pans it, as far as the end
+    app.editorScrollX = 0.0f;
+    const float reach = editorScrollbarH(app).maxScroll;
+    app.mouseX = (int)(editorPaneWidth(app) * 0.5f);
+    app.mouseY = 300;
+    handleMouseHWheel(app, app.hwnd, MAKEWPARAM(0, WHEEL_DELTA), MAKELPARAM(app.mouseX, app.mouseY));
+    check(closeTo(app.editorScrollX, dpi(app, 60.0f)), "the horizontal wheel over the source pans it" + where);
+    for (int i = 0; i < 400; ++i) handleMouseHWheel(app, app.hwnd, MAKEWPARAM(0, WHEEL_DELTA), MAKELPARAM(app.mouseX, app.mouseY));
+    check(closeTo(app.editorScrollX, reach), "and stops at the widest line's end" + where);
+    // Wrapped, nothing runs past the pane
+    app.editorWordWrap = true;
+    app.editorScrollX = 0.0f;
+    rebuildLineStarts(app);
+    frame(app);
+    check(editorScrollbarH(app).maxScroll == 0.0f, "wrapped lines have no bar along the foot" + where);
+    app.editorWordWrap = false;
+    exitEditMode(app);
+}
+
+int runSplitScrollbarTests(const char* path, const char* frontMatterPath, const char* longLinesPath) {
     auto state = std::make_unique<App>();
     App& app = *state;
     app.hwnd = CreateWindowExW(0, L"STATIC", L"Split scrollbar tests", WS_POPUP, 0, 0, 1050, 900,
@@ -204,6 +262,7 @@ int runSplitScrollbarTests(const char* path, const char* frontMatterPath) {
                     aboveFirstBlock(app, frontMatterPath, width, wrap);
                 }
             }
+            if (longLinesPath) acrossBar(app, longLinesPath, width);
         }
     }
     DestroyWindow(app.hwnd);

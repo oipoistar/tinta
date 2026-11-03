@@ -1063,6 +1063,11 @@ void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
     }
     // Horizontal scroll
     float delta = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA * dpi(app, 60.0f);
+    // Over the source, its long unwrapped lines pan (#314)
+    if (app.editMode && app.mouseX < editorPaneWidth(app)) {
+        editorScrollHorizontally(app, hwnd, delta);
+        return;
+    }
     app.targetScrollX += delta;
 
     float maxScrollX = std::max(
@@ -3309,7 +3314,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
 
     // Edit mode: route to editor
     if (app.editMode && (app.draggingSeparator || app.editorSelecting ||
-                         app.editorScrollbarDragging)) {
+                         app.editorScrollbarDragging || app.editorScrollbarHDragging)) {
         int x = GET_X_LPARAM(lParam);
         int y = GET_Y_LPARAM(lParam);
         handleEditorMouseUp(app, hwnd, x, y);

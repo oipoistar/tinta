@@ -689,6 +689,11 @@ struct App {
     bool editorScrollbarDragging = false;
     float editorScrollbarDragStartY = 0.0f;
     float editorScrollbarDragStartScroll = 0.0f;
+    // The bar along the editor's foot while unwrapped lines run past the
+    // pane (#314), dragged as the side one is
+    bool editorScrollbarHDragging = false;
+    float editorScrollbarHDragStartX = 0.0f;
+    float editorScrollbarHDragStartScroll = 0.0f;
     // The selection dragged to move it, or with Ctrl to copy it (#289):
     // armed by a press on the selection, a drag once the pointer passes
     // the system's drag distance
@@ -1511,6 +1516,9 @@ struct App {
     // (the highlighting's line kinds) knows when to work it out again
     unsigned long long editorTextRevision = 0;
     float editorScrollX = 0.0f;  // horizontal scroll, non-wrap mode only (#77)
+    // The widest line in columns, a wide (CJK) letter two, for the
+    // horizontal scrollbar's reach (#314)
+    size_t editorWidestColumns = 0;
 
     // Editor view options (persisted)
     bool editorShowPreview = true;

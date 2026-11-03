@@ -202,7 +202,7 @@ int runScrollSyncTests(const char* file);
 int runNotificationSettingTests();
 int runGotoLineTests(const char* file);
 int runReadingPositionTests(const char* file);
-int runSplitScrollbarTests(const char* file, const char* frontMatterFile);
+int runSplitScrollbarTests(const char* file, const char* frontMatterFile, const char* longLinesFile);
 int runEditorDragTests(const char* file);
 int runTouchTests(const char* file);
 int runByteOrderMarkTests(const char* file, const char* frontMatterFile);
@@ -222,8 +222,8 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--notification-setting-tests") return runNotificationSettingTests();
     if (argc == 3 && std::string(argv[1]) == "--goto-line-tests") return runGotoLineTests(argv[2]);
     if (argc == 3 && std::string(argv[1]) == "--reading-position-tests") return runReadingPositionTests(argv[2]);
-    if ((argc == 3 || argc == 4) && std::string(argv[1]) == "--split-scrollbar-tests")
-        return runSplitScrollbarTests(argv[2], argc == 4 ? argv[3] : nullptr);
+    if (argc >= 3 && argc <= 5 && std::string(argv[1]) == "--split-scrollbar-tests")
+        return runSplitScrollbarTests(argv[2], argc >= 4 ? argv[3] : nullptr, argc == 5 ? argv[4] : nullptr);
     if (argc == 3 && std::string(argv[1]) == "--touch-tests") return runTouchTests(argv[2]);
     if (argc == 3 && std::string(argv[1]) == "--editor-drag-tests") return runEditorDragTests(argv[2]);
     if (argc == 4 && std::string(argv[1]) == "--byte-order-mark-tests")
