@@ -68,6 +68,8 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Hardware-accelerated** - Smooth text rendering via DirectWrite
 - **Word wrap** - Optional soft wrap in the editor (Ctrl+W)
 - **Native LaTeX math** - `$inline$` and `$$display$$` equations with matrices, cases, aligned equations, fractions, limits, accents and custom macros. Uses an installed math font; no bundled fonts or web engine. See the [supported math syntax](docs/math-support.md).
+- **Citations** - Name a BibTeX or CSL-JSON library in the front matter and cite with pandoc's syntax (`[@doe2024, p. 4]`, `@doe2024 says`): citations and the references come out in APA, Chicago, IEEE, Nature or GB/T 7714, or any `.csl` style, with a hover card and a click to each reference. Figures, tables and equations number themselves and `@fig:id` refers to them, as pandoc-crossref does; HTML, Word and PDF keep it all, and pandoc exports get `--citeproc`. See [Citations, figures and tables](docs/citations.md)
+- **CSS themes** - A `.css` file in the `themes` folder is a theme: real CSS syntax, selectors and cascade, variables, `oklch()`, `color-mix()` and `light-dark()` for one sheet that follows Windows. Saving it restyles the window, and its mistakes are reported with their lines. See [CSS themes](docs/css-themes.md)
 - **Focused editing** - Hide the preview pane while writing (Ctrl+E)
 - **Native Mermaid diagrams** - 22 diagram families, from flowcharts with subgraphs through sequence, class, state, ER, gantt, and pie to C4, sankey, kanban, and radar - rendered without a web engine
 - **Export as HTML, DOCX, or PDF** - Right-click and pick "Export as..." for a self-contained web page, a Word document that opens natively, or a vector PDF; diagrams and math come along in every format
@@ -318,6 +320,8 @@ The [Frontmatter settings](docs/frontmatter.md) page controls property display a
 Named, repeated and multiline [footnotes](docs/footnotes.md) include native navigation and HTML/DOCX export.
 
 Individual H1-H6, marked-text, bold, italic, selection and rule colours are described in [Theme colours](docs/theme-colours.md).
+
+Themes can also be written in CSS, one `.css` file each in a `themes` folder beside `themes.ini`; see [CSS themes](docs/css-themes.md).
 
 ## Dependencies
 

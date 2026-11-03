@@ -1,6 +1,6 @@
 ---
 title: "Theming: CSS themes"
-status: Draft, phase 1 in progress
+status: Phase 1 built (2026-11-04); phases 2 and 3 to come
 created: 2026-11-03
 ---
 
@@ -380,7 +380,7 @@ computed values, and swatches; editing a value writes it back to the sheet.
 
 ## Phases
 
-1. **CSS themes** (in progress): the engine; the base sheet for colours,
+1. **CSS themes** (built; see `tests/css-themes-validation.md`): the engine; the base sheet for colours,
    fonts, sizes and line height; built-ins and themes.ini through the
    mapping; `.css` themes in the chooser; following the file; diagnostics;
    HTML export carrying the sheet.

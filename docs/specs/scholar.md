@@ -1,8 +1,7 @@
 ---
 title: "Scholar: write the paper"
-status: Draft, in progress
+status: Phase 1 built (2026-11-04); phases 2 and 3 to come
 created: 2026-11-03
-bibliography: ../../tests/fixtures/scholar/references.bib
 ---
 
 # Scholar: write the paper
@@ -12,7 +11,9 @@ export, so a researcher can write a paper in Tinta without LaTeX. The syntax
 is pandoc's (citeproc) and pandoc-crossref's, so a paper written in Tinta
 builds unchanged with pandoc and the reverse.
 
-Status: phase 1 is being built (see [Phases](#phases)).
+Status: phase 1 is built: citations, references, numbered figures, tables
+and equations, hover cards, and the exports (see [Phases](#phases) and
+`tests/scholar-validation.md`).
 
 ## Why
 
@@ -397,7 +398,7 @@ the Windows compression API (XPRESS Huffman); the results are RCDATA in
 
 ## Phases
 
-1. **Citations and cross-references** (in progress): the bib, cite, xml
+1. **Citations and cross-references** (built): the bib, cite, xml
    and csl modules; the bundled styles; citations and the bibliography in
    the reader view, print, HTML and Word; figures, tables and equations
    numbered and referenced; hover cards and click-through; diagnostics;
