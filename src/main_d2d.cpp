@@ -1014,6 +1014,7 @@ render_document:
     }
 
     if (!livePage) renderFrontmatterOverflow(app);
+    if (!livePage) renderReferenceCard(app);
 
     // Back to screen coordinates: notifications, stats, and overlays
     // (including the folder browser panel itself) are not shifted
@@ -2046,8 +2047,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.plantumlUserPath = toWide(savedSettings.plantumlPath);
     app.mathFont = toWide(savedSettings.mathFont);
     app.cjkFont = toWide(savedSettings.cjkFont);
-    int startTheme = app.followSystemTheme ? autoThemeIndex(app)
     themesSetSystemDark(!systemPrefersLight());
+    int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;
     if (startTheme >= themeCount()) startTheme = 0;

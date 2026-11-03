@@ -181,6 +181,7 @@ enum InlineKind {
     INL_MATH_MARK, INL_MATH,            // $x$
     INL_WIKI_MARK, INL_WIKI,            // [[name|words]]: the brackets and the name, the words shown
     INL_FOOTNOTE,                       // [^1]
+    INL_CITE,                           // [see @key, p. 4] and @fig:id (docs/specs/scholar.md)
     INL_LINK_MARK, INL_LINK,            // [words](address): [ and ](address), the words
     INL_IMAGE_MARK, INL_IMAGE,          // ![words](address)
     INL_STRONG_MARK, INL_STRONG,        // **bold**

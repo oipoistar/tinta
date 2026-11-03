@@ -15,6 +15,7 @@
 #include <commdlg.h>
 #include <shlobj.h>
 
+#include <algorithm>
 #include <fstream>
 #include <string>
 
@@ -75,6 +76,7 @@ struct PandocJob {
     HWND hwnd = nullptr;
     std::wstring cmdLine;   // full command line, exe quoted first
     std::wstring tempFile;  // deleted when the run finishes
+    std::wstring folder;    // the document's: its bibliography is found from there
 };
 
 DWORD WINAPI pandocWorker(LPVOID param) {
@@ -84,8 +86,8 @@ DWORD WINAPI pandocWorker(LPVOID param) {
     PROCESS_INFORMATION pi{};
     std::wstring cmd = job->cmdLine;  // CreateProcess needs it writable
     bool ok = false;
-    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE,
-                       CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+    if (CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                       job->folder.empty() ? nullptr : job->folder.c_str(), &si, &pi)) {
         // Big documents convert in seconds; two minutes is a hang
         if (WaitForSingleObject(pi.hProcess, 120000) == WAIT_OBJECT_0) {
             DWORD code = 1;
@@ -207,9 +209,24 @@ void pandocExportFlow(App& app, HWND hwnd, int fmt) {
         outFile.write(md.data(), (std::streamsize)md.size());
     }
 
-    // Assemble the command line; the writer comes from the -o extension
+    // Assemble the command line; the writer comes from the -o extension.
+    // A document with a bibliography is read as pandoc's Markdown, whose
+    // citations citeproc formats, with pandoc-crossref when it is
+    // installed (docs/specs/scholar.md)
+    const bool cites = !f.htmlBridge && app.root && !app.root->children.empty() &&
+                       app.root->children[0]->type == qmd::ElementType::Properties &&
+                       std::any_of(app.root->children[0]->properties.begin(),
+                                   app.root->children[0]->properties.end(),
+                                   [](const fm::Property& p) { return p.key == "bibliography"; });
     std::wstring cmd = L"\"" + app.pandocExe + L"\" -f " +
-                       (f.htmlBridge ? L"html" : L"gfm") + L" -s ";
+                       (f.htmlBridge ? L"html" : cites ? L"markdown" : L"gfm") + L" -s ";
+    if (cites) {
+        wchar_t crossref[MAX_PATH]{};
+        if (SearchPathW(nullptr, L"pandoc-crossref.exe", nullptr, MAX_PATH, crossref, nullptr)) {
+            cmd += L"--filter \"" + std::wstring(crossref) + L"\" ";
+        }
+        cmd += L"--citeproc ";
+    }
     std::wstring title = stem;
     for (auto& ch : title) {
         if (ch == L'"') ch = L'\'';
@@ -226,7 +243,13 @@ void pandocExportFlow(App& app, HWND hwnd, int fmt) {
     }
     cmd += L"-o \"" + std::wstring(out) + L"\" \"" + tempFile + L"\"";
 
-    PandocJob* job = new PandocJob{hwnd, cmd, tempFile};
+    std::wstring folder;
+    if (!app.currentFile.empty()) {
+        folder = toWideStr(app.currentFile);
+        size_t slash = folder.find_last_of(L"\\/");
+        folder = slash == std::wstring::npos ? std::wstring() : folder.substr(0, slash);
+    }
+    PandocJob* job = new PandocJob{hwnd, cmd, tempFile, folder};
     app.pandocRunning = true;
     HANDLE thread = CreateThread(nullptr, 0, pandocWorker, job, 0, nullptr);
     if (thread) {

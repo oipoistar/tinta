@@ -99,6 +99,10 @@ void appendCountableText(const ElementPtr& element, std::wstring& out) {
         case ElementType::FootnoteReference:
         case ElementType::FootnoteBacklink:
         case ElementType::HorizontalRule:
+        // Citations and the references count no more than footnote marks
+        // do (docs/specs/scholar.md)
+        case ElementType::Citation:
+        case ElementType::Bibliography:
             break;
         // Blocks and table cells end with a break, so words never join
         // across them

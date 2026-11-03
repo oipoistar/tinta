@@ -171,6 +171,20 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                 if (elem->type == ElementType::Subscript) st.drawYOffset = lineHeight * 0.38f;
                 break;
 
+            case ElementType::Citation:
+            case ElementType::CrossReference:
+                // Scholar: what it reads as, in the link colour without a
+                // rule under it, going where its url says (#ref-key,
+                // #fig:id). Its anchor, cite-N, is where it stands
+                if (!elem->url.empty()) {
+                    st.color = app.theme.link;
+                    st.linkUrl = elem->url;
+                    st.isLink = true;
+                    st.anchorId = elem->title;
+                }
+                if (elem->type == ElementType::Citation) app.citationKeys[elem->title] = elem->language;
+                break;
+
             case ElementType::FootnoteReference:
                 st.anchorId = elem->title;
                 if (app.supSubFormat) { st.format = app.supSubFormat; st.fixedSize = true; }

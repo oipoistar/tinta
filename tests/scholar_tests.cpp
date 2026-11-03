@@ -4,6 +4,7 @@
 #include "document.h"
 #include "scholar.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -119,7 +120,7 @@ void figuresAndTables(const fs::path& fixtures) {
 void wordsFromFrontMatter() {
     auto zh = parseText("---\nlang: zh-CN\n---\n\n![\xE7\xAC\x94\xE5\xB0\x96](nib.png){#fig:nib}\n");
     auto figures = all(zh.root, ElementType::Figure);
-    check(figures.size() == 1 && plain(captionOf(figures[0])) == "\xE5\x9B\xBE 1\xEF\xBC\x9A \xE7\xAC\x94\xE5\xB0\x96",
+    check(figures.size() == 1 && plain(captionOf(figures[0])) == "\xE5\x9B\xBE 1\xEF\xBC\x9A\xE7\xAC\x94\xE5\xB0\x96",
           "lang: zh numbers in Chinese: " + (figures.empty() ? std::string() : plain(captionOf(figures[0]))));
     auto own = parseText("---\nfigureTitle: Fig.\ntitleDelim: \" -\"\n---\n\n![A nib](nib.png){#fig:nib}\n");
     figures = all(own.root, ElementType::Figure);
@@ -131,12 +132,129 @@ void wordsFromFrontMatter() {
     check(all(noTable.root, ElementType::Figure).empty() && all(noTable.root, ElementType::Caption).empty(),
           "Table: without a table stays a paragraph");
 }
+bool contains(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
+
+ElementPtr bibliographyOf(const ElementPtr& root) {
+    auto lists = all(root, ElementType::Bibliography);
+    return lists.empty() ? nullptr : lists.front();
+}
+
+bool listsKey(const ElementPtr& bibliography, const std::string& key) {
+    if (!bibliography) return false;
+    for (const auto& entry : bibliography->children)
+        if (entry->title == "ref-" + key) return true;
+    return false;
+}
+
+void citationsInAPaper(const fs::path& fixtures) {
+    auto result = parse(fixtures / "paper.md");
+    check(result.success, "paper.md parses");
+    for (const auto& problem : result.problems) check(false, "paper.md has no problems: " + problem);
+    auto citations = all(result.root, ElementType::Citation);
+    check(citations.size() == 17, "the paper's 17 citations are found, got " + std::to_string(citations.size()));
+    if (citations.empty()) return;
+    const std::string first = plain(citations[0]);
+    check(contains(first, "Knuth") && contains(first, "1984") && contains(first, "Brooks") && first[0] == '(',
+          "APA cites by author and year in parentheses: " + first);
+    check(citations[0]->url == "#ref-knuth1984" && citations[0]->language == "knuth1984 brooks1995" &&
+              citations[0]->title == "cite-1",
+          "a citation goes to its first reference, knows its keys and has its own anchor");
+    const std::string inText = plain(citations[1]);
+    check(contains(inText, "Okafor") && contains(inText, "2021") && inText[0] != '(',
+          "@okafor2021 reads as the author in the sentence: " + inText);
+    bool inTable = false, inFootnote = false, inQuote = false;
+    for (const auto& c : citations) {
+        for (const qmd::Element* up = c->parent; up; up = up->parent) {
+            inTable |= up->type == ElementType::TableCell;
+            inFootnote |= up->type == ElementType::FootnoteDefinition;
+            inQuote |= up->type == ElementType::BlockQuote;
+        }
+    }
+    check(inTable && inFootnote && inQuote, "citations in a table, a footnote and a quote are found");
+    for (const auto& text : all(result.root, ElementType::Text)) {
+        check(!contains(text->text, "[@") && !contains(text->text, "@knuth"), "no citation is left as text: " + text->text);
+    }
+    bool mail = false, mention = false;
+    for (const auto& elem : all(result.root, ElementType::Link)) mail |= contains(elem->url, "okafor@example.org");
+    for (const auto& text : all(result.root, ElementType::Text)) mention |= contains(text->text, "@inkfan");
+    check(mail && mention, "an e-mail address and an @mention without a reference stay what they were");
+
+    auto refs = all(result.root, ElementType::CrossReference);
+    std::vector<std::string> reads;
+    for (const auto& r : refs) reads.push_back(plain(r));
+    const std::string nbsp = "\xC2\xA0";
+    auto has = [&](const std::string& want) { return std::find(reads.begin(), reads.end(), want) != reads.end(); };
+    check(has("eq." + nbsp + "2") && has("fig." + nbsp + "1") && has("tbl." + nbsp + "1") &&
+              has("eqns." + nbsp + "1, 2") && has("Fig." + nbsp + "1"),
+          "@eq:rise, @fig:nib, @tbl:inks, [@eq:flow; @eq:rise] and @Fig:nib read as pandoc-crossref reads them");
+    for (const auto& r : refs) check(r->url.size() > 1 && r->url[0] == '#', "a reference goes to its target: " + plain(r));
+
+    ElementPtr list = bibliographyOf(result.root);
+    check(list && list->language == "hanging" && list->children.size() == 21,
+          "the references: one entry per work cited, hanging (APA)");
+    for (const char* key : {"knuth1984", "consortium2022", "zhang2020"}) {
+        check(listsKey(list, key) == (std::string(key) != "zhang2020"), std::string("the references list ") + key + " only if cited");
+    }
+    const auto& top = result.root->children;
+    size_t at = 0;
+    while (at < top.size() && top[at] != list) ++at;
+    check(at >= 1 && at < top.size() && top[at - 1]->type == ElementType::Heading && plain(top[at - 1]) == "References",
+          "reference-section-title heads them");
+    check(at + 1 < top.size() && top[at + 1]->type == ElementType::Footnotes, "and they come before the footnotes");
+}
+
+void citationsInChinese(const fs::path& fixtures) {
+    auto result = parse(fixtures / "paper-zh.md");
+    for (const auto& problem : result.problems) check(false, "paper-zh.md has no problems: " + problem);
+    ElementPtr list = bibliographyOf(result.root);
+    check(list && list->language == "field" && !list->children.empty() && list->children[0]->text == "[1]",
+          "GB/T 7714 numbers its references in a column");
+    auto citations = all(result.root, ElementType::Citation);
+    check(!citations.empty() && contains(plain(citations[0]), "1"), "and cites by number: " +
+          (citations.empty() ? std::string() : plain(citations[0])));
+    auto refs = all(result.root, ElementType::CrossReference);
+    bool chinese = false;
+    for (const auto& r : refs) chinese |= plain(r) == "\xE5\xBC\x8F\xC2\xA0" "1" || plain(r) == "\xE5\x9B\xBE\xC2\xA0" "1";
+    check(chinese, "lang: zh words the references in Chinese");
+}
+
+void citationsWithout(const fs::path& fixtures) {
+    // No bibliography: @ is text, but figures are still referred to
+    auto plainDoc = parseText("Write to ana@example.org or [@knuth1984] @knuth1984.\n\n"
+                              "![A nib](nib.png){#fig:nib}\n\nSee @fig:nib.\n");
+    check(all(plainDoc.root, ElementType::Citation).empty(), "without a bibliography nothing cites");
+    auto refs = all(plainDoc.root, ElementType::CrossReference);
+    check(refs.size() == 1 && plain(refs[0]) == "fig.\xC2\xA0" "1", "but @fig:id still refers to its figure");
+    check(all(plainDoc.root, ElementType::Bibliography).empty(), "and no references are listed");
+
+    // Problems are reported with where they are, and nothing stops reading
+    const std::string folder = fixtures.string();
+    qmd::MarkdownParser parser;
+    auto broken = parseDocument(parser, "---\nbibliography: broken.bib\ncsl: no-such-style\n---\n\n"
+                                        "A missing key [@nobody] and a known one [@good2020].\n\n@fig:missing\n",
+                                (fixtures / "draft.md").wstring());
+    bool line = false, style = false, missing = false, figure = false;
+    for (const auto& p : broken.problems) {
+        line |= contains(p, "broken.bib, line ");
+        style |= contains(p, "no-such-style");
+        missing |= contains(p, "nobody");
+        figure |= contains(p, "fig:missing");
+    }
+    check(line && style && missing && figure,
+          "a broken library, an unknown style, a missing key and a missing figure are each reported");
+    auto cites = all(broken.root, ElementType::Citation);
+    check(cites.size() == 2, "both citations still format");
+    check(bibliographyOf(broken.root) != nullptr, "with the references of the keys that exist");
+}
 }  // namespace
 
 int main() {
     const fs::path fixtures = TINTA_SCHOLAR_FIXTURES;
     figuresAndTables(fixtures);
     wordsFromFrontMatter();
+    citationsInAPaper(fixtures);
+    citationsInChinese(fixtures);
+    citationsWithout(fixtures);
     std::cout << "Scholar: " << failures << " failures\n";
     return failures ? 1 : 0;
 }

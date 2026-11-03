@@ -68,6 +68,14 @@ target_compile_options(md4c PRIVATE $<$<C_COMPILER_ID:MSVC>:/W3>)
 set(SCHOLAR_SOURCES
     src/scholar.cpp
     src/csl_bundle.cpp
+    src/bib.cpp
+    src/cite.cpp
+    src/json.cpp
+    src/xml.cpp
+    src/csl_text.cpp
+    src/csl_style.cpp
+    src/csl_render.cpp
+    src/csl_process.cpp
 )
 
 # Themes and CSS themes (docs/specs/theming.md): every target that builds
@@ -144,7 +152,6 @@ set(SOURCES
     src/plantuml_app.cpp
     src/wordcount.cpp
     src/sheet_model.cpp
-    src/json.cpp
     src/sheet_doc.cpp
     src/sheet_render.cpp
     src/sheet_input.cpp
@@ -706,7 +713,9 @@ if(BUILD_TESTING)
         tests/scholar_tests.cpp
         src/document.cpp src/frontmatter.cpp ${SCHOLAR_SOURCES}
         src/markdown.cpp src/footnotes.cpp
+        ${CSL_RC}
     )
+    add_dependencies(scholar_tests csl_bundle)
     target_include_directories(scholar_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${md4c_SOURCE_DIR}/src

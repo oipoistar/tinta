@@ -1262,6 +1262,35 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
             walkChildren(ctx, elem);
             ctx.out += "</figcaption>\n";
             break;
+        // Citations and references in pandoc's own markup
+        case ElementType::Citation:
+            ctx.out += "<span class=\"citation\" data-cites=\"" + htmlEscape(elem->language) + "\">";
+            if (!elem->url.empty()) ctx.out += "<a href=\"" + htmlEscape(elem->url) + "\" role=\"doc-biblioref\">";
+            walkChildren(ctx, elem);
+            if (!elem->url.empty()) ctx.out += "</a>";
+            ctx.out += "</span>";
+            break;
+        case ElementType::CrossReference:
+            if (!elem->url.empty()) ctx.out += "<a href=\"" + htmlEscape(elem->url) + "\">";
+            walkChildren(ctx, elem);
+            if (!elem->url.empty()) ctx.out += "</a>";
+            break;
+        case ElementType::Bibliography:
+            ctx.out += std::string("<div id=\"refs\" class=\"references csl-bib-body") +
+                       (elem->language == "hanging" ? " hanging-indent" : "") + "\" role=\"list\">\n";
+            walkChildren(ctx, elem);
+            ctx.out += "</div>\n";
+            break;
+        case ElementType::BibEntry:
+            ctx.out += "<div id=\"" + htmlEscape(elem->title) + "\" class=\"csl-entry\" role=\"listitem\">";
+            if (!elem->text.empty()) {
+                ctx.out += "<div class=\"csl-left-margin\">" + htmlEscape(elem->text) +
+                           "</div><div class=\"csl-right-inline\">";
+            }
+            walkChildren(ctx, elem);
+            if (!elem->text.empty()) ctx.out += "</div>";
+            ctx.out += "</div>\n";
+            break;
         case ElementType::Paragraph:
             ctx.out += elem->language == "footnote-backlinks" ? "<p class=\"footnote-backlinks\">" : "<p>";
             walkChildren(ctx, elem);
@@ -1594,6 +1623,11 @@ std::string themeCss(const App& app, const std::string& bodyFont,
     captionText.a = 0.8f;
     css += "figure{margin:1em 0;}figure p{margin:0;}figure table{margin:.4em 0;}"
            "figcaption{color:" + colorCss(captionText) + ";margin:.4em 0 1em;}";
+    // ... and its references, as pandoc lays them out
+    css += ".citation a,a[role=doc-biblioref]{text-decoration:none;}"
+           ".csl-entry{margin:.5em 0;}.hanging-indent .csl-entry{padding-left:2em;text-indent:-2em;}"
+           ".csl-left-margin{float:left;min-width:2.5em;padding-right:.5em;}"
+           ".csl-right-inline{margin-left:3em;}";
     css += "th,td{border:1px solid " + colorCss(border) +
            ";padding:6px 13px;}";
     css += "th{background:" + colorCss(t.codeBackground) + ";}";
@@ -1654,6 +1688,11 @@ bool exportHtmlFile(App& app, const std::wstring& path) {
                "initial-scale=1\"/>\n";
     ctx.out += "<title>" + htmlEscape(title) + "</title>\n";
     ctx.out += "<style>" + themeCss(app, bodyFont, monoFont) + "</style>\n";
+    // A CSS theme's own sheet follows, so a browser draws what Tinta does
+    // and what Tinta leaves to it (docs/specs/theming.md)
+    if (std::string sheet = themeSheetCss(app.currentThemeIndex); !sheet.empty()) {
+        ctx.out += "<style>\n" + sheet + "</style>\n";
+    }
     if (std::any_of(app.root->children.begin(), app.root->children.end(), [](const ElementPtr& e) { return e->type == ElementType::Footnotes; }))
         ctx.out += "<style>.footnote{position:relative;padding-left:2em}.footnote>span{position:absolute;left:0}.footnote>p:first-of-type{margin-top:0}.footnote-backlinks{font-size:.8em}</style>\n";
     ctx.out += "</head>\n<body>\n";
@@ -1688,11 +1727,6 @@ void exportDocumentAs(App& app, HWND hwnd) {
         L"Web page (*.html)\0*.html\0Word document (*.docx)\0*.docx\0"
         L"PDF document (*.pdf)\0*.pdf\0";
     ofn.lpstrFile = path;
-    // A CSS theme's own sheet follows, so a browser draws what Tinta does
-    // and what Tinta leaves to it (docs/specs/theming.md)
-    if (std::string sheet = themeSheetCss(app.currentThemeIndex); !sheet.empty()) {
-        ctx.out += "<style>\n" + sheet + "</style>\n";
-    }
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (!runSaveFileDialog(ofn)) return;

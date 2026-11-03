@@ -379,6 +379,34 @@ int blockAt(const std::wstring& t, size_t at) {
     }
 }
 
+// A bracket that holds a citation: an @ that starts a key after its opening,
+// a space, a semicolon or a minus, and a closing bracket no (address) follows
+static bool citesWithin(std::wstring_view line, size_t open) {
+    size_t close = line.find(L']', open + 1);
+    if (close == std::wstring_view::npos || (close + 1 < line.size() && line[close + 1] == L'(')) return false;
+    for (size_t at = open + 1; at + 1 < close; ++at) {
+        if (line[at] != L'@') continue;
+        wchar_t before = line[at - 1];
+        wchar_t after = line[at + 1];
+        if ((at == open + 1 || before == L' ' || before == L';' || before == L'-') && (iswalnum(after) || after == L'_' || after == L'{')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// @fig:, @tbl:, @eq:, @sec: or @lst: at `at`, either case for the first letter
+static bool crossReferenceAt(std::wstring_view line, size_t at) {
+    for (const wchar_t* prefix : {L"fig:", L"tbl:", L"eq:", L"sec:", L"lst:"}) {
+        size_t n = wcslen(prefix);
+        if (at + 1 + n >= line.size()) continue;
+        bool same = towlower(line[at + 1]) == prefix[0];
+        for (size_t k = 1; same && k < n; ++k) same = line[at + 1 + k] == prefix[k];
+        if (same && (iswalnum(line[at + 1 + n]) || line[at + 1 + n] == L'_')) return true;
+    }
+    return false;
+}
+
 void inlineSpans(std::wstring_view line, size_t from, std::vector<InlineSpan>& spans) {
     const size_t npos = std::wstring_view::npos;
     auto add = [&](int kind, size_t at, size_t length) { spans.push_back({kind, at, length}); };
@@ -419,6 +447,18 @@ void inlineSpans(std::wstring_view line, size_t from, std::vector<InlineSpan>& s
             if (close == npos) continue;
             add(INL_FOOTNOTE, i, close - i + 1);
             i = close;
+        } else if (c == L'[' && citesWithin(line, i)) {
+            // [@key], [see @key, p. 4], [-@key]: one span to its bracket
+            size_t close = line.find(L']', i + 1);
+            add(INL_CITE, i, close - i + 1);
+            i = close;
+        } else if (c == L'@' && (i == 0 || !iswalnum(line[i - 1])) && crossReferenceAt(line, i)) {
+            // @fig:id, @tbl:id, @eq:id, @sec:id, @lst:id
+            size_t stop = i + 1;
+            while (stop < line.size() && (iswalnum(line[stop]) || wcschr(L":_-.", line[stop]) != nullptr)) ++stop;
+            while (stop > i + 1 && wcschr(L":.-", line[stop - 1]) != nullptr) --stop;
+            add(INL_CITE, i, stop - i);
+            i = stop - 1;
         } else if (c == L'[' || (c == L'!' && i + 1 < line.size() && line[i + 1] == L'[')) {
             // [text](address) and ![alt](address): "](address)" is one mark
             size_t open = c == L'!' ? i + 1 : i;

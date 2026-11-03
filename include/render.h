@@ -33,4 +33,9 @@ D2D1_COLOR_F resolveDiagramRole(const App& app, const mermaidext::Prim& prim,
 // letters on `baseline`.
 App::LayoutShape listBullet(float textX, float baseline, float em, int depth, D2D1_COLOR_F color);
 
+// Under the pointer resting on a citation, the references it cites; on a
+// reference to a figure or table, its caption (docs/specs/scholar.md).
+// Drawn in document coordinates, as the front matter's overflow card is
+void renderReferenceCard(App& app);
+
 #endif // TINTA_RENDER_H

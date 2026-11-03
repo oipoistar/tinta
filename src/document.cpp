@@ -265,13 +265,27 @@ static void insertProperties(qmd::ParseResult& result, const std::string& conten
     result.root->children.insert(result.root->children.begin(), std::move(props));
 }
 
-// Figures, tables and equations numbered, citations and references
-// formatted (docs/specs/scholar.md); what went wrong rides along
-static void finishScholar(qmd::ParseResult& result, const std::wstring& path) {
-    if (!result.success || !result.root) return;
+// Markdown with Scholar (docs/specs/scholar.md): the front matter's
+// bibliography is read before the parse, so a bare @key knows whether it
+// cites; afterwards figures, tables and equations are numbered and the
+// citations and references formatted, and what went wrong rides along
+static qmd::ParseResult parseMarkdown(qmd::MarkdownParser& parser, const std::string& content,
+                                      const std::wstring& path) {
     const size_t slash = path.find_last_of(L"\\/");
     const std::wstring folder = slash == std::wstring::npos ? std::wstring() : path.substr(0, slash);
-    result.problems = scholar::process(result.root, folder);
+    const scholar::Session session = scholar::begin(fm::parse(content).properties, folder);
+    parser.setCitationFinder(scholar::finder(session));
+    std::string cleaned;
+    qmd::ParseResult result;
+    if (blankPreamble(content, cleaned)) {
+        result = parser.parse(cleaned);
+        insertProperties(result, content);
+    } else {
+        result = parser.parse(content);
+    }
+    parser.setCitationFinder({});
+    if (result.success && result.root) result.problems = scholar::finish(result.root, session);
+    return result;
 }
 
 qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
@@ -282,18 +296,9 @@ qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
     if (isPlainTextDocumentPath(path)) {
         return createPlainTextDocument(content, plainTextLanguage(path));
     }
-    std::string cleaned;
-    qmd::ParseResult result;
-    if (blankPreamble(content, cleaned)) {
-        result = parser.parse(cleaned);
-        insertProperties(result, content);
-    } else {
-        result = parser.parse(content);
-    }
     std::wstring wide(path.size(), L'\0');
     wide.resize((size_t)MultiByteToWideChar(CP_UTF8, 0, path.data(), (int)path.size(), wide.data(), (int)wide.size()));
-    finishScholar(result, wide);
-    return result;
+    return parseMarkdown(parser, content, wide);
 }
 
 qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
@@ -304,14 +309,5 @@ qmd::ParseResult parseDocument(qmd::MarkdownParser& parser,
     if (isPlainTextDocumentPath(path)) {
         return createPlainTextDocument(content, plainTextLanguage(path));
     }
-    std::string cleaned;
-    qmd::ParseResult result;
-    if (blankPreamble(content, cleaned)) {
-        result = parser.parse(cleaned);
-        insertProperties(result, content);
-    } else {
-        result = parser.parse(content);
-    }
-    finishScholar(result, std::wstring(path));
-    return result;
+    return parseMarkdown(parser, content, std::wstring(path));
 }

@@ -503,11 +503,14 @@ static const Element* highlightSpanOf(const Element* elem) {
     return nullptr;
 }
 
+// firstLineX, when set, starts the first line left of startX, where the
+// lines after it wrap: a hanging indent (a bibliography's entries)
 static void layoutInlineContent(App& app, const std::vector<ElementPtr>& elements,
                                 float startX, float& y, float maxWidth,
                                 IDWriteTextFormat* baseFormat, D2D1_COLOR_F baseColor,
-                                const std::string& baseLinkUrl = {}, float customLineHeight = 0.0f) {
-    float x = startX;
+                                const std::string& baseLinkUrl = {}, float customLineHeight = 0.0f,
+                                float firstLineX = -1.0f) {
+    float x = firstLineX >= 0.0f ? firstLineX : startX;
     float lineHeight = customLineHeight > 0 ? customLineHeight : baseFormat->GetFontSize() * themeLineHeight(app.theme);
     const float normalLineHeight = lineHeight;
     float mathTextOffset = 0;
@@ -574,6 +577,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         App::LinkRect lr;
         lr.bounds = D2D1::RectF(lineStartX, lineY, lineEndX, lineY + lineHeight);
         lr.url = linkUrl;
+        lr.anchor = inlineAnchor;
         app.linkRects.push_back(lr);
     };
 
@@ -1236,6 +1240,16 @@ static bool pinAnchorsOnly(App& app, const std::vector<ElementPtr>& children, fl
 }
 
 static void layoutInlineRun(App& app, std::vector<ElementPtr>& run, float& y, float indent, float maxWidth);
+
+// What an element reads as, its inline children's text run together
+static std::string plainText(const ElementPtr& elem) {
+    if (elem->type == ElementType::Text) return elem->text;
+    if (elem->type == ElementType::SoftBreak) return " ";
+    std::string out;
+    for (const auto& child : elem->children) out += plainText(child);
+    return out;
+}
+
 
 static void layoutParagraph(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     // A $$...$$ equation stands on its own line, centered, wherever it sits
@@ -3792,8 +3806,14 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
             break;
         case ElementType::Figure:
             // A numbered figure or captioned table (Scholar): its id is a
-            // place a reference scrolls to
-            if (!elem->title.empty()) app.footnoteAnchors[elem->title] = y;
+            // place a reference scrolls to, and its caption what the
+            // reference's card shows
+            if (!elem->title.empty()) {
+                app.footnoteAnchors[elem->title] = y;
+                for (const auto& child : elem->children) {
+                    if (child->type == ElementType::Caption) app.referenceCards[elem->title] = toWide(plainText(child));
+                }
+            }
             for (const auto& child : elem->children) {
                 // The picture itself, with its caption close under it
                 // rather than past a paragraph's empty last line
@@ -3811,6 +3831,42 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
             layoutInlineContent(app, elem->children, indent, y, maxWidth, app.textFormat, muted);
             app.docText += L"\n\n";
             y += 14 * app.contentScale * app.zoomFactor;
+            break;
+        }
+        case ElementType::Bibliography: {
+            // Scholar's references: a number column (IEEE, Nature, GB/T) or
+            // a hanging indent (APA, Chicago); each entry is the place its
+            // citations go to
+            const float scale = app.contentScale * app.zoomFactor;
+            float column = 0;
+            if (elem->language == "field") {
+                for (const auto& entry : elem->children)
+                    column = std::max(column, measureText(app, toWide(entry->text), app.textFormat));
+                column += 10 * scale;
+            }
+            const float hang = elem->language == "hanging" ? 32 * scale : 0;
+            for (const auto& entry : elem->children) {
+                if (entry->type != ElementType::BibEntry) continue;
+                app.footnoteAnchors[entry->title] = y;
+                app.referenceCards[entry->title] =
+                    toWide((entry->text.empty() ? std::string() : entry->text + " ") + plainText(entry));
+                if (column > 0) {
+                    auto label = std::make_shared<Element>(ElementType::Text);
+                    label->text = entry->text;
+                    float labelY = y;
+                    layoutInlineContent(app, {label}, indent, labelY, column, app.textFormat, app.theme.text);
+                    float entryY = y;
+                    layoutInlineContent(app, entry->children, indent + column, entryY, maxWidth - column,
+                                        app.textFormat, app.theme.text);
+                    y = std::max(labelY, entryY);
+                } else {
+                    layoutInlineContent(app, entry->children, indent + hang, y, maxWidth - hang, app.textFormat,
+                                        app.theme.text, {}, 0.0f, indent);
+                }
+                app.docText += L"\n\n";
+                y += 8 * scale;
+            }
+            y += 6 * scale;
             break;
         }
         case ElementType::CodeBlock:
@@ -4088,4 +4144,54 @@ void ensureLayoutComplete(App& app) {
 D2D1_COLOR_F resolveDiagramRole(const App& app, const mermaidext::Prim& prim,
                                 mermaidext::Role role) {
     return resolveDiagramRoleImpl(app, prim, role);
+}
+
+// Scholar's hover cards: above the page's own drawing, in its coordinates
+void renderReferenceCard(App& app) {
+    if (app.showSettings || app.showContextMenu || app.showThemeChooser || app.showThemeEditor ||
+        app.referenceCards.empty()) {
+        return;
+    }
+    const float dx = app.mouseX - documentViewportX(app) + app.scrollX, dy = app.mouseY + app.scrollY;
+    for (const auto& link : app.linkRects) {
+        const auto& b = link.bounds;
+        if (dx < b.left || dx > b.right || dy < b.top || dy > b.bottom) continue;
+        std::wstring card;
+        if (link.anchor.rfind("cite-", 0) == 0) {
+            auto keys = app.citationKeys.find(link.anchor);
+            if (keys == app.citationKeys.end()) return;
+            size_t at = 0;
+            while (at < keys->second.size()) {
+                size_t space = keys->second.find(' ', at);
+                const std::string key = keys->second.substr(at, space == std::string::npos ? std::string::npos : space - at);
+                at = space == std::string::npos ? keys->second.size() : space + 1;
+                if (key.empty()) continue;
+                auto entry = app.referenceCards.find("ref-" + key);
+                if (!card.empty()) card += L"\n\n";
+                card += entry != app.referenceCards.end() ? entry->second : L"@" + toWide(key) + L"?";
+            }
+        } else if (link.anchor.rfind("xref-", 0) == 0 && link.url.size() > 1) {
+            auto entry = app.referenceCards.find(link.url.substr(1));
+            if (entry != app.referenceCards.end()) card = entry->second;
+        }
+        if (card.empty() || !app.folderBrowserFormat) return;
+        const float s = app.contentScale;
+        const float w = std::min(440 * s, documentViewportWidth(app) - 24 * s);
+        const float x = std::clamp(b.left - app.scrollX, 12 * s, std::max(12 * s, documentViewportWidth(app) - w - 12 * s));
+        const float y = b.bottom - app.scrollY + 6 * s;
+        IDWriteTextLayout* layout = nullptr;
+        app.dwriteFactory->CreateTextLayout(card.c_str(), (UINT32)card.size(), app.folderBrowserFormat, w - 20 * s,
+                                            10000, &layout);
+        if (!layout) return;
+        layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+        DWRITE_TEXT_METRICS metrics{};
+        layout->GetMetrics(&metrics);
+        app.brush->SetColor(app.theme.codeBackground);
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + metrics.height + 16 * s), 6 * s, 6 * s), app.brush);
+        app.brush->SetColor(app.theme.text);
+        app.renderTarget->DrawTextLayout(D2D1::Point2F(x + 10 * s, y + 8 * s), layout, app.brush);
+        layout->Release();
+        return;
+    }
 }

@@ -1332,6 +1332,22 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
             emitParagraph(ctx, elem, caption);
             break;
         }
+        case ElementType::Bibliography:
+            for (const auto& entry : elem->children) {
+                if (entry->type != ElementType::BibEntry) continue;
+                // The number column's label leads its entry's line
+                auto line = std::make_shared<Element>(ElementType::Paragraph);
+                if (!entry->text.empty()) {
+                    auto label = std::make_shared<Element>(ElementType::Text);
+                    label->text = entry->text + " ";
+                    line->children.push_back(label);
+                }
+                for (const auto& child : entry->children) line->children.push_back(child);
+                ParaProps reference = props;
+                reference.styleId = "Bibliography";
+                emitParagraph(ctx, line, reference);
+            }
+            break;
         case ElementType::Heading: {
             int level = std::max(1, std::min(6, elem->level));
             ParaProps heading = props;
@@ -1599,7 +1615,11 @@ std::string stylesXml(const DocxCtx& ctx) {
            ctx.codeBgHex + "\"/><w:spacing w:after=\"160\"/></w:pPr>"
            "<w:rPr>" + rFontsXml(ctx.monoFont, ctx.monoEastAsia) +
            "<w:sz w:val=\"21\"/><w:szCs w:val=\"21\"/></w:rPr></w:style>";
-    // Figure and table captions (Scholar), as Word names its own
+    // References with a hanging indent, and figure and table captions
+    // (Scholar), as Word names its own
+    xml += "<w:style w:type=\"paragraph\" w:styleId=\"Bibliography\">"
+           "<w:name w:val=\"Bibliography\"/><w:basedOn w:val=\"Normal\"/>"
+           "<w:pPr><w:spacing w:after=\"120\"/><w:ind w:left=\"720\" w:hanging=\"720\"/></w:pPr></w:style>";
     xml += "<w:style w:type=\"paragraph\" w:styleId=\"Caption\">"
            "<w:name w:val=\"caption\"/><w:basedOn w:val=\"Normal\"/>"
            "<w:pPr><w:spacing w:after=\"200\"/></w:pPr>"

@@ -512,6 +512,7 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
                         break;
                     case INL_WIKI:
                     case INL_FOOTNOTE:
+                    case INL_CITE:
                     case INL_LINK:
                     case INL_ADDRESS:
                         layout->SetDrawingEffect(cache.linkBrush.Get(), range(at, n));

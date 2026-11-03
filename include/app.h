@@ -1130,7 +1130,13 @@ struct App {
     struct LinkRect {
         D2D1_RECT_F bounds;
         std::string url;
+        std::string anchor;  // the span's own anchor: cite-N, xref-N, a footnote mark's
     };
+    // Scholar's hover cards (docs/specs/scholar.md): each reference's text by
+    // its anchor (ref-key) and each figure's or table's caption by its id;
+    // and the keys each citation (cite-N) cites
+    std::unordered_map<std::string, std::wstring> referenceCards;
+    std::unordered_map<std::string, std::string> citationKeys;
     std::vector<LinkRect> linkRects;
     std::string hoveredLink;
 
@@ -1747,6 +1753,8 @@ struct App {
         headings.clear();
         headingSlugCounts.clear();
         footnoteAnchors.clear();
+        referenceCards.clear();
+        citationKeys.clear();
         htmlAnchors.clear();
         fileRefCache.clear();
         for (auto& a : annotations) {

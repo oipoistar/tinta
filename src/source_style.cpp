@@ -475,6 +475,7 @@ void styleText(App& app, State& S, IDWriteTextLayout* layout, std::wstring_view 
                 break;
             case live::INL_WIKI:
             case live::INL_FOOTNOTE:
+            case live::INL_CITE:
             case live::INL_LINK:
             case live::INL_ADDRESS:
                 paint(S.link.Get(), span.at, span.length);
