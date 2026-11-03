@@ -83,7 +83,7 @@ struct Decoration {
     std::optional<Color> color;  // empty: currentColor
     LineStyle style = LineStyle::Solid;
     float thickness = -1;  // px; -1 auto
-    float offset = -1;     // text-underline-offset, px; -1 auto
+    float offset = -1;     // text-underline-offset, px; -1 auto; inherited, as CSS has it
 };
 
 // Every property Tinta reads. `ComputedStyle::declared` records which of them
@@ -234,8 +234,9 @@ public:
 
     Context root();  // the html element, :root
     // An element under `parent`. `previous` are its earlier element siblings
-    // in order, for + and ~. The same parent and an element no selector can
-    // tell apart from an earlier one give the same context: a document has a
+    // in order, for + and ~; passing the same array as it grows reads each
+    // sibling once. The same parent and an element no selector can tell
+    // apart from an earlier one give the same context: a document has a
     // few hundred, not one per element
     Context child(Context parent, const Element& element, const Element* previous = nullptr,
                   size_t previousCount = 0);

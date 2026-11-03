@@ -421,6 +421,10 @@ void matchingTests() {
     check(picks("li:not(:first-child)", {0, 3, 1}), ":not() with a pseudo-class");
     check(picks(":is(blockquote p) > strong", {0, 6, 1, 0}) && !picks(":not(.alert-note > p) > strong", {0, 6, 1, 0}),
           "complex selectors inside :is() and :not()");
+    check(picks(":is(h1 + p)", {0, 1}) && !picks(":is(h1 + p)", {0, 2}) && picks("p:not(h1 + p)", {0, 2}) &&
+          !picks("p:not(h1 + p)", {0, 1}), "sibling combinators inside :is() and :not()");
+    check(picks("#top ~ ul > .b", {0, 3, 1}) && picks(":is(p + p) + ul", {0, 3}) && !picks(":is(h1 + p) + ul", {0, 3}),
+          "ids, and nested sibling selectors before a combinator");
     check(!picks("p:hover", {0, 2}) && !picks("p, a:hover", {0, 2}), "an unsupported pseudo-class drops the rule");
 }
 
