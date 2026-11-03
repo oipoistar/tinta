@@ -100,7 +100,8 @@ void applyTheme(App& app, int themeIndex) {
     bool sameFonts = app.textFormat &&
         app.formatsFontFamily == face(newTheme.fontFamily) &&
         app.formatsCodeFontFamily == face(newTheme.codeFontFamily) &&
-        app.formatsHeadingFontFamily == face(themeHeadingFont(newTheme));
+        app.formatsHeadingFontFamily == face(themeHeadingFont(newTheme)) &&
+        app.formatsTypeKey == themeTypeKey(newTheme);
 
     app.currentThemeIndex = themeIndex;
     app.theme = newTheme;
@@ -424,8 +425,9 @@ void updateTextFormats(App& app) {
 
     // Create text formats with current zoom and theme fonts
     float scale = app.contentScale * app.zoomFactor;
-    float fontSize = 16.0f * scale;
-    float codeSize = 14.0f * scale;
+    // A CSS theme may size the type (docs/specs/theming.md)
+    float fontSize = (app.theme.bodySize > 0 ? app.theme.bodySize : 16.0f) * scale;
+    float codeSize = (app.theme.codeSize > 0 ? app.theme.codeSize : 14.0f) * scale;
 
     const wchar_t* fontFamily = app.theme.fontFamily;
     const wchar_t* codeFont = app.theme.codeFontFamily;
@@ -480,9 +482,12 @@ void updateTextFormats(App& app) {
     const wchar_t* headingFont = themeHeadingFont(app.theme);
     float headingSizes[] = {32, 26, 22, 18, 16, 14};
     for (int i = 0; i < 6; i++) {
+        if (app.theme.headingSize[i] > 0) headingSizes[i] = app.theme.headingSize[i];
+        const DWRITE_FONT_WEIGHT weight = app.theme.headingWeight[i] > 0
+            ? (DWRITE_FONT_WEIGHT)app.theme.headingWeight[i] : DWRITE_FONT_WEIGHT_BOLD;
         app.dwriteFactory->CreateTextFormat(headingFont, nullptr,
-            DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            headingSizes[i] * scale, L"en-us", &app.headingFormats[i]);
+            weight, app.theme.headingItalic[i] ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, headingSizes[i] * scale, L"en-us", &app.headingFormats[i]);
         app.dwriteFactory->CreateTextFormat(headingFont, nullptr,
             DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
             headingSizes[i] * scale, L"en-us", &app.headingItalicFormats[i]);
@@ -527,6 +532,7 @@ void updateTextFormats(App& app) {
     app.formatsFontFamily = fontFamily ? fontFamily : L"";
     app.formatsCodeFontFamily = codeFont ? codeFont : L"";
     app.formatsHeadingFontFamily = headingFont ? headingFont : L"";
+    app.formatsTypeKey = themeTypeKey(app.theme);
 
     updateOverlayFormats(app);
     app.appliedZoomFactor = app.zoomFactor;

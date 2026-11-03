@@ -137,7 +137,32 @@ struct D2DTheme {
     // the horizontal rule's colour, else blockquoteBorder
     std::optional<D2D1_COLOR_F> selection = std::nullopt;
     std::optional<D2D1_COLOR_F> rule = std::nullopt;
+    // Type sizes a CSS theme sets (docs/specs/theming.md), in pixels at
+    // 100%; 0 keeps Tinta's (body 16, code 14, headings 32/26/22/18/16/14,
+    // bold, line height 1.7 times the size)
+    float bodySize = 0, codeSize = 0, lineHeight = 0;
+    float headingSize[6] = {};
+    int headingWeight[6] = {};
+    bool headingItalic[6] = {};
+    // The file a CSS theme came from, for following its changes; else empty
+    const wchar_t* sourcePath = nullptr;
 };
+
+// What a theme's type sizes are, as text: text formats are rebuilt when it
+// changes, as they are for a change of face
+inline std::string themeTypeKey(const D2DTheme& theme) {
+    std::string key = std::to_string(theme.bodySize) + "/" + std::to_string(theme.codeSize);
+    for (int i = 0; i < 6; i++) {
+        key += "/" + std::to_string(theme.headingSize[i]) + ":" + std::to_string(theme.headingWeight[i]) +
+               (theme.headingItalic[i] ? "i" : "");
+    }
+    return key;
+}
+
+// The body's line height as a multiple of the type size
+inline float themeLineHeight(const D2DTheme& theme) {
+    return theme.lineHeight > 0 ? theme.lineHeight : 1.7f;
+}
 
 inline D2D1_COLOR_F themeInlineCodeColor(const D2DTheme& theme) {
     return theme.inlineCode.value_or(theme.code);
@@ -499,6 +524,7 @@ struct App {
     // compares with these, not with app.theme: saving the theme in use from
     // the theme editor rewrites the strings app.theme points into (#265)
     std::wstring formatsFontFamily, formatsCodeFontFamily, formatsHeadingFontFamily;
+    std::string formatsTypeKey;  // and the type sizes (themeTypeKey)
 
     // Overlay text formats (cached)
     IDWriteTextFormat* searchTextFormat = nullptr;

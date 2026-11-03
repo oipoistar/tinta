@@ -216,14 +216,14 @@ Look pageLook(const App& app) {
     look.headingFace = th.headingFontFamily && *th.headingFontFamily ? th.headingFontFamily : look.face;
     look.codeFace = th.codeFontFamily && *th.codeFontFamily ? th.codeFontFamily : L"Consolas";
     // The reading view's sizes (d2d_init.cpp) and line height (render.cpp)
-    look.size = 16.0f * scale;
-    look.codeSize = 14.0f * scale;
+    look.size = (th.bodySize > 0 ? th.bodySize : 16.0f) * scale;
+    look.codeSize = (th.codeSize > 0 ? th.codeSize : 14.0f) * scale;
     const float headings[] = {32, 26, 22, 18, 16, 14};
     for (int i = 0; i < 6; ++i) {
-        look.headingSize[i] = headings[i] * scale;
+        look.headingSize[i] = (th.headingSize[i] > 0 ? th.headingSize[i] : headings[i]) * scale;
         look.heading[i] = themeHeadingColor(th, i + 1);
     }
-    look.lineHeight = 1.7f;
+    look.lineHeight = themeLineHeight(th);
     look.codeInset = 12.0f * scale;
     look.listIndent = 24.0f * scale;
     look.text = th.text;

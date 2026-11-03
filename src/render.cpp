@@ -508,7 +508,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                                 IDWriteTextFormat* baseFormat, D2D1_COLOR_F baseColor,
                                 const std::string& baseLinkUrl = {}, float customLineHeight = 0.0f) {
     float x = startX;
-    float lineHeight = customLineHeight > 0 ? customLineHeight : baseFormat->GetFontSize() * 1.7f;
+    float lineHeight = customLineHeight > 0 ? customLineHeight : baseFormat->GetFontSize() * themeLineHeight(app.theme);
     const float normalLineHeight = lineHeight;
     float mathTextOffset = 0;
     float maxX = startX + maxWidth;
@@ -3354,7 +3354,7 @@ static void layoutImage(App& app, const ElementPtr& elem, float& y, float indent
         }
         altText += L"]";
 
-        float lineHeight = app.italicFormat->GetFontSize() * 1.7f;
+        float lineHeight = app.italicFormat->GetFontSize() * themeLineHeight(app.theme);
         size_t docStart = app.docText.size();
         LayoutInfo info = createLayout(app, altText, app.italicFormat, lineHeight, app.bodyTypography);
 
@@ -3394,7 +3394,7 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
     float scale = app.contentScale * app.zoomFactor;
     float cellPadding = 8.0f * scale;
     float fontSize = app.textFormat->GetFontSize();
-    float lineHeight = fontSize * 1.7f;
+    float lineHeight = fontSize * themeLineHeight(app.theme);
     float minColWidth = 40.0f * scale;
 
     // Collect rows
