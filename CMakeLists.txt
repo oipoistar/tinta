@@ -780,6 +780,14 @@ if(BUILD_TESTING)
     target_compile_definitions(cite_tests PRIVATE
         TINTA_SCHOLAR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scholar")
     add_test(NAME citation_syntax COMMAND cite_tests)
+
+    # CSS themes: the engine on its own (docs/specs/theming.md)
+    add_executable(css_tests tests/css_tests.cpp src/css.cpp src/css_values.cpp src/css_props.cpp
+        src/css_parse.cpp src/css_cascade.cpp)
+    target_include_directories(css_tests PRIVATE include)
+    target_compile_definitions(css_tests PRIVATE
+        TINTA_CSS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/theme-css")
+    add_test(NAME css_engine COMMAND css_tests)
 endif()
 
 # Install

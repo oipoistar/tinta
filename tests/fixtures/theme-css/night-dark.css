@@ -1,0 +1,52 @@
+/* Night: a dark theme written with the newer colour functions */
+:root {
+  color-scheme: dark;
+  --bg: oklch(18% 0.02 260);
+  --fg: oklch(88% 0.02 260);
+  --accent: oklch(72% 0.14 250);
+  --muted: color-mix(in oklab, var(--fg) 60%, var(--bg));
+  accent-color: var(--accent);
+  caret-color: var(--accent);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--fg);
+  font-family: "Iosevka Aile", "Segoe UI", sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
+  counter-reset: chapter;
+}
+
+h1, h2, h3 { color: oklch(92% 0.05 80); font-weight: 700; letter-spacing: -0.01em; }
+h1 { font-size: calc(1rem + 1.25em); }
+h2 { font-size: clamp(20px, 1.4em, 28px); }
+h3 { font-size: max(1.1em, 18px); }
+h1::before { content: counter(chapter, upper-roman) ". "; counter-increment: chapter; }
+
+a { color: var(--accent); text-decoration: none; }
+a:not([href^="#"]) { text-decoration-line: underline; }
+
+code {
+  color: hsl(30 80% 70%);
+  background: hsl(220 20% 22% / 0.8);
+  font-variant-ligatures: none;
+}
+pre {
+  background: linear-gradient(to bottom, hsl(220 25% 14%), hsl(220 25% 11%));
+  border: 1px solid hsl(220 15% 25%);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 40%);
+}
+
+blockquote { border-left: 3px solid var(--accent); color: var(--muted); font-style: italic; }
+table td, table th { border-color: hsl(220 15% 28%); }
+tbody tr:nth-child(odd) { background-color: rgb(255 255 255 / 3%); }
+mark { background-color: hwb(50 10% 40%); color: black; }
+hr { border-top: 1px dashed var(--muted); }
+
+.token.keyword { color: lch(70% 60 300); }
+.token.string { color: lab(75% -40 40); }
+.token.comment { color: var(--muted); }
+
+::selection { background-color: color-mix(in srgb, var(--accent) 35%, transparent); }

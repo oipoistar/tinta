@@ -1,0 +1,26 @@
+/* Mistakes: one of each problem a theme author makes, for diagnostics */
+body {
+  colour: #333;
+  color: #ggg;
+  display: flex;
+  font-size: 16px
+  line-height: 1.5;
+  background-color: rgb(10 20);
+}
+div.sidebar { color: red; }
+nav ul { margin: 0; }
+a:hover { color: blue; }
+p::first-line { font-weight: bold; }
+h1 { font-wieght: bold; transition: color 0.2s; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@frobnicate something;
+h2 { color: red !importnt; }
+h3 {
+  & span { color: blue; }
+  color: green;
+}
+p { margin: 1em 0;; padding 4px; }
+.box { border-radius: 4px / 8px; }
+@media screen and (hover: hover) { a { color: purple; } }
+blockquote { -webkit-font-smoothing: antialiased; }
+h4 { color: red

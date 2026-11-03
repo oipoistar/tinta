@@ -83,7 +83,7 @@ struct Decoration {
     std::optional<Color> color;  // empty: currentColor
     LineStyle style = LineStyle::Solid;
     float thickness = -1;  // px; -1 auto
-    float offset = -1;     // text-underline-offset, px; -1 auto
+    float offset = -1;     // text-underline-offset, px; -1 auto; inherited, as CSS has it
 };
 
 // Every property Tinta reads. `ComputedStyle::declared` records which of them
@@ -121,6 +121,7 @@ struct ComputedStyle {
     std::vector<FontFeature> fontFeatures;    // font-feature-settings and font-variant-*
     std::vector<FontFeature> fontVariations;  // font-variation-settings
     float lineHeight = 0;                 // px; 0 is normal
+    float lineHeightFactor = 0;           // a unitless line-height, which children inherit as the factor; else 0
     float letterSpacing = 0;              // px
     TextAlign textAlign = TextAlign::Start;
     float textIndent = 0;                 // px
@@ -152,8 +153,9 @@ struct ComputedStyle {
     // A custom property read as a colour (`--ui-accent: #3366cc`)
     std::optional<Color> customColor(std::string_view name) const;
 
-    // Shared, copy-on-write, per context
+    // Shared, copy-on-write, per context; sorted by name
     std::shared_ptr<const std::vector<std::pair<std::string, std::string>>> customs;
+    bool dark = false;  // the media it was computed for, which light-dark() in customColor() follows
 };
 
 // --- Sheets --------------------------------------------------------------------
@@ -211,6 +213,7 @@ struct Element {
     int index = 0, count = 0;          // 1-based place among element siblings, and their number
     int typeIndex = 0, typeCount = 0;  // the same among siblings with this tag
     bool checked = false;              // a done task's checkbox, or its list item
+    bool empty = false;                // no children and no text, for :empty
 };
 
 enum class Pseudo : uint8_t { Before, After, Marker, Selection };
@@ -231,8 +234,9 @@ public:
 
     Context root();  // the html element, :root
     // An element under `parent`. `previous` are its earlier element siblings
-    // in order, for + and ~. The same parent and an element no selector can
-    // tell apart from an earlier one give the same context: a document has a
+    // in order, for + and ~; passing the same array as it grows reads each
+    // sibling once. The same parent and an element no selector can tell
+    // apart from an earlier one give the same context: a document has a
     // few hundred, not one per element
     Context child(Context parent, const Element& element, const Element* previous = nullptr,
                   size_t previousCount = 0);
