@@ -703,6 +703,13 @@ if(BUILD_TESTING)
     target_compile_definitions(bib_tests PRIVATE
         TINTA_SCHOLAR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scholar")
     add_test(NAME bibliography COMMAND bib_tests)
+
+    # Scholar: pandoc's citation syntax, against the fixture library's keys
+    add_executable(cite_tests tests/cite_tests.cpp src/cite.cpp src/bib.cpp src/json.cpp)
+    target_include_directories(cite_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(cite_tests PRIVATE
+        TINTA_SCHOLAR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scholar")
+    add_test(NAME citation_syntax COMMAND cite_tests)
 endif()
 
 # Install
