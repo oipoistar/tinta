@@ -558,11 +558,12 @@ bool diagramToPng(App& app, const std::string& source, std::string& png,
 // TeX source -> PNG at 2x plus logical size and baseline
 bool mathToPng(App& app, const std::string& tex, bool display,
                std::string& png, float& logicalWidth, float& logicalHeight,
-               float& logicalBaseline) {
-    MathBoxPtr box = mathParse(app, toWide(tex),
+               float& logicalBaseline, std::wstring* tag = nullptr) {
+    MathBoxPtr box = mathParse(app, mathResolveRefs(toWide(tex), app.mathLabels),
                                (display ? 18.0f : 16.0f) * kRasterScale,
                                display);
     if (!box) return false;
+    if (tag) *tag = mathBoxTagText(box);
     float width = mathBoxWidth(box);
     float height = mathBoxHeight(box);
     if (width < 1 || height < 1) return false;
@@ -767,6 +768,7 @@ std::string paraPropsXml(const ParaProps& props) {
 
 void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
                 int listDepth);
+void emitDisplayMath(DocxCtx& ctx, const ElementPtr& elem, const ParaProps& props);
 
 // Inline content of one paragraph into `out`
 void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
@@ -958,7 +960,10 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
         }
         case ElementType::RubyText:
             break;
-        case ElementType::MathInline: {
+        // A $$ equation in a list item or a cell keeps to the line, as on the
+        // page; it wrote nothing before (#314)
+        case ElementType::MathInline:
+        case ElementType::MathDisplay: {
             std::string png;
             float width, height, baseline;
             if (mathToPng(ctx.app, elem->text, false, png, width, height,
@@ -975,7 +980,8 @@ void walkInline(DocxCtx& ctx, const ElementPtr& elem, RunProps props,
             } else {
                 RunProps code = props;
                 code.code = true;
-                emitTextRun(ctx, "$" + elem->text + "$", code, out);
+                const std::string dollars = elem->type == ElementType::MathDisplay ? "$$" : "$";
+                emitTextRun(ctx, dollars + elem->text + dollars, code, out);
             }
             break;
         }
@@ -1002,9 +1008,31 @@ void emitInlineRun(DocxCtx& ctx, const std::vector<ElementPtr>& run,
     ctx.body += "</w:p>";
 }
 
+// A $$ equation is a centred paragraph of its own, wherever it sits in the
+// paragraph, as on the page: inline, it drew nothing at all (#314)
 void emitParagraph(DocxCtx& ctx, const ElementPtr& elem,
                    const ParaProps& props) {
-    emitInlineRun(ctx, elem->children, props);
+    std::vector<ElementPtr> words;
+    auto flush = [&] {
+        auto blank = [](const ElementPtr& e) {
+            return !e || e->type == ElementType::SoftBreak ||
+                   (e->type == ElementType::Text && e->text.find_first_not_of(" \t\r\n") == std::string::npos);
+        };
+        while (!words.empty() && blank(words.front())) words.erase(words.begin());
+        while (!words.empty() && blank(words.back())) words.pop_back();
+        if (!words.empty()) emitInlineRun(ctx, words, props);
+        words.clear();
+    };
+    for (const auto& child : elem->children) {
+        if (child && child->type == ElementType::MathDisplay) {
+            flush();
+            emitDisplayMath(ctx, child, props);
+        } else {
+            words.push_back(child);
+        }
+    }
+    if (words.size() == elem->children.size()) emitInlineRun(ctx, elem->children, props);
+    else flush();
 }
 
 // Inline content that can stand in a block outside any paragraph
@@ -1253,6 +1281,29 @@ std::string hexOfRgb(uint32_t rgb) {
     return buf;
 }
 
+// A display equation, centred; its \tag's number at a right tab (#314)
+void emitDisplayMath(DocxCtx& ctx, const ElementPtr& elem, const ParaProps& props) {
+    std::string png;
+    float width, height, baseline;
+    std::wstring tag;
+    if (!mathToPng(ctx.app, elem->text, true, png, width, height, baseline, &tag)) {
+        emitDiagramOrCode(ctx, "$$" + elem->text + "$$", "", props);
+        return;
+    }
+    int rel = addImageRel(ctx, "png", png);
+    long long cx, cy;
+    fitEmu(width, height, cx, cy);
+    if (tag.empty()) {
+        ctx.body += "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r>" + drawingXml(ctx, rel, cx, cy) + "</w:r></w:p>";
+        return;
+    }
+    // Centred between the A4 page's margins, the number at the right one
+    ctx.body += "<w:p><w:pPr><w:tabs><w:tab w:val=\"center\" w:pos=\"4819\"/>"
+                "<w:tab w:val=\"right\" w:pos=\"9638\"/></w:tabs></w:pPr>"
+                "<w:r><w:tab/></w:r><w:r>" + drawingXml(ctx, rel, cx, cy) +
+                "</w:r><w:r><w:tab/><w:t>" + xmlEscape(toUtf8(tag)) + "</w:t></w:r></w:p>";
+}
+
 void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
                 int listDepth) {
     if (!elem) return;
@@ -1481,22 +1532,9 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
                 walkBlocks(ctx, child, props, listDepth);
             }
             break;
-        case ElementType::MathDisplay: {
-            std::string png;
-            float width, height, baseline;
-            if (mathToPng(ctx.app, elem->text, true, png, width, height,
-                          baseline)) {
-                int rel = addImageRel(ctx, "png", png);
-                long long cx, cy;
-                fitEmu(width, height, cx, cy);
-                ctx.body +=
-                    "<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r>" +
-                    drawingXml(ctx, rel, cx, cy) + "</w:r></w:p>";
-            } else {
-                emitDiagramOrCode(ctx, "$$" + elem->text + "$$", "", props);
-            }
+        case ElementType::MathDisplay:
+            emitDisplayMath(ctx, elem, props);
             break;
-        }
         default:
             // Inline elements reaching block level wrap in a paragraph
             emitParagraph(ctx, elem, props);

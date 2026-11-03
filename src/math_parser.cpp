@@ -257,6 +257,7 @@ struct Parser {
     int depth = 0;
     size_t atoms = 0;
     int delimiterDepth = 0;
+    std::wstring tag;  // the first \tag's number as set: "(1.8)"
 
     struct Nest {
         int& depth;
@@ -291,6 +292,33 @@ struct Parser {
         if (peek() != L'}') failed = true;
         else ++pos;
         return value;
+    }
+
+    // A brace group's text as written, inner groups and commands with it
+    std::wstring balancedGroup() {
+        skipWs();
+        if (peek() != L'{') { failed = true; return {}; }
+        size_t start = ++pos;
+        int open = 1;
+        while (!eof() && open) {
+            wchar_t c = src[pos++];
+            if (c == L'\\' && !eof()) ++pos;
+            else if (c == L'{') ++open;
+            else if (c == L'}') --open;
+        }
+        if (open) { failed = true; return {}; }
+        return src.substr(start, pos - 1 - start);
+    }
+
+    // Words set upright, as \text sets them
+    MNodePtr uprightText(const std::wstring& text) {
+        auto row = mk(MNode::Row);
+        row->literalText = true;
+        auto run = mk(MNode::Sym);
+        run->text = text;
+        run->roman = run->literalText = true;
+        row->kids.push_back(run);
+        return row;
     }
 
     wchar_t readDelimiter() {
@@ -559,6 +587,28 @@ struct Parser {
             auto op = textGroup();
             if (op) { op->spacing = 0.16f; op->limitOp = limits; }
             return op;
+        }
+
+        // Equation numbers (#314): \tag{1.8} sets "(1.8)" at a display
+        // line's right and \tag* leaves the parentheses off. \label names the
+        // equation for \eqref and \ref, which the document resolves before
+        // the parse; one it could not reads (??), as in LaTeX. \notag and
+        // \nonumber number nothing, as nothing is numbered unless tagged.
+        if (cmd == L"tag") {
+            const bool star = peek() == L'*';
+            if (star) ++pos;
+            std::wstring number = balancedGroup();
+            if (tag.empty()) tag = star ? number : L"(" + number + L")";
+            return mk(MNode::Row);
+        }
+        if (cmd == L"label") {
+            balancedGroup();
+            return mk(MNode::Row);
+        }
+        if (cmd == L"notag" || cmd == L"nonumber") return mk(MNode::Row);
+        if (cmd == L"eqref" || cmd == L"ref") {
+            balancedGroup();
+            return uprightText(cmd == L"eqref" ? L"(??)" : L"??");
         }
 
         // Escapes and explicit spacing
@@ -853,7 +903,9 @@ MNodePtr parseLatex(const std::wstring& source) {
     if (!expandLatexMacros(source, expanded)) return nullptr;
     Parser parser(expanded);
     auto root = parser.parseRow(0);
-    return parser.failed || !root || root->kids.empty() ? nullptr : root;
+    if (parser.failed || !root || root->kids.empty()) return nullptr;
+    root->tag = parser.tag;
+    return root;
 }
 
 bool isBuiltinMathCommand(const std::wstring& command) {
@@ -866,7 +918,7 @@ bool isBuiltinMathCommand(const std::wstring& command) {
         L"cancel bcancel xcancel overbrace underbrace acute grave breve check not "
         L"phantom hphantom vphantom smash hspace kern mkern quad qquad thinspace medspace thickspace enspace "
         L"overset underset stackrel substack xrightarrow xleftarrow pmod bmod pod newcommand renewcommand "
-        L"providecommand def DeclareMathOperator ";
+        L"providecommand def DeclareMathOperator tag label notag nonumber eqref ref ";
     return names.find(L" " + command + L" ") != std::wstring::npos;
 }
 

@@ -80,6 +80,127 @@ void checkMarkdownFixture(App& app, const char* filename, size_t minimumMath,
     std::cout << filename << ": " << equations << " equations\n";
 }
 
+// A box's text runs, and the corners of its strokes and rules, as its SVG
+// has them
+struct Drawn {
+    std::vector<std::pair<std::string, float>> runs;  // text, x
+    std::vector<std::pair<float, float>> strokes;     // x, y
+};
+Drawn drawnOf(const MathBoxPtr& box) {
+    Drawn d;
+    const std::string svg = box ? mathBoxSvg(box, "#000", "x") : std::string();
+    auto value = [&](size_t at, const std::string& name) {
+        const std::string key = " " + name + "=\"";
+        return std::stof(svg.substr(svg.find(key, at) + key.size()));
+    };
+    for (size_t at = svg.find("<text "); at != std::string::npos; at = svg.find("<text ", at + 1)) {
+        const size_t open = svg.find('>', at), close = svg.find("</text>", open);
+        d.runs.push_back({svg.substr(open + 1, close - open - 1), value(at, "x")});
+    }
+    for (size_t at = svg.find("<line "); at != std::string::npos; at = svg.find("<line ", at + 1)) {
+        d.strokes.push_back({value(at, "x1"), value(at, "y1")});
+        d.strokes.push_back({value(at, "x2"), value(at, "y2")});
+    }
+    for (size_t at = svg.find("<rect "); at != std::string::npos; at = svg.find("<rect ", at + 1)) {
+        const float x = value(at, "x"), y = value(at, "y");
+        d.strokes.push_back({x, y});
+        d.strokes.push_back({x + value(at, "width"), y + value(at, "height")});
+    }
+    return d;
+}
+
+// #314: the reported equations, signs, letters beside brackets, accents,
+// numbers and references
+void reportedLayouts(App& app) {
+    constexpr float em = 24.0f;
+    auto width = [&](const wchar_t* tex, bool display = false) { return mathBoxWidth(mathParse(app, tex, em, display)); };
+    for (const wchar_t* tex : {
+             LR"([\![-p + 2\mu\,\partial_n u_n]\!] + [\![\mathbf n\cdot\mathbf T_E\cdot\mathbf n]\!] = \gamma\kappa,
+\qquad
+[\![\mathbf n\cdot\mathbf T_E\cdot\mathbf n]\!] = \tfrac12\left[\!\left[\varepsilon\left(E_n^2 - E_t^2\right)\right]\!\right].
+\tag{1.8})",
+             LR"(\rho_{e,c} = \frac{\varepsilon_0E_c}{R},\quad q_c = \varepsilon_0E_c,\quad j_c = K_lE_c.
+\tag{2.1})"}) {
+        check(mathParse(app, tex, em, true) != nullptr, "the reported tagged equations render");
+    }
+
+    // A sign after an opening bracket, a comma or a relation, or before a
+    // closing one, is unary: as tight as a sign set alone in braces
+    for (const auto& pair : {std::pair<const wchar_t*, const wchar_t*>{LR"([-p])", LR"([{-}p])"},
+                             {LR"((-x))", LR"(({-}x))"}, {LR"(\{-1\})", LR"(\{{-}1\})"},
+                             {LR"(f(x,-y))", LR"(f(x,{-}y))"}, {LR"(x=\quad-1)", LR"(x=\quad{-}1)"},
+                             {LR"((a-))", LR"((a{-}))"}}) {
+        check(std::abs(width(pair.first) - width(pair.second)) < 0.01f, "a sign with nothing to bind is unary");
+    }
+    check(width(L"a-b") > width(L"a{-}b") + em * 0.3f, "a sign between two terms stays binary");
+    check(std::abs(width(L"a,b") - width(L"a{,}b") - em * 0.12f) < 0.01f, "a comma takes its space after it only");
+
+    // A slanted letter's lean keeps an upright bracket and a superscript clear
+    auto gap = [&](const wchar_t* tex) {
+        const Drawn d = drawnOf(mathParse(app, tex, em, false));
+        return d.runs.size() >= 2 ? d.runs[1].second - d.runs[0].second : 0.0f;
+    };
+    check(gap(L"x)") > gap(LR"(\mathrm{x}))") + em * 0.05f, "a bracket clears a slanted letter's lean");
+    check(gap(L"E^2") > gap(LR"(\mathrm{E}^2)") + em * 0.05f, "a superscript clears a slanted base's lean");
+    check(std::abs(gap(L"E_n") - gap(LR"(\mathrm{E}_n)")) < 0.01f, "a subscript tucks in under the lean");
+
+    // A drawn bracket keeps clear of what stands before it
+    for (bool display : {false, true}) {
+        const Drawn d = drawnOf(mathParse(app, LR"(\left(\frac{a}{b}\right))", em, display));
+        float left = 1e9f;
+        for (const auto& p : d.strokes) left = std::min(left, p.first);
+        check(!d.strokes.empty() && left > em * (display ? 0.15f : 0.08f) + em * 0.05f,
+              "a drawn bracket's bulge stands off the box's edge");
+    }
+
+    // An accent sits just over its letter, within the letter's own height
+    const MathBoxPtr plain = mathParse(app, L"x", em, false);
+    for (const wchar_t* tex : {LR"(\tilde{x})", LR"(\hat{x})", LR"(\bar{x})", LR"(\dot{x})"}) {
+        const MathBoxPtr accented = mathParse(app, tex, em, false);
+        const Drawn d = drawnOf(accented);
+        float lowest = -1e9f;
+        for (const auto& p : d.strokes) lowest = std::max(lowest, p.second);
+        check(accented && !d.strokes.empty() && mathBoxBaseline(accented) - lowest < em * 0.85f,
+              "an accent sits just over its letter");
+        check(std::abs(mathBoxHeight(accented) - mathBoxHeight(plain)) < 0.5f, "an accented x stays within the line's ascent");
+    }
+    const Drawn phi = drawnOf(mathParse(app, LR"(\tilde\phi)", em, false));
+    float lowest = -1e9f;
+    for (const auto& p : phi.strokes) lowest = std::max(lowest, p.second);
+    check(mathBoxBaseline(mathParse(app, LR"(\tilde\phi)", em, false)) - lowest < em * 1.0f, "the tilde sits on the phi");
+
+    // \tag: inline, its number follows a quad on; on display it stands
+    // apart for the line's right, the equation as wide as without it
+    check(width(LR"(x=1\tag{1.8})") > width(L"x=1") + em, "an inline tag follows the equation");
+    const MathBoxPtr shown = mathParse(app, LR"(x=1\label{eq:one}\tag{1.8})", em, true);
+    check(mathBoxTag(shown) && mathBoxTagText(shown) == L"(1.8)" && mathBoxWidth(mathBoxTag(shown)) > em,
+          "a display tag is a box of its own");
+    check(std::abs(mathBoxWidth(shown) - width(L"x=1", true)) < 0.01f, "the equation keeps its own width");
+    check(!mathBoxTag(mathParse(app, L"x=1", em, true)), "an untagged equation has no number");
+
+    // \eqref and \ref read the number a \label's \tag gives it
+    std::map<std::wstring, std::wstring> labels;
+    mathCollectLabels(LR"(E=mc^2 \label{eq:energy} \tag{2.1})", labels);
+    mathCollectLabels(LR"(F=ma \label{eq:force})", labels);
+    check(labels.size() == 1 && labels[L"eq:energy"] == L"2.1", "a label takes its equation's tag");
+    check(mathResolveRefs(LR"(\eqref{eq:energy}+\ref{eq:energy}+\eqref{eq:force})", labels) ==
+              LR"(\text{(2.1)}+\text{2.1}+\eqref{eq:force})",
+          "references read their number; one with none stays");
+
+    // settings.ini's mathFont= when installed, else Cambria Math
+    const std::wstring saved = app.mathFont;
+    app.mathFont = L"Segoe UI";
+    mathClearCache();
+    check(mathBoxSvg(mathParse(app, L"x", em, false), "#000", "x").find("font-family=\"Segoe UI\"") != std::string::npos,
+          "mathFont sets the equations' face");
+    app.mathFont = L"No Such Math Face";
+    mathClearCache();
+    check(mathBoxSvg(mathParse(app, L"x", em, false), "#000", "x").find("font-family=\"Cambria Math\"") != std::string::npos,
+          "a math face not installed falls back to Cambria Math");
+    app.mathFont = saved;
+    mathClearCache();
+}
+
 bool rasterize(const std::vector<MathBoxPtr>& boxes, const wchar_t* path = nullptr) {
     using Microsoft::WRL::ComPtr;
     UINT width = 32, height = 16;
@@ -210,6 +331,7 @@ int main(int argc, char** argv) {
         auto textSvg = mathBoxSvg(mathParse(app, LR"(\text{for all }x\in\mathbb{R})", 24, true), "#111", "Segoe UI");
         check(textSvg.find("for all ") != std::string::npos && textSvg.find("xml:space=\"preserve\"") != std::string::npos,
               "SVG preserves text spaces");
+        reportedLayouts(app);
         mathBoxRetain(app, tall, 5, 10, D2D1::ColorF(D2D1::ColorF::Black));
         check(!app.layoutTextRuns.empty() && !app.layoutLines.empty(), "retained viewer receives same primitives");
         app.clearLayoutCache();

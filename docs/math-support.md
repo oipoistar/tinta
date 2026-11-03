@@ -1,6 +1,6 @@
 # Native math compatibility
 
-Tinta renders a growing subset of LaTeX mathematics using DirectWrite and Direct2D. Use `$...$` for inline math and `$$...$$` for a centered display equation. For large matrices and derivations, display math gives the clearest layout. Paragraphs containing tall inline equations use additional line spacing.
+Tinta renders a growing subset of LaTeX mathematics using DirectWrite and Direct2D. Use `$...$` for inline math and `$$...$$` for a centered display equation. A `$$...$$` equation stands on its own line wherever it sits in a paragraph, and two in a row stand one under the other. For large matrices and derivations, display math gives the clearest layout. Paragraphs containing tall inline equations use additional line spacing.
 
 ## Environments
 
@@ -47,9 +47,15 @@ Math alphabets include `\mathrm`, `\mathit`, `\mathbf`, `\boldsymbol` / `\bm`, `
 
 Decorations include `\bar`, `\overline`, `\underline`, `\vec`, `\overrightarrow`, `\hat`, `\widehat`, `\tilde`, `\widetilde`, `\dot`, `\ddot`, `\acute`, `\grave`, `\breve`, `\check`, `\overbrace`, `\underbrace`, `\boxed`, `\cancel`, `\bcancel`, `\xcancel` and `\not`. Braces can carry annotations using scripts.
 
+## Equation numbers
+
+`\tag{1.8}` sets "(1.8)" at the right of a display equation's line and `\tag*{A}` sets "A" without parentheses; the equation moves off center to keep an em clear of its number, and with no room for both the number goes under it, at the right. Inline, the number follows the equation a quad on. `\label{eq:jump}` names an equation, and `\eqref{eq:jump}` and `\ref{eq:jump}` anywhere in the document read the number its `\tag` gives it; a reference to an untagged or unknown label reads (??), as in LaTeX. Equations are not numbered unless tagged, so `\notag` and `\nonumber` set nothing. HTML exports set the number at the line's right and Word exports at a right tab.
+
 ## Delimiters and spacing
 
 `\left...\right` and `\middle` size delimiters with their contents. A dot denotes an invisible delimiter. The `\big`, `\Big`, `\bigg`, `\Bigg` families and their `l`, `r`, `m` variants provide explicit sizes.
+
+A sign is binary only between two terms: after an opening bracket, an operator, a relation, a comma or another sign, and before a relation, a closing bracket or a comma, it sets close to its term (`[-p]`, `f(x,-y)`). A comma takes its space after it.
 
 Spacing includes `\,`, `\:`, `\;`, `\!`, `\quad`, `\qquad`, `\enspace`, and thin/medium/thick space aliases. `\hspace`, `\kern` and `\mkern` accept `em`, `ex`, `mu`, `pt` and `px` dimensions; `ex` is approximated as half an em. `\phantom`, `\hphantom`, `\vphantom` and `\smash` control invisible layout space.
 
@@ -69,11 +75,11 @@ Supported definitions are `\newcommand`, `\renewcommand`, `\providecommand`, bas
 
 ## Rendering and remaining scope
 
-Tinta selects the installed **Cambria Math** family when available and otherwise uses the theme font. It does not download or bundle a font. Layout uses native text, rules and lines; this is not a full OpenType MATH typesetting engine.
+Tinta selects the installed **Cambria Math** family when available and otherwise uses the theme font. `mathFont=` in settings.ini names another installed face for equations, such as Latin Modern Math or STIX Two Math; one that is not installed falls back to Cambria Math. It does not download or bundle a font. Layout uses native text, rules and lines; this is not a full OpenType MATH typesetting engine. Accents sit just over their letter's ink, and a slanted letter's lean keeps a bracket or a superscript after it clear, as TeX's italic correction does.
 
 The viewer, native raster exports and SVG math exports share the same layout. SVG references the selected font family without embedding its font data. Unsupported commands or malformed structure make the whole expression fall back to raw TeX.
 
-This extension does not implement complete LaTeX documents, arbitrary packages, document-wide macros, automatic equation numbering, `\tag`, `\label`, `\eqref`, `\(...\)` / `\[...\]` Markdown delimiters, or standalone `equation` / `align` environments outside dollar delimiters. Use `aligned` inside `$$...$$` for multiline derivations. Chemistry, units packages, color commands and TikZ remain outside the supported subset.
+This extension does not implement complete LaTeX documents, arbitrary packages, document-wide macros, automatic equation numbering, `\(...\)` / `\[...\]` Markdown delimiters, or standalone `equation` / `align` environments outside dollar delimiters. Use `aligned` inside `$$...$$` for multiline derivations. Chemistry, units packages, color commands and TikZ remain outside the supported subset.
 
 ## Regression samples
 

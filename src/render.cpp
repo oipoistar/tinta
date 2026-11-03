@@ -600,7 +600,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         }
         IDWriteTextFormat* format = run.style.format ? run.style.format : baseFormat;
         float size = format->GetFontSize();
-        mathBoxes[i] = mathParse(app, toWide(run.elem->text), size, false);
+        mathBoxes[i] = mathParse(app, mathResolveRefs(toWide(run.elem->text), app.mathLabels), size, false);
         if (!mathBoxes[i]) continue;
         float baseline = size * 0.8f;
         IDWriteTextLayout* probe = nullptr;
@@ -756,12 +756,14 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 // text flow, baseline-aligned with the surrounding line
                 std::wstring latex = toWide(elem->text);
                 MathBoxPtr box = mathBoxes[runIndex];
+                // $$ shows as $$: a display equation's source read $x$ (#314)
+                const std::wstring dollars = elem->type == ElementType::MathDisplay ? L"$$" : L"$";
                 if (!box) {
                     // Unsupported TeX: show the raw source in code style
                     format = inlineCodeFormat(app, run.style.bold, run.style.italic);
                     if (!isLink) color = themeInlineCodeColor(app.theme);
                     drawYOffset += baselineOf(textFormat) - baselineOf(format);
-                    text = L"$" + latex + L"$";
+                    text = dollars + latex + dollars;
                     break;
                 }
                 float w = mathBoxWidth(box);
@@ -791,7 +793,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 if (isLink) addLinkSegment(x, x + w, y, linkUrl, color);
 
                 size_t docStart = app.docText.size();
-                std::wstring source = L"$" + latex + L"$";
+                std::wstring source = dollars + latex + dollars;
                 app.docText += source;
                 addTextRect(app,
                             D2D1::RectF(x, y, x + w, y + lineHeight),
@@ -1146,7 +1148,7 @@ static void layoutMathBlock(App& app, const ElementPtr& elem, float& y,
                             float indent, float maxWidth) {
     std::wstring latex = toWide(elem->text);
     float baseSize = app.textFormat ? app.textFormat->GetFontSize() : 16.0f;
-    MathBoxPtr box = mathParse(app, latex, baseSize * 1.06f, true);
+    MathBoxPtr box = mathParse(app, mathResolveRefs(latex, app.mathLabels), baseSize * 1.06f, true);
     if (!box) {
         // Unsupported TeX: raw source in code style (the mermaid pattern)
         auto fallback = std::make_shared<Element>(ElementType::CodeBlock);
@@ -1162,6 +1164,18 @@ static void layoutMathBlock(App& app, const ElementPtr& elem, float& y,
     y += 6 * scale;
     float w = mathBoxWidth(box);
     float x = indent + std::max(0.0f, (maxWidth - w) / 2);
+    // Its \tag's number at the line's right (#314). The equation moves off
+    // the middle to keep an em clear of it, and with no room for both on
+    // one line the number goes under it, at the right.
+    float below = 0;
+    if (MathBoxPtr tag = mathBoxTag(box)) {
+        const float tagX = indent + std::max(0.0f, maxWidth - mathBoxWidth(tag));
+        if (x + w + baseSize > tagX) x = std::max(indent, tagX - baseSize - w);
+        const bool under = x + w + baseSize > tagX;
+        const float tagY = under ? y + mathBoxHeight(box) : y + mathBoxBaseline(box) - mathBoxBaseline(tag);
+        mathBoxRetain(app, tag, tagX, tagY, app.theme.text);
+        if (under) below = mathBoxHeight(tag);
+    }
     mathBoxRetain(app, box, x, y, app.theme.text);
 
     size_t docStart = app.docText.size();
@@ -1170,26 +1184,17 @@ static void layoutMathBlock(App& app, const ElementPtr& elem, float& y,
                 docStart, latex.size());
     app.docText += L"\n\n";
 
-    y += mathBoxHeight(box) + 14 * scale;
+    y += mathBoxHeight(box) + below + 14 * scale;
 }
 
-// A paragraph that is exactly one $$...$$ span renders as a math block
-static const ElementPtr* soleMathDisplayChild(const ElementPtr& elem) {
-    const ElementPtr* found = nullptr;
-    for (const auto& child : elem->children) {
-        if (!child) continue;
-        if (child->type == ElementType::MathDisplay) {
-            if (found) return nullptr;
-            found = &child;
-        } else if (child->type == ElementType::Text) {
-            for (char c : child->text) {
-                if (!isspace((unsigned char)c)) return nullptr;
-            }
-        } else if (child->type != ElementType::SoftBreak) {
-            return nullptr;
-        }
+// Nothing to draw between equations: blanks and line breaks
+static bool blankInline(const ElementPtr& child) {
+    if (!child || child->type == ElementType::SoftBreak) return true;
+    if (child->type != ElementType::Text) return false;
+    for (char c : child->text) {
+        if (!isspace((unsigned char)c)) return false;
     }
-    return found;
+    return true;
 }
 
 static bool isAnchorOnlyContent(const std::vector<ElementPtr>& children) {
@@ -1222,9 +1227,29 @@ static bool pinAnchorsOnly(App& app, const std::vector<ElementPtr>& children, fl
     return true;
 }
 
+static void layoutInlineRun(App& app, std::vector<ElementPtr>& run, float& y, float indent, float maxWidth);
+
 static void layoutParagraph(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
-    if (const ElementPtr* math = soleMathDisplayChild(elem)) {
-        layoutMathBlock(app, *math, y, indent, maxWidth);
+    // A $$...$$ equation stands on its own line, centered, wherever it sits
+    // in the paragraph: two in a row ran on as one line of text (#314). The
+    // words before, between and after them make lines of their own.
+    if (std::any_of(elem->children.begin(), elem->children.end(),
+                    [](const ElementPtr& c) { return c && c->type == ElementType::MathDisplay; })) {
+        std::vector<ElementPtr> words;
+        auto flush = [&] {
+            while (!words.empty() && blankInline(words.front())) words.erase(words.begin());
+            while (!words.empty() && blankInline(words.back())) words.pop_back();
+            layoutInlineRun(app, words, y, indent, maxWidth);
+        };
+        for (const auto& child : elem->children) {
+            if (child && child->type == ElementType::MathDisplay) {
+                flush();
+                layoutMathBlock(app, child, y, indent, maxWidth);
+            } else {
+                words.push_back(child);
+            }
+        }
+        flush();
         return;
     }
     if (pinAnchorsOnly(app, elem->children, y)) return;
@@ -3840,6 +3865,14 @@ static size_t countElements(const ElementPtr& elem) {
 
 namespace {
 
+void collectMathLabels(const ElementPtr& elem, std::map<std::wstring, std::wstring>& labels) {
+    if (!elem) return;
+    if ((elem->type == ElementType::MathInline || elem->type == ElementType::MathDisplay) &&
+        elem->text.find("\\label") != std::string::npos)
+        mathCollectLabels(toWide(elem->text), labels);
+    for (const auto& child : elem->children) collectMathLabels(child, labels);
+}
+
 // Reset layout state and prepare for laying out blocks. Returns false when
 // there is nothing to lay out (no document).
 bool layoutBegin(App& app) {
@@ -3895,6 +3928,9 @@ bool layoutBegin(App& app) {
     app.scrollAnchors.clear();
     app.layoutTableSeq = 0;
     app.layoutDiagramSeq = 0;
+    // The equations' numbers by label, for an \eqref anywhere to read (#314)
+    app.mathLabels.clear();
+    collectMathLabels(app.root, app.mathLabels);
     return true;
 }
 

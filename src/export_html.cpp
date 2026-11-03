@@ -1201,13 +1201,17 @@ void emitImage(ExportCtx& ctx, const ElementPtr& elem) {
 }
 
 void emitMath(ExportCtx& ctx, const ElementPtr& elem, bool display) {
-    std::wstring tex = toWide(elem->text);
+    std::wstring tex = mathResolveRefs(toWide(elem->text), ctx.app.mathLabels);
     MathBoxPtr box = mathParse(ctx.app, tex, display ? 18.0f : 16.0f, display);
     if (box) {
         std::string svg =
             mathBoxSvg(box, "currentColor", ctx.bodyFontCss);
         if (display) {
-            ctx.out += "<div class=\"math-display\">" + svg + "</div>";
+            // A \tag's number at the line's right (#314)
+            std::string number;
+            if (MathBoxPtr tag = mathBoxTag(box))
+                number = "<span class=\"math-tag\">" + mathBoxSvg(tag, "currentColor", ctx.bodyFontCss) + "</span>";
+            ctx.out += "<div class=\"math-display\">" + svg + number + "</div>";
         } else {
             ctx.out += "<span class=\"math-inline\">" + svg + "</span>";
         }
@@ -1581,7 +1585,8 @@ std::string themeCss(const App& app, const std::string& bodyFont,
     css += "img{max-width:100%;}";
     css += "li.task{list-style:none;margin-left:-20px;}";
     css += ".diagram{text-align:center;margin:1em 0;overflow-x:auto;}";
-    css += ".math-display{text-align:center;margin:1em 0;}";
+    css += ".math-display{text-align:center;margin:1em 0;position:relative;}";
+    css += ".math-tag{position:absolute;right:0;top:50%;transform:translateY(-50%);}";
     css += ".math-inline svg{vertical-align:middle;}";
     // ==highlight== uses the viewer's marker-pen yellow, not the accent
     css += "mark{background:" +

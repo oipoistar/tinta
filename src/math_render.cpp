@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwchar>
 #include <cwctype>
 #include <unordered_map>
 #include <vector>
@@ -42,6 +43,9 @@ struct MathBox {
     std::vector<MathLine> lines;
     float width = 0, height = 0, baseline = 0;
     std::wstring fontFamily;
+    // A display equation's \tag, laid out on its own for the line's right
+    std::shared_ptr<MathBox> tag;
+    std::wstring tagText;
     ~MathBox() {
         for (auto& r : runs) {
             if (r.layout) r.layout->Release();
@@ -63,8 +67,18 @@ using namespace tinta_math;
 
 struct Metrics {
     float width = 0, ascent = 0, descent = 0;
+    // How high its ink reaches over the baseline, below zero when no run
+    // measured it (its ascent stands in), and how far a slanted letter's
+    // ink leans out past its width at the top: its italic correction
+    float ink = -1, lean = 0;
     float height() const { return ascent + descent; }
+    float inkTop() const { return ink >= 0 ? ink : ascent; }
+    float extent() const { return width + lean; }
 };
+
+// TeX's atoms, as far as the space between them goes. Explicit spaces and
+// empty groups are none.
+enum class Atom { None, Ord, Op, Bin, Rel, Open, Close, Punct };
 
 struct LayoutCtx {
     App& app;
@@ -80,14 +94,20 @@ float styleScale(int style) {
 }
 
 std::wstring g_mathFontFamily;
+// settings.ini's mathFont= when it is installed (Latin Modern Math, STIX
+// Two Math, #314), else Cambria Math, else the theme's font
 const wchar_t* mathFontFamily(App& app) {
     if (g_mathFontFamily.empty()) {
         g_mathFontFamily = app.theme.fontFamily ? app.theme.fontFamily : L"Segoe UI";
         IDWriteFontCollection* fonts = nullptr;
         if (SUCCEEDED(app.dwriteFactory->GetSystemFontCollection(&fonts))) {
-            UINT32 index = 0; BOOL exists = FALSE;
-            if (SUCCEEDED(fonts->FindFamilyName(L"Cambria Math", &index, &exists)) && exists)
-                g_mathFontFamily = L"Cambria Math";
+            for (const std::wstring& family : {app.mathFont, std::wstring(L"Cambria Math")}) {
+                UINT32 index = 0; BOOL exists = FALSE;
+                if (!family.empty() && SUCCEEDED(fonts->FindFamilyName(family.c_str(), &index, &exists)) && exists) {
+                    g_mathFontFamily = family;
+                    break;
+                }
+            }
             fonts->Release();
         }
     }
@@ -129,6 +149,14 @@ IDWriteTextLayout* makeRunLayout(App& app, const std::wstring& text,
     m.width = tm.widthIncludingTrailingWhitespace;
     m.ascent = lm.baseline;
     m.descent = std::max(0.0f, lm.height - lm.baseline);
+    // The ink, from the layout box's edges: its top, and its right at the
+    // width the layout was made with. A slanted letter's ink leans out
+    // past its width, the italic simulated for a math face with none
+    DWRITE_OVERHANG_METRICS over{};
+    if (SUCCEEDED(layout->GetOverhangMetrics(&over))) {
+        m.ink = std::max(0.0f, lm.baseline + over.top);
+        m.lean = std::max(0.0f, 100000.0f + over.right - m.width);
+    }
     return layout;
 }
 
@@ -171,6 +199,50 @@ float nodeSpacing(const MNodePtr& node) {
     return 0;
 }
 
+bool opening(wchar_t c) { return c && std::wstring(L"([{\x27E8\x2308\x230A\x27E6").find(c) != std::wstring::npos; }
+bool closing(wchar_t c) { return c && std::wstring(L")]}\x27E9\x2309\x230B\x27E7").find(c) != std::wstring::npos; }
+
+Atom atomOf(const MNodePtr& node) {
+    if (!node) return Atom::None;
+    switch (node->kind) {
+        case MNode::Space:
+            return Atom::None;
+        case MNode::Row:
+            if (node->kids.empty()) return Atom::None;  // \label, \tag
+            return node->spacing == 0.2f ? Atom::Bin : node->spacing == 0.16f ? Atom::Op : Atom::Ord;
+        case MNode::Stack:
+            if (node->spacing == 0.26f) return Atom::Rel;  // \xrightarrow
+            [[fallthrough]];
+        case MNode::Script:
+            return node->kids.empty() || !node->kids[0] ? Atom::Ord : atomOf(node->kids[0]);
+        case MNode::Middle:
+            if (opening(node->open)) return Atom::Open;
+            if (closing(node->open)) return Atom::Close;
+            return node->spacing == 0.26f ? Atom::Rel : Atom::Ord;
+        case MNode::Sym: {
+            if (node->literalText) return Atom::Ord;
+            if (node->largeOp || node->spacing == 0.16f) return Atom::Op;
+            const std::wstring& t = node->text;
+            if (t.size() == 1 && opening(t[0])) return Atom::Open;
+            if (t.size() == 1 && closing(t[0])) return Atom::Close;
+            if (t == L"," || t == L";") return Atom::Punct;
+            const float space = nodeSpacing(node);
+            return space == 0.26f ? Atom::Rel : space == 0.2f ? Atom::Bin : Atom::Ord;
+        }
+        default:
+            return Atom::Ord;
+    }
+}
+
+// A letter set slanted: its neighbour's room keeps clear of its lean, but
+// the next slanted letter leans with it
+bool slanted(const MNodePtr& node) {
+    if (!node) return false;
+    if (node->kind == MNode::Script) return !node->kids.empty() && slanted(node->kids[0]);
+    return node->kind == MNode::Sym && (node->forceItalic || (!node->roman && !node->text.empty() &&
+                                                             isMathVariableChar(node->text[0])));
+}
+
 // The workhorse: recursively lay out `node` with the baseline at
 // `baselineY`, starting at `x`. Returns the node's metrics. When
 // record=false (measure pass), nothing is emitted.
@@ -200,20 +272,62 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
             return rm;
         }
         case MNode::Row: {
+            // Space by TeX's atoms. A sign binds two things only: after an
+            // opening bracket, an operator, a relation, another sign or a
+            // comma, or before a relation, a closing bracket, a comma or the
+            // end, it is unary and takes no space ("[-p" read "[ - p",
+            // #314). Punctuation takes its space after it, and nothing comes
+            // between a bracket and what it encloses. Explicit spaces are no
+            // atoms.
+            const auto& kids = node->kids;
+            std::vector<Atom> atoms(kids.size());
+            for (size_t i = 0; i < kids.size(); ++i) atoms[i] = atomOf(kids[i]);
+            auto neighbour = [&](size_t i, bool after) {
+                if (after) {
+                    for (size_t j = i + 1; j < kids.size(); ++j)
+                        if (atoms[j] != Atom::None) return atoms[j];
+                } else {
+                    for (size_t j = i; j-- > 0;)
+                        if (atoms[j] != Atom::None) return atoms[j];
+                }
+                return Atom::None;
+            };
+            for (size_t i = 0; i < kids.size(); ++i) {
+                if (atoms[i] != Atom::Bin) continue;
+                const Atom before = neighbour(i, false), after = neighbour(i, true);
+                if (before == Atom::None || before == Atom::Bin || before == Atom::Op || before == Atom::Rel ||
+                    before == Atom::Open || before == Atom::Punct || after == Atom::None || after == Atom::Rel ||
+                    after == Atom::Close || after == Atom::Punct)
+                    atoms[i] = Atom::Ord;
+            }
             float cx = x;
             float prevSpace = 0.0f;
+            Atom prevAtom = Atom::None;
             bool first = true;
-            for (const auto& kid : node->kids) {
+            for (size_t i = 0; i < kids.size(); ++i) {
+                const auto& kid = kids[i];
                 if (!kid) continue;
-                float kidSpace = nodeSpacing(kid) * em;
-                // A leading sign (or a sign after another operator) is unary.
-                if (nodeSpacing(kid) == 0.2f && (first || prevSpace >= em * 0.2f)) kidSpace = 0;
-                if (!first) cx += std::max(prevSpace, kidSpace);
+                const bool unary = atoms[i] == Atom::Ord && atomOf(kid) == Atom::Bin;
+                float kidSpace = unary ? 0.0f : nodeSpacing(kid) * em;
+                if (!first) {
+                    float gap = std::max(prevSpace, atoms[i] == Atom::Punct ? 0.0f : kidSpace);
+                    if (prevAtom == Atom::Open || (atoms[i] == Atom::Close && prevAtom != Atom::Punct)) gap = 0;
+                    cx += gap;
+                }
                 Metrics km = layoutNodeImpl(ctx, kid, size, cx, baselineY, record);
                 cx += km.width;
+                // A slanted letter's lean keeps it clear of an upright
+                // neighbour, a bracket, a digit or a sign, past any space:
+                // the italic correction. The row's last one leans out of it.
+                size_t next = i + 1;
+                while (next < kids.size() && atoms[next] == Atom::None) ++next;
+                if (next == kids.size()) m.lean = km.lean;
+                else if (!slanted(kids[next])) cx += km.lean;
                 m.ascent = std::max(m.ascent, km.ascent);
                 m.descent = std::max(m.descent, km.descent);
+                m.ink = std::max(m.ink, km.inkTop());
                 prevSpace = kidSpace;
+                if (atoms[i] != Atom::None) prevAtom = atoms[i];
                 first = false;
             }
             m.width = cx - x;
@@ -387,18 +501,21 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
             float supShift = std::max(bm.ascent * 0.55f, em * 0.38f);
             float subShift = std::max(bm.descent + em * 0.05f, em * 0.16f);
 
+            // A slanted base's superscript clears its lean; the subscript
+            // tucks in under it
             Metrics supM, subM;
             if (sup) {
-                supM = layoutNodeImpl(child, sup, scriptSize, sx,
+                supM = layoutNodeImpl(child, sup, scriptSize, sx + bm.lean,
                                       baselineY - supShift, record);
             }
             if (sub) {
                 subM = layoutNodeImpl(child, sub, scriptSize, sx,
                                       baselineY + subShift, record);
             }
-            m.width = bm.width + em * 0.03f + std::max(supM.width, subM.width);
+            m.width = bm.width + em * 0.03f + std::max({sup ? bm.lean + supM.extent() : 0.0f, subM.extent(), bm.lean});
             m.ascent = std::max(bm.ascent, sup ? supShift + supM.ascent : 0.0f);
             m.descent = std::max(bm.descent, sub ? subShift + subM.descent : 0.0f);
+            m.ink = std::max(bm.inkTop(), sup ? supShift + supM.inkTop() : 0.0f);
             return m;
         }
         case MNode::Frac: {
@@ -407,6 +524,8 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
             float inner = size * styleScale(child.style) / styleScale(ctx.style);
             Metrics num = measureNode(child, node->kids[0], inner);
             Metrics den = measureNode(child, node->kids[1], inner);
+            num.width = num.extent();
+            den.width = den.extent();
             float pad = em * 0.12f;
             float ruleW = std::max(num.width, den.width) + pad * 2;
             float ruleH = node->noBar ? 0 : std::max(1.0f, em * 0.055f);
@@ -478,12 +597,17 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
                         }
                     }
                 };
-                float leftWidth = node->open ? width + pad : 0;
-                float rightWidth = node->close ? width + pad : 0;
-                draw(node->open, x);
+                // A stroke's bulge keeps a little clear of what stands
+                // outside it, as a glyph's side bearing does: an opening
+                // paren drawn from the very edge cut into the letter before
+                // it (#314). The contents' lean stays inside.
+                float bearing = em * 0.07f;
+                float leftWidth = node->open ? bearing + width + pad : 0;
+                float rightWidth = node->close ? pad + width + bearing : 0;
+                draw(node->open, x + bearing);
                 layoutNodeImpl(ctx, node->kids[0], size, x + leftWidth, baselineY, record);
-                draw(node->close, x + leftWidth + cm.width + pad);
-                m.width = leftWidth + cm.width + rightWidth;
+                draw(node->close, x + leftWidth + cm.extent() + pad);
+                m.width = leftWidth + cm.extent() + rightWidth;
                 m.ascent = cm.ascent + em * 0.08f + stroke / 2;
                 m.descent = cm.descent + em * 0.08f + stroke / 2;
                 return m;
@@ -519,7 +643,7 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
             cx += ow;
             Metrics inner = layoutNodeImpl(ctx, node->kids[0], size, cx,
                                            baselineY, record);
-            cx += inner.width;
+            cx += inner.extent();
             float cw = emitDelim(node->close);
             cx += cw;
             m.width = cx - x;
@@ -532,6 +656,7 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
         case MNode::Deco: {
             if (node->decoKind == 3) {  // sqrt
                 Metrics cm = measureNode(ctx, node->kids[0], size);
+                cm.width = cm.extent();
                 LayoutCtx child = ctx; child.style = 3;
                 float indexSize = size * styleScale(3) / styleScale(ctx.style);
                 MNodePtr index = node->kids.size() > 1 ? node->kids[1] : nullptr;
@@ -568,14 +693,33 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
                 bool under = kind == 8 || kind == 13;
                 bool overlay = kind == 10 || kind == 11 || kind == 18 || kind == 19;
                 float extra = overlay ? 0 : (kind == 12 || kind == 13 ? em * 0.45f : em * 0.3f);
-                if (under) m.descent += extra; else m.ascent += extra;
-                if (kind == 9) m.descent += extra;
+                // An accent sits just over its letter's ink, an x's height at
+                // least, not over the face's tallest letter: a tilde floated
+                // well clear of the phi under it (#314). Over a slanted letter
+                // it moves along with the slant.
+                const bool accent = kind == 5 || kind == 6 || kind == 7 || (kind >= 14 && kind <= 17);
+                float skew = 0;
+                if (accent) {
+                    top = baselineY - std::max(cm.inkTop(), em * 0.45f);
+                    m.ascent = std::max(cm.ascent, baselineY - top + extra);
+                    m.ink = baselineY - top + extra;
+                    skew = cm.lean * 0.75f;
+                } else if (under) {
+                    m.descent += extra;
+                } else {
+                    m.ascent += extra;
+                    m.ink = -1;  // a box, a brace or a stroke over it: its ascent
+                }
+                if (kind == 9) {
+                    m.descent += extra;
+                    m.lean = 0;
+                }
                 if (record) {
                     layoutNodeImpl(ctx, node->kids[0], size, x + pad, baselineY, true);
                     auto line = [&](float x1, float y1, float x2, float y2) {
                         ctx.box.lines.push_back({x1, y1, x2, y2, stroke});
                     };
-                    float center = x + m.width / 2;
+                    float center = x + m.width / 2 + skew;
                     if (kind == 5 || kind == 6) {
                         float dot = em * 0.1f, y = top - em * 0.2f;
                         if (kind == 5) ctx.box.rules.push_back({center - dot / 2, y, dot, dot});
@@ -622,26 +766,28 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
                 }
                 return m;
             }
-            // overline / overrightarrow / hat
+            // overline / overrightarrow / hat, over the ink as an accent is
             Metrics cm = measureNode(ctx, node->kids[0], size);
             float gap = em * 0.12f;
             float ruleH = std::max(1.0f, em * 0.05f);
             Metrics inner = layoutNodeImpl(ctx, node->kids[0], size, x,
                                            baselineY, record);
-            float topY = baselineY - cm.ascent - gap - ruleH;
+            const float reach = std::max(cm.inkTop(), em * 0.45f);
+            const float lx = x + cm.lean * 0.75f;
+            float topY = baselineY - reach - gap - ruleH;
             if (record) {
                 if (node->decoKind == 1) {
-                    ctx.box.rules.push_back({x, topY, cm.width, ruleH});
+                    ctx.box.rules.push_back({lx, topY, cm.width, ruleH});
                 } else if (node->decoKind == 2) {
                     float aw = em * 0.22f;   // arrowhead
                     float ay = topY + ruleH / 2;
-                    ctx.box.rules.push_back({x, topY, cm.width, ruleH});
+                    ctx.box.rules.push_back({lx, topY, cm.width, ruleH});
                     ctx.box.lines.push_back(
-                        {x + cm.width - aw, ay - aw * 0.6f, x + cm.width, ay, ruleH});
+                        {lx + cm.width - aw, ay - aw * 0.6f, lx + cm.width, ay, ruleH});
                     ctx.box.lines.push_back(
-                        {x + cm.width - aw, ay + aw * 0.6f, x + cm.width, ay, ruleH});
+                        {lx + cm.width - aw, ay + aw * 0.6f, lx + cm.width, ay, ruleH});
                 } else if (node->decoKind == 4) {
-                    float cxm = x + cm.width / 2;
+                    float cxm = lx + cm.width / 2;
                     float hw = std::min(cm.width / 2, em * 0.28f);
                     ctx.box.lines.push_back(
                         {cxm - hw, topY + ruleH + em * 0.08f, cxm, topY, ruleH});
@@ -650,8 +796,10 @@ Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
                 }
             }
             m.width = std::max(inner.width, cm.width);
-            m.ascent = cm.ascent + gap + ruleH + em * 0.08f;
+            m.ascent = std::max(cm.ascent, reach + gap + ruleH + em * 0.08f);
             m.descent = cm.descent;
+            m.ink = reach + gap + ruleH;
+            m.lean = cm.lean;
             return m;
         }
     }
@@ -673,7 +821,83 @@ Metrics measureNode(LayoutCtx& ctx, const MNodePtr& node, float size) {
 
 std::unordered_map<std::wstring, MathBoxPtr> g_mathCache;
 
+// Words set upright, as \text sets them: an equation's number
+MNodePtr uprightRow(const std::wstring& text) {
+    auto run = std::make_shared<MNode>();
+    run->kind = MNode::Sym;
+    run->text = text;
+    run->roman = run->literalText = true;
+    auto row = std::make_shared<MNode>();
+    row->kind = MNode::Row;
+    row->literalText = true;
+    row->kids.push_back(run);
+    return row;
+}
+
+// A tree laid out into a box of its own, the pad all round
+void layoutBox(App& app, MathBox& box, const MNodePtr& root, float fontSize, bool display) {
+    box.fontFamily = mathFontFamily(app);
+    LayoutCtx ctx{app, box, display ? 0 : 1};
+    Metrics probe = measureNode(ctx, root, fontSize);
+    float pad = fontSize * (display ? 0.15f : 0.08f);
+    float baseline = probe.ascent + pad;
+    Metrics final = layoutNode(ctx, root, fontSize, pad, baseline);
+    box.width = final.extent() + pad * 2;
+    box.height = final.ascent + final.descent + pad * 2;
+    box.baseline = baseline;
+}
+
+// The braces' text after a command at `at` ("\label{x}", "\tag*{1}"), and
+// where they close; false for none. Labels and numbers hold no groups.
+bool commandValue(const std::wstring& tex, size_t at, const wchar_t* command, std::wstring& value, size_t& close) {
+    const size_t n = wcslen(command);
+    if (tex.compare(at + 1, n, command) != 0 || (at + 1 + n < tex.size() && iswalpha(tex[at + 1 + n]))) return false;
+    size_t p = at + 1 + n;
+    if (p < tex.size() && tex[p] == L'*') ++p;
+    while (p < tex.size() && iswspace(tex[p])) ++p;
+    if (p >= tex.size() || tex[p] != L'{') return false;
+    close = tex.find(L'}', p + 1);
+    if (close == std::wstring::npos) return false;
+    value = tex.substr(p + 1, close - p - 1);
+    return true;
+}
+
 } // namespace
+
+void mathCollectLabels(const std::wstring& tex, std::map<std::wstring, std::wstring>& labels) {
+    std::wstring number, value;
+    std::vector<std::wstring> keys;
+    for (size_t at = tex.find(L'\\'); at != std::wstring::npos; at = tex.find(L'\\', at + 2)) {
+        size_t close = 0;
+        if (commandValue(tex, at, L"label", value, close)) keys.push_back(value);
+        else if (commandValue(tex, at, L"tag", value, close) && number.empty()) number = value;
+        else continue;
+        at = close - 1;
+    }
+    if (number.empty()) return;
+    for (const auto& key : keys) labels.emplace(key, number);
+}
+
+std::wstring mathResolveRefs(const std::wstring& tex, const std::map<std::wstring, std::wstring>& labels) {
+    if (labels.empty() || tex.find(L"ref") == std::wstring::npos) return tex;
+    std::wstring out, key;
+    size_t copied = 0;
+    for (size_t at = tex.find(L'\\'); at != std::wstring::npos; at = tex.find(L'\\', at + 2)) {
+        size_t close = 0;
+        const bool eqref = commandValue(tex, at, L"eqref", key, close);
+        if (!eqref && !commandValue(tex, at, L"ref", key, close)) continue;
+        auto it = labels.find(key);
+        // A number that is words and digits reads as \text sets it
+        if (it == labels.end() || it->second.find_first_of(L"\\{}$%#&~^_") != std::wstring::npos) continue;
+        out.append(tex, copied, at - copied);
+        out += L"\\text{" + (eqref ? L"(" + it->second + L")" : it->second) + L"}";
+        copied = close + 1;
+        at = close - 1;
+    }
+    if (!copied) return tex;
+    out.append(tex, copied, std::wstring::npos);
+    return out;
+}
 
 MathBoxPtr mathParse(App& app, const std::wstring& latex, float fontSize,
                      bool display) {
@@ -688,20 +912,29 @@ MathBoxPtr mathParse(App& app, const std::wstring& latex, float fontSize,
         return nullptr;
     }
 
+    // \tag's number (#314): inline, a quad after the equation; on display,
+    // a box of its own for the line's right edge
+    if (!root->tag.empty() && !display) {
+        auto quad = std::make_shared<MNode>();
+        quad->kind = MNode::Space;
+        quad->space = 1.0f;
+        root->kids.push_back(quad);
+        root->kids.push_back(uprightRow(root->tag));
+    }
     auto box = std::make_shared<MathBox>();
-    box->fontFamily = mathFontFamily(app);
-    LayoutCtx ctx{app, *box, display ? 0 : 1};
-    Metrics probe = measureNode(ctx, root, fontSize);
-    float pad = fontSize * (display ? 0.15f : 0.08f);
-    float baseline = probe.ascent + pad;
-    Metrics final = layoutNode(ctx, root, fontSize, pad, baseline);
-    box->width = final.width + pad * 2;
-    box->height = final.ascent + final.descent + pad * 2;
-    box->baseline = baseline;
+    layoutBox(app, *box, root, fontSize, display);
+    if (!root->tag.empty() && display) {
+        box->tagText = root->tag;
+        box->tag = std::make_shared<MathBox>();
+        layoutBox(app, *box->tag, uprightRow(root->tag), fontSize, display);
+    }
 
     g_mathCache[key] = box;
     return box;
 }
+
+MathBoxPtr mathBoxTag(const MathBoxPtr& box) { return box ? box->tag : nullptr; }
+std::wstring mathBoxTagText(const MathBoxPtr& box) { return box ? box->tagText : std::wstring(); }
 
 float mathBoxWidth(const MathBoxPtr& box) { return box ? box->width : 0; }
 float mathBoxHeight(const MathBoxPtr& box) { return box ? box->height : 0; }

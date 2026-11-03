@@ -58,6 +58,9 @@ void saveSettings(const Settings& settings) {
     if (!settings.plantumlPath.empty()) {
         file << "plantumlPath=" << settings.plantumlPath << "\n";
     }
+    if (!settings.mathFont.empty()) {
+        file << "mathFont=" << settings.mathFont << "\n";
+    }
     file << "followSystemTheme=" << (settings.followSystemTheme ? 1 : 0) << "\n";
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
@@ -423,6 +426,8 @@ Settings loadSettings() {
             settings.pandocPath = value;
         } else if (key == "plantumlPath") {
             settings.plantumlPath = value;
+        } else if (key == "mathFont") {
+            settings.mathFont = value;
         } else if (key == "sessionActive") {
             int idx = std::stoi(value);
             if (idx >= 0) settings.sessionActive = idx;

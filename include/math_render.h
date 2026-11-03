@@ -3,6 +3,7 @@
 
 #include "app.h"
 
+#include <map>
 #include <memory>
 #include <string>
 
@@ -20,6 +21,19 @@ using MathBoxPtr = std::shared_ptr<MathBox>;
 // (source, size, display); the cache is cleared by mathClearCache.
 MathBoxPtr mathParse(App& app, const std::wstring& latex, float fontSize,
                      bool display);
+
+// A display equation's \tag, laid out on its own to stand at the right of
+// its line, or null; and its text, "(1.8)" (#314). Inline, the number
+// follows the equation in its own box.
+MathBoxPtr mathBoxTag(const MathBoxPtr& box);
+std::wstring mathBoxTagText(const MathBoxPtr& box);
+
+// A document's equation numbers: the labels of one equation's TeX, each
+// with the number its \tag gives it, for \eqref and \ref in the others
+void mathCollectLabels(const std::wstring& latex, std::map<std::wstring, std::wstring>& labels);
+// The TeX with each \eqref and \ref to a known label set as its number;
+// an unknown one reads (??), as in LaTeX
+std::wstring mathResolveRefs(const std::wstring& latex, const std::map<std::wstring, std::wstring>& labels);
 
 float mathBoxWidth(const MathBoxPtr& box);
 float mathBoxHeight(const MathBoxPtr& box);

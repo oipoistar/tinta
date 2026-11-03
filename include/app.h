@@ -17,6 +17,7 @@
 #include <memory>
 #include <vector>
 #include <unordered_map>
+#include <map>
 #include <chrono>
 #include <utility>
 #include <optional>
@@ -336,6 +337,9 @@ struct Settings {
     std::string pandocPath;
     // User-chosen PlantUML tool: plantuml.exe or plantuml.jar ("" = PATH)
     std::string plantumlPath;
+    // A math face to set equations in, for one with a MATH table such as
+    // Latin Modern Math (#314); "" or one not installed: Cambria Math
+    std::string mathFont;
 };
 
 // Application state
@@ -1454,6 +1458,11 @@ struct App {
     plantuml::Tool plantumlTool;
     std::wstring plantumlUserPath;
     bool plantumlChecked = false;
+
+    // Equations: settings.ini's math face, and the numbers the document's
+    // \tag gives its \label names, gathered as the layout starts (#314)
+    std::wstring mathFont;
+    std::map<std::wstring, std::wstring> mathLabels;
     // Async render queue (created lazily by plantumlEnsureQueue) and the
     // per-process work root under %TEMP%; unique_ptr keeps App.h the only
     // owner and joins the worker before exit via WM_DESTROY

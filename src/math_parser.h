@@ -48,6 +48,7 @@ struct MNode {
     bool uniformAlignment = false;
     std::vector<size_t> verticalRules;
     std::vector<size_t> horizontalRules;
+    std::wstring tag;              // The root: its \tag, "(1.8)", drawn at a display line's right
 };
 
 

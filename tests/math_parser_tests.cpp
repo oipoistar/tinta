@@ -94,6 +94,21 @@ int main() {
     for (int i = 0; i < 64; ++i) excessiveRows += L"\\\\x";
     check(!parseLatex(excessiveRows + L"\\end{matrix}"), "matrix row count is bounded");
     // Deterministic mutation smoke test: malformed input must terminate without
+    // #314: \tag numbers an equation, \tag* without parentheses, the first
+    // one if there are two; \label, \notag and \nonumber set nothing; a
+    // reference no document resolved reads (??), as in LaTeX
+    auto tagged = parseLatex(LR"(x = 1 \label{eq:one} \tag{1.8})");
+    check(tagged && tagged->tag == L"(1.8)" && textOf(tagged) == L"x=1", "tag numbers an equation, label sets nothing");
+    auto starred = parseLatex(LR"(y \tag*{A.1})");
+    check(starred && starred->tag == L"A.1", "tag* leaves the parentheses off");
+    auto twice = parseLatex(LR"(z \tag{1} \tag{2})");
+    check(twice && twice->tag == L"(1)", "the first tag numbers it");
+    check(textOf(parseLatex(LR"(a \notag b \nonumber)")) == L"ab", "notag and nonumber set nothing");
+    check(textOf(parseLatex(LR"(\eqref{eq:one} \ref{eq:one})")) == L"(??)??", "an unresolved reference reads (??)");
+    check(!parseLatex(LR"(x \tag{1)") && !parseLatex(LR"(x \label{a)"), "an unclosed tag or label falls back");
+    check(parseLatex(LR"(\left[\!\left[\varepsilon\left(E_n^2 - E_t^2\right)\right]\!\right]. \tag{1.8})") != nullptr,
+          "the reported equation parses with its tag");
+
     // crashes, including partially typed environments and macro definitions.
     const std::vector<std::wstring> seeds = {example,
         LR"(\newcommand{\v}[1]{\begin{pmatrix}#1\end{pmatrix}}\v{a\\b})",
