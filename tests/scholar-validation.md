@@ -73,6 +73,15 @@ footnotes with citations, two equations, a figure, an e-mail address and an
   `@fig:` still does; a broken library, an unknown style, a missing key and
   a missing figure each reported.
 
+- `scholar_in_app` (input_tests, `--scholar-app-tests`): `paper.md` in a
+  window at 1050 and 650 px: the first citation's link goes to
+  `#ref-knuth1984` and its anchor knows both its keys, every reference,
+  the figure, the table and the equations are places to go, the hover
+  card holds Knuth's reference, APA's entries hang (the second line starts
+  right of the first), a click on the citation scrolls to its reference;
+  `paper-zh.md` sets [1] in a column beside its entry. Frames are saved
+  beside the test.
+
 ## In the built app
 
 `tinta.exe --printpages` and `--exporthtml` on the fixtures
@@ -91,3 +100,29 @@ footnotes with citations, two equations, a figure, an e-mail address and an
 - `crossref.md`: Figure 1 and 2, Table 1 and 2, an unnumbered caption,
   equations (1), (2) and (P).
 - The HTML exports carry the same text in pandoc's markup.
+- The frames from `scholar_in_app` (`build/scholar-app-test-Release`): at
+  650 px the references wrap with their hanging indent, DOI links
+  underlined; the Chinese paper's numbers stand in their column.
+
+## Size
+
+`tinta.exe` grows from 3,995,136 to 4,708,352 bytes for Scholar and CSS
+themes together (713,216 bytes). From the linker map, Scholar's own code
+is about 312 KB (BibTeX reader 80, CSL processor 162 with its XML reader,
+`scholar.cpp` 50, citation syntax 17) plus 28 KB of packed styles; the CSS
+engine and theme compiler are about 190 KB; the rest is their share of
+`std::` templates (about 150 KB in all) and unwind tables. `/O1` or `/Ob1`
+on these files changes nothing worth having (+512 and +6,144 bytes).
+
+## Limitations
+
+- In-text citations in numeric styles name authors by a fallback (family
+  names, the locale's "and", et al. from three), since the styles give
+  none; pandoc's own fallback may differ.
+- Note styles (Chicago notes) format as in-text citations; footnotes from
+  citations come in phase 2, with completion in Live, Zotero, inline
+  `references:` and `::: {#refs}` placement.
+- A BibTeX name with no comma and no space ("张三") is all family name, as
+  in pandoc.
+- Hover cards show in the reading view; Live shows them on its replayed
+  page but not on the block being typed.

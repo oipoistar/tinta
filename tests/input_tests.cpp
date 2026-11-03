@@ -182,6 +182,7 @@ int runDeletedTabTests();
 int runFileChangeTests();
 int runPinnedTabTests();
 int runReopenClosedTabTests();
+int runScholarAppTests(const char* fixtureDir);
 int runSearchPanelTests();
 int runTableInputTests();
 int runDockedPreviewTests();
@@ -217,6 +218,7 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--file-change-tests") return runFileChangeTests();
     if (argc == 2 && std::string(argv[1]) == "--pinned-tab-tests") return runPinnedTabTests();
     if (argc == 2 && std::string(argv[1]) == "--reopen-closed-tab-tests") return runReopenClosedTabTests();
+    if (argc == 2 && std::string(argv[1]) == "--scholar-app-tests") return runScholarAppTests(TINTA_SCHOLAR_FIXTURE_DIR);
     if (argc == 2 && std::string(argv[1]) == "--editor-feature-tests") return runEditorFeatureTests();
     if (argc == 2 && std::string(argv[1]) == "--ui-font-tests") return runUiFontTests();
     if (argc == 2 && std::string(argv[1]) == "--print-export-tests") return runPrintExportTests();

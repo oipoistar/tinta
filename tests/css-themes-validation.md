@@ -89,6 +89,14 @@ A real window could not be captured in this remote session (PrintWindow
 and the screen copy return no Direct2D content); the frames come from the
 same drawing code.
 
+## Size
+
+The CSS engine and the theme compiler are about 190 KB of `tinta.exe`'s
+growth to 4,708,352 bytes (measured from the linker map with Scholar's;
+see `tests/scholar-validation.md`), with their share of `std::`
+templates. That is over the 120 KB the spec set for phase 1; trimming it
+means dropping parts of CSS the later phases need.
+
 ## Limitations
 
 - Only what the theme can say today is drawn: colours, faces, type sizes
