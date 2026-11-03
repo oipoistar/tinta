@@ -80,6 +80,31 @@ void checkMarkdownFixture(App& app, const char* filename, size_t minimumMath,
     std::cout << filename << ": " << equations << " equations\n";
 }
 
+// #314: a closing $ followed by a letter closes, as pandoc reads it; a digit
+// after it, or a space before it, leaves it open
+void closingDollars(App& app) {
+    auto spans = [&](const std::string& source) {
+        std::vector<std::string> found;
+        auto doc = app.parser.parse(source);
+        std::function<void(const qmd::ElementPtr&)> walk = [&](const qmd::ElementPtr& e) {
+            if (!e) return;
+            if (e->type == qmd::ElementType::MathInline) found.push_back(e->text);
+            for (const auto& child : e->children) walk(child);
+        };
+        if (doc.success) walk(doc.root);
+        return found;
+    };
+    using Spans = std::vector<std::string>;
+    check(spans("$R=50\\,\\mu$m\xEF\xBC\x8C$\\gamma$\n") == Spans{"R=50\\,\\mu", "\\gamma"},
+          "a $ before a unit's letters closes, and the next equation opens after it");
+    check(spans("$x$y and *a* $b$c\n") == Spans{"x", "b"}, "a $ followed by a letter closes");
+    check(spans("$x$, $y$ and ($z$)\n") == Spans{"x", "y", "z"}, "a $ before punctuation or a space still closes");
+    check(spans("It costs $5 and $6, or $10.\n").empty(), "prices stay text");
+    check(spans("Hello $name, your total is $amount.\n").empty(), "a $ after a space does not close");
+    check(spans("$x$5 stays text\n").empty(), "a $ followed by a digit does not close");
+    check(spans("`$a$b` and \\$c$d\n").empty(), "code and an escaped $ stay text");
+}
+
 // A box's text runs, and the corners of its strokes and rules, as its SVG
 // has them
 struct Drawn {
@@ -277,6 +302,7 @@ int main(int argc, char** argv) {
         checkMarkdownFixture(app, "markdown-regression-control.md", 0, false, 3);
         checkMarkdownFixture(app, "application-menu.md", 5, false, 3);
         checkMarkdownFixture(app, "application-menu-companion.md", 1, false, 2);
+        closingDollars(app);
         auto markdown = app.parser.parse("$$\n\\begin{bmatrix}1&2\\\\5&6\\end{bmatrix}\\longrightarrow 6\n$$");
         check(markdown.success && !markdown.root->children.empty(), "display math Markdown parses");
         if (markdown.success && !markdown.root->children.empty()) {

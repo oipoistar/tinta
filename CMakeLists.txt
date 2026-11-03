@@ -22,15 +22,46 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-# MD4C markdown parser
+# MD4C markdown parser: fetched, then built here from a copy with one rule
+# changed (below). Its own CMakeLists is left out: no CMakeLists in the
+# subdirectory named means fetched and not added.
 include(FetchContent)
 FetchContent_Declare(
     md4c
     GIT_REPOSITORY https://github.com/mity/md4c.git
     GIT_TAG 729e6b8b320caa96328968ab27d7db2235e4fb47  # release-0.5.2, pinned by commit
     GIT_SHALLOW TRUE
+    SOURCE_SUBDIR built-by-tinta
 )
 FetchContent_MakeAvailable(md4c)
+
+# A closing $ may be followed by a letter, as pandoc reads it: $50\,\mu$m
+# closes after \mu (#314). md4c wanted a space or punctuation after it and
+# ran the span on to the next $. A digit after it still leaves it open
+# ($5 and $6), and so does a space before it ($name and $amount). The copy
+# is written again when md4c changes; one without the rule stops here.
+file(READ "${md4c_SOURCE_DIR}/src/md4c.c" MD4C_SOURCE)
+set(MD4C_CLOSER "if(tmp < line->end  &&  !ISUNICODEWHITESPACE(tmp)  &&  !ISUNICODEPUNCT(tmp))")
+string(FIND "${MD4C_SOURCE}" "${MD4C_CLOSER}" MD4C_CLOSER_AT)
+if(MD4C_CLOSER_AT EQUAL -1)
+    message(FATAL_ERROR "md4c: the closing $ rule Tinta changes is not in ${md4c_SOURCE_DIR}/src/md4c.c")
+endif()
+string(REPLACE "${MD4C_CLOSER}"
+    "if(tmp < line->end  &&  !ISUNICODEWHITESPACE(tmp)  &&  !ISUNICODEPUNCT(tmp)  &&  (ISDIGIT(tmp)  ||  off == line->beg  ||  ISUNICODEWHITESPACEBEFORE(off)))"
+    MD4C_SOURCE "${MD4C_SOURCE}")
+set(MD4C_COPY "${CMAKE_CURRENT_BINARY_DIR}/md4c-tinta/md4c.c")
+set(MD4C_WRITTEN "")
+if(EXISTS "${MD4C_COPY}")
+    file(READ "${MD4C_COPY}" MD4C_WRITTEN)
+endif()
+if(NOT MD4C_WRITTEN STREQUAL MD4C_SOURCE)
+    file(WRITE "${MD4C_COPY}" "${MD4C_SOURCE}")
+endif()
+add_library(md4c STATIC "${MD4C_COPY}")
+target_include_directories(md4c PUBLIC "${md4c_SOURCE_DIR}/src")
+target_compile_definitions(md4c PRIVATE MD4C_USE_UTF8)
+# The warning level md4c builds itself at
+target_compile_options(md4c PRIVATE $<$<C_COMPILER_ID:MSVC>:/W3>)
 
 # Source files
 set(SOURCES
