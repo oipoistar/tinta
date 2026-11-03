@@ -184,6 +184,7 @@ struct NamesSpec {
     std::vector<int> vars;  // their slots
     bool hasName = false, hasEtAl = false;
     NameOptions name;
+    NameOptions level;  // name options set on <names> itself, between <name> and the context
     Formatting nameFmt, givenFmt, familyFmt;
     std::string etAlTerm = "et-al";
     Formatting etAlFmt;

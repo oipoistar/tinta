@@ -658,6 +658,7 @@ private:
 
     NameOptions options(const NamesSpec& spec) const {
         NameOptions o = spec.name;
+        if (spec.level.has) o.inherit(spec.level);
         o.inherit(job.bibliography ? eng.bibliographyNames.options : eng.citationNames.options);
         return o;
     }

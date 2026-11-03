@@ -1008,6 +1008,19 @@ void nameTests() {
     expect(names("<name form=\"count\" et-al-min=\"3\" et-al-use-first=\"1\"/>", three), "1", "names: count after et al.");
     expect(names("<name form=\"count\"/>", three), "3", "names: count");
     expect(names("<name form=\"short\" and=\"text\"/>", three), "Doe, Smith, and Brown", "names: short form");
+    // Name options inherit: <style>, <citation>, <names>, <name>
+    expect(layoutOut("<names variable=\"author\" et-al-min=\"3\" et-al-use-first=\"1\"><name/></names>",
+                     withAuthors(three)),
+           "John Doe et al.", "names: options on <names>");
+    expect(layoutOut("<names variable=\"author\" et-al-min=\"3\" et-al-use-first=\"1\"><name et-al-use-first=\"2\"/></names>",
+                     withAuthors(three)),
+           "John Doe, Ann Smith, et al.", "names: <name> over <names>");
+    csl::Result inherited = runOne("initialize-with=\". \" name-as-sort-order=\"all\"",
+                                   "<citation et-al-min=\"3\" et-al-use-first=\"1\" name-form=\"short\"><layout>"
+                                   "<names variable=\"author\"><name/></names></layout></citation>",
+                                   withAuthors(three));
+    expect(inherited.citations.empty() ? "" : csl::plain(inherited.citations[0]), "Doe et al.",
+           "names: <citation> and <style> options");
     expect(names("<name initialize-with=\". \"/>", {person("Sartre", "Jean-Paul")}), "J.-P. Sartre",
            "names: hyphenated initials");
     expect(names("<name initialize-with=\". \"/>", {person("Sartre", "Jean-Paul")}, "initialize-with-hyphen=\"false\""),
