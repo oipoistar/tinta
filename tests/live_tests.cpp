@@ -1640,6 +1640,131 @@ void selectingLines(App& app, const fs::path& dir) {
     check(!pixels.empty() && spread < 0.01f, "#313: no darker strip where the hidden ** and * sit, " + std::to_string(spread));
 }
 
+// #315: a list's levels each draw their own bullet, close to the item's
+// text, on the page and in Live's stretch; Tab takes an item a level in and
+// one Shift+Tab takes it back; only the line being typed in is washed
+void nestedLists(App& app, const fs::path& dir, const fs::path& out) {
+    openInEditor(app, dir / "Nested lists.md");
+    check(editorLiveOn(app) && find(app, L"- Tab on this item") != std::wstring::npos, "#315: the fixture opens in Live");
+    placeCaret(app, find(app, L"The last paragraph"));
+    const float em = app.textFormat ? app.textFormat->GetFontSize() : 16.0f;
+    // The page: a disc, a circle, a square, then a disc again, in a numbered
+    // list, under tasks and in a quote too
+    std::string kinds;
+    std::vector<D2D1_RECT_F> bullets;
+    for (const auto& s : app.layoutShapes) {
+        if (s.rect.right - s.rect.left > em * 0.5f) continue;
+        if (s.type == App::LayoutShapeType::Rectangle && s.fill.a > 0) kinds += 's';
+        else if (s.type == App::LayoutShapeType::Ellipse) kinds += s.fill.a > 0 ? 'd' : 'c';
+        else continue;
+        bullets.push_back(s.rect);
+    }
+    check(kinds == "dcsdddcssdc", "#315: a bullet a level, round again past the third: " + kinds);
+    bool closeBy = false;
+    const size_t first = app.docText.find(L"There is no");
+    for (const auto& r : app.textRects) {
+        if (r.docStart != first || bullets.empty()) continue;
+        const float gap = r.rect.left - bullets[0].right, mid = (bullets[0].top + bullets[0].bottom) * 0.5f;
+        closeBy = gap > em * 0.3f && gap < em * 0.5f && mid > r.rect.top && mid < r.rect.bottom;
+    }
+    check(closeBy, "#315: a bullet stands two fifths of an em before its item's text, level with its letters");
+    frame(app, out / "live-nested-lists.png");
+
+    // Tab: under the item before it at its level, not as deep as the item
+    // above it; Shift+Tab undoes it
+    const KeyMods shift{false, true, false};
+    placeCaret(app, find(app, L"- Tab on this item") + 6);
+    keystroke(app, VK_TAB);
+    check(find(app, L"\n  - Tab on this item") != std::wstring::npos, "#315: Tab takes an item one level in");
+    keystroke(app, VK_TAB, shift);
+    check(find(app, L"\n- Tab on this item") != std::wstring::npos, "#315: one Shift+Tab takes it back out");
+    placeCaret(app, find(app, L"  - When we indent") + 8);
+    keystroke(app, VK_TAB);
+    check(find(app, L"\n  - When we indent") != std::wstring::npos, "#315: the first item at its level goes no further in");
+    keystroke(app, VK_TAB, shift);
+    keystroke(app, VK_TAB);
+    check(find(app, L"\n  - When we indent") != std::wstring::npos, "#315: out a level and in again it is back");
+    placeCaret(app, find(app, L"2. Second") + 4);
+    keystroke(app, VK_TAB);
+    check(find(app, L"\n   2. Second") != std::wstring::npos, "#315: a numbered item goes under the number before it");
+    keystroke(app, VK_TAB, shift);
+    check(find(app, L"\n2. Second") != std::wstring::npos, "#315: and back out");
+
+    // The line being typed in is washed, not the list around it
+    placeCaret(app, find(app, L"Shift+Tab takes it back out") + 5);
+    D2D1_POINT_2F caret{};
+    float lineHeight = 0, top = 0, bottom = 0, moved = 0;
+    check(liveCaretClientPoint(app, caret, lineHeight) && livePageGeometry(app, top, bottom, moved), "#315: the list is the stretch");
+    const std::vector<D2D1_COLOR_F> screen = pixelsAfter(app, [&] { drawLive(app); });
+    const float washLeft = std::max(dpi(app, 10.0f), app.layoutIndent - dpi(app, 12.0f));
+    const int column = (int)(documentViewportX(app) + washLeft - app.scrollX + 3.0f);
+    int washed = 0, from = INT_MAX, to = -1;
+    const int scanTop = std::max((int)chromeTopHeight(app) + 1, (int)(top - app.scrollY) - 10);
+    const int scanBottom = std::min(app.height - 1, (int)(bottom - app.scrollY) + 10);
+    for (int y = scanTop; y <= scanBottom && screen.size() == (size_t)app.width * app.height; ++y) {
+        const D2D1_COLOR_F& p = screen[(size_t)y * app.width + column];
+        const D2D1_COLOR_F& b = app.theme.background;
+        if (std::fabs(p.r - b.r) + std::fabs(p.g - b.g) + std::fabs(p.b - b.b) < 0.004f) continue;
+        ++washed;
+        from = std::min(from, y);
+        to = std::max(to, y);
+    }
+    check(bottom - top > lineHeight * 4 && washed > lineHeight * 0.7f && washed < lineHeight + 3 &&
+              from <= caret.y + 1 && to >= caret.y + lineHeight - 2,
+          "#315: one line's rows washed, " + std::to_string(washed) + " of the list's " + std::to_string((int)(bottom - top)));
+    frame(app, out / "live-nested-lists-typing.png");
+
+    // The stretch's other lines draw the page's bullets, as near the text:
+    // at three times the size, a ring's hole and a square's corners are
+    // whole pixels
+    LiveText e;
+    e.text = L"- one\n  - two\n    - three\n      - four\n- five";
+    e.anchor = e.caret = e.text.size();
+    const float zoom = app.zoomFactor;
+    app.zoomFactor = zoom * 3.0f;
+    const live::Look look = live::pageLook(app);
+    app.zoomFactor = zoom;
+    const float size = look.size;
+    live::LayoutCache cache;
+    IDWriteTextLayout* layout = live::layoutOf(app, e, 0, e.text.size(), 600.0f, look, cache, live::caretLineOf(e, 0, e.text.size()));
+    check(layout != nullptr, "#315: Live lays the list out");
+    if (!layout) return;
+    const std::vector<D2D1_COLOR_F> pixels = pixelsAfter(app, [&] {
+        app.renderTarget->Clear(app.theme.background);
+        live::draw(app, e, layout, cache, 0, look, false, 1.0f);
+    });
+    auto inked = [&](int x, int y) {
+        const D2D1_COLOR_F& p = pixels[(size_t)y * app.width + x];
+        const D2D1_COLOR_F& b = app.theme.background;
+        return std::fabs(p.r - b.r) + std::fabs(p.g - b.g) + std::fabs(p.b - b.b) > 0.6f;
+    };
+    std::string drawn;
+    bool besideText = true;
+    for (const wchar_t* word : {L"one", L"two", L"three", L"four"}) {
+        float x = 0, y = 0, h = 0;
+        live::caretPoint(layout, 0, e.text.find(word), x, y, h);
+        int left = INT_MAX, right = -1, upper = INT_MAX, lower = -1;
+        for (int py = (int)y; py < (int)(y + h) && pixels.size() == (size_t)app.width * app.height; ++py) {
+            for (int px = std::max(0, (int)(x - size)); px < (int)x - 1; ++px) {
+                if (!inked(px, py)) continue;
+                left = std::min(left, px);
+                right = std::max(right, px);
+                upper = std::min(upper, py);
+                lower = std::max(lower, py);
+            }
+        }
+        if (right < 0) {
+            drawn += '-';
+            continue;
+        }
+        const bool centre = inked((left + right) / 2, (upper + lower) / 2), corner = inked(left, upper);
+        drawn += centre ? (corner ? 's' : 'd') : 'c';
+        besideText = besideText && x - right > size * 0.3f && x - right < size * 0.55f;
+    }
+    check(drawn == "dcsd", "#315: Live draws the page's bullet for each level: " + drawn);
+    check(besideText, "#315: as near the text as the page does");
+}
+
 }  // namespace
 
 int runLiveTests(const char* fixtureDir) {
@@ -1693,6 +1818,7 @@ int runLiveTests(const char* fixtureDir) {
     readingToggle(app, dir);
     themeColours(app);
     selectingLines(app, dir);
+    nestedLists(app, dir, out);
 
     // Two themes at two widths, on the tour
     openInEditor(app, doc);

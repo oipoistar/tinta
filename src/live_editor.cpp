@@ -791,11 +791,18 @@ void renderLivePage(App& app) {
     slice(0, L.top, 0);
     slice(L.bottom, 1.0e9f, L.shift);
     live::Look look = live::pageLook(app);
-    // The stretch being typed in: a faint wash, then its text
+    // The line being typed in, the one showing its Markdown: a faint wash
+    // behind its rows, then the stretch's text. The whole stretch washed
+    // read as a block picked out, a list's every item with it (#315)
     float washLeft = std::max(dpi(app, 10.0f), app.layoutIndent - dpi(app, 12.0f));
     float washRight = app.layoutIndent + app.layoutMaxWidth + dpi(app, 12.0f);
-    paint::fillRound(app, D2D1::RectF(washLeft - sx, L.textY - dpi(app, 6.0f) - sy, washRight - sx, L.textY + L.height + dpi(app, 6.0f) - sy),
-                     dpi(app, 6.0f), paint::alpha(app.theme.accent, 0.05f));
+    const size_t typed = std::clamp(L.e.hasSelection() ? L.e.anchor : L.e.caret, L.from, L.to);
+    float x0 = 0, firstRow = 0, h0 = 0, x1 = 0, lastRow = 0, h1 = 0;
+    if (live::caretPoint(L.layout, L.from, std::max(live::lineStart(L.e.text, typed), L.from), x0, firstRow, h0) &&
+        live::caretPoint(L.layout, L.from, std::min(live::lineEnd(L.e.text, typed), L.to), x1, lastRow, h1)) {
+        paint::fillRound(app, D2D1::RectF(washLeft - sx, L.textY + firstRow - sy, washRight - sx, L.textY + lastRow + h1 - sy),
+                         dpi(app, 6.0f), paint::alpha(app.theme.accent, 0.05f));
+    }
     D2D1_MATRIX_3X2_F saved;
     app.renderTarget->GetTransform(&saved);
     app.renderTarget->SetTransform(D2D1::Matrix3x2F::Translation(L.textX - sx, L.textY - sy) * saved);

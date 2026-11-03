@@ -789,8 +789,11 @@ void indent(LiveText& e, bool out) {
     LineMark top = lineMark(e.text, first);
     size_t step = fenceState(e.text, first) == 2 ? 4 : 2;
     if (listKind(top.kind)) {
-        // A list item goes under the item above, or back out to its parent
-        size_t parent = 0, above = std::wstring::npos;
+        // A list item goes one level in, under the item before it at its own
+        // level, or back out to its parent's: Shift+Tab undoes a Tab. Going
+        // under the nearest item above took it as deep as that one's own
+        // items, three levels at a press, and back out a level at a time (#315)
+        size_t parent = 0, before = std::wstring::npos, shallowest = std::wstring::npos;
         for (size_t at = first; at > 0;) {
             at = lineStart(e.text, at - 1);
             std::wstring_view line = lineView(e.text, at);
@@ -800,21 +803,25 @@ void indent(LiveText& e, bool out) {
                 if (p.indent == 0) break;
                 continue;
             }
-            if (above == std::wstring::npos) above = at;
+            if (p.indent == top.indent && before == std::wstring::npos) before = at;
             if (p.indent < top.indent) {
                 parent = p.indent;
                 break;
             }
+            // Items indented unevenly: the shallowest since the parent stands in
+            if (p.indent > top.indent && (shallowest == std::wstring::npos || p.indent <= lineMark(e.text, shallowest).indent))
+                shallowest = at;
             if (!at) break;
         }
+        if (before == std::wstring::npos) before = shallowest;
         if (out) {
             step = top.indent - std::min(top.indent, parent);
-        } else if (above != std::wstring::npos) {
-            LineMark p = lineMark(e.text, above);
+        } else if (before != std::wstring::npos) {
+            LineMark p = lineMark(e.text, before);
             size_t want = p.indent + (p.kind == LineMark::Number ? p.length : 2);
             step = want > top.indent ? want - top.indent : 0;
         } else {
-            step = 0;  // the first item of a list cannot go under anything
+            step = 0;  // the first item at its level cannot go under anything
         }
         if (!step) return;
     }

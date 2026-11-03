@@ -8,6 +8,7 @@
 #include "live_text.h"
 #include "d2d_init.h"
 #include "i18n.h"
+#include "render.h"
 #include "syntax.h"
 #include "ui_paint.h"
 #include "utils.h"
@@ -32,8 +33,9 @@ class MarkObject final : public IDWriteInlineObject {
 public:
     enum Kind { Hidden, Bullet, Box, Checked, Quote, Rule, Space };
     MarkObject(Kind kind, float size, float width, ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush, D2D1_COLOR_F text,
-               D2D1_COLOR_F accent, std::optional<D2D1_COLOR_F> rule = std::nullopt)
-        : kind_(kind), size_(size), width_(width), target_(target), brush_(brush), text_(text), accent_(accent), rule_(rule) {}
+               D2D1_COLOR_F accent, std::optional<D2D1_COLOR_F> rule = std::nullopt, int depth = 0)
+        : kind_(kind), size_(size), width_(width), target_(target), brush_(brush), text_(text), accent_(accent), rule_(rule),
+          depth_(depth) {}
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
         if (riid == __uuidof(IUnknown) || riid == __uuidof(IDWriteInlineObject)) {
@@ -60,8 +62,19 @@ public:
             brush_->SetColor(c);
         };
         if (kind_ == Bullet) {
-            color(text_, 0.7f);
-            target_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x + u * 0.2f, mid), u * 0.12f, u * 0.12f), brush_);
+            // The page's bullet for its depth, as far before the text; with
+            // no room for a step it keeps to the mark's own place
+            App::LayoutShape bullet = listBullet(width_ > 0 ? x + width_ : x + u * 0.76f, y + u * 0.8f, u, depth_, text_);
+            color(text_, 1.0f);
+            const D2D1_RECT_F& r = bullet.rect;
+            if (bullet.type == App::LayoutShapeType::Rectangle) {
+                target_->FillRectangle(r, brush_);
+            } else {
+                D2D1_ELLIPSE disc = D2D1::Ellipse(D2D1::Point2F((r.left + r.right) * 0.5f, (r.top + r.bottom) * 0.5f),
+                                                  (r.right - r.left) * 0.5f, (r.bottom - r.top) * 0.5f);
+                if (bullet.fill.a > 0.0f) target_->FillEllipse(disc, brush_);
+                else target_->DrawEllipse(disc, brush_, bullet.strokeWidth);
+            }
         } else if (kind_ == Box || kind_ == Checked) {
             D2D1_ROUNDED_RECT box =
                 D2D1::RoundedRect(D2D1::RectF(x + u * 0.08f, mid - u * 0.36f, x + u * 0.8f, mid + u * 0.36f), u * 0.14f, u * 0.14f);
@@ -113,6 +126,7 @@ private:
     ID2D1SolidColorBrush* brush_;
     D2D1_COLOR_F text_, accent_;
     std::optional<D2D1_COLOR_F> rule_;
+    int depth_;
 };
 
 // Formats the engine lays text out with, kept for the factory's life
@@ -304,14 +318,14 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
     bool here = false;
     float lineSize = look.size;
     auto range = [](size_t at, size_t length) { return DWRITE_TEXT_RANGE{(UINT32)at, (UINT32)length}; };
-    auto mark = [&](size_t at, size_t length, MarkObject::Kind kind, float objectWidth = 0) {
+    auto mark = [&](size_t at, size_t length, MarkObject::Kind kind, float objectWidth = 0, int depth = 0) {
         if (!length) return;
         if (here) {
             layout->SetDrawingEffect(cache.markBrush.Get(), range(at, length));
             return;
         }
         MarkObject* object = new MarkObject(kind, lineSize, objectWidth, app.renderTarget, cache.glyphBrush.Get(), look.text,
-                                            look.accent, look.rule);
+                                            look.accent, look.rule, depth);
         layout->SetInlineObject(object, range(at, length));
         object->Release();
     };
@@ -335,6 +349,13 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
     int language = 0;
     SyntaxState syntax;
     std::vector<InlineSpan> spans;
+    // The marks' indents of the items a line's item sits in: how deep it is
+    std::vector<size_t> items;
+    auto depthOf = [&](size_t indent) {
+        while (!items.empty() && items.back() >= indent) items.pop_back();
+        items.push_back(indent);
+        return (int)items.size() - 1;
+    };
     size_t start = 0, lineIndex = 0;
     bool inFence = false, inMath = false, inFront = from == 0 && t.compare(0, 3, L"---") == 0;
     size_t fenceStart = 0, frontEnd = 0;
@@ -423,6 +444,7 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
                     mark(at, marks, MarkObject::Quote);
                 } else if (rest.size() >= 2 && (rest[0] == L'-' || rest[0] == L'*' || rest[0] == L'+') && rest[1] == L' ') {
                     bool task = rest.size() >= 5 && rest[2] == L'[' && rest[4] == L']' && (rest.size() == 5 || rest[5] == L' ');
+                    const int depth = depthOf(lead);
                     // On the page a list's items stand a step in per level,
                     // their text a step past the mark
                     float step = look.listIndent;
@@ -442,9 +464,9 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
                             layout->SetStrikethrough(TRUE, text);
                         }
                     } else if (step > 0) {
-                        mark(at, 2, MarkObject::Bullet, step);
+                        mark(at, 2, MarkObject::Bullet, step, depth);
                     } else {
-                        mark(at, 1, MarkObject::Bullet);
+                        mark(at, 1, MarkObject::Bullet, 0, depth);
                     }
                 } else if (look.listIndent > 0 && iswdigit(rest[0])) {
                     // A number keeps its digits; the space after it reaches the item's text
@@ -452,6 +474,7 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
                     while (digits < rest.size() && iswdigit(rest[digits])) ++digits;
                     if (digits < 10 && digits + 1 < rest.size() && (rest[digits] == L'.' || rest[digits] == L')') &&
                         rest[digits + 1] == L' ') {
+                        depthOf(lead);
                         if (lead) mark(start, lead, MarkObject::Space, look.listIndent * (float)(lead / 3));
                         if (!here) {
                             IDWriteTextLayout* number = nullptr;

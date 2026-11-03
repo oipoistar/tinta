@@ -27,4 +27,10 @@ void discardAsyncImage(void* asyncResult);
 D2D1_COLOR_F resolveDiagramRole(const App& app, const mermaidext::Prim& prim,
                                 mermaidext::Role role);
 
+// A list item's bullet as the page and Live draw it: a disc, a circle, then
+// a square by how deep its list sits, and the next level round again (#315).
+// It stands a little before the item's text at `textX`, halfway up the
+// letters on `baseline`.
+App::LayoutShape listBullet(float textX, float baseline, float em, int depth, D2D1_COLOR_F color);
+
 #endif // TINTA_RENDER_H

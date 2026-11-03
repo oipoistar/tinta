@@ -40,6 +40,26 @@ static bool fitBlockEnabled(const App& app, unsigned key) {
            app.fitBlocks.end();
 }
 
+App::LayoutShape listBullet(float textX, float baseline, float em, int depth, D2D1_COLOR_F color) {
+    App::LayoutShape shape;
+    const int kind = std::max(0, depth) % 3;
+    // Two fifths of an em clear of the text, as a browser sets its marker
+    const float cx = textX - em * 0.56f, cy = baseline - em * 0.3f;
+    const float half = em * (kind == 2 ? 0.14f : 0.16f);
+    shape.type = kind == 2 ? App::LayoutShapeType::Rectangle : App::LayoutShapeType::Ellipse;
+    shape.rect = D2D1::RectF(cx - half, cy - half, cx + half, cy + half);
+    shape.fill = color;
+    if (kind == 1) {
+        // A ring as wide as the disc: its stroke inside the disc's edge
+        shape.strokeWidth = std::max(1.0f, em * 0.07f);
+        const float inset = shape.strokeWidth * 0.5f;
+        shape.rect = D2D1::RectF(cx - half + inset, cy - half + inset, cx + half - inset, cy + half - inset);
+        shape.stroke = color;
+        shape.fill.a = 0.0f;
+    }
+    return shape;
+}
+
 namespace {
 constexpr float kHugeWidth = 100000.0f;
 constexpr float kLineBucketTolerance = 5.0f;
@@ -2871,7 +2891,8 @@ static void layoutList(App& app, const ElementPtr& elem, float& y, float indent,
         if (child->type != ElementType::ListItem) continue;
 
         const LayoutSnapshot markerStart = takeSnapshot(app);
-        size_t markerIndex = SIZE_MAX;
+        size_t markerIndex = SIZE_MAX, bulletIndex = SIZE_MAX;
+        float bulletBaseline = 0;
         size_t listItem = app.docListItems.size();
         app.docListItems.push_back({app.docText.size(), app.docText.size(), listDepth - 1,
                                     elem->ordered, itemNum,
@@ -2910,15 +2931,19 @@ static void layoutList(App& app, const ElementPtr& elem, float& y, float indent,
                                 boxX + box + 4 * scale, boxY + box + 4 * scale),
                     child->taskMarkOffset, child->taskChecked});
             }
-        } else {
-            std::wstring marker = elem->ordered ?
-                std::to_wstring(itemNum++) + L"." : L"\x2022";
+        } else if (elem->ordered) {
+            std::wstring marker = std::to_wstring(itemNum++) + L".";
 
             LayoutInfo info = createLayout(app, marker, app.textFormat, 24.0f, app.bodyTypography);
             D2D1_POINT_2F pos = D2D1::Point2F(indent, y);
             D2D1_RECT_F bounds = D2D1::RectF(indent, y, indent + listIndent, y + 24);
             if (info.layout) markerIndex = app.layoutTextRuns.size();
             addTextRun(app, std::move(info), pos, bounds, app.theme.text, 0, 0, false);
+        } else if (app.textFormat) {
+            bulletBaseline = y + formatBaseline(app, app.textFormat);
+            bulletIndex = app.layoutShapes.size();
+            app.layoutShapes.push_back(listBullet(indent + listIndent, bulletBaseline,
+                app.textFormat->GetFontSize(), listDepth - 1, app.theme.text));
         }
 
         const LayoutSnapshot contentStart = takeSnapshot(app);
@@ -2977,6 +3002,11 @@ static void layoutList(App& app, const ElementPtr& elem, float& y, float indent,
                 marker.pos.y += shift;
                 marker.bounds.top += shift;
                 marker.bounds.bottom += shift;
+            } else if (bulletIndex < app.layoutShapes.size()) {
+                auto& bullet = app.layoutShapes[bulletIndex].rect;
+                float shift = headingBaseline - bulletBaseline;
+                bullet.top += shift;
+                bullet.bottom += shift;
             }
         }
 

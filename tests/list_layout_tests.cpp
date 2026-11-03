@@ -191,6 +191,20 @@ float baseline(const App::LayoutTextRun& run) {
     return run.pos.y + metrics.baseline;
 }
 
+// The first item's marker: a number set as text, or a bullet drawn halfway
+// up the letters of the baseline it stands on (#315)
+struct Marker {
+    bool found = false;
+    float baseline = 0, top = 0;
+};
+Marker firstMarker(const App& app) {
+    for (const auto& run : app.layoutTextRuns)
+        if (!run.docLength) return {true, baseline(run), run.pos.y};
+    if (app.layoutShapes.empty() || !app.textFormat) return {};
+    const D2D1_RECT_F& bullet = app.layoutShapes.front().rect;
+    return {true, (bullet.top + bullet.bottom) * 0.5f + app.textFormat->GetFontSize() * 0.3f, bullet.top};
+}
+
 void firstBlockCases(App& app) {
     auto html = app.parser.parse("<ul><li>a<li>b</ul>\n<p>after</p>\n");
     check(html.success, "omitted-end-tag HTML parses");
@@ -221,13 +235,11 @@ void firstBlockCases(App& app) {
             layoutDocument(app);
             const auto* text = runFor(app, L"Heading first");
             const auto* following = runFor(app, L"Following paragraph.");
-            auto marker = std::find_if(app.layoutTextRuns.begin(), app.layoutTextRuns.end(), [](const auto& run) {
-                return !run.docLength;
-            });
-            check(app.headings.size() == 1 && text && following && marker != app.layoutTextRuns.end(),
+            const Marker marker = firstMarker(app);
+            check(app.headings.size() == 1 && text && following && marker.found,
                   "heading-first item renders a native heading, marker and following paragraph");
-            if (!text || !following || marker == app.layoutTextRuns.end()) continue;
-            const float delta = baseline(*text) - baseline(*marker);
+            if (!text || !following || !marker.found) continue;
+            const float delta = baseline(*text) - marker.baseline;
             check(closeEnough(delta, 0), "heading-first marker shares the heading's first-line baseline");
             float size = 0;
             text->layout->GetFontSize(0, &size);
@@ -272,15 +284,15 @@ void htmlHeadingCases(App& app) {
                 check(title && following && app.headings.size() == 1 && !app.layoutTextRuns.empty(),
                       "HTML list retains a native heading, marker and following paragraph");
                 if (!title || !following || app.headings.empty() || app.layoutTextRuns.empty()) continue;
-                const auto& marker = app.layoutTextRuns.front();
-                check(!marker.docLength && closeEnough(baseline(marker), baseline(*title)),
+                const Marker marker = firstMarker(app);
+                check(marker.found && closeEnough(marker.baseline, baseline(*title)),
                       "HTML first heading shares its main text baseline with the marker");
                 float size = 0;
                 title->layout->GetFontSize(0, &size);
                 check(closeEnough(size, app.headingFormats[level - 1]->GetFontSize()),
                       "HTML first heading keeps native font size");
                 const std::vector<float> geometry = {title->pos.x, title->pos.y, following->pos.y,
-                    app.contentHeight, marker.pos.y};
+                    app.contentHeight, marker.top};
                 if (!anchored) plain = geometry;
                 else {
                     for (size_t i = 0; i < plain.size(); ++i)
@@ -304,7 +316,7 @@ void htmlHeadingCases(App& app) {
 void anchorBufferCases(App& app) {
     app.root = app.parser.parse("- Control\n").root;
     layoutDocument(app);
-    const float markerY = app.layoutTextRuns.front().pos.y;
+    const float markerY = app.layoutTextRuns.front().pos.y, bulletTop = firstMarker(app).top;
     for (int kind = 0; kind < 7; ++kind) {
         auto heading = node(ElementType::Heading, {text("Later heading")});
         heading->level = 3;
@@ -322,7 +334,7 @@ void anchorBufferCases(App& app) {
         }
         app.root = node(ElementType::Document, {node(ElementType::List, {node(ElementType::ListItem, children)})});
         layoutDocument(app);
-        check(!app.layoutTextRuns.empty() && closeEnough(app.layoutTextRuns.front().pos.y, markerY),
+        check(firstMarker(app).found && closeEnough(firstMarker(app).top, bulletTop),
               "later, nested and absent headings do not move the outer marker");
         if (kind < 2) {
             const auto* visible = runFor(app, kind == 0 ? L"Visible before" : L"Visible anchor");
@@ -350,7 +362,7 @@ void anchorBufferCases(App& app) {
         node(ElementType::HtmlBlock, {node(ElementType::HtmlBlock, {heading})})})})});
     layoutDocument(app);
     const auto* title = runFor(app, L"Wrapped heading");
-    check(title && closeEnough(baseline(app.layoutTextRuns.front()), baseline(*title)),
+    check(title && closeEnough(firstMarker(app).baseline, baseline(*title)),
           "first heading resolves through nested HTML wrappers and an anchor-only paragraph");
     check(app.htmlAnchors.size() == 1 && closeEnough(app.htmlAnchors[0].second, markerY),
           "anchor-only paragraph pins once without advancing the heading");
