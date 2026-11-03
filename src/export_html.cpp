@@ -1688,6 +1688,11 @@ void exportDocumentAs(App& app, HWND hwnd) {
         L"Web page (*.html)\0*.html\0Word document (*.docx)\0*.docx\0"
         L"PDF document (*.pdf)\0*.pdf\0";
     ofn.lpstrFile = path;
+    // A CSS theme's own sheet follows, so a browser draws what Tinta does
+    // and what Tinta leaves to it (docs/specs/theming.md)
+    if (std::string sheet = themeSheetCss(app.currentThemeIndex); !sheet.empty()) {
+        ctx.out += "<style>\n" + sheet + "</style>\n";
+    }
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (!runSaveFileDialog(ofn)) return;

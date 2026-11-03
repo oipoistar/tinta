@@ -70,12 +70,24 @@ set(SCHOLAR_SOURCES
     src/csl_bundle.cpp
 )
 
+# Themes and CSS themes (docs/specs/theming.md): every target that builds
+# themes.cpp needs the engine and the compiler with it
+set(THEME_SOURCES
+    src/themes.cpp
+    src/themes_css.cpp
+    src/css.cpp
+    src/css_values.cpp
+    src/css_props.cpp
+    src/css_parse.cpp
+    src/css_cascade.cpp
+)
+
 # Source files
 set(SOURCES
     ${SCHOLAR_SOURCES}
     src/main_d2d.cpp
     src/markdown.cpp src/footnotes.cpp
-    src/themes.cpp
+    ${THEME_SOURCES}
     src/settings.cpp
     src/keymap.cpp
     src/config_dir.cpp
@@ -175,6 +187,8 @@ set(HEADERS
     include/plantuml_app.h
     include/wordcount.h
     include/scholar.h
+    include/css.h
+    include/themes_css.h
     include/sheet.h
     include/sheet_ui.h
 )
@@ -523,10 +537,11 @@ if(BUILD_TESTING)
         TINTA_HTML_QUOTE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/html-blockquote-text.md")
     add_test(NAME blockquote_layout COMMAND blockquote_layout_tests)
 
-    add_executable(theme_tests tests/theme_tests.cpp tests/theme_colour_tests.cpp ${INPUT_TEST_SOURCES})
+    add_executable(theme_tests tests/theme_tests.cpp tests/theme_colour_tests.cpp tests/theme_css_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(theme_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(theme_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
     target_compile_definitions(theme_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>
+        TINTA_THEME_CSS_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/theme-css"
         TINTA_THEME_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/inline-code-color.md"
         TINTA_THEME_FONTS_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/theme-editor-fonts-265.md"
         TINTA_INLINE_BG_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/inline-code-background-278.md"
@@ -537,10 +552,10 @@ if(BUILD_TESTING)
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_portable_test.cmake)
 
     add_executable(context_menu_tests tests/context_menu_tests.cpp src/context_menu.cpp
-        src/markdown.cpp src/footnotes.cpp src/themes.cpp src/config_dir.cpp
+        src/markdown.cpp src/footnotes.cpp ${THEME_SOURCES} src/config_dir.cpp
         src/plantuml.cpp src/plantuml_queue.cpp)
     target_include_directories(context_menu_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
-    target_link_libraries(context_menu_tests PRIVATE md4c shell32)
+    target_link_libraries(context_menu_tests PRIVATE md4c shell32 dwrite)
     target_compile_definitions(context_menu_tests PRIVATE UNICODE _UNICODE)
     add_test(NAME context_menu COMMAND context_menu_tests)
 
@@ -549,7 +564,7 @@ if(BUILD_TESTING)
     add_test(NAME math_parser COMMAND math_parser_tests)
 
     add_executable(math_layout_tests tests/math_layout_tests.cpp
-        src/math_parser.cpp src/math_macros.cpp src/math_render.cpp src/markdown.cpp src/footnotes.cpp src/themes.cpp src/config_dir.cpp
+        src/math_parser.cpp src/math_macros.cpp src/math_render.cpp src/markdown.cpp src/footnotes.cpp ${THEME_SOURCES} src/config_dir.cpp
         src/plantuml.cpp src/plantuml_queue.cpp)
     target_include_directories(math_layout_tests PRIVATE include src ${md4c_SOURCE_DIR}/src)
     target_link_libraries(math_layout_tests PRIVATE md4c d2d1 dwrite windowscodecs shell32 ole32)
@@ -721,7 +736,7 @@ if(BUILD_TESTING)
         tests/inline_style_tests.cpp
         src/inline_style.cpp
         src/markdown.cpp src/footnotes.cpp
-        src/themes.cpp
+        ${THEME_SOURCES}
         src/config_dir.cpp
         src/plantuml.cpp src/plantuml_queue.cpp
     )

@@ -1471,12 +1471,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_SETTINGCHANGE:
             // Windows switched light/dark mode
-            if (app && app->followSystemTheme && lParam &&
-                wcscmp((const wchar_t*)lParam, L"ImmersiveColorSet") == 0) {
-                int want = autoThemeIndex(*app);
-                if (want != app->currentThemeIndex) {
-                    applyTheme(*app, want);
-                    persistThemeChoice(*app);
+            if (app && lParam && wcscmp((const wchar_t*)lParam, L"ImmersiveColorSet") == 0) {
+                themesSetSystemDark(!systemPrefersLight());
+                if (app->followSystemTheme) {
+                    int want = autoThemeIndex(*app);
+                    if (want != app->currentThemeIndex) {
+                        applyTheme(*app, want);
+                        persistThemeChoice(*app);
+                    } else if (themeFollowsSystem(want)) {
+                        applyTheme(*app, want);
+                    }
+                } else if (themeFollowsSystem(app->currentThemeIndex)) {
+                    // A CSS theme with color-scheme: light dark turns too
+                    applyTheme(*app, app->currentThemeIndex);
                 }
             }
             return 0;
@@ -2040,6 +2047,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.mathFont = toWide(savedSettings.mathFont);
     app.cjkFont = toWide(savedSettings.cjkFont);
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
+    themesSetSystemDark(!systemPrefersLight());
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;
     if (startTheme >= themeCount()) startTheme = 0;

@@ -231,6 +231,7 @@ extern const int THEME_COUNT;
 // members stay valid. Indices: [0, THEME_COUNT) built-in, then customs.
 struct CustomTheme {
     std::wstring name, fontFamily, headingFontFamily, codeFontFamily;
+    std::wstring sourcePath;  // a CSS theme's sheet
     D2DTheme theme;
 };
 int themeCount();
@@ -253,6 +254,22 @@ int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
                     const std::wstring& fontFamily,
                     const std::wstring& codeFontFamily,
                     const std::wstring& headingFontFamily = L"");
+
+// CSS themes (docs/specs/theming.md): <config>\themes\*.css, registered
+// after the themes.ini ones, each named by its file. One that follows
+// Windows (color-scheme: light dark) is drawn as Windows is set
+void themesSetSystemDark(bool dark);
+bool themeFollowsSystem(int index);
+// The sheet a CSS theme came from, else empty
+std::wstring themeSourcePath(int index);
+// Reads a CSS theme again when its file, or one it imports, changed;
+// true when it did, and the theme is to be applied again
+bool themeReloadIfChanged(int index);
+// What its sheet holds that Tinta cannot use, a line each ("Ink.css,
+// line 14: `display` has no effect..."); empty for other themes
+std::vector<std::wstring> themeProblems(int index);
+// The sheet as CSS, its imports inlined, for the HTML export; else empty
+std::string themeSheetCss(int index);
 
 // Persistent settings
 enum class SidePanel { None, Contents, Browser };
@@ -525,6 +542,8 @@ struct App {
     // the theme editor rewrites the strings app.theme points into (#265)
     std::wstring formatsFontFamily, formatsCodeFontFamily, formatsHeadingFontFamily;
     std::string formatsTypeKey;  // and the type sizes (themeTypeKey)
+    std::wstring themeProblemsShown;  // the CSS theme's problems last reported
+    int themeProblemsIndex = -1;      // and the theme they were for
 
     // Overlay text formats (cached)
     IDWriteTextFormat* searchTextFormat = nullptr;

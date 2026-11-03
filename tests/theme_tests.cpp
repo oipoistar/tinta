@@ -22,6 +22,7 @@
 
 int testThemeColours(App& app, const std::filesystem::path& dir);
 int testEmphasisColours(App& app, const std::filesystem::path& dir);
+int testCssThemes(App& app, const std::filesystem::path& dir);
 
 
 namespace {
@@ -645,6 +646,7 @@ int main(int argc, char** argv) {
               "DOCX linked code preserves the link color");
         failures += testThemeColours(app, dir);
         failures += testEmphasisColours(app, dir);
+        failures += testCssThemes(app, dir);
         themeEditorFontsApply(app, read(TINTA_THEME_FONTS_FIXTURE));
     }
     themeEditorFonts(dir);

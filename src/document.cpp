@@ -102,7 +102,7 @@ bool isPlainTextPath(std::basic_string_view<Character> path) {
     std::string ext = extensionLower(path);
     return ext == ".txt" || ext == ".json" || ext == ".yaml" ||
            ext == ".yml" || ext == ".toml" || ext == ".ini" ||
-           ext == ".csv" || ext == ".log";
+           ext == ".csv" || ext == ".log" || ext == ".css";
 }
 
 // Fence language tag for a plain-text document's code block
@@ -115,6 +115,7 @@ const char* plainTextLanguage(std::basic_string_view<Character> path) {
     if (ext == ".ini") return "ini";
     if (ext == ".csv") return "csv";
     if (ext == ".log") return "log";
+    if (ext == ".css") return "css";  // a CSS theme's sheet (docs/specs/theming.md)
     return "";
 }
 

@@ -38,7 +38,7 @@ tr:nth-child(even) td { background: color-mix(in oklab, var(--ink) 4%, transpare
   body { font-size: 15px; }
 }
 @supports (color: oklch(50% 0.1 200)) {
-  mark { background-color: oklch(92% 0.08 95); }
+  mark { background-color: light-dark(oklch(92% 0.08 95), oklch(42% 0.09 85)); }
 }
 @supports (display: grid) {
   table { color: red; }

@@ -239,8 +239,10 @@ const int THEME_COUNT = sizeof(THEMES) / sizeof(THEMES[0]);
 //   ...
 
 #include "settings.h"
+#include "themes_css.h"
 
 #include <shlobj.h>
+#include <algorithm>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -445,8 +447,179 @@ const char* themesIniTemplate() {
            "; syntaxfunction=, syntaxtype=, syntaxcontrolflow= color code blocks\n";
 }
 
+// ---- CSS themes (docs/specs/theming.md) ----
+
+namespace {
+
+struct CssEntry {
+    std::wstring path;
+    // The sheet and the files it imports, with their times as read
+    std::vector<std::pair<std::wstring, FILETIME>> files;
+    std::unique_ptr<CustomTheme> light, dark;  // dark: a sheet that follows Windows
+    std::shared_ptr<const css::Sheet> sheet;
+    std::vector<css::Diagnostic> diagnostics;
+};
+std::vector<std::unique_ptr<CssEntry>> g_cssThemes;
+// Themes a reload replaced: copies of a D2DTheme may still point into
+// their strings (print, the chooser's previews), so they stay for the run
+std::vector<std::unique_ptr<CustomTheme>> g_retiredThemes;
+bool g_systemDark = false;
+
+bool fileTime(const std::wstring& path, FILETIME& time) {
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return false;
+    time = data.ftLastWriteTime;
+    return true;
+}
+
+bool readUtf8(const std::wstring& path, std::string& text) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    text = buffer.str();
+    if (text.compare(0, 3, "\xEF\xBB\xBF") == 0) text.erase(0, 3);
+    return true;
+}
+
+CssEntry* cssEntryAt(int index) {
+    const int css = index - THEME_COUNT - (int)g_customThemes.size();
+    return css >= 0 && css < (int)g_cssThemes.size() ? g_cssThemes[css].get() : nullptr;
+}
+
+// Reads the entry's sheet into its light theme, and its dark one when the
+// sheet follows Windows. @import "Paper" or the name of a themes.ini theme
+// starts from that theme; any other import is a file beside the sheet
+void readCssTheme(CssEntry& entry) {
+    entry.files.clear();
+    std::string text;
+    FILETIME time{};
+    fileTime(entry.path, time);
+    entry.files.push_back({entry.path, time});
+    const bool readable = readUtf8(entry.path, text);
+    const css::ImportSource imports = [&](std::string_view name, std::string_view from, std::string& out,
+                                          std::string& file) {
+        const std::wstring wanted = utf8ToWideTheme(std::string(name));
+        for (int i = 0; i < THEME_COUNT; i++) {
+            if (_wcsicmp(THEMES[i].name, wanted.c_str()) == 0) {
+                out = themeToCss(THEMES[i]);
+                file = std::string(name);
+                return true;
+            }
+        }
+        for (const auto& custom : g_customThemes) {
+            if (_wcsicmp(custom->name.c_str(), wanted.c_str()) == 0) {
+                out = themeToCss(custom->theme);
+                file = std::string(name);
+                return true;
+            }
+        }
+        std::wstring base = utf8ToWideTheme(std::string(from));
+        size_t slash = base.find_last_of(L"\\/");
+        std::wstring path = slash == std::wstring::npos ? wanted : base.substr(0, slash + 1) + wanted;
+        if (!readUtf8(path, out)) return false;
+        FILETIME imported{};
+        fileTime(path, imported);
+        entry.files.push_back({path, imported});
+        file = wideToUtf8Theme(path);
+        return true;
+    };
+    std::wstring name = entry.path.substr(entry.path.find_last_of(L"\\/") + 1);
+    if (name.size() > 4) name.resize(name.size() - 4);  // .css
+    auto light = std::make_unique<CustomTheme>();
+    light->name = name;
+    CssTheme compiled = compileCssTheme(readable ? text : std::string(), wideToUtf8Theme(entry.path), false,
+                                        imports, *light);
+    light->sourcePath = entry.path;
+    bindStrings(*light);
+    light->theme.sourcePath = light->sourcePath.c_str();
+    std::unique_ptr<CustomTheme> dark;
+    if (compiled.lightDark) {
+        dark = std::make_unique<CustomTheme>();
+        dark->name = name;
+        compileCssTheme(text, wideToUtf8Theme(entry.path), true, imports, *dark);
+        dark->sourcePath = entry.path;
+        bindStrings(*dark);
+        dark->theme.sourcePath = dark->sourcePath.c_str();
+    }
+    if (entry.light) g_retiredThemes.push_back(std::move(entry.light));
+    if (entry.dark) g_retiredThemes.push_back(std::move(entry.dark));
+    entry.light = std::move(light);
+    entry.dark = std::move(dark);
+    entry.sheet = compiled.sheet;
+    entry.diagnostics = std::move(compiled.diagnostics);
+    if (!readable) entry.diagnostics.push_back({css::Diagnostic::Error, wideToUtf8Theme(entry.path), 0, 0, "the file cannot be read"});
+}
+
+void loadCssThemes() {
+    g_cssThemes.clear();
+    const std::wstring dir = tintaConfigDir();
+    if (dir.empty()) return;
+    WIN32_FIND_DATAW found{};
+    HANDLE search = FindFirstFileW((dir + L"\\themes\\*.css").c_str(), &found);
+    if (search == INVALID_HANDLE_VALUE) return;
+    std::vector<std::wstring> paths;
+    do {
+        if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) paths.push_back(dir + L"\\themes\\" + found.cFileName);
+    } while (FindNextFileW(search, &found));
+    FindClose(search);
+    std::sort(paths.begin(), paths.end(), [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
+    for (const auto& path : paths) {
+        auto entry = std::make_unique<CssEntry>();
+        entry->path = path;
+        readCssTheme(*entry);
+        g_cssThemes.push_back(std::move(entry));
+    }
+}
+
+}  // namespace
+
+void themesSetSystemDark(bool dark) { g_systemDark = dark; }
+
+bool themeFollowsSystem(int index) {
+    const CssEntry* entry = cssEntryAt(index);
+    return entry && entry->dark;
+}
+
+std::wstring themeSourcePath(int index) {
+    const CssEntry* entry = cssEntryAt(index);
+    return entry ? entry->path : std::wstring();
+}
+
+bool themeReloadIfChanged(int index) {
+    CssEntry* entry = cssEntryAt(index);
+    if (!entry) return false;
+    bool changed = false;
+    for (const auto& file : entry->files) {
+        FILETIME now{};
+        if (!fileTime(file.first, now) || CompareFileTime(&now, &file.second) != 0) changed = true;
+    }
+    if (changed) readCssTheme(*entry);
+    return changed;
+}
+
+std::vector<std::wstring> themeProblems(int index) {
+    std::vector<std::wstring> problems;
+    const CssEntry* entry = cssEntryAt(index);
+    if (!entry) return problems;
+    for (const auto& d : entry->diagnostics) {
+        std::wstring file = utf8ToWideTheme(d.file);
+        size_t slash = file.find_last_of(L"\\/");
+        if (slash != std::wstring::npos) file = file.substr(slash + 1);
+        std::wstring line = file;
+        if (d.line > 0) line += L", line " + std::to_wstring(d.line);
+        problems.push_back(line + L": " + utf8ToWideTheme(d.message));
+    }
+    return problems;
+}
+
+std::string themeSheetCss(int index) {
+    const CssEntry* entry = cssEntryAt(index);
+    return entry && entry->sheet ? css::serialize(*entry->sheet) : std::string();
+}
+
 int themeCount() {
-    return THEME_COUNT + (int)g_customThemes.size();
+    return THEME_COUNT + (int)g_customThemes.size() + (int)g_cssThemes.size();
 }
 
 const D2DTheme& themeAt(int index) {
@@ -455,10 +628,20 @@ const D2DTheme& themeAt(int index) {
     if (custom >= 0 && custom < (int)g_customThemes.size()) {
         return g_customThemes[custom]->theme;
     }
+    if (const CssEntry* entry = cssEntryAt(index)) {
+        return g_systemDark && entry->dark ? entry->dark->theme : entry->light->theme;
+    }
     return THEMES[0];
 }
 
+static void loadCustomThemesIni();
+
 void loadCustomThemes() {
+    loadCustomThemesIni();
+    loadCssThemes();
+}
+
+static void loadCustomThemesIni() {
     g_customThemes.clear();
     std::wstring path = themesIniPath();
     if (path.empty()) return;

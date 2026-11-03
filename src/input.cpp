@@ -610,6 +610,16 @@ static void openThemesIniFile() {
 // editCurrent seeds the editor with the active theme's name so saving
 // updates that custom theme in place (built-ins save as a copy)
 static void openThemeEditor(App& app, bool editCurrent) {
+    // A CSS theme is its sheet: Edit opens that in the editor, and each
+    // save restyles the window (docs/specs/theming.md)
+    if (const std::wstring sheet = editCurrent ? themeSourcePath(app.currentThemeIndex) : std::wstring();
+        !sheet.empty()) {
+        app.showSettings = false;
+        tabOpenPath(app, app.hwnd, toUtf8(sheet));
+        if (!app.editMode) enterEditMode(app);
+        InvalidateRect(app.hwnd, nullptr, FALSE);
+        return;
+    }
     enumerateSystemFontFamilies(app);
     themeEditorAdoptBase(app, app.currentThemeIndex);
     app.themeEditorName = editCurrent ? app.theme.name : tr(app, "theme.editor.default_name");
@@ -4800,7 +4810,29 @@ void handleLinkPeekTimer(App& app, HWND hwnd) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
+void reportThemeProblems(App& app) {
+    // Once per set of problems: the file timer reads the sheet again only
+    // when it changes, and a fixed sheet clears the record
+    const std::vector<std::wstring> problems = themeProblems(app.currentThemeIndex);
+    std::wstring all;
+    for (const auto& problem : problems) all += problem + L"\n";
+    if (all == app.themeProblemsShown) return;
+    app.themeProblemsShown = all;
+    if (problems.empty()) return;
+    wchar_t text[160];
+    swprintf_s(text, _countof(text), tr(app, "toast.theme_problems"), (int)problems.size());
+    signalPush(app, SIG_WARN, SIGI_WARNING, text, problems.front(), all);
+}
+
 void handleFileWatchTimer(App& app, HWND hwnd) {
+    // A CSS theme follows its file as documents do (docs/specs/theming.md)
+    if (themeReloadIfChanged(app.currentThemeIndex)) {
+        applyTheme(app, app.currentThemeIndex);
+        reportThemeProblems(app);
+    } else if (app.themeProblemsIndex != app.currentThemeIndex) {
+        app.themeProblemsIndex = app.currentThemeIndex;
+        reportThemeProblems(app);
+    }
     // Refresh the deleted-on-disk flags driving the red-grey tab dots
     // (runs even when the active document is untitled or being edited)
     bool missingChanged = false;
