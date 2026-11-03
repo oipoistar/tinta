@@ -272,6 +272,25 @@ void wordFonts(App& app, const std::filesystem::path& dir) {
     check(docx.find("<w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr>" + rFonts(L"Cambria", headingHan)) !=
               std::string::npos,
           "headingfont= reaches Word's heading styles");
+
+    // #314: settings.ini's cjkFont= comes before Tinta's own CJK faces, on
+    // the screen and in Word; one not installed leaves them as they were
+    auto preferCjk = [&](const wchar_t* face) {
+        app.cjkFont = face;
+        if (app.fontFallback) app.fontFallback->Release();
+        app.fontFallback = nullptr;
+        updateTextFormats(app);
+    };
+    preferCjk(L"SimSun");
+    check(latinHan != L"SimSun" && facesOf(app, app.textFormat, kHan) == L"SimSun",
+          "cjkFont= draws CJK beside a Latin body face");
+    check(exportDocxFile(app, (dir / L"cjk-font.docx").wstring()), "the cjkFont export succeeds");
+    docx = read(dir / L"cjk-font.docx");
+    check(docx.find("<w:rPrDefault><w:rPr>" + rFonts(L"Georgia", L"SimSun")) != std::string::npos,
+          "Word names cjkFont= for CJK");
+    preferCjk(L"No Such CJK Face");
+    check(facesOf(app, app.textFormat, kHan) == latinHan, "a cjkFont= not installed leaves the faces as they were");
+    preferCjk(L"");
     app.theme = saved;
     updateTextFormats(app);
 }

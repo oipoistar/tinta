@@ -181,6 +181,12 @@ with the path box focused and selected, so paste + Enter jumps anywhere
 (also in Settings → General). `tinta --new` starts an untitled quick note
 from the command line. The print preview offers 12.7, 19.05 and 25.4 mm page
 margins; `printMarginMm=` takes any value from 5 to 50 for printing and PDF.
+`cjkFont=` names an installed face for a document's Chinese, Japanese and
+Korean letters, ahead of the ones Tinta falls back to (Microsoft YaHei UI
+first on most systems): a face with lighter bold weights, such as Source Han
+Sans or DengXian, sets bold CJK more evenly. `mathFont=` names one for
+equations, such as Latin Modern Math. Both are read at start, and a face that
+is not installed is passed over.
 
 The interface language is available in Settings → General. It follows the
 Windows display language by default, or can be changed explicitly. Transient

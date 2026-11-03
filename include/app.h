@@ -340,6 +340,9 @@ struct Settings {
     // A math face to set equations in, for one with a MATH table such as
     // Latin Modern Math (#314); "" or one not installed: Cambria Math
     std::string mathFont;
+    // A face a document's Chinese, Japanese and Korean letters fall back
+    // to before Tinta's own (#314); "": Microsoft YaHei UI and the others
+    std::string cjkFont;
 };
 
 // Application state
@@ -1468,6 +1471,8 @@ struct App {
     // \tag gives its \label names, gathered as the layout starts (#314)
     std::wstring mathFont;
     std::map<std::wstring, std::wstring> mathLabels;
+    // settings.ini's face for a document's CJK letters, read at start (#314)
+    std::wstring cjkFont;
     // Async render queue (created lazily by plantumlEnsureQueue) and the
     // per-process work root under %TEMP%; unique_ptr keeps App.h the only
     // owner and joins the worker before exit via WM_DESTROY

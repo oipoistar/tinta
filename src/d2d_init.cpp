@@ -165,21 +165,26 @@ int interfaceCjkOrder(const App& app) {
     return -1;
 }
 
-// Kana, hangul and ideographs go to CJK families in the given order. Only
-// the document chain adds the emoji fonts; interface text leaves every
-// other character to the system fallback, as it did before.
+// Kana, hangul and ideographs go to CJK families in the given order, a
+// preferred one first (settings.ini's cjkFont=, #314). Only the document
+// chain adds the emoji fonts; interface text leaves every other character
+// to the system fallback, as it did before.
 IDWriteFontFallback* createFontFallback(IDWriteFactory* factory, CjkOrder order,
-                                        bool emoji) {
+                                        bool emoji, const std::wstring& preferred = L"") {
     IDWriteFontFallback* fallback = nullptr;
     IDWriteFactory2* factory2 = nullptr;
     if (SUCCEEDED(factory->QueryInterface(__uuidof(IDWriteFactory2),
             reinterpret_cast<void**>(&factory2)))) {
         IDWriteFontFallbackBuilder* builder = nullptr;
         if (SUCCEEDED(factory2->CreateFontFallbackBuilder(&builder))) {
-            // --- Japanese kana: Japanese fonts first ---
-            const wchar_t* jpFamilies[] = {
-                L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI"
+            auto preferredFirst = [&](std::initializer_list<const wchar_t*> own) {
+                std::vector<const wchar_t*> families;
+                if (!preferred.empty()) families.push_back(preferred.c_str());
+                families.insert(families.end(), own);
+                return families;
             };
+            // --- Japanese kana: Japanese fonts first ---
+            auto jpFamilies = preferredFirst({L"Yu Gothic UI", L"Meiryo", L"Microsoft YaHei UI"});
             DWRITE_UNICODE_RANGE jpRanges[] = {
                 { 0x3040, 0x309F },    // Hiragana
                 { 0x30A0, 0x30FF },    // Katakana
@@ -189,12 +194,10 @@ IDWriteFontFallback* createFontFallback(IDWriteFactory* factory, CjkOrder order,
                 { 0x3300, 0x3357 },    // Squared katakana words (㌔ ㌘)
                 { 0xFF65, 0xFF9F },    // Halfwidth katakana
             };
-            builder->AddMapping(jpRanges, 7, jpFamilies, 3);
+            builder->AddMapping(jpRanges, 7, jpFamilies.data(), (UINT32)jpFamilies.size());
 
             // --- Korean: Korean font first ---
-            const wchar_t* krFamilies[] = {
-                L"Malgun Gothic", L"Microsoft YaHei UI", L"Yu Gothic UI"
-            };
+            auto krFamilies = preferredFirst({L"Malgun Gothic", L"Microsoft YaHei UI", L"Yu Gothic UI"});
             DWRITE_UNICODE_RANGE krRanges[] = {
                 { 0x1100, 0x11FF },    // Hangul Jamo
                 { 0x3130, 0x318F },    // Hangul compatibility Jamo
@@ -202,7 +205,7 @@ IDWriteFontFallback* createFontFallback(IDWriteFactory* factory, CjkOrder order,
                 { 0x3260, 0x327F },    // Circled Hangul (㉠ ㉻)
                 { 0xAC00, 0xD7AF },    // Hangul syllables
             };
-            builder->AddMapping(krRanges, 5, krFamilies, 3);
+            builder->AddMapping(krRanges, 5, krFamilies.data(), (UINT32)krFamilies.size());
 
             // --- CJK ideographs: in the requested order ---
             DWRITE_UNICODE_RANGE cjkRanges[] = {
@@ -222,7 +225,9 @@ IDWriteFontFallback* createFontFallback(IDWriteFactory* factory, CjkOrder order,
                 { 0xFFA0, 0xFFEF },    // Halfwidth/fullwidth forms (Hangul + rest)
                 { 0x20000, 0x2FA1F },  // CJK extensions B-F
             };
-            builder->AddMapping(cjkRanges, 15, kCjkFamilies[order], 4);
+            const wchar_t* const* own = kCjkFamilies[order];
+            auto cjkFamilies = preferredFirst({own[0], own[1], own[2], own[3]});
+            builder->AddMapping(cjkRanges, 15, cjkFamilies.data(), (UINT32)cjkFamilies.size());
 
             // Signs Segoe UI Emoji maps to the wrong glyph go to faces that
             // draw them first: it gave the square root the glyph of A with a
@@ -329,6 +334,8 @@ std::wstring documentCjkFamily(App& app, const wchar_t* family) {
     std::wstring face;
     if (drawsHan(family)) {
         face = family;
+    } else if (drawsHan(app.cjkFont.c_str())) {
+        face = app.cjkFont;  // settings.ini's cjkFont=, first as on screen (#314)
     } else {
         for (const wchar_t* candidate : kCjkFamilies[windowsCjkOrder()]) {
             if (drawsHan(candidate)) {
@@ -513,7 +520,7 @@ void updateTextFormats(App& app) {
 
     // Build font fallback chain for emoji and CJK support
     if (!app.fontFallback) {
-        app.fontFallback = createFontFallback(app.dwriteFactory, windowsCjkOrder(), true);
+        app.fontFallback = createFontFallback(app.dwriteFactory, windowsCjkOrder(), true, app.cjkFont);
     }
 
     // What applyTheme compares a new theme with

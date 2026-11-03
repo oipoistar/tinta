@@ -61,6 +61,9 @@ void saveSettings(const Settings& settings) {
     if (!settings.mathFont.empty()) {
         file << "mathFont=" << settings.mathFont << "\n";
     }
+    if (!settings.cjkFont.empty()) {
+        file << "cjkFont=" << settings.cjkFont << "\n";
+    }
     file << "followSystemTheme=" << (settings.followSystemTheme ? 1 : 0) << "\n";
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
@@ -428,6 +431,8 @@ Settings loadSettings() {
             settings.plantumlPath = value;
         } else if (key == "mathFont") {
             settings.mathFont = value;
+        } else if (key == "cjkFont") {
+            settings.cjkFont = value;
         } else if (key == "sessionActive") {
             int idx = std::stoi(value);
             if (idx >= 0) settings.sessionActive = idx;

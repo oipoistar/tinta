@@ -2038,6 +2038,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.pandocUserPath = toWide(savedSettings.pandocPath);
     app.plantumlUserPath = toWide(savedSettings.plantumlPath);
     app.mathFont = toWide(savedSettings.mathFont);
+    app.cjkFont = toWide(savedSettings.cjkFont);
     int startTheme = app.followSystemTheme ? autoThemeIndex(app)
                                            : savedSettings.themeIndex;
     app.currentThemeIndex = startTheme;
