@@ -55,19 +55,24 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown, Mermaid and PlantUML files
 
-            A fix release for 4.0.0. For what is new in 4.0 (Live and Sheets), see the [v4.0.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.0.0).
+            A fix release for 4.0.1. For what is new in 4.0 (Live and Sheets), see the [v4.0.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.0.0).
 
             ### Added
-            - Themes can colour bold and italic text, the selection and horizontal rules with `bold=`, `italic=`, `bolditalic=`, `selection=` and `hr=` in `themes.ini`, on the page, in Live and Source and in the exports. See [Theme colours](https://github.com/oipoistar/tinta/blob/master/docs/theme-colours.md). Requested by @Fallgrim (#310)
+            - Pinned tabs, from a tab's menu: a pinned tab keeps to the start of the row as its first letter and stays in view. The title bar's pin is remembered for the next start. Requested by @Fallgrim (#312)
+            - Equation numbers with `\tag`, and `\eqref` and `\ref` to an equation's `\label`, in the reader and the HTML and Word exports. Requested by @TiegenFang (#314)
+            - With wrapping off, a scrollbar along the source editor's foot for lines that run past it, and the horizontal wheel pans them. Requested by @TiegenFang (#314)
+            - `mathFont=` and `cjkFont=` in `settings.ini` name the faces for equations and for Chinese, Japanese and Korean letters. Requested by @TiegenFang (#314)
 
             ### Changed
-            - In Live, Ctrl+E shows the page as the reader draws it, and Ctrl+E goes back to the caret; in the reader, Ctrl+E opens the editor. Source keeps Ctrl+E for its preview pane. Requested by @Fallgrim (#308)
+            - Source and Live follow a file another program changes, as the reader does, and ask Reload or Keep mine when there are unsaved edits. Requested by @QuamerX (#311)
+            - Each level of a bullet list has its own bullet, closer to its text. In Live, Tab takes an item one level in and Shift+Tab undoes it, and only the line being typed in is highlighted. Requested by @Fallgrim (#315)
 
             ### Fixed
-            - Live's scrollbar can be dragged, and after a switch to Source and back the wheel and Down keep Live's page where they leave it. Reported by @go4399 (#307)
-            - Live no longer sometimes shows a document opened after leaving the editor as Markdown being typed
-            - The Microsoft Store logos are sharp at every display scale instead of enlarged and soft. Reported by @Fallgrim (#309)
-            - Strikethrough and highlight wrap bold, italic, links and code; `~~**bold**~~` and `==*italic*==` used to show their `~~` and `==` as text. As on GitHub, `a == b` and `x ~~ y ~~ z` stay text, and so do escaped signs
+            - A double-click in Source selects whole words in every script, Turkish, Greek and Cyrillic included. Reported by @Fallgrim (#313)
+            - Selections over bold, italic, links and code are one even band, without seams in the reader or brighter strips in Live. Reported by @Fallgrim (#313)
+            - Two `$$` equations in a row are set as two, and Word exports include `$$` equations. Reported by @TiegenFang (#314)
+            - An inline `$` equation can close before a letter, as in pandoc, so `$R=50\,\mu$m` no longer runs on; prices stay text. Reported by @TiegenFang (#314)
+            - Signs after brackets, brackets beside slanted letters and accents such as the tilde are set as TeX sets them. Reported by @TiegenFang (#314)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats

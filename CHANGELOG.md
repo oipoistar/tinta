@@ -1,5 +1,24 @@
 # Changelog
 
+## [v4.0.2] - 2026-11-03
+
+### Added
+- Pinned tabs. Pin tab in a tab's menu moves it to the start of the row, after the other pinned tabs, and shrinks it to its name's first letter with no close button. Pinned tabs stay in view while the others scroll, Close all but this, left and right leave them open, and the session keeps them. The title bar's pin is now remembered, so a window left on top opens on top. Requested by @Fallgrim (#312)
+- Equation numbers: `\tag` sets an equation's number at the right of its line, or under it when the line is full, and `\eqref` and `\ref` give the number of the equation whose `\label` they name, in the reader and the HTML and Word exports. `\notag` and `\nonumber` are accepted. Requested by @TiegenFang (#314)
+- With wrapping off, a scrollbar runs along the foot of the source editor while lines run past it. It can be dragged and its track clicked, and the horizontal wheel pans the lines. Requested by @TiegenFang (#314)
+- `mathFont=` in `settings.ini` names an installed face for equations, such as Latin Modern Math, and `cjkFont=` one that comes first for a document's Chinese, Japanese and Korean letters, as when Microsoft YaHei UI's bold looks too heavy. Both are read at start. Requested by @TiegenFang (#314)
+
+### Changed
+- Source and Live follow a file another program changes, as the reader does. With nothing unsaved they take the new text, keeping the caret, in one step Ctrl+Z takes back; with unsaved edits, Changed on disk asks to Reload or Keep mine, as Notepad++ does. Save and exit used to write over the other program's text. Requested by @QuamerX (#311)
+- Each level of a bullet list has its own bullet, a disc, a circle, then a square, set closer to its text, on the page, in print and in Live. In Live, Tab takes an item one level in, under the item before it, and Shift+Tab undoes it; after a nested list Tab used to take it several levels in. Live's highlight covers the line being typed in instead of the whole list. Requested by @Fallgrim (#315)
+
+### Fixed
+- A double-click in Source takes whole words in every script, Turkish, Greek and Cyrillic included, and so do Ctrl+Left/Right, Ctrl+Backspace/Delete and Ctrl+D; only ASCII letters and digits counted as word characters. A drag after a double- or triple-click grows the selection by words or lines, as it does in Live. Reported by @Fallgrim (#313)
+- A selection over bold, italic, links and code is one even band: the reader left a dark seam beside each, and Live a brighter strip at each hidden mark. In Live, the lines a growing selection reaches stay as the page shows them instead of showing their Markdown and reflowing under the pointer. Reported by @Fallgrim (#313)
+- Two `$$` equations in a row are two equations; the second ran on as source. A `$$` equation inside a paragraph stands on its own line, and Word exports include `$$` equations, which they used to leave out. Reported by @TiegenFang (#314)
+- An inline `$` equation closes before a letter, as in pandoc, so `$R=50\,\mu$m，$\gamma$` is two equations; it used to run on to the next `$`. A `$` after a space or before a digit still closes nothing, so prices stay text. Reported by @TiegenFang (#314)
+- Equations set signs, brackets and accents as TeX does: a sign after an opening bracket, a relation or a comma is unary, brackets and superscripts keep clear of slanted letters, and accents such as the tilde sit on their letter instead of floating above it. Reported by @TiegenFang (#314)
+
 ## [v4.0.1] - 2026-11-02
 
 ### Added
