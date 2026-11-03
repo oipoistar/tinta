@@ -1475,7 +1475,12 @@ void performanceTests() {
     }
     std::shared_ptr<const Sheet> plain, sheet;
     double typicalMs = parseTime(typical, plain), heavyMs = parseTime(heavy, sheet);
-    check(plain->rules.size() > 200 && sheet->rules.size() > 150 && typicalMs < 20 && heavyMs < 20,
+#ifdef NDEBUG
+    const double slack = 1;
+#else
+    const double slack = 50;  // a debug build checks every iterator
+#endif
+    check(plain->rules.size() > 200 && sheet->rules.size() > 150 && typicalMs < 20 * slack && heavyMs < 20 * slack,
           "500-line sheets parse quickly: " + std::to_string(typicalMs) + " and " + std::to_string(heavyMs) + " ms");
     El page = el("html", {el("body", {
         el("h1"), el("p", {el("a"), el("strong", {el("em")}), el("code"), el("mark")}), el("h2"),
@@ -1501,7 +1506,7 @@ void performanceTests() {
         for (Engine::Context c : all) engine.style(c);
     }
     double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count() / (rounds * all.size());
-    check(us < 200, "a context's style computes quickly: " + std::to_string(us) + " us");
+    check(us < 200 * slack, "a context's style computes quickly: " + std::to_string(us) + " us");
     std::cout << "  speed: 500-line sheets parse in " << typicalMs << " ms (typical) and " << heavyMs
               << " ms (heavy); a style computes in " << us << " us, over " << all.size() << " contexts\n";
 }
