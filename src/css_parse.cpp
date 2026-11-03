@@ -667,12 +667,23 @@ struct Parser {
     Lines lines;
     std::shared_ptr<const std::string> file;
     bool rulesSeen = false;
+    int depth = 0;  // of @media and @supports blocks
 
     Parser(Sheet& s, const ImportSource& i, std::vector<Diagnostic>& d, std::vector<std::string>& files)
         : sheet(s), imports(i), diagnostics(d), stack(files), tokens(tokenize(s.text)), lines(s.text),
           file(std::make_shared<const std::string>(s.file)) {}
 
     void run() { ruleList(0, tokens.size(), Scope(), true); }
+
+    void nestedRules(size_t begin, size_t end, const Scope& scope, uint32_t at) {
+        if (depth >= 32) {
+            report(Diagnostic::Error, at, "at-rules nest too deeply; the rules inside are skipped");
+            return;
+        }
+        ++depth;
+        ruleList(begin, end, scope, false);
+        --depth;
+    }
 
     void report(Diagnostic::Level level, uint32_t offset, std::string message) {
         Diagnostic d;
@@ -966,7 +977,7 @@ struct Parser {
             for (const std::string& w : reader.warnings) report(Diagnostic::Warning, at.begin, w);
             Scope inner = scope;
             inner.media.push_back(std::make_shared<const MediaExpr>(std::move(e)));
-            ruleList(j + 1, close, inner, false);
+            nestedRules(j + 1, close, inner, at.begin);
         } else if (name == "supports") {
             SupportsReader reader{sheet.text};
             std::vector<const Node*> p = parts(prelude);
@@ -978,7 +989,7 @@ struct Parser {
             }
             Scope inner = scope;
             inner.supported = scope.supported && result;
-            ruleList(j + 1, close, inner, false);
+            nestedRules(j + 1, close, inner, at.begin);
         } else if (name == "font-face") {
             fontFace(at, j + 1, close);
         } else {

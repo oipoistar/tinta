@@ -233,7 +233,7 @@ struct Engine::Impl {
     std::unordered_map<std::string, std::vector<Node>> customNodes;
 
     // Scratch, kept to save allocations
-    std::vector<uint64_t> done, value, matched;
+    std::vector<uint64_t> done, value, matched, siblingBits;
     std::vector<uint32_t> candidates;
     std::string key, joined;
     std::vector<std::pair<uint32_t, uint32_t>> matches;
@@ -312,6 +312,7 @@ struct Engine::Impl {
         done.assign(words, 0);
         value.assign(words, 0);
         matched.assign(words, 0);
+        siblingBits.assign(words, 0);
     }
 
     void activate() {
@@ -412,7 +413,7 @@ struct Engine::Impl {
             run.last.assign(words, 0);
             run.any.assign(words, 0);
         }
-        std::vector<uint64_t> bits(words);
+        std::vector<uint64_t>& bits = siblingBits;
         while (run.count < count) {
             const Element& e = previous[run.count];
             Probe s{&e, &contexts[parent], run.count ? run.last.data() : nullptr, run.count ? run.any.data() : nullptr,
@@ -767,34 +768,49 @@ struct Engine::Impl {
         return true;
     }
 
+    // The ancestors without a style first, from the top, so deep pages never recurse
     const Computed& computedOf(uint32_t id) {
         if (!contexts[id].style) {
-            uint32_t parent = contexts[id].parent;
-            const Computed* above = parent == noContext ? nullptr : &computedOf(parent);
-            auto style = std::make_unique<Computed>();
-            cascade(id, -1, above, false, *style);
-            contexts[id].style = std::move(style);
+            std::vector<uint32_t> chain;
+            for (uint32_t c = id; c != noContext && !contexts[c].style; c = contexts[c].parent) chain.push_back(c);
+            for (size_t k = chain.size(); k-- > 0;) {
+                uint32_t c = chain[k], parent = contexts[c].parent;
+                auto style = std::make_unique<Computed>();
+                cascade(c, -1, parent == noContext ? nullptr : contexts[parent].style.get(), false, *style);
+                contexts[c].style = std::move(style);
+            }
         }
         return *contexts[id].style;
     }
 
+    // ::selection inherits from the parent's, so a :root rule reaches the whole page
+    void selectionOf(uint32_t id) {
+        const int w = (int)Pseudo::Selection;
+        const Computed& element = computedOf(id);
+        uint32_t parent = contexts[id].parent;
+        const Computed* above = parent != noContext ? contexts[parent].pseudo[w].get() : nullptr;
+        auto own = std::make_unique<Computed>();
+        std::unique_ptr<Computed> style;
+        if (cascade(id, (int8_t)w, above ? above : &element, above != nullptr, *own)) style = std::move(own);
+        else if (above) style = std::make_unique<Computed>(*above);
+        contexts[id].pseudo[w] = std::move(style);
+        contexts[id].pseudoDone |= (uint8_t)(1 << w);
+    }
+
     const ComputedStyle* pseudoOf(uint32_t id, Pseudo which) {
         int w = (int)which;
-        const Computed& element = computedOf(id);
-        if (!((contexts[id].pseudoDone >> w) & 1)) {
-            std::unique_ptr<Computed> style;
-            auto own = std::make_unique<Computed>();
-            if (which == Pseudo::Selection) {
-                uint32_t parent = contexts[id].parent;
-                const Computed* above =
-                    parent != noContext && pseudoOf(parent, Pseudo::Selection) ? contexts[parent].pseudo[w].get() : nullptr;
-                if (cascade(id, (int8_t)w, above ? above : &element, above != nullptr, *own)) style = std::move(own);
-                else if (above) style = std::make_unique<Computed>(*above);
-            } else if (cascade(id, (int8_t)w, &element, false, *own) &&
-                       (which == Pseudo::Marker || !own->s.content.empty())) {
-                style = std::move(own);
+        if (which == Pseudo::Selection) {
+            std::vector<uint32_t> chain;
+            for (uint32_t c = id; c != noContext && !((contexts[c].pseudoDone >> w) & 1); c = contexts[c].parent) {
+                chain.push_back(c);
             }
-            contexts[id].pseudo[w] = std::move(style);
+            for (size_t k = chain.size(); k-- > 0;) selectionOf(chain[k]);
+        } else if (!((contexts[id].pseudoDone >> w) & 1)) {
+            const Computed& element = computedOf(id);
+            auto own = std::make_unique<Computed>();
+            if (cascade(id, (int8_t)w, &element, false, *own) && (which == Pseudo::Marker || !own->s.content.empty())) {
+                contexts[id].pseudo[w] = std::move(own);
+            }
             contexts[id].pseudoDone |= (uint8_t)(1 << w);
         }
         return contexts[id].pseudo[w] ? &contexts[id].pseudo[w]->s : nullptr;

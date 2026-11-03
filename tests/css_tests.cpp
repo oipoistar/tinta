@@ -1404,6 +1404,40 @@ void inkTests() {
 
 // --- Speed ----------------------------------------------------------------------------------------
 
+// --- Hostile input --------------------------------------------------------------------------------
+
+void robustnessTests() {
+    std::vector<Diagnostic> d;
+    auto parens = sheetOf("p { color: " + std::string(5000, '(') + " }", &d);
+    check(parens->rules.empty(), "5,000 open brackets end in nothing, not a crash");
+    std::string media;
+    for (int i = 0; i < 200; ++i) media += "@media all { ";
+    media += "p { color: red }";
+    for (int i = 0; i < 200; ++i) media += " }";
+    sheetOf(media, &d);
+    check(hasDiagnostic(d, "at-rules nest too deeply"), "200 nested @media blocks are reported");
+    std::string pseudo = "p:is(";
+    for (int i = 0; i < 300; ++i) pseudo += ":is(";
+    sheetOf(pseudo + std::string(301, ')') + " { color: red }", &d);
+    std::string garbage("\x00\xff{{}};;@@@{\"\\", 15);
+    garbage += "url(\x01) #- -- <!-- @media { ) ] } \\";
+    sheetOf(garbage, &d);
+    sheetOf("", &d);
+    sheetOf("/* only a comment", &d);
+    check(true, "garbage, empty and comment-only sheets parse");
+    Engine engine;
+    engine.load({sheetOf("blockquote { margin-left: 1px } :root::selection { color: #ff0000 } blockquote::before { content: \"|\" }")},
+                Media());
+    Element quote;
+    quote.tag = "blockquote";
+    quote.index = quote.count = quote.typeIndex = quote.typeCount = 1;
+    Engine::Context ctx = engine.root();
+    for (int i = 0; i < 3000; ++i) ctx = engine.child(ctx, quote);
+    const ComputedStyle* selection = engine.pseudo(ctx, Pseudo::Selection);
+    check(engine.style(ctx).margin[3] == 1 && selection && sameColor(selection->color, "#ff0000") &&
+          engine.pseudo(ctx, Pseudo::Before), "a page 3,000 elements deep styles without recursing");
+}
+
 // Milliseconds to parse a sheet, the sheets kept so their freeing is not counted
 double parseTime(const std::string& text, std::shared_ptr<const Sheet>& sheet) {
     const int runs = 40;
@@ -1493,6 +1527,7 @@ int main() {
     paperTests();
     nightTests();
     inkTests();
+    robustnessTests();
     performanceTests();
     std::cout << "css engine: " << checks - failures << " of " << checks << " checks passed\n";
     return failures ? 1 : 0;
