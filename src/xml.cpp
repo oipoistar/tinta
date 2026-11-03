@@ -336,6 +336,8 @@ struct Reader {
             }
             if (startsWith("<!")) return fail("a declaration inside an element", at);
             size_t start = at;
+            // Readers walk the tree recursively; no style nests anywhere near this
+            if (stack.size() >= 256) return fail("elements nested too deep", start);
             parent.children.emplace_back();
             Node& child = parent.children.back();
             std::string_view childName;

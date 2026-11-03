@@ -720,6 +720,28 @@ void bundledStyles() {
                           citation({ref("doe2024"), ref("book2019"), ref("three2023"), ref("many2022")})});
     expect(out[2], "1" + ND + "4", "nature: four in a row collapse");
 
+    // No date
+    {
+        bib::Library undated;
+        bib::Item it;
+        it.id = "undated";
+        it.type = "article-journal";
+        it.names["author"] = {person("Doe", "John")};
+        it.fields["title"] = "Undated";
+        it.fields["container-title"] = "Ink Letters";
+        it.fields["volume"] = "1";
+        it.fields["page"] = "1-2";
+        undated.add(it);
+        csl::Result a = csl::process(*apa, bundledLocale, undated, {citation({ref("undated")})}, csl::Options());
+        expect(a.citations.empty() ? "" : csl::plain(a.citations[0]), "(Doe, n.d.)", "apa: no date");
+        expect(a.bibliography.entries.empty() ? "" : csl::html(a.bibliography.entries[0].text),
+               "Doe, J. (n.d.). Undated. <i>Ink Letters</i>, <i>1</i>, 1" + ND + "2.", "apa: no date, entry");
+        csl::Result c = csl::process(*chicago, bundledLocale, undated, {citation({ref("undated")})}, csl::Options());
+        expect(c.citations.empty() ? "" : csl::plain(c.citations[0]), "(Doe, n.d.)", "chicago: no date");
+        expect(c.bibliography.entries.empty() ? "" : csl::html(c.bibliography.entries[0].text),
+               "Doe, John. n.d. " + LQ + "Undated." + RQ + " <i>Ink Letters</i> 1: 1" + ND + "2.", "chicago: no date, entry");
+    }
+
     // nocite
     csl::Options listed;
     listed.nocite = {"book2019", "@three2023", "unknown1999"};
@@ -840,6 +862,9 @@ void xmlTests() {
         {"<a><![CDATA[ open", "an unclosed CDATA section", 1},
         {"<a b=\"<\"/>", "a '<' inside attribute b", 1},
     };
+    std::string deep;
+    for (int i = 0; i < 300; ++i) deep += "<g>";
+    check(!xml::parse(deep, root, error, line) && error == "elements nested too deep", "xml: nesting is bounded");
     for (const Bad& b : bad) {
         xml::Node node;
         bool ok = xml::parse(b.text, node, error, line);
@@ -983,6 +1008,19 @@ void nameTests() {
     expect(names("<name form=\"count\" et-al-min=\"3\" et-al-use-first=\"1\"/>", three), "1", "names: count after et al.");
     expect(names("<name form=\"count\"/>", three), "3", "names: count");
     expect(names("<name form=\"short\" and=\"text\"/>", three), "Doe, Smith, and Brown", "names: short form");
+    // Name options inherit: <style>, <citation>, <names>, <name>
+    expect(layoutOut("<names variable=\"author\" et-al-min=\"3\" et-al-use-first=\"1\"><name/></names>",
+                     withAuthors(three)),
+           "John Doe et al.", "names: options on <names>");
+    expect(layoutOut("<names variable=\"author\" et-al-min=\"3\" et-al-use-first=\"1\"><name et-al-use-first=\"2\"/></names>",
+                     withAuthors(three)),
+           "John Doe, Ann Smith, et al.", "names: <name> over <names>");
+    csl::Result inherited = runOne("initialize-with=\". \" name-as-sort-order=\"all\"",
+                                   "<citation et-al-min=\"3\" et-al-use-first=\"1\" name-form=\"short\"><layout>"
+                                   "<names variable=\"author\"><name/></names></layout></citation>",
+                                   withAuthors(three));
+    expect(inherited.citations.empty() ? "" : csl::plain(inherited.citations[0]), "Doe et al.",
+           "names: <citation> and <style> options");
     expect(names("<name initialize-with=\". \"/>", {person("Sartre", "Jean-Paul")}), "J.-P. Sartre",
            "names: hyphenated initials");
     expect(names("<name initialize-with=\". \"/>", {person("Sartre", "Jean-Paul")}, "initialize-with-hyphen=\"false\""),
@@ -1008,6 +1046,11 @@ void nameTests() {
     expect(names("<name form=\"short\"/>", {vonBeethoven}), "Beethoven", "names: a von part dropped when short");
     expect(names("<name name-as-sort-order=\"all\" initialize-with=\". \"/>", {vonBeethoven}), "Beethoven, L. van",
            "names: a von part after the initials");
+    // One name only
+    expect(names("<name name-as-sort-order=\"all\" initialize-with=\". \"/>", {person("", "Plato")}), "Plato",
+           "names: a single name inverted");
+    expect(names("<name and=\"text\" form=\"short\"/>", {person("", "Plato"), person("Doe", "John")}), "Plato and Doe",
+           "names: a single name, short");
     // "and others" is never printed
     expect(names("<name name-as-sort-order=\"all\" initialize-with=\". \" and=\"symbol\" delimiter-precedes-last=\"always\"/>",
                  {person("Doe", "John"), person("Smith", "Ann"), organisation("others")}),
@@ -1145,6 +1188,14 @@ void pageTests() {
                      first),
            "pp. 45" + ND + "67", "pages: an en-dash range is plural");
     check(csl::isNumeric("2\xE2\x80\x93" "4") && csl::isNumeric("2\xE2\x80\x94" "4"), "pages: dashed ranges are numeric");
+    // A thousands comma is no list: one patent, "No."
+    bib::Item patent;
+    patent.fields["number"] = "10,000,001";
+    std::string numbered = "<group delimiter=\" \"><label variable=\"number\" form=\"short\" text-case=\"capitalize-first\"/>"
+                           "<text variable=\"number\"/></group>";
+    expect(layoutOut(numbered, patent), "No. 10,000,001", "a number with thousands commas is one");
+    patent.fields["number"] = "2, 4";
+    expect(layoutOut(numbered, patent), "Nos. 2, 4", "a list of numbers is several");
 }
 
 void numberTests() {
@@ -1315,6 +1366,10 @@ void richTextTests() {
     expect(layoutOut("<group delimiter=\", \"><text variable=\"title\" quotes=\"true\"/><text value=\"x\"/></group>", it),
            LQ + "Why?," + RQ + " x", "a comma moves inside the quotes, after a question mark");
     expect(layoutOut("<text variable=\"title\" suffix=\".\"/>", it), "Why?", "no period after a question mark");
+    it.fields["title"] = "Ink in <i>Sepia</i>";
+    expect(layoutOut("<group delimiter=\", \"><text variable=\"title\" quotes=\"true\"/><text value=\"x\"/></group>", it,
+                     "", "en-US", true),
+           LQ + "Ink in <i>Sepia</i>," + RQ + " x", "a comma moved inside the quotes is not italic");
     it.fields["title"] = "U.S.";
     expect(layoutOut("<text variable=\"title\" suffix=\".\"/>", it), "U.S.", "no doubled period");
     expect(layoutOut("<group delimiter=\". \"><text variable=\"title\"/><text value=\"Next\"/></group>", it), "U.S. Next",

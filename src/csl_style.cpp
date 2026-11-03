@@ -360,6 +360,9 @@ struct Reader {
         e.names = std::make_unique<NamesSpec>();
         NamesSpec& spec = *e.names;
         spec.variables = words(node.get("variable"));
+        // Name options on <names> itself, spelled as on <citation>: its own
+        // delimiter is the one between variables
+        readNameOptions(node, spec.level, true);
         for (const xml::Node& child : node.children) {
             if (child.isText()) continue;
             if (child.name == "name") {

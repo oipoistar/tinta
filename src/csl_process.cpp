@@ -788,8 +788,15 @@ Result process(const Style& style, const LocaleSource& locales, const bib::Libra
     bool piq = eng.punctuationInQuote;
 
     // The items, cited ones first in the order they are first cited
+    // At most every item of the library: sized once, never moved
+    size_t cites = 0;
+    for (const cite::Citation& c : citations) cites += c.items.size();
+    bool everything = std::find(options.nocite.begin(), options.nocite.end(), "*") != options.nocite.end();
+    size_t most = std::min(library.items.size(), everything ? library.items.size() : cites + options.nocite.size());
     std::vector<ItemState> states;
+    states.reserve(most);
     std::unordered_map<const bib::Item*, int> indexOf;
+    indexOf.reserve(most);
     auto add = [&](const bib::Item* item, bool cited) {
         auto found = indexOf.emplace(item, (int)states.size());
         if (found.second) {
