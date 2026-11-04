@@ -1,0 +1,12 @@
+if(NOT DEFINED TEST_BINARY OR NOT DEFINED TEST_DIR)
+    message(FATAL_ERROR "TEST_BINARY and TEST_DIR are required")
+endif()
+file(REMOVE_RECURSE "${TEST_DIR}")
+file(MAKE_DIRECTORY "${TEST_DIR}")
+configure_file("${TEST_BINARY}" "${TEST_DIR}/input_tests.exe" COPYONLY)
+file(WRITE "${TEST_DIR}/settings.ini" "[Settings]\nhasAskedFileAssociation=1\ncheckUpdates=0\nlanguage=en\n")
+execute_process(COMMAND "${TEST_DIR}/input_tests.exe" --paper-export-tests
+    WORKING_DIRECTORY "${TEST_DIR}" RESULT_VARIABLE result TIMEOUT 180)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Paper export tests failed: ${result}")
+endif()
