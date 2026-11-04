@@ -488,6 +488,32 @@ static void alignLines(App& app, const LayoutSnapshot& from, float startX, float
     refreshBuckets(app, from);
 }
 
+// A CSS theme's box-shadow under a box (page_style.h): the first shadow
+// that is not inset, its blur as rings that fade outwards. Inserted at
+// `at`, under the box drawn there
+static void addShadow(App& app, size_t at, const D2D1_RECT_F& box, float radius, const page::Style& css) {
+    if (!css.has(css::Prop::BoxShadow)) return;
+    for (const css::Shadow& shadow : css->boxShadow) {
+        if (shadow.inset || shadow.color.a <= 0) continue;
+        const float x = page::px(app, shadow.x), y = page::px(app, shadow.y);
+        const float blur = page::px(app, shadow.blur), spread = page::px(app, shadow.spread);
+        const int rings = blur > 0 ? 4 : 1;
+        std::vector<App::LayoutRect> layers;
+        for (int k = rings; k >= 1; --k) {
+            const float grow = spread + blur * (float)k / (float)rings * 0.5f;
+            App::LayoutRect r;
+            r.rect = D2D1::RectF(box.left + x - grow, box.top + y - grow, box.right + x + grow, box.bottom + y + grow);
+            r.color = page::color(shadow.color);
+            r.color.a = shadow.color.a / (float)rings;
+            r.radius = radius + grow;
+            layers.push_back(r);
+        }
+        app.layoutRects.insert(app.layoutRects.begin() + (ptrdiff_t)std::min(at, app.layoutRects.size()), layers.begin(),
+                               layers.end());
+        return;
+    }
+}
+
 // A block's box as a CSS theme draws it (page_style.h): background,
 // padding and borders around its content. It opens before the content,
 // narrowing the room the content has, and closes after it. Nothing is
@@ -544,7 +570,11 @@ struct BlockBox {
         if (!open) return;
         y += pad[2] + edge[2];
         if (pad[2] + edge[2] > 0.0f) page::boundary(app);
-        if (background < app.layoutRects.size()) app.layoutRects[background].rect.bottom = y;
+        if (background < app.layoutRects.size()) {
+            app.layoutRects[background].rect.bottom = y;
+            addShadow(app, background, app.layoutRects[background].rect, app.layoutRects[background].radius,
+                      page::current(app));
+        }
         auto color = [&](int side) { return edgeColored[side] ? edgeColor[side] : ink; };
         if (edge[0] > 0) app.layoutLines.push_back({{left, top + edge[0] / 2}, {right, top + edge[0] / 2}, color(0), edge[0]});
         if (edge[2] > 0) app.layoutLines.push_back({{left, y - edge[2] / 2}, {right, y - edge[2] / 2}, color(2), edge[2]});
@@ -3040,6 +3070,9 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
             card.stroke = css.has(Prop::BorderTopColor) ? page::color(edge.color) : app.theme.blockquoteBorder;
         }
         app.layoutRects.push_back(card);
+        const size_t before = app.layoutRects.size();
+        addShadow(app, bgRectIndex, card.rect, card.radius, css);
+        bgRectIndex += app.layoutRects.size() - before;  // the card moved up past its shadow
     }
 
     std::wstring wcode = toWide(code);
@@ -3296,7 +3329,10 @@ static void layoutBlockquote(App& app, const ElementPtr& elem, float& y, float i
     if (boxed) {
         // A box holds its children's margins, as CSS's padding does
         if (css.has(Prop::PaddingBottom)) y += page::px(app, css->padding[2]);
-        if (fill < app.layoutRects.size()) app.layoutRects[fill].rect.bottom = y;
+        if (fill < app.layoutRects.size()) {
+            app.layoutRects[fill].rect.bottom = y;
+            addShadow(app, fill, app.layoutRects[fill].rect, app.layoutRects[fill].radius, css);
+        }
         if (barWidth > 0.0f) app.layoutRects.push_back({D2D1::RectF(indent, startY, indent + barWidth, y), barColor});
         page::boundary(app);
         y += page::afterContainer(app, 14);
@@ -3875,8 +3911,13 @@ static void layoutImage(App& app, const ElementPtr& elem, float& y, float indent
         displayW = displayH * (imgW / imgH);
     }
 
-    app.layoutBitmaps.push_back({entry.bitmap,
-        D2D1::RectF(indent, y, indent + displayW, y + displayH)});
+    App::LayoutBitmap placed{entry.bitmap, D2D1::RectF(indent, y, indent + displayW, y + displayH)};
+    // A CSS theme's img { opacity } (page_style.h)
+    if (const page::Style& around = page::current(app)) {
+        const page::Style img = page::child(app, around, *elem);
+        if (img.has(css::Prop::Opacity)) placed.opacity = std::clamp(img->opacity, 0.0f, 1.0f);
+    }
+    app.layoutBitmaps.push_back(std::move(placed));
 
     y += displayH + 12 * scale;
 }

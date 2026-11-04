@@ -161,6 +161,8 @@ struct D2DTheme {
     // the horizontal rule's colour, else blockquoteBorder
     std::optional<D2D1_COLOR_F> selection = std::nullopt;
     std::optional<D2D1_COLOR_F> rule = std::nullopt;
+    // A CSS theme's caret-color for the editors' caret; else the text's
+    std::optional<D2D1_COLOR_F> caret = std::nullopt;
     // Type sizes a CSS theme sets (docs/specs/theming.md), in pixels at
     // 100%; 0 keeps Tinta's (body 16, code 14, headings 32/26/22/18/16/14,
     // bold, line height 1.7 times the size)
@@ -548,6 +550,7 @@ struct App {
         // Copies, measurement rollback and relayout all release via RAII.
         Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
         D2D1_RECT_F destRect{};
+        float opacity = 1.0f;  // a CSS theme's img { opacity }
     };
     std::vector<LayoutBitmap> layoutBitmaps;
 

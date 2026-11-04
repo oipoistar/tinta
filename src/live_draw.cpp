@@ -697,7 +697,7 @@ void draw(App& app, const LiveText& e, IDWriteTextLayout* layout, const LayoutCa
         // As tall as the line's letters, not its spacing
         float h = hm.height / cache.factor;
         float top = hm.top + (hm.height - h) * 0.72f;
-        app.brush->SetColor(look.accent);
+        app.brush->SetColor(app.theme.caret.value_or(look.accent));
         rt->FillRectangle(D2D1::RectF(cx - 0.75f * pixel, top, cx + 1.25f * pixel, top + h), app.brush);
     }
 }

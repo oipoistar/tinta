@@ -4763,7 +4763,7 @@ static void editorDrawExtraCarets(App& app, float lineHeight) {
     if (app.editorExtraCarets.empty() || !app.cursorBlinkOn || !sourceEditorHasFocus(app)) {
         return;
     }
-    app.brush->SetColor(app.theme.text);
+    app.brush->SetColor(app.theme.caret.value_or(app.theme.text));
     for (const auto& caret : app.editorExtraCarets) {
         D2D1_POINT_2F point{};
         if (!editorCaretPointAt(app, caret.pos, caret.upstream == caret.pos, point)) continue;
@@ -4908,7 +4908,7 @@ static void renderEditorWrapped(App& app, float editorWidth) {
         if (app.cursorBlinkOn && sourceEditorHasFocus(app) && i == curLine) {
             D2D1_POINT_2F point{};
             if (editorCaretPoint(app, point)) {
-                app.brush->SetColor(app.theme.text);
+                app.brush->SetColor(app.theme.caret.value_or(app.theme.text));
                 app.renderTarget->FillRectangle(
                     D2D1::RectF(point.x, point.y, point.x + dpi(app, 2.0f), point.y + lineHeight),
                     app.brush);
@@ -5070,7 +5070,7 @@ void renderEditor(App& app, float editorWidth) {
     if (app.cursorBlinkOn && sourceEditorHasFocus(app)) {
         D2D1_POINT_2F point{};
         if (editorCaretPoint(app, point)) {
-            app.brush->SetColor(app.theme.text);
+            app.brush->SetColor(app.theme.caret.value_or(app.theme.text));
             app.renderTarget->FillRectangle(
                 D2D1::RectF(point.x, point.y, point.x + dpi(app, 2.0f), point.y + lineHeight), app.brush);
         }

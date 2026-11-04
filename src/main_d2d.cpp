@@ -553,7 +553,8 @@ render_document:
             D2D1::RectF(bmp.destRect.left - app.scrollX,
                          bmp.destRect.top - app.scrollY,
                          bmp.destRect.right - app.scrollX,
-                         bmp.destRect.bottom - app.scrollY));
+                         bmp.destRect.bottom - app.scrollY),
+            bmp.opacity);
         app.drawCalls++;
     }
 

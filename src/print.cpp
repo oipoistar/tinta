@@ -467,7 +467,7 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
         dc->DrawBitmap(bmp.bitmap.Get(),
             D2D1::RectF(bmp.destRect.left + dx, bmp.destRect.top + dy,
                         bmp.destRect.right + dx, bmp.destRect.bottom + dy),
-            1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+            bmp.opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
         resetBand(banded);
     }
 

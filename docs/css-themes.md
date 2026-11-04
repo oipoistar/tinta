@@ -87,6 +87,9 @@ Tinta's own look stays.
   counter(h2) ". " }` numbers the headings, in Contents too, and
   `a[href^="http"]::after { content: " ↗" }` marks the links that leave
   the page.
+- **Depth and the caret:** `box-shadow` under code blocks, quotes and boxed
+  paragraphs and headings, `opacity` on pictures, and `caret-color` for
+  the editors' caret.
 - **A document's own classes:** front matter `cssclasses: [wide, serif]`
   (Obsidian's key) puts them on `body`, so a `body.wide` rule reaches that
   document alone.

@@ -323,6 +323,7 @@ CssTheme compileCssTheme(const std::string& text, const std::string& file, bool 
     if (page.a > 0) t.background = d2d(page);
     if (declared(bs, Prop::Color)) t.text = t.heading = d2d(bs.color);
     if (bs.accentColor) t.accent = d2d(*bs.accentColor);
+    if (bs.caretColor) t.caret = d2d(*bs.caretColor);
     if (declared(bs, Prop::FontFamily)) out.fontFamily = faceOf(bs, out.fontFamily);
     if (declared(bs, Prop::FontSize)) t.bodySize = bs.fontSize;
     if (declared(bs, Prop::LineHeight) && bs.fontSize > 0) {

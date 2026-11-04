@@ -602,6 +602,47 @@ void wordStyles(App& app, const fs::path& dir) {
     loadCustomThemes();
     applyTheme(app, 0);
 }
+
+// caret-color colours the editors' caret, box-shadow lays a fading shadow
+// under a code block, and opacity dims an image
+void caretShadowOpacity(App& app, const fs::path& dir) {
+    const fs::path themes = dir / "themes";
+    fs::create_directories(themes);
+    {
+        std::ofstream(themes / "Depth.css", std::ios::binary)
+            << ":root { caret-color: #ff8800; }\n"
+               "pre { box-shadow: 0 2px 8px rgb(0 0 0 / 0.4); border-radius: 6px; }\n"
+               "img { opacity: 0.5; }\n";
+    }
+    loadCustomThemes();
+    int depth = -1;
+    for (int i = 0; i < themeCount(); i++) {
+        if (std::wstring(themeAt(i).name) == L"Depth") depth = i;
+    }
+    check(depth >= 0, "the depth sheet is listed");
+    if (depth < 0) return;
+    applyTheme(app, depth);
+    check(app.theme.caret && sameColor(*app.theme.caret, 0xFF8800), "caret-color sets the editors' caret");
+    const fs::path image = fs::path(TINTA_THEME_CSS_FIXTURES).parent_path() / "scholar" / "nib.png";
+    const std::string before = app.currentFile;
+    app.currentFile = toUtf8((image.parent_path() / "page.md").wstring());
+    app.root = app.parser.parse("```\ncode\n```\n\n![nib](nib.png)\n").root;
+    layoutDocument(app);
+    int layers = 0;
+    for (const auto& rect : app.layoutRects) {
+        if (rect.color.r == 0 && rect.color.g == 0 && rect.color.b == 0 && closeTo(rect.color.a, 0.1f, 0.01f)) layers++;
+    }
+    check(layers == 4, "box-shadow lays four fading rings under the code block: " + std::to_string(layers));
+    bool dimmed = false;
+    for (const auto& bitmap : app.layoutBitmaps) dimmed = dimmed || closeTo(bitmap.opacity, 0.5f, 0.001f);
+    check(dimmed, "img { opacity } dims the picture: " + std::to_string(app.layoutBitmaps.size()) + " pictures");
+    app.currentFile = before;
+    std::error_code ignored;
+    fs::remove(themes / "Depth.css", ignored);
+    loadCustomThemes();
+    applyTheme(app, 0);
+    check(!app.theme.caret, "a built-in theme keeps the caret in the text's colour");
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -628,6 +669,7 @@ int testPageStyles(App&, const fs::path& dir) {
     printing(app, dir);
     liveLook(app, dir);
     wordStyles(app, dir);
+    caretShadowOpacity(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;
