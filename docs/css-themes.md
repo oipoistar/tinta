@@ -128,11 +128,13 @@ Tinta's print palette, black on white, with its fonts and spacing.
 
 ## Importing Typora and Obsidian themes
 
-**Settings > Appearance > Import theme...** takes a Typora or Obsidian
+**Settings > Appearance > Themes > Import** takes a Typora or Obsidian
 theme's `.css` file and writes a Tinta theme beside your others, named as
-the file was. Tinta works out which app the theme is for, reads the sheets
-it imports along with it, and lists what it could not carry over, each
-with its line; the new theme is then in the chooser like any other.
+the file was, and switches to it. Tinta works out which app the theme is
+for, reads the sheets it imports along with it, copies the font files its
+`@font-face` rules load from beside it, and lists what it could not carry
+over at the top of the new sheet, each with its line; the theme is then in
+the chooser like any other.
 
 What the import rewrites:
 
@@ -188,8 +190,7 @@ theme's opening comment, its name and licence, is kept at the top.
 Limits: the dropped `#write` and `.markdown-preview-view` prefixes carried
 specificity, so where the theme relied on it rather than on order a rule
 can now lose to an earlier one; light and dark rules are placed after the
-others, which keeps the usual case right. Fonts a theme loads from files
-beside it must be copied beside the imported theme.
+others, which keeps the usual case right.
 
 ## Exports
 

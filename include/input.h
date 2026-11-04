@@ -43,6 +43,10 @@ void navigateForward(App& app, HWND hwnd);
 std::wstring clipboardLine(HWND hwnd);
 // A CSS theme's problems, as a notice when they change (docs/specs/theming.md)
 void reportThemeProblems(App& app);
+// Settings > Appearance > Import: a Typora or Obsidian theme's sheet made a
+// CSS theme beside the others, its fonts copied along, and applied. The
+// new theme's index, or -1 with a notice when it could not be read
+int importThemeFrom(App& app, const std::wstring& source);
 void handleFileWatchTimer(App& app, HWND hwnd);
 void handleSelectScrollTimer(App& app, HWND hwnd);
 // Dwell timer fired over a local .md link: load the peek preview

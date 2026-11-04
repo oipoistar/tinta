@@ -11,6 +11,8 @@
 #include "export.h"
 #include "font_faces.h"
 #include "frame_preview.h"
+#include "input.h"
+#include "overlays.h"
 #include "render.h"
 #include "utils.h"
 
@@ -328,6 +330,53 @@ void generatedContent(App& app, const fs::path& dir) {
     loadCustomThemes();
     applyTheme(app, 0);
 }
+
+// Settings > Appearance > Import: Typora's Night made a CSS theme beside
+// the others, listed and applied, what it left out at the top of the sheet
+void importing(App& app, const fs::path& dir) {
+    const fs::path fixture = fs::path(TINTA_THEME_CSS_FIXTURES) / "import" / "typora-night.css";
+    const int index = importThemeFrom(app, fixture.wstring());
+    check(index >= 0 && app.currentThemeIndex == index, "the imported theme is listed and applied");
+    if (index < 0) return;
+    const fs::path sheet = themeSourcePath(index);
+    check(sheet.parent_path() == dir / "themes" && sheet.filename() == "typora-night.css",
+          "it lands beside the other themes, named as the file was");
+    std::ifstream in(sheet, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    check(text.rfind("/* Imported by Tinta from typora-night.css. Left out:", 0) == 0,
+          "what could not come along heads the sheet");
+    check(app.theme.isDark, "Night draws dark");
+    check(themeProblems(index).empty(), "and Tinta reads the imported sheet without a problem");
+    const int again = importThemeFrom(app, fixture.wstring());
+    check(again >= 0 && fs::path(themeSourcePath(again)).filename() == "typora-night 2.css", "a second import takes the next name");
+    std::error_code ignored;
+    fs::remove(sheet, ignored);
+    if (again >= 0) fs::remove(themeSourcePath(again), ignored);
+    loadCustomThemes();
+    applyTheme(app, 0);
+}
+
+// Settings > Appearance with its Import button, wide and narrow, saved to look at
+void settingsPreview(App& app, const fs::path& dir) {
+    applyTheme(app, 0);
+    app.root = app.parser.parse("# Settings\n").root;
+    layoutDocument(app);
+    app.showSettings = true;
+    app.settingsAnimation = 1.0f;
+    app.settingsSection = 1;
+    check(saveFramePreview(app, dir / "settings-appearance.png", [&] { renderSettingsOverlay(app); }),
+          "saved settings-appearance.png");
+    bool import = false;
+    for (const auto& hit : app.settingsHits) import = import || hit.second == SET_IMPORT_THEME;
+    check(import, "the Themes card has an Import button");
+    const int width = app.width;
+    app.width = 640;
+    check(saveFramePreview(app, dir / "settings-appearance-narrow.png", [&] { renderSettingsOverlay(app); }),
+          "saved settings-appearance-narrow.png");
+    app.width = width;
+    app.showSettings = false;
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -347,6 +396,8 @@ int testPageStyles(App&, const fs::path& dir) {
     unstyled(app);
     fontFaces(app, dir);
     generatedContent(app, dir);
+    importing(app, dir);
+    settingsPreview(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;

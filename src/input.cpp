@@ -30,6 +30,7 @@
 #include "export.h"
 #include "i18n.h"
 #include "selection.h"
+#include "css.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -640,6 +641,115 @@ static void openThemeEditor(App& app, bool editCurrent) {
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
+// Settings > Appearance > Import (docs/css-themes.md): a Typora or Obsidian
+// theme's sheet made a CSS theme of Tinta's own, beside the others, with
+// the font files its @font-face rules load from beside it. What could not
+// come along heads the new sheet, one line each
+int importThemeFrom(App& app, const std::wstring& source) {
+    const size_t slash = source.find_last_of(L"\\/");
+    const std::wstring from = slash == std::wstring::npos ? std::wstring() : source.substr(0, slash);
+    std::wstring stem = slash == std::wstring::npos ? source : source.substr(slash + 1);
+    if (const size_t dot = stem.find_last_of(L'.'); dot != std::wstring::npos) stem.resize(dot);
+    std::string text;
+    const std::wstring dir = tintaConfigDir().empty() ? std::wstring() : tintaConfigDir() + L"\\themes";
+    auto failed = [&] {
+        signalPush(app, SIG_WARN, SIGI_WARNING, tr(app, "toast.theme_import_failed"), source, source);
+        if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
+        return -1;
+    };
+    if (dir.empty() || !sheetui::readFileUtf8(source, text)) return failed();
+    // A sheet the theme imports, read from beside the one importing it
+    const css::ImportSource imports = [](std::string_view name, std::string_view importer, std::string& out,
+                                         std::string& file) {
+        std::wstring base = toWide(std::string(importer));
+        const size_t cut = base.find_last_of(L"\\/");
+        const std::wstring path = (cut == std::wstring::npos ? std::wstring() : base.substr(0, cut + 1)) +
+                                  toWide(std::string(name));
+        if (!sheetui::readFileUtf8(path, out)) return false;
+        file = toUtf8(path);
+        return true;
+    };
+    std::vector<css::Diagnostic> notes;
+    const std::string converted = css::importTheme(text, css::Flavor::Detect, notes, toUtf8(source), imports);
+    if (converted.empty()) return failed();
+    std::string head;
+    if (!notes.empty()) {
+        head = "/* Imported by Tinta from " + toUtf8(stem) + ".css. Left out:\n";
+        for (const auto& note : notes) {
+            std::string message = note.message;
+            for (size_t at = message.find("*/"); at != std::string::npos; at = message.find("*/", at)) message.replace(at, 2, "* /");
+            head += " * " + (note.line > 0 ? "line " + std::to_string(note.line) + ": " : std::string()) + message + "\n";
+        }
+        head += " */\n\n";
+    }
+    CreateDirectoryW(dir.c_str(), nullptr);
+    std::wstring name = stem, target = dir + L"\\" + stem + L".css";
+    for (int n = 2; GetFileAttributesW(target.c_str()) != INVALID_FILE_ATTRIBUTES; ++n) {
+        name = stem + L" " + std::to_wstring(n);
+        target = dir + L"\\" + name + L".css";
+    }
+    {
+        std::ofstream out(target, std::ios::binary);
+        out << head << converted;
+        if (!out.good()) return failed();
+    }
+    // Its fonts beside it come along, at the same places under themes
+    {
+        std::vector<css::Diagnostic> ignored;
+        if (auto sheet = css::parse(text, toUtf8(source), css::Origin::Theme, imports, ignored)) {
+            for (const auto& face : css::fontFaces(*sheet)) {
+                for (const auto& file : face.sources) {
+                    if (file.rfind("local:", 0) == 0) continue;
+                    const std::wstring path = toWide(file);
+                    if (from.empty() || _wcsnicmp(path.c_str(), (from + L"\\").c_str(), from.size() + 1) != 0) continue;
+                    const std::wstring copy = dir + path.substr(from.size());
+                    for (size_t at = copy.find_first_of(L"\\/", dir.size() + 1); at != std::wstring::npos;
+                         at = copy.find_first_of(L"\\/", at + 1)) {
+                        CreateDirectoryW(copy.substr(0, at).c_str(), nullptr);
+                    }
+                    CopyFileW(path.c_str(), copy.c_str(), TRUE);
+                }
+            }
+        }
+    }
+    loadCustomThemes();
+    // The chooser's preview formats grow with the list
+    for (auto& pf : app.themePreviewFormats) {
+        if (pf.name) pf.name->Release();
+        if (pf.preview) pf.preview->Release();
+        if (pf.code) pf.code->Release();
+    }
+    app.themePreviewFormats.clear();
+    int index = -1;
+    for (int i = 0; i < themeCount(); i++) {
+        if (_wcsicmp(themeAt(i).name, name.c_str()) == 0 && themeSourcePath(i) == target) index = i;
+    }
+    if (index < 0) return failed();
+    applyTheme(app, index);
+    persistThemeChoice(app);
+    wchar_t message[200];
+    swprintf_s(message, _countof(message), tr(app, "toast.theme_imported"), name.c_str());
+    std::wstring detail;
+    for (const auto& note : notes) detail += toWide(note.message) + L"\n";
+    signalPush(app, notes.empty() ? SIG_SUCCESS : SIG_INFO, notes.empty() ? SIGI_CHECK : SIGI_INFO, message,
+               notes.empty() ? target : toWide(std::to_string(notes.size())) + L" \x2192 " + target, detail);
+    app.showSettings = false;
+    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
+    return index;
+}
+
+static void importThemeFile(App& app) {
+    wchar_t chosen[MAX_PATH] = L"";
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = app.hwnd;
+    ofn.lpstrFilter = L"CSS (*.css)\0*.css\0";
+    ofn.lpstrFile = chosen;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (runOpenFileDialog(ofn)) importThemeFrom(app, chosen);
+}
+
 static void closeThemeEditor(App& app, bool backToSettings) {
     app.showThemeEditor = false;
     if (backToSettings) {
@@ -856,6 +966,9 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             break;
         case SET_EDIT_THEME:
             openThemeEditor(app, true);
+            break;
+        case SET_IMPORT_THEME:
+            importThemeFile(app);
             break;
         case SET_TOC_LEFT: app.tocOnLeft = true; break;
         case SET_LANG_DROPDOWN:

@@ -3055,6 +3055,7 @@ void renderSettingsOverlay(App& app) {
         {
             float themesW = chipsWidth({tr(app, "settings.browse"),
                                         tr(app, "settings.edit"),
+                                        tr(app, "settings.import"),
                                         tr(app, "settings.new")});
             cardLabel(tr(app, "settings.themes"), tr(app, "settings.themes.hint"),
                       themesW + dpi(app, 10.0f));
@@ -3062,6 +3063,7 @@ void renderSettingsOverlay(App& app) {
             float chipY = cy + (rowCardH - dpi(app, 24.0f)) * 0.5f;
             settingsChip(app, bx2, chipY, tr(app, "settings.browse"), false, SET_OPEN_THEMES, anim, fmt);
             settingsChip(app, bx2, chipY, tr(app, "settings.edit"), false, SET_EDIT_THEME, anim, fmt);
+            settingsChip(app, bx2, chipY, tr(app, "settings.import"), false, SET_IMPORT_THEME, anim, fmt);
             // The create action is the accent-filled primary button
             settingsChip(app, bx2, chipY, tr(app, "settings.new"), true, SET_NEW_THEME, anim, fmt);
         }
