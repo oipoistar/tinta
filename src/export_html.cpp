@@ -1068,6 +1068,7 @@ struct ExportCtx {
     // Cumulative PlantUML render time left in this export; shared across
     // all fences through the recursion (see plantumlFenceSvg).
     int plantumlBudgetMsLeft = kPlantumlExportBudgetMs;
+    std::map<std::string, int> headingSlugs;  // ids given so far, as the page counts them
 };
 
 void walk(ExportCtx& ctx, const ElementPtr& elem);
@@ -1298,7 +1299,26 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
             break;
         case ElementType::Heading: {
             int level = std::max(1, std::min(6, elem->level));
-            ctx.out += "<h" + std::to_string(level) + ">";
+            // The id the page gives it, so links to #a-heading and #sec:id
+            // work in the browser too: its {#id}, else its slug
+            std::string id = elem->title;
+            if (id.empty()) {
+                std::wstring words;
+                std::function<void(const ElementPtr&)> collect = [&](const ElementPtr& e) {
+                    if (e->type == ElementType::Text) {
+                        if (e->language != "section-number") words += toWide(e->text);
+                    } else {
+                        for (const auto& c : e->children) collect(c);
+                    }
+                };
+                collect(elem);
+                words.erase(0, words.find_first_not_of(L' '));  // the space after a number
+                const std::string base = slugifyHeading(words);
+                int& n = ctx.headingSlugs[base];
+                id = n == 0 ? base : base + "-" + std::to_string(n);
+                ++n;
+            }
+            ctx.out += "<h" + std::to_string(level) + (id.empty() ? std::string() : " id=\"" + htmlEscape(id) + "\"") + ">";
             walkChildren(ctx, elem);
             ctx.out += "</h" + std::to_string(level) + ">\n";
             break;
@@ -1449,7 +1469,11 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
             walkChildren(ctx, elem);
             break;
         case ElementType::Text:
-            ctx.out += htmlEscape(elem->text);
+            if (elem->language == "section-number") {
+                ctx.out += "<span class=\"header-section-number\">" + htmlEscape(elem->text) + "</span>";
+            } else {
+                ctx.out += htmlEscape(elem->text);
+            }
             break;
         case ElementType::Code:
             ctx.out += "<code>";

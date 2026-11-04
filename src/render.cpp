@@ -1307,19 +1307,29 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
     }
 
     // All Markdown heading levels participate in Contents and anchor navigation (#210).
+    // A section number (Scholar) shows in Contents but stays out of the slug,
+    // and an id given as {#id} is the heading's own
     if (elem->level >= 1 && elem->level <= 6) {
-        std::wstring headingText;
+        std::wstring headingText, slugText;
         std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
             if (!e) return;
-            if (e->type == ElementType::Text) headingText += toWide(e->text);
-            else for (const auto& c : e->children) extract(c);
+            if (e->type == ElementType::Text) {
+                headingText += toWide(e->text);
+                if (e->language != "section-number") slugText += toWide(e->text);
+            } else {
+                for (const auto& c : e->children) extract(c);
+            }
         };
         for (const auto& child : elem->children) extract(child);
 
-        std::string baseId = slugifyHeading(headingText);
-        int& n = app.headingSlugCounts[baseId];
-        std::string id = (n == 0) ? baseId : (baseId + "-" + std::to_string(n));
-        n++;
+        std::string id = elem->title;
+        if (id.empty()) {
+            slugText.erase(0, slugText.find_first_not_of(L' '));  // the space after a number
+            std::string baseId = slugifyHeading(slugText);
+            int& n = app.headingSlugCounts[baseId];
+            id = (n == 0) ? baseId : (baseId + "-" + std::to_string(n));
+            n++;
+        }
         app.headings.push_back({headingText, elem->level, y, id});
     }
 

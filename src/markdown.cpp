@@ -1735,6 +1735,41 @@ static ElementPtr makeCaption(const ElementPtr& paragraph, Element* parent) {
     return caption;
 }
 
+// pandoc's heading attributes, # Methods {#sec:methods .unnumbered}: the id
+// goes to title, where a link finds it before the heading's slug, and {-}
+// or .unnumbered keep the heading out of the section numbers. Text that is
+// not all attributes ({a, b}) stays
+static void takeHeadingAttributes(const ElementPtr& heading) {
+    if (heading->children.empty() || heading->children.back()->type != ElementType::Text) return;
+    std::string& text = heading->children.back()->text;
+    size_t end = text.find_last_not_of(" \t");
+    if (end == std::string::npos || text[end] != '}') return;
+    size_t open = text.rfind('{', end);
+    if (open == std::string::npos) return;
+    std::string id;
+    bool unnumbered = false;
+    size_t at = open + 1;
+    while (at < end) {
+        while (at < end && text[at] == ' ') ++at;
+        size_t stop = text.find(' ', at);
+        if (stop == std::string::npos || stop > end) stop = end;
+        const std::string token = text.substr(at, stop - at);
+        at = stop;
+        if (token.empty()) continue;
+        if (token == "-" || token == ".unnumbered") unnumbered = true;
+        else if (token[0] == '#' && token.size() > 1) id = token.substr(1);
+        else if (token[0] == '.' && token.size() > 1) continue;
+        else if (token.find('=') != std::string::npos && token[0] != '=') continue;
+        else return;  // not attributes
+    }
+    if (id.empty() && !unnumbered) return;
+    text.erase(open);
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.pop_back();
+    if (text.empty()) heading->children.pop_back();
+    heading->title = id;
+    if (unnumbered) heading->language = "unnumbered";
+}
+
 static void attachCaptions(const ElementPtr& parent) {
     switch (parent->type) {
         case ElementType::Document:
@@ -1753,6 +1788,7 @@ static void attachCaptions(const ElementPtr& parent) {
     for (size_t i = 0; i < kids.size(); ++i) {
         const ElementPtr& child = kids[i];
         attachCaptions(child);
+        if (child->type == ElementType::Heading) takeHeadingAttributes(child);
         // $$...$$ {#eq:id}: the id names the equation
         if (child->type == ElementType::Paragraph) {
             for (size_t k = 0; k + 1 < child->children.size(); ++k) {

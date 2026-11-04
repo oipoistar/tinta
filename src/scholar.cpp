@@ -109,10 +109,13 @@ void label(const ElementPtr& caption, const std::string& words) {
     caption->children = std::move(kids);
 }
 
-// What each id numbers: 'f' figure, 't' table, 'e' equation, and its number
+// What each id numbers: 'f' figure, 't' table, 'e' equation, 's' section,
+// and its number; or, for a section in a document that numbers none, its
+// title, which a reference reads instead (named)
 struct Target {
     char kind = 0;
     std::string number;
+    bool named = false;
 };
 
 struct Numbering {
@@ -162,6 +165,53 @@ void number(const ElementPtr& elem, Numbering& n) {
     for (const auto& child : elem->children) number(child, n);
 }
 
+bool truthy(const std::string& value) {
+    const std::string v = lower(value);
+    return v == "true" || v == "yes" || v == "on" || v == "1";
+}
+
+// pandoc's numbersections (and pandoc-crossref's numberSections): the
+// document's own sections, its top-level headings, numbered 1, 1.1, 1.1.1
+// from the shallowest level they use. A first-level heading alone at the
+// top is the title, and {-} or .unnumbered keep a heading out. The number
+// leads the heading as text marked section-number, which a heading's slug
+// and the word count skip. Ids find their section either way
+void numberSections(const ElementPtr& root, bool numbered, std::map<std::string, Target>& ids) {
+    std::vector<ElementPtr> headings;
+    int ones = 0;
+    for (const auto& block : root->children) {
+        if (block->type != ElementType::Heading) continue;
+        headings.push_back(block);
+        ones += block->level == 1;
+    }
+    if (headings.empty()) return;
+    const bool titled = headings.front()->level == 1 && ones == 1;
+    int base = 7;
+    for (size_t i = titled ? 1 : 0; i < headings.size(); ++i) {
+        if (headings[i]->language != "unnumbered") base = std::min(base, headings[i]->level);
+    }
+    int counters[6] = {};
+    for (size_t i = 0; i < headings.size(); ++i) {
+        const ElementPtr& h = headings[i];
+        std::string number;
+        if (!(titled && i == 0) && h->language != "unnumbered" && h->level >= base) {
+            const int depth = std::min(h->level - base, 5);
+            ++counters[depth];
+            for (int d = depth + 1; d < 6; ++d) counters[d] = 0;
+            for (int d = 0; d <= depth; ++d) number += (d ? "." : "") + std::to_string(counters[d]);
+        }
+        if (numbered && !number.empty()) {
+            auto mark = text(number, h.get());
+            mark->language = "section-number";
+            h->children.insert(h->children.begin(), {mark, text(" ", h.get())});
+        }
+        if (!h->title.empty()) {
+            if (numbered && !number.empty()) ids.emplace(h->title, Target{'s', number});
+            else ids.emplace(h->title, Target{'s', plain(h), true});
+        }
+    }
+}
+
 // --- Cross-references ----------------------------------------------------------
 
 // "1, 2" or, for three in a row and more, "1-3" with an en dash
@@ -208,7 +258,7 @@ std::string renderReference(const cite::Citation& citation, const Words& words,
         if (size_t colon = id.find(':'); colon != std::string::npos) id = lower(id.substr(0, colon)) + id.substr(colon);
         auto found = ids.find(id);
         if (found == ids.end()) {
-            problems.push_back("@" + item.id + " names no figure, table or equation");
+            problems.push_back("@" + item.id + " names no figure, table, equation or section");
             if (!out.empty()) out += ", ";
             out += "@" + item.id + "?";
             ++i;
@@ -227,9 +277,17 @@ std::string renderReference(const cite::Citation& citation, const Words& words,
             if (more == ids.end() || more->second.kind != kind) break;
             numbers.push_back(more->second.number);
         }
-        const std::string (&prefix)[2] = kind == 'f' ? words.fig : kind == 't' ? words.tbl : words.eq;
+        const std::string (&prefix)[2] =
+            kind == 'f' ? words.fig : kind == 't' ? words.tbl : kind == 's' ? words.sec : words.eq;
         std::string group = joinNumbers(numbers);
         if (kind == 'e' && bare) group = "(" + group + ")";
+        if (found->second.named) {
+            // A section of a document that numbers none reads as its title
+            if (!out.empty()) out += ", ";
+            out += found->second.number;
+            ++i;
+            continue;
+        }
         if (!bare) {
             std::string word = prefix[numbers.size() > 1 ? 1 : 0];
             group = (capital ? capitalised(word) : word) + "\xC2\xA0" + group;
@@ -448,6 +506,7 @@ Words wordsFor(const std::vector<fm::Property>& front) {
         words.figure = words.fig[0] = words.fig[1] = "\xE5\x9B\xBE";
         words.table = words.tbl[0] = words.tbl[1] = "\xE8\xA1\xA8";
         words.eq[0] = words.eq[1] = "\xE5\xBC\x8F";
+        words.sec[0] = words.sec[1] = "\xE8\x8A\x82";
         words.delim = "\xEF\xBC\x9A";
     }
     if (std::string v = scalar(front, "figureTitle"); !v.empty()) words.figure = v;
@@ -456,6 +515,7 @@ Words wordsFor(const std::vector<fm::Property>& front) {
     prefixInto(front, "figPrefix", words.fig);
     prefixInto(front, "tblPrefix", words.tbl);
     prefixInto(front, "eqnPrefix", words.eq);
+    prefixInto(front, "secPrefix", words.sec);
     return words;
 }
 
@@ -530,6 +590,9 @@ std::vector<std::string> finish(const ElementPtr& root, const Session& session) 
     const Words words = wordsFor(frontOf(root));
     Numbering numbering{words};
     number(root, numbering);
+    const auto& front = frontOf(root);
+    numberSections(root, truthy(scalar(front, "numbersections")) || truthy(scalar(front, "numberSections")),
+                   numbering.ids);
 
     // @fig:id and friends
     std::vector<ElementPtr> references;

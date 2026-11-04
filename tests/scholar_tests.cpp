@@ -250,6 +250,38 @@ void citationsWithout(const fs::path& fixtures) {
     check(missingRef.size() == 1 && missingRef[0]->level == 1, "and so is a reference to a missing figure");
     check(bibliographyOf(broken.root) != nullptr, "with the references of the keys that exist");
 }
+void sections(const fs::path& fixtures) {
+    auto result = parse(fixtures / "sections.md");
+    for (const auto& problem : result.problems) check(false, "sections.md has no problems: " + problem);
+    std::vector<std::string> heads;
+    for (const auto& block : result.root->children)
+        if (block->type == ElementType::Heading) heads.push_back(plain(block));
+    const std::vector<std::string> want = {"Numbered sections", "1 Method", "1.1 Apparatus", "2 Results",
+                                           "Acknowledgements", "Appendix", "3 Sets {a, b}"};
+    check(heads == want, "sections are numbered from the second level, the title, {-} and .unnumbered left out");
+    for (size_t i = 0; i < heads.size() && i < want.size(); ++i)
+        if (heads[i] != want[i]) check(false, "  heading " + std::to_string(i) + " reads: " + heads[i]);
+    bool marked = false;
+    for (const auto& block : result.root->children) {
+        if (block->type == ElementType::Heading && block->title == "sec:method") {
+            marked = !block->children.empty() && block->children[0]->language == "section-number";
+        }
+    }
+    check(marked, "the number is marked, and the heading keeps its {#sec:method} id");
+    std::vector<std::string> reads;
+    for (const auto& r : all(result.root, ElementType::CrossReference)) reads.push_back(plain(r));
+    const std::string nbsp = "\xC2\xA0";
+    const std::vector<std::string> refs = {"sec." + nbsp + "1", "sec." + nbsp + "2", "Appendix",
+                                           "secs." + nbsp + "1, 2", "Sec." + nbsp + "1.1"};
+    check(reads == refs, "@sec: reads the section's number, or the title of one left unnumbered");
+
+    // Without numbersections, a reference reads as the section's title
+    auto loose = parseText("## Method {#sec:method}\n\nText.\n\n## Results\n\nSee @sec:method.\n");
+    auto looseRefs = all(loose.root, ElementType::CrossReference);
+    check(looseRefs.size() == 1 && plain(looseRefs[0]) == "Method", "unnumbered, @sec:method reads Method");
+    for (const auto& block : loose.root->children)
+        if (block->type == ElementType::Heading) check(plain(block).find("1") == std::string::npos, "and nothing is numbered");
+}
 }  // namespace
 
 int main() {
@@ -259,6 +291,7 @@ int main() {
     citationsInAPaper(fixtures);
     citationsInChinese(fixtures);
     citationsWithout(fixtures);
+    sections(fixtures);
     std::cout << "Scholar: " << failures << " failures\n";
     return failures ? 1 : 0;
 }

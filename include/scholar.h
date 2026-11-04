@@ -14,13 +14,14 @@ namespace csl { struct Style; }
 namespace scholar {
 
 // The words a document numbers with: pandoc-crossref's front matter keys
-// (figureTitle, tableTitle, titleDelim, figPrefix, tblPrefix, eqnPrefix),
-// else its lang:'s defaults, else English
+// (figureTitle, tableTitle, titleDelim, figPrefix, tblPrefix, eqnPrefix,
+// secPrefix), else its lang:'s defaults, else English
 struct Words {
     std::string figure = "Figure", table = "Table", delim = ":";
     std::string fig[2] = {"fig.", "figs."};
     std::string tbl[2] = {"tbl.", "tbls."};
     std::string eq[2] = {"eq.", "eqns."};
+    std::string sec[2] = {"sec.", "secs."};
 };
 Words wordsFor(const std::vector<fm::Property>& front);
 

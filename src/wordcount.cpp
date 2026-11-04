@@ -80,7 +80,8 @@ void appendCountableText(const ElementPtr& element, std::wstring& out) {
     if (!element) return;
     switch (element->type) {
         case ElementType::Text:
-            out += widen(element->text);
+            // A section's number (Scholar) is no word of its heading
+            if (element->language != "section-number") out += widen(element->text);
             break;
         case ElementType::SoftBreak:
             out += L' ';

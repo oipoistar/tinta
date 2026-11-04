@@ -81,7 +81,7 @@ struct Element {
     std::string text;
     std::vector<fm::Property> properties; // top-level YAML fields
     std::string url;          // for links/images
-    std::string title;        // for links/images
+    std::string title;        // for links/images; a heading's {#id}
     int level = 0;            // for headings (1-6)
     bool ordered = false;     // for lists
     int start = 1;            // for ordered lists

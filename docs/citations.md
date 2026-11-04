@@ -73,6 +73,17 @@ As @fig:nib shows, and [@tbl:density; @eq:energy] confirm...
   front matter keys (`figureTitle`, `tableTitle`, `titleDelim`,
   `figPrefix`, `tblPrefix`, `eqnPrefix`), and Chinese with `lang: zh`.
 
+## Sections
+
+`numbersections: true` (pandoc's key; pandoc-crossref's `numberSections`
+too) numbers the document's sections 1, 1.1, 1.1.1 from the shallowest
+level they use. A first-level heading alone at the top is the title and
+stays unnumbered, as does any heading marked `{-}` or `{.unnumbered}`.
+Give a heading an id with `{#sec:methods}` and refer to it with
+`@sec:methods` ("sec. 1"); in a document without numbers the reference
+reads as the section's title. Any heading can take an id this way, for
+links to `#its-id`, and the HTML export keeps every heading's id.
+
 ## Exporting
 
 - **HTML** writes pandoc's markup: `span.citation`, `div#refs` with
