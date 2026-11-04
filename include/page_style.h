@@ -155,5 +155,9 @@ const std::vector<Inspected>& recorded(const App& app);
 std::vector<css::Applied> explain(App& app, css::Engine::Context context);
 // The style a context computed to; null without a CSS theme
 const css::ComputedStyle* computedStyle(App& app, css::Engine::Context context);
+// An element's style outside layout, by its tags from the page down
+// ({"blockquote", "p"}), as its first of each; empty without a CSS sheet.
+// Live reads its code, list and quote looks from it
+Style lookup(App& app, std::initializer_list<const char*> tags);
 
 }  // namespace page

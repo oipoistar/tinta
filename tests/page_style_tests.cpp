@@ -13,8 +13,10 @@
 #include "frame_preview.h"
 #include "input.h"
 #include "inspector.h"
+#include "live_text.h"
 #include "overlays.h"
 #include "page_style.h"
+#include "print.h"
 #include "render.h"
 #include "utils.h"
 
@@ -474,6 +476,91 @@ void folderSheets(App& app, const fs::path& dir) {
     std::error_code ignored;
     fs::remove_all(project, ignored);
 }
+
+// Print: a sheet's @media print rules apply on paper, and its colours with
+// them; a sheet without print rules prints in Tinta's print palette, with
+// its spacing kept
+void printing(App& app, const fs::path& dir) {
+    const fs::path themes = dir / "themes";
+    fs::create_directories(themes);
+    {
+        std::ofstream(themes / "Printed.css", std::ios::binary)
+            << "p { margin: 0 0 30px; color: #00aa00; }\n@media print { h1 { color: #aa0000; } }\n";
+        std::ofstream(themes / "Screen.css", std::ios::binary) << "p { margin: 0 0 30px; color: #00aa00; }\n";
+    }
+    loadCustomThemes();
+    auto indexOf = [](const wchar_t* name) {
+        for (int i = 0; i < themeCount(); i++) {
+            if (std::wstring(themeAt(i).name) == name) return i;
+        }
+        return -1;
+    };
+    const std::string page = "# Title\n\nFirst paragraph.\n\nSecond paragraph.\n";
+    auto onPaper = [&](int theme) {
+        applyTheme(app, theme);
+        const D2DTheme screen = app.theme;
+        app.printLayout = true;
+        app.theme = printTheme(screen);
+        updateTextFormats(app);
+        app.root = app.parser.parse(page).root;
+        layoutDocument(app);
+        const auto* title = runOf(app, L"Title");
+        const auto* first = runStarting(app, L"First");
+        const auto* second = runStarting(app, L"Second");
+        struct Seen { bool redTitle, greenText; float gap; } seen{
+            title && sameColor(title->color, 0xAA0000), first && sameColor(first->color, 0x00AA00),
+            first && second ? second->bounds.top - first->bounds.bottom : -1};
+        app.printLayout = false;
+        app.theme = screen;
+        updateTextFormats(app);
+        return seen;
+    };
+    const int printed = indexOf(L"Printed"), screen = indexOf(L"Screen");
+    check(printed >= 0 && screen >= 0, "the print sheets are listed");
+    if (printed < 0 || screen < 0) return;
+    const auto withRules = onPaper(printed);
+    check(withRules.redTitle && withRules.greenText, "a sheet with @media print prints its colours, print rules included");
+    const auto without = onPaper(screen);
+    check(!without.greenText, "a sheet without print rules prints in Tinta's print palette");
+    check(closeTo(without.gap, 30.0f, 1.0f), "and keeps its spacing on paper");
+    std::error_code ignored;
+    fs::remove(themes / "Printed.css", ignored);
+    fs::remove(themes / "Screen.css", ignored);
+    loadCustomThemes();
+    applyTheme(app, 0);
+}
+
+// Live reads a CSS theme's code padding, list indent and quote bar, as the
+// reading view draws them
+void liveLook(App& app, const fs::path& dir) {
+    const fs::path themes = dir / "themes";
+    fs::create_directories(themes);
+    {
+        std::ofstream(themes / "Looks.css", std::ios::binary)
+            << "pre { padding: 20px; }\nul { padding-left: 40px; }\nblockquote { border-left: 3px solid #123456; }\n";
+    }
+    loadCustomThemes();
+    int looks = -1;
+    for (int i = 0; i < themeCount(); i++) {
+        if (std::wstring(themeAt(i).name) == L"Looks") looks = i;
+    }
+    check(looks >= 0, "the Live sheet is listed");
+    if (looks < 0) return;
+    applyTheme(app, looks);
+    app.root = app.parser.parse("Text.\n").root;
+    layoutDocument(app);
+    const float scale = app.contentScale * app.zoomFactor;
+    const live::Look look = live::pageLook(app);
+    check(closeTo(look.codeInset, 20 * scale) && closeTo(look.listIndent, 40 * scale) && sameColor(look.quote, 0x123456),
+          "Live's code, lists and quotes take the sheet's padding, indent and bar");
+    applyTheme(app, 0);
+    layoutDocument(app);
+    const live::Look plain = live::pageLook(app);
+    check(closeTo(plain.codeInset, 12 * scale) && closeTo(plain.listIndent, 24 * scale), "and a built-in theme keeps Live's own");
+    std::error_code ignored;
+    fs::remove(themes / "Looks.css", ignored);
+    loadCustomThemes();
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -497,6 +584,8 @@ int testPageStyles(App&, const fs::path& dir) {
     settingsPreview(app, dir);
     inspecting(app, dir);
     folderSheets(app, dir);
+    printing(app, dir);
+    liveLook(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;

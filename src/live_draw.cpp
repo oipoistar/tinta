@@ -8,6 +8,7 @@
 #include "live_text.h"
 #include "d2d_init.h"
 #include "font_faces.h"
+#include "page_style.h"
 #include "i18n.h"
 #include "render.h"
 #include "syntax.h"
@@ -180,8 +181,9 @@ float naturalHeight(App& app, IDWriteTextFormat* fmt) {
 
 std::wstring lookKey(const Look& look) {
     wchar_t buf[96];
-    swprintf_s(buf, L"|%.2f|%.2f|%.2f|%.2f|%d|%.3f%.3f%.3f", look.size, look.codeSize, look.headingSize[0], look.lineHeight,
-               look.markdown ? 1 : 0, look.text.r, look.accent.g, look.code.b);
+    swprintf_s(buf, L"|%.2f|%.2f|%.2f|%.2f|%d|%.3f%.3f%.3f|%.1f|%.1f", look.size, look.codeSize, look.headingSize[0],
+               look.lineHeight, look.markdown ? 1 : 0, look.text.r, look.accent.g, look.code.b, look.codeInset,
+               look.listIndent);
     std::wstring key = look.face + L"|" + look.headingFace + L"|" + look.codeFace + buf;
     // The theme's emphasis and rule colours are drawn into the layout too
     for (const auto* color : {&look.bold, &look.italic, &look.rule}) {
@@ -228,6 +230,15 @@ Look pageLook(const App& app) {
     look.lineHeight = themeLineHeight(th);
     look.codeInset = 12.0f * scale;
     look.listIndent = 24.0f * scale;
+    // A CSS theme's code blocks, lists and quotes (page_style.h), as the
+    // reading view draws them
+    App& page = const_cast<App&>(app);
+    if (const page::Style pre = page::lookup(page, {"pre"}); pre.has(css::Prop::PaddingLeft)) {
+        look.codeInset = std::max(0.0f, pre->padding[3] * scale);
+    }
+    if (const page::Style list = page::lookup(page, {"ul"}); list.has(css::Prop::PaddingLeft)) {
+        look.listIndent = std::max(0.0f, list->padding[3] * scale);
+    }
     look.text = th.text;
     look.accent = th.accent;
     look.link = th.link;
@@ -235,6 +246,9 @@ Look pageLook(const App& app) {
     look.codeBack = th.codeBackground;
     look.inlineCodeBack = themeInlineCodeBackground(th);
     look.quote = th.blockquoteBorder;
+    if (const page::Style quote = page::lookup(page, {"blockquote"}); quote.has(css::Prop::BorderLeftColor)) {
+        look.quote = page::color(quote->border[3].color);
+    }
     look.mark = themeHighlightBackground(th);
     look.bold = themeEmphasisColor(th, true, false);
     look.italic = themeEmphasisColor(th, false, true);

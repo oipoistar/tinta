@@ -968,6 +968,20 @@ std::vector<css::Applied> explain(App& app, css::Engine::Context context) {
     return s->engine.explain(context);
 }
 
+Style lookup(App& app, std::initializer_list<const char*> tags) {
+    State* s = app.pageState.get();
+    // Outside a layout the page's frames stand ready after the last begin()
+    if (!s || !s->active || s->depth < 2) return {};
+    Style style = s->frames[1]->style;
+    for (const char* tag : tags) {
+        css::Element e;
+        e.tag = tag;
+        e.index = e.count = e.typeIndex = e.typeCount = 1;
+        style = s->styleOf(s->engine.child(style.context, e), &style);
+    }
+    return style;
+}
+
 const css::ComputedStyle* computedStyle(App& app, css::Engine::Context context) {
     State* s = app.pageState.get();
     if (!s || !s->active) return nullptr;
