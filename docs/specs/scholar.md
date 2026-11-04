@@ -1,6 +1,6 @@
 ---
 title: "Scholar: write the paper"
-status: Phases 1 and 3 built (2026-11-04); phase 2 to come
+status: Phases 1 and 3 built (2026-11-04); phase 2 built but for inline references (2026-11-04)
 created: 2026-11-03
 ---
 
@@ -15,7 +15,11 @@ Status: phase 1 is built: citations, references, numbered figures, tables
 and equations, hover cards, and the exports (see [Phases](#phases) and
 `tests/scholar-validation.md`). Phase 3, paper export, is built too:
 title block, two columns, page numbers, running heads and Word's paper
-styles (`tests/paper-export-validation.md`).
+styles (`tests/paper-export-validation.md`). From phase 2, the
+writing aids (completion in Live and Source, the Cite button and
+Zotero's picker, `tests/citation-completion-validation.md`), note
+styles, section numbers with `@sec:`, and following a saved library
+are built; inline `references:` is to come.
 
 ## Why
 
@@ -192,7 +196,8 @@ Nothing fails silently and nothing blocks reading:
 - Typing `[@` or `@` (in a document with a bibliography) opens a completion
   list of keys, filtered by key, author, year and title as you type; Enter
   inserts the key. Typing `@fig:` lists the figure ids in the document.
-  (Phase 2.)
+  (Phase 2, built: `@tbl:`, `@eq:` and `@sec:` list theirs too, and the
+  rail's Cite button opens Zotero's picker, or types `[@` without it.)
 
 ### Following changes
 
@@ -272,6 +277,7 @@ pandoc's author objects, of which the `name` is read), `institute`,
 | `include/csl.h`, `src/csl.cpp` (+ `csl_*.cpp`) | CSL styles and locales, and the processor | `bib.h`, `cite.h`, `xml.h` |
 | `src/scholar.cpp`, `include/scholar.h` | the document side: loading libraries and styles per document, caching, collecting citations and cross-references from the parsed document, giving layout and exports their text | everything above, `markdown.h`, `frontmatter.h` |
 | `tools/csl_pack.cpp` | build-time: strips `<info>`, comments and indentation from the bundled styles and locales and compresses them | |
+| `include/zotero.h`, `src/zotero.cpp` | phase 2: Better BibTeX's Cite As You Write picker, probed and asked over WinHTTP on a worker thread | |
 
 The first five are plain C++ with no Windows calls, tested as console
 programs. Only `scholar.cpp` knows Tinta's document and settings.
@@ -437,7 +443,9 @@ the Windows compression API (XPRESS Huffman); the results are RCDATA in
    for its picker, and its auto-exported `.bib`/`.json` followed live);
    note styles (Chicago notes-bibliography: citations become footnotes);
    inline `references:` in front matter; section numbers and `@sec:`; a
-   "Cite" button on the tool rail.
+   "Cite" button on the tool rail. Built: the completion (with `@sec:`
+   ids listed), the picker and the Cite button, note styles, sections
+   and following the library; inline `references:` to come.
 3. **Paper export** (built): title block, authors and affiliations,
    abstract, two-column PDF, running heads and page numbers, Word paper
    styles and SEQ fields.

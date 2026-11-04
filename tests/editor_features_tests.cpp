@@ -441,7 +441,9 @@ void railNumberButton(App& app) {
         for (int h : {900, 600, 540}) {
             app.height = h;
             paintRail();
-            const D2D1_RECT_F last = hit(22), export_ = hit(23), first = hit(1);
+            // The Cite button is the last of the tools
+            const D2D1_RECT_F image = hit(22), last = hit(24), export_ = hit(23), first = hit(1);
+            check(last.top >= image.bottom, "the Cite button comes after the picture button");
             check((export_.bottom > export_.top) == foot, "the foot shows Pandoc's export button only when it is found");
             const float limit = foot ? export_.top - dpi(app, 8.0f) : (float)h;
             check(last.bottom > last.top && last.bottom <= limit + 0.5f,

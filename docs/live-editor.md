@@ -69,6 +69,11 @@ same way on a sheet and in its own tab.
   down.
 - **[[** lists the notes in the document's folder. The arrow keys choose
   one and Enter writes the link.
+- **[@**, or an `@` that starts a word, lists the keys of the document's
+  bibliography with their authors, years and titles, and `@fig:`, `@tbl:`,
+  `@eq:` and `@sec:` its own figures, tables, equations and sections, as
+  Source does ([details](citations.md#citing-as-you-type)). Typing narrows
+  the list and Enter writes the key.
 - **Ctrl+Z / Ctrl+Y** are Source's undo and redo, which take typing back a
   word at a time.
 
@@ -135,7 +140,9 @@ strikethrough, code, link, bullets, numbers, tasks, quote) act on the Live
 text. A block button marks every line of the selection, the numbers
 counting on, and takes the mark off them all when they all have it. Its
 table and diagram buttons open the menu's table grid and diagrams beside
-it, and its picture button picks a picture to link at the caret.
+it, its picture button picks a picture to link at the caret, and its cite
+button, **@**, opens Zotero's citation picker, or types `[@` and the list
+of keys without it ([Zotero](citations.md#zotero)).
 
 ## The menu
 

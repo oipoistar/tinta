@@ -52,4 +52,16 @@ std::vector<std::string> finish(const qmd::ElementPtr& root, const Session& sess
 // its citations
 std::vector<std::wstring> followedFiles(const qmd::ElementPtr& root, const std::wstring& folder);
 
+// A row of the citation list Live and Source open as a key is typed
+// (docs/citations.md): the key or id, and what it names
+struct Suggestion {
+    std::wstring key, detail;  // detail: "Doe et al. 2024, Ink Flow in..." or a caption
+};
+// What completes the key typed in text[from, caret), after its @. After
+// fig:, tbl:, eq: or sec:, the document's own ids of that kind, in order;
+// otherwise the keys of the bibliography its properties name, matched by
+// key, author, year and title words, best first. `folder` is the
+// document's, where its bibliography is found
+std::vector<Suggestion> suggest(const std::wstring& text, size_t from, size_t caret, const std::wstring& folder);
+
 }

@@ -50,6 +50,7 @@
 #include "tabs.h"
 #include "search_panel.h"
 #include "sheet_ui.h"
+#include "zotero.h"
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
 
@@ -1105,6 +1106,9 @@ render_document:
 // Everything above the page or the sheet: prompts, chips, the tab strip,
 // overlays and dialogs, then the end of the frame
 static void renderChromeAndEnd(App& app) {
+    // The source's citation list under its caret, over the page beside it
+    if (app.editMode) renderEditorCompletion(app);
+
     // Ctrl+G's go-to-line prompt, at the top of the pane it acts on (#276)
     renderGotoLinePrompt(app);
 
@@ -1842,6 +1846,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             delete version;
             return 0;
         }
+
+        case WM_APP_ZOTERO:
+            // Zotero's picker answered the Cite button (the handler deletes it)
+            if (app) editorCiteAnswer(*app, hwnd, wParam, lParam);
+            else delete (zotero::Answer*)lParam;
+            return 0;
 
         case WM_APP_PANDOC_DONE:
             if (app) {

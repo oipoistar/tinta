@@ -6,8 +6,7 @@
 #pragma once
 
 #include "app.h"
-
-struct LiveText;
+#include "live_text.h"
 
 // Switches Source and Live (the rail's pill, Ctrl+/); the caret stays on
 // its character and at its height in the window
@@ -48,6 +47,11 @@ void renderLiveMenu(App& app);
 const LiveText& liveText(const App& app);
 // A rail button on the Live text; false for the ones that insert through the source
 bool liveRailCommand(App& app, HWND hwnd, int id);
+// The citation keys and figure ids the document being edited offers for
+// the key typed in text[from, caret), after its @ (docs/citations.md)
+std::vector<LiveText::Choice> citeChoices(App& app, const std::wstring& text, size_t from, size_t caret);
+// [@ typed at the page's caret, its list open: the Cite button without Zotero
+void liveTypeCitation(App& app, HWND hwnd);
 // The caret on the screen, for the IME's windows
 bool liveCaretClientPoint(App& app, D2D1_POINT_2F& top, float& height);
 // Where the live stretch is on the page as shown: its top and bottom, and

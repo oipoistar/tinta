@@ -120,6 +120,9 @@ static const RailBtn kInsertBtns[] = {
      DWRITE_FONT_STYLE_NORMAL, L"Segoe UI", false, "rail.diagram", L""},
     {22, L"\U0001F5BC", 12.0f, DWRITE_FONT_WEIGHT_NORMAL,
      DWRITE_FONT_STYLE_NORMAL, L"Segoe UI", false, "rail.image", L""},
+    // A citation: Zotero's picker, or [@ and the bibliography's keys
+    {24, L"@", 13.5f, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+     L"Segoe UI", false, "rail.cite", L""},
 };
 // Source | Live (docs/live-editor.md): the pill at the rail's top
 static const RailBtn kModeBtns[] = {
