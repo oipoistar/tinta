@@ -68,7 +68,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Hardware-accelerated** - Smooth text rendering via DirectWrite
 - **Word wrap** - Optional soft wrap in the editor (Ctrl+W)
 - **Native LaTeX math** - `$inline$` and `$$display$$` equations with matrices, cases, aligned equations, fractions, limits, accents and custom macros. Uses an installed math font; no bundled fonts or web engine. See the [supported math syntax](docs/math-support.md).
-- **Citations** - Name a BibTeX or CSL-JSON library in the front matter and cite with pandoc's syntax (`[@doe2024, p. 4]`, `@doe2024 says`): citations and the references come out in APA, Chicago, IEEE, Nature or GB/T 7714, or any `.csl` style, with a hover card and a click to each reference. Figures, tables and equations number themselves and `@fig:id` refers to them, as pandoc-crossref does; HTML, Word and PDF keep it all, and pandoc exports get `--citeproc`. See [Citations, figures and tables](docs/citations.md)
+- **Citations** - Name a BibTeX or CSL-JSON library in the front matter and cite with pandoc's syntax (`[@doe2024, p. 4]`, `@doe2024 says`): citations and the references come out in APA, Chicago, IEEE, Nature or GB/T 7714, or any `.csl` style, with a hover card and a click to each reference. Figures, tables and equations number themselves and `@fig:id` refers to them, as pandoc-crossref does; HTML, Word and PDF keep it all, and pandoc exports get `--citeproc`. A paper's front matter in pandoc's variables (`title`, `author`, `abstract`, `keywords`, `classoption: twocolumn`, `papersize`, `fontsize`) prints like a journal manuscript, with a title block, two columns, page numbers and running heads, and Word gets Title, Author and Abstract styles and numbered captions as fields. See [Citations, figures and tables](docs/citations.md)
 - **CSS themes** - A `.css` file in the `themes` folder is a theme: real CSS syntax, selectors and cascade, variables, `oklch()`, `color-mix()` and `light-dark()` for one sheet that follows Windows. Saving it restyles the window, and its mistakes are reported with their lines. See [CSS themes](docs/css-themes.md)
 - **Focused editing** - Hide the preview pane while writing (Ctrl+E)
 - **Native Mermaid diagrams** - 22 diagram families, from flowcharts with subgraphs through sequence, class, state, ER, gantt, and pie to C4, sankey, kanban, and radar - rendered without a web engine
@@ -134,7 +134,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Ctrl+S` | Save (in edit mode) |
 | `Ctrl+Shift+S` | Save As: the editor writes the buffer to a new path, the viewer saves a copy, and the document continues under the new name |
 | `Ctrl+H` | Find and replace (in edit mode): Tab switches fields, Enter replaces, Ctrl+Enter replaces all |
-| `Ctrl+P` | Print / export to PDF; the preview picks the paper, orientation and margins |
+| `Ctrl+P` | Print / export to PDF; the preview picks the paper, orientation and margins, two columns, page numbers and running heads |
 | `Ctrl+E` | In Source, show/hide the preview pane; in Live, read the page at full width, and `Ctrl+E` again to go back |
 | `Ctrl+Shift+E` | Read the unsaved edits at full width; `Esc` returns to the source (in edit mode) |
 | `Ctrl+W` | Toggle word wrap (in edit mode) |

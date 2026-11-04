@@ -79,14 +79,69 @@ As @fig:nib shows, and [@tbl:density; @eq:energy] confirm...
   `div.csl-entry` per reference, `figure` and `figcaption`.
 - **Word** keeps the formatted citations and references (in a
   Bibliography style with a hanging indent) and puts captions in Word's
-  Caption style.
-- **Print and PDF** are as on screen.
+  Caption style, their numbers as fields (`SEQ Figure`, `SEQ Table`), so
+  Word's table of figures and cross-references find them.
+- **Print and PDF** are as on screen; a paper prints as below.
 - **LaTeX and other pandoc formats:** Tinta hands the document to pandoc
   with `--citeproc`, and `--filter pandoc-crossref` when that filter is
   installed.
 
+## Printing a paper
+
+Front matter in pandoc's own variables makes a document a paper, and the
+same file builds with pandoc's LaTeX:
+
+```yaml
+---
+title: "Ink on the move: capillary flow in split nibs"
+subtitle: A study in two columns
+shorttitle: Ink on the move        # the running head; else the title
+author:
+  - Ana Okafor
+  - name: Lars Lindqvist           # pandoc's author objects give their name
+institute: [University of Lagos, Uppsala University]
+date: 4 November 2026
+abstract: |
+  Fountain pens move ink by capillary action alone...
+
+  A second paragraph.
+keywords: [capillary flow, fountain pens]
+thanks: We thank the reading group.
+classoption: twocolumn             # or [twocolumn, a4paper]
+papersize: a4                      # a4, letter (legal, a3)
+fontsize: 11pt                     # 10pt to 12pt; the page sets 12pt
+geometry: margin=2cm               # the page margins
+---
+```
+
+- A `title` with an `author` or an `abstract` prints a **title block** in
+  place of the properties strip: the title, subtitle, authors joined with
+  commas and "and", the institutes, the date, the abstract set in from both
+  sides under its heading, the keywords, and the thanks as a footnote
+  under a short rule, marked * on the title. The screen keeps the strip.
+- **Two columns** with `classoption: twocolumn` or the preview's Two
+  columns: the title block spans both on the first page, the text runs
+  down the left column and then the right, and figures, tables, code and
+  equations fit their column (wider ones shrink into it).
+- **Page numbers** centred under the text, and **running heads** from the
+  second page on: the short title or title on the left, the first author's
+  surname on the right, "et al." when there are more. A paper has both;
+  the preview turns either off, or on for any document.
+- `papersize` and `fontsize` choose the preview's paper and the type size,
+  and `geometry: margin=` the margins, until a margin is picked in the
+  preview.
+- **Word** sets the title block in the styles Word and pandoc name: Title,
+  Subtitle, Author, Affiliation, Date, Abstract Title and Abstract, and
+  Keywords, for a journal's template to restyle. The thanks is a footnote
+  marked *.
+
+The words follow `lang:` (Abstract, Zusammenfassung, Résumé, 摘要...).
+The title block reads Markdown's emphasis, bold and code, but sets maths
+and citations in it as written.
+
 Try the [paper](../tests/fixtures/scholar/paper.md), its
 [Chinese companion](../tests/fixtures/scholar/paper-zh.md), the
-[citation syntax](../tests/fixtures/scholar/citation-syntax.md) and the
-[numbered figures](../tests/fixtures/scholar/crossref.md). The design is in
-[docs/specs/scholar.md](specs/scholar.md).
+[citation syntax](../tests/fixtures/scholar/citation-syntax.md), the
+[numbered figures](../tests/fixtures/scholar/crossref.md) and the
+[two-column paper](../tests/fixtures/scholar/paper-print.md) (Ctrl+P). The
+design is in [docs/specs/scholar.md](specs/scholar.md).

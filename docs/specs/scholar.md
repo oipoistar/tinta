@@ -1,6 +1,6 @@
 ---
 title: "Scholar: write the paper"
-status: Phase 1 built (2026-11-04); phases 2 and 3 to come
+status: Phases 1 and 3 built (2026-11-04); phase 2 to come
 created: 2026-11-03
 ---
 
@@ -13,7 +13,9 @@ builds unchanged with pandoc and the reverse.
 
 Status: phase 1 is built: citations, references, numbered figures, tables
 and equations, hover cards, and the exports (see [Phases](#phases) and
-`tests/scholar-validation.md`).
+`tests/scholar-validation.md`). Phase 3, paper export, is built too:
+title block, two columns, page numbers, running heads and Word's paper
+styles (`tests/paper-export-validation.md`).
 
 ## Why
 
@@ -210,7 +212,8 @@ re-renders open documents that use it.
   bibliography as paragraphs in a "Bibliography" style (hanging indent or a
   tab stop for the number column), captions in Word's "Caption" style with
   a SEQ field, so Word can rebuild a table of figures.
-- Print and PDF: drawn as on screen.
+- Print and PDF: drawn as on screen; a paper as [Paper export](#paper-export-phase-3)
+  sets it.
 - Pandoc formats: Tinta passes `--citeproc` when the document has a
   bibliography, plus `--filter pandoc-crossref` when that filter is on the
   PATH. The Markdown goes to pandoc unchanged, so pandoc's own processing
@@ -218,17 +221,43 @@ re-renders open documents that use it.
 
 ## Paper export (phase 3)
 
-From front matter: `title`, `subtitle`, `author` (a list, each with
-`name`, `affiliation`, `email`, `orcid`, `corresponding`), `date`,
-`abstract`, `keywords`, `thanks`.
+From front matter, in pandoc's variables so the file builds with pandoc's
+LaTeX: `title`, `subtitle`, `shorttitle`, `author` (a string, a list, or
+pandoc's author objects, of which the `name` is read), `institute`,
+`date`, `abstract` (plain, quoted or a `|`/`>` block), `keywords`,
+`thanks`, `lang`, `classoption`, `papersize`, `fontsize` and `geometry`.
+`src/paper.cpp` reads them from the YAML the Properties element keeps
+(`fm::parse` leaves block scalars opaque and is unchanged).
 
-- A title block at the top of the PDF and Word export: title, authors with
-  numbered affiliations, abstract set off and keywords.
-- PDF options: one or two columns (figures and tables may span both with
-  `{.wide}`), page numbers, running heads (short title and authors), A4 or
-  Letter, 10-12 pt.
-- Word: title, author and abstract styles, figure and table captions with
-  SEQ fields, bibliography style; so a journal's template can restyle it.
+- A title with authors or an abstract makes a title block in print, PDF
+  and Word, in place of the properties strip (the screen keeps the strip):
+  the title, subtitle, authors joined with commas and "and", the
+  institutes on lines below, the date, an "Abstract" heading and the
+  abstract set in from both sides, "Keywords: a, b, c", and the thanks as
+  a footnote line under a short rule, marked * on the title. The words
+  follow `lang:`. Inline Markdown in the fields keeps emphasis, bold and
+  code; maths and citations read as written.
+- Print and PDF: one or two columns (`classoption: twocolumn`, or the
+  preview's toggle). The title block spans both columns on page 1; the
+  text runs down the left column, then the right, each column cut where a
+  page would be, figures, tables, code and equations laid out at the
+  column's width (wider ones shrink into it). Page numbers centred in the
+  bottom margin and running heads in the top one from page 2 (the short
+  title or title; the first author's surname, et al. for more), in a
+  small muted face, on by default for a paper and toggled in the
+  preview. `papersize` (A4, Letter; Legal and A3) and `fontsize` (8 to 14
+  pt against the page's 12) set the preview's paper and type size,
+  `geometry: margin=` its margins until a chip is picked.
+- Word: the title block in Title, Subtitle, Author, Affiliation, Date,
+  Abstract Title and Abstract, and Keywords styles; the thanks a footnote
+  with a * mark; figure and table captions as "Figure " + `SEQ Figure`
+  field + ": ...", tables in a `SEQ Table` sequence, in Word's Caption
+  style; the bibliography style as before. A journal's template can
+  restyle it all.
+- Not built: numbered affiliations matched to authors, figures spanning
+  both columns with `{.wide}`, floats (a figure too tall for what is left
+  of a column moves to the next and leaves the space), two columns in
+  Word.
 
 ## Design
 
@@ -409,8 +438,9 @@ the Windows compression API (XPRESS Huffman); the results are RCDATA in
    note styles (Chicago notes-bibliography: citations become footnotes);
    inline `references:` in front matter; section numbers and `@sec:`; a
    "Cite" button on the tool rail.
-3. **Paper export**: title block, authors and affiliations, abstract,
-   two-column PDF, running heads and page numbers, Word paper styles.
+3. **Paper export** (built): title block, authors and affiliations,
+   abstract, two-column PDF, running heads and page numbers, Word paper
+   styles and SEQ fields.
 
 ## Decisions
 
