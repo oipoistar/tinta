@@ -1,7 +1,7 @@
 #pragma once
-// References for citations: BibTeX, BibLaTeX and CSL-JSON read into the CSL
-// data model that csl.h formats (docs/specs/scholar.md). Plain data and text
-// only.
+// References for citations: BibTeX, BibLaTeX, CSL-JSON and CSL YAML read into
+// the CSL data model that csl.h formats (docs/specs/scholar.md). Plain data
+// and text only.
 #include <map>
 #include <string>
 #include <string_view>
@@ -80,8 +80,17 @@ private:
 // line they are on
 void readBibtex(std::string_view text, std::string_view source, Library& library);
 void readCslJson(std::string_view text, std::string_view source, Library& library);
-// Chooses by extension: .bib and .bibtex read as BibTeX, .json as CSL-JSON.
-// False for any other extension
+// CSL YAML, as pandoc reads it: a list of CSL items, or a mapping whose
+// references: holds them. Text fields are pandoc Markdown (*italic*,
+// **bold**, ^sup^, ~sub~, [x]{.smallcaps}, [x]{.nocase})
+void readCslYaml(std::string_view yaml, std::string_view source, Library& library);
+// The references: of a document's front matter, as CSL YAML; problems carry
+// the document's lines. False when its front matter has no references:. As
+// pandoc has it, these take precedence over a bibliography file's entries
+// with the same id, so read them into the library first
+bool readFrontMatterReferences(std::string_view document, std::string_view source, Library& library);
+// Chooses by extension: .bib and .bibtex read as BibTeX, .json as CSL-JSON,
+// .yaml and .yml as CSL YAML. False for any other extension
 bool readByExtension(std::string_view text, std::string_view path, Library& library);
 
 // The pieces, for tests and for the citation completion list

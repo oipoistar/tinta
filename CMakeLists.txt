@@ -71,6 +71,7 @@ set(SCHOLAR_SOURCES
     src/bib.cpp
     src/cite.cpp
     src/json.cpp
+    src/yaml.cpp
     src/xml.cpp
     src/csl_text.cpp
     src/csl_style.cpp
@@ -797,15 +798,20 @@ if(BUILD_TESTING)
     target_compile_definitions(config_path_tests PRIVATE UNICODE _UNICODE)
     add_test(NAME config_paths COMMAND config_path_tests)
 
-    # Scholar: BibTeX, BibLaTeX and CSL-JSON read into references
-    add_executable(bib_tests tests/bib_tests.cpp src/bib.cpp src/json.cpp)
+    # Scholar: BibTeX, BibLaTeX, CSL-JSON and CSL YAML read into references
+    add_executable(bib_tests tests/bib_tests.cpp src/bib.cpp src/json.cpp src/yaml.cpp)
     target_include_directories(bib_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_definitions(bib_tests PRIVATE
         TINTA_SCHOLAR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scholar")
     add_test(NAME bibliography COMMAND bib_tests)
 
+    # The YAML reader front matter and CSL YAML are read with
+    add_executable(yaml_tests tests/yaml_tests.cpp src/yaml.cpp src/json.cpp)
+    target_include_directories(yaml_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_test(NAME yaml COMMAND yaml_tests)
+
     # Scholar: pandoc's citation syntax, against the fixture library's keys
-    add_executable(cite_tests tests/cite_tests.cpp src/cite.cpp src/bib.cpp src/json.cpp)
+    add_executable(cite_tests tests/cite_tests.cpp src/cite.cpp src/bib.cpp src/json.cpp src/yaml.cpp)
     target_include_directories(cite_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_definitions(cite_tests PRIVATE
         TINTA_SCHOLAR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/scholar")
@@ -822,7 +828,7 @@ if(BUILD_TESTING)
     # Scholar's CSL processor and XML reader against the bundled styles
     # (docs/specs/scholar.md); a console program, no window
     add_executable(csl_tests tests/csl_tests.cpp
-        src/xml.cpp src/bib.cpp src/json.cpp src/csl_text.cpp src/csl_style.cpp src/csl_render.cpp src/csl_process.cpp)
+        src/xml.cpp src/bib.cpp src/json.cpp src/yaml.cpp src/csl_text.cpp src/csl_style.cpp src/csl_render.cpp src/csl_process.cpp)
     target_include_directories(csl_tests PRIVATE include src)
     target_compile_definitions(csl_tests PRIVATE TINTA_CSL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources/csl")
     add_test(NAME csl_processor COMMAND csl_tests)

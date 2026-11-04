@@ -867,6 +867,218 @@ void cslJsonVariants() {
     equal(field(f.find("huge"), "volume"), "1e+300", "an absurd number is written out");
 }
 
+// --- CSL YAML ------------------------------------------------------------
+
+Library cslYaml(const std::string& text) {
+    Library library;
+    readCslYaml(text, "test.yaml", library);
+    return library;
+}
+
+// pandoc's manual, "Specifying bibliographic data"
+const char* const watsonCrick =
+    "---\n"
+    "references:\n"
+    "- type: article-journal\n"
+    "  id: WatsonCrick1953\n"
+    "  author:\n"
+    "  - family: Watson\n"
+    "    given: J. D.\n"
+    "  - family: Crick\n"
+    "    given: F. H. C.\n"
+    "  issued:\n"
+    "    date-parts:\n"
+    "    - - 1953\n"
+    "      - 4\n"
+    "      - 25\n"
+    "  title: 'Molecular structure of nucleic acids: a structure for\n"
+    "    deoxyribose nucleic acid'\n"
+    "  title-short: Molecular structure of nucleic acids\n"
+    "  container-title: Nature\n"
+    "  volume: 171\n"
+    "  issue: 4356\n"
+    "  page: 737-738\n"
+    "  DOI: 10.1038/171737a0\n"
+    "  URL: https://www.nature.com/articles/171737a0\n"
+    "  language: en-GB\n"
+    "...\n";
+
+void cslYamlManual() {
+    Library lib = cslYaml(watsonCrick);
+    equal(diagnostics(lib), "", "pandoc's example reads without problems");
+    const Item* w = lib.find("WatsonCrick1953");
+    check(w && w->type == "article-journal" && lib.items.size() == 1, "one article");
+    equal(w ? w->line : 0, 3, "an item's line is its first key's");
+    equal(showNames(w, "author"), "J. D.|||Watson|; F. H. C.|||Crick|", "names as mappings");
+    equal(showDate(w, "issued"), "1953-4-25", "date-parts as a list of lists");
+    equal(field(w, "title"), "Molecular structure of nucleic acids: a structure for deoxyribose nucleic acid",
+          "a quoted title over two lines");
+    equal(field(w, "title-short"), "Molecular structure of nucleic acids", "a title with a colon-free plain value");
+    equal(field(w, "container-title"), "Nature", "the journal");
+    equal(field(w, "volume") + " " + field(w, "issue") + " " + field(w, "page"), "171 4356 737-738",
+          "numbers as written");
+    equal(field(w, "DOI") + " " + field(w, "URL") + " " + field(w, "language"),
+          "10.1038/171737a0 https://www.nature.com/articles/171737a0 en-GB", "DOI, URL and language");
+
+    // The same item in CSL-JSON reads the same
+    Library json;
+    readCslJson("[{\"type\": \"article-journal\", \"id\": \"WatsonCrick1953\", \"author\": [{\"family\": \"Watson\","
+                " \"given\": \"J. D.\"}, {\"family\": \"Crick\", \"given\": \"F. H. C.\"}], \"issued\": {\"date-parts\":"
+                " [[1953, 4, 25]]}, \"volume\": 171, \"page\": \"737-738\"}]",
+                "test.json", json);
+    const Item* j = json.find("WatsonCrick1953");
+    check(j && w && showNames(j, "author") == showNames(w, "author") && showDate(j, "issued") == showDate(w, "issued") &&
+              field(j, "volume") == field(w, "volume") && field(j, "page") == field(w, "page"),
+          "CSL YAML and CSL-JSON give the same item");
+}
+
+void cslYamlVariants() {
+    std::string text =
+        "- id: list\n"
+        "  type: book\n"
+        "  title: The *Origin* of **Species**, H~2~O and x^2^, [DNA]{.nocase} and [Small Caps]{.smallcaps}\n"
+        "  container-title: '***Both*** and `*code*` & <i>tags</i>'\n"
+        "  URL: https://example.org/a_b_c/*x*\n"
+        "  note: 2 * 3 * 4, snake_case_name and \\*literal\\*\n"
+        "  issued: 2006-06\n"
+        "  accessed: [{year: 2020, month: 1, day: 2}]\n"
+        "  original-date:\n"
+        "    - year: 1859\n"
+        "    - year: 1860\n"
+        "- id: 42\n"
+        "  type: book\n"
+        "  issued: 1999\n"
+        "  author:\n"
+        "  - Doe, Jane\n"
+        "  - literal: World Ink Organization\n"
+        "- id: flags\n"
+        "  type: book\n"
+        "  author:\n"
+        "  - family: van Gogh\n"
+        "    given: Vincent\n"
+        "    parse-names: false\n"
+        "  - family: Smith\n"
+        "    suffix: Jr.\n"
+        "    comma-suffix: true\n"
+        "  issued: {date-parts: [[2020]], circa: true}\n"
+        "  edition: true\n"
+        "- just a string\n"
+        "- id: notype\n";
+    Library a = cslYaml(text);
+    // (equal) keeps std::equal, which two strings would find, out of it
+    (equal)(diagnostics(a),
+            "test.yaml:" + std::to_string(lineOf(text, "just a string")) + ": a reference that is not a mapping\n" +
+                "test.yaml:" + std::to_string(lineOf(text, "id: notype")) + ": @notype has no type; read as a document",
+            "CSL YAML problems with their lines");
+    const Item* list = a.find("list");
+    equal(field(list, "title"),
+          "The <i>Origin</i> of <b>Species</b>, H<sub>2</sub>O and x<sup>2</sup>, <span class=\"nocase\">DNA</span> and "
+          "<span style=\"font-variant:small-caps;\">Small Caps</span>",
+          "pandoc Markdown in a title");
+    equal(field(list, "container-title"), "<b><i>Both</i></b> and *code* &amp; <i>tags</i>",
+          "bold italics, a code span, an ampersand and HTML tags");
+    equal(field(list, "URL"), "https://example.org/a_b_c/*x*", "no Markdown in a URL");
+    equal(field(list, "note"), "2 * 3 * 4, snake_case_name and *literal*",
+          "spaced stars, underscores inside words and escapes stay text");
+    equal(showDate(list, "issued"), "2006-6", "an EDTF date as text");
+    equal(showDate(list, "accessed"), "2020-1-2", "a date as a list of year, month and day");
+    equal(showDate(list, "original-date"), "1859/1860", "a range as two of them");
+    const Item* n = a.find("42");
+    check(n != nullptr, "a number id is a key");
+    equal(showDate(n, "issued"), "1999", "a year as a number");
+    equal(showNames(n, "author"), "Jane|||Doe|; =World Ink Organization", "a name as text, and a literal");
+    const Item* flags = a.find("flags");
+    equal(showNames(flags, "author"), "Vincent|||van Gogh|; |||Smith|Jr.", "parse-names: false keeps the family name whole");
+    const std::vector<Name>* authors = flags ? flags->namesOf("author") : nullptr;
+    check(authors && authors->size() == 2 && (*authors)[1].commaSuffix, "comma-suffix: true");
+    equal(showDate(flags, "issued"), "2020 circa", "circa: true");
+    equal(field(flags, "edition"), "true", "a YAML true in a text field reads as written");
+
+    // A mistake: the references before it count, the one it is in does not
+    std::string broken = "references:\n- id: kept\n  type: book\n- id: cut\n  type: book\n  title: *bad*\n- id: never\n";
+    Library b = cslYaml(broken);
+    equal(diagnostics(b), "test.yaml:6: not valid YAML: aliases (*) are not supported; quote a value that starts with *",
+          "a YAML mistake with its line");
+    check(b.find("kept") && !b.find("cut") && !b.find("never"), "the references before a mistake are read");
+    Library dup = cslYaml("- id: a\n  type: book\n  title: One\n  title: Two\n");
+    equal(diagnostics(dup), "test.yaml:4: not valid YAML: the key `title` appears twice", "a key twice");
+    check(!dup.find("a"), "a reference with a key twice is left out");
+
+    equal(diagnostics(cslYaml("title: x\n")), "test.yaml:1: CSL YAML is a list of references, or a mapping with references:",
+          "a mapping without references:");
+    equal(diagnostics(cslYaml("references: refs.bib\n")), "test.yaml:1: references: holds a list of references",
+          "references: that is no list");
+    Library empty = cslYaml("\xEF\xBB\xBF# nothing yet\nreferences:\n");
+    check(empty.items.empty() && empty.diagnostics.empty(), "an empty references: is no problem");
+    check(cslYaml("").diagnostics.empty(), "an empty file is no problem");
+    Library solo = cslYaml("id: solo\ntype: book\ntitle: Alone\n");
+    equal(field(solo.find("solo"), "title"), "Alone", "one item, not in a list");
+    Library flow = cslYaml("[{id: f1, type: book, title: \"A, B\"}, {id: f2, type: book}]");
+    check(flow.find("f1") && flow.find("f2") && field(flow.find("f1"), "title") == "A, B", "items in flow style");
+}
+
+void frontMatterReferences() {
+    std::string doc = fixture("inline-references.md");
+    Library lib;
+    check(readFrontMatterReferences(doc, "inline-references.md", lib), "the fixture has references:");
+    equal(diagnostics(lib), "", "the fixture's references read without problems");
+    equal((int)lib.items.size(), 3, "three references");
+    const Item* watson = lib.find("WatsonCrick1953");
+    equal(watson ? watson->line : 0, lineOf(doc, "- type: article-journal"), "lines are the document's");
+    equal(lib.find("chen2019") ? lib.find("chen2019")->line : 0, lineOf(doc, "- id: chen2019"), "the third's line");
+    equal(showDate(watson, "issued"), "1953-4-25", "pandoc's example in the fixture");
+    equal(field(lib.find("lima2021"), "title"), "The chemistry of <i>Sepia</i> ink, from the sea to the page",
+          "a Markdown title");
+    equal(field(lib.find("lima2021"), "edition"), "2", "an edition as a number");
+    equal(showDate(lib.find("lima2021"), "issued"), "2021", "a year");
+    const Item* chen = lib.find("chen2019");
+    check(chen && chen->type == "chapter", "a chapter");
+    equal(showNames(chen, "author") + " / " + showNames(chen, "editor"), "Bo|||Chen| / Ana|||Okafor|",
+          "names in flow style");
+    equal(field(chen, "title"), "Why paper drinks: capillary rise in cellulose", "a quoted title with a colon");
+    equal(field(chen, "URL"), "https://example.org/handbook/chen_capillary_rise", "a URL with underscores");
+    equal(showDate(chen, "issued"), "2019-5", "a year and month");
+    size_t body = doc.find("\n# Ink that remembers");
+    check(body != std::string::npos, "the fixture has a body");
+    for (const Item& item : lib.items) {
+        check(doc.find("@" + item.id, body) != std::string::npos, item.id + " is cited in the text");
+    }
+
+    Library none;
+    check(!readFrontMatterReferences("# No front matter\n\n[@a]\n", "x.md", none), "no front matter");
+    check(!readFrontMatterReferences("---\ntitle: x\nbibliography: refs.bib\n---\n", "x.md", none),
+          "front matter without references:");
+    check(!readFrontMatterReferences("---\nnested:\n  references: [x]\n---\n", "x.md", none), "references: under another key");
+    check(!readFrontMatterReferences("---\nreferences:\n- id: x\n", "x.md", none), "front matter never closed");
+    check(none.items.empty() && none.diagnostics.empty(), "nothing read, nothing reported");
+
+    // A mistake elsewhere in the front matter costs no reference; one inside
+    // them is reported on the document's line
+    std::string messy = "---\ntitle: *Bad* YAML\nreferences:\n- id: ok\n  type: book\n- id: broken\n  title: \"open\n"
+                        "author: x\n---\nText [@ok].\n";
+    Library m;
+    check(readFrontMatterReferences(messy, "messy.md", m), "messy front matter has references:");
+    check(m.find("ok") && !m.find("broken"), "the reference before the mistake is read");
+    equal(diagnostics(m), "messy.md:7: not valid YAML: a quoted value is not closed", "the mistake on the document's line");
+
+    Library crlf;
+    readFrontMatterReferences("\xEF\xBB\xBF---\r\ntitle: Windows\r\n\"references\":\r\n- id: crlf\r\n  type: book\r\n"
+                              "  title: Line ends\r\n\r\nlang: en\r\n---\r\n",
+                              "crlf.md", crlf);
+    equal(field(crlf.find("crlf"), "title"), "Line ends", "CRLF, a byte order mark and a quoted key");
+    equal(crlf.find("crlf") ? crlf.find("crlf")->line : 0, 4, "its line");
+    check(crlf.diagnostics.empty(), "no problems: " + diagnostics(crlf));
+
+    // pandoc: inline references take precedence over a bibliography's
+    Library both;
+    readFrontMatterReferences("---\nreferences:\n- id: knuth1984\n  type: book\n  title: Inline wins\n---\n", "doc.md", both);
+    readBibtex(fixture("references.bib"), "references.bib", both);
+    equal(field(both.find("knuth1984"), "title"), "Inline wins", "the inline reference wins");
+    bool reported = false;
+    for (const Diagnostic& d : both.diagnostics) reported |= d.source == "references.bib" && d.message.find("@knuth1984") != std::string::npos;
+    check(reported, "the file's entry is the duplicate");
+}
+
 // --- The library ---------------------------------------------------------
 
 void library() {
@@ -874,10 +1086,12 @@ void library() {
     check(readByExtension("@misc{a, title = {A}}", "refs/main.bib", lib), ".bib is BibTeX");
     check(readByExtension("@misc{b, title = {B}}", "C:\\refs\\Extra.BIBTEX", lib), ".BIBTEX in any case");
     check(readByExtension("[{\"id\": \"c\", \"type\": \"book\"}]", "refs/more.json", lib), ".json is CSL-JSON");
-    check(!readByExtension("- id: d", "refs/refs.yaml", lib), "other extensions are not read");
-    check(!readByExtension("@misc{e}", "refs.v2/noextension", lib), "a dot in a folder is no extension");
-    equal((int)lib.items.size(), 3, "three files read");
-    check(lib.find("a") && lib.find("b") && lib.find("c"), "found by key");
+    check(readByExtension("- id: d\n  type: book\n", "refs/refs.yaml", lib), ".yaml is CSL YAML");
+    check(readByExtension("references:\n- id: e\n  type: book\n", "refs/More.YML", lib), ".YML in any case");
+    check(!readByExtension("TY  - BOOK", "refs/refs.ris", lib), "other extensions are not read");
+    check(!readByExtension("@misc{f}", "refs.v2/noextension", lib), "a dot in a folder is no extension");
+    equal((int)lib.items.size(), 5, "five files read");
+    check(lib.find("a") && lib.find("b") && lib.find("c") && lib.find("d") && lib.find("e"), "found by key");
     equal(lib.find("b") ? lib.find("b")->source : "", "C:\\refs\\Extra.BIBTEX", "an item knows its file");
     check(!lib.find("A"), "keys are exact");
 
@@ -908,8 +1122,8 @@ void robustness() {
     uint32_t seed = 20261103;
     for (int round = 0; round < 4000; ++round) {
         static const char* const starts[] = {"", "@misc{k, title = ", "@article(k, author = {",
-                                             "[{\"id\": \"k\", \"issued\": {\"raw\": \""};
-        std::string text = starts[round % 4];
+                                             "[{\"id\": \"k\", \"issued\": {\"raw\": \"", "---\nreferences:\n- id: k\n  title: "};
+        std::string text = starts[round % 5];
         seed = seed * 1103515245u + 12345u;
         size_t length = (seed >> 16) % 160;
         for (size_t i = 0; i < length; ++i) {
@@ -919,6 +1133,8 @@ void robustness() {
         Library random;
         readBibtex(text, "random.bib", random);
         readCslJson(text, "random.json", random);
+        readCslYaml(text, "random.yaml", random);
+        readFrontMatterReferences(text + "\n---\n", "random.md", random);
         latexToRich(text);
         parseBibtexNames(text);
         Date d;
@@ -939,6 +1155,9 @@ int main() {
     brokenFixture();
     cslJsonFixture();
     cslJsonVariants();
+    cslYamlManual();
+    cslYamlVariants();
+    frontMatterReferences();
     library();
     robustness();
     if (failures) {
