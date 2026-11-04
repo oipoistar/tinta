@@ -93,7 +93,15 @@ std::string baseSheet(const D2DTheme& t) {
 
 struct State {
     css::Engine engine;
-    std::shared_ptr<const css::Sheet> sheet, base;
+    std::shared_ptr<const css::Sheet> sheet, base, local;  // local: the folder's tinta.css
+    // The folder sheet last found: for which folder, when it was looked
+    // for, and the file's time as read
+    struct Folder {
+        std::wstring folder, path;
+        FILETIME time{};
+        std::shared_ptr<const css::Sheet> sheet;
+        unsigned long long checked = 0;
+    } folder;
     std::string baseText;
     css::Media media;
     bool active = false;
@@ -410,9 +418,102 @@ bool describe(const Element& e, css::Element& d) {
     return true;
 }
 
+std::wstring folderSheetOf(App& app, const std::string& document) {
+    if (document.empty()) return {};
+    if (!app.pageState) app.pageState = std::make_shared<State>();
+    State::Folder& f = app.pageState->folder;
+    std::wstring folder = wide(document);
+    const size_t slash = folder.find_last_of(L"\\/");
+    if (slash == std::wstring::npos) return {};
+    folder.resize(slash);
+    // The folders are walked again after two seconds; the file found is
+    // looked at every time, so a save restyles at once
+    const unsigned long long now = GetTickCount64();
+    std::wstring found = f.path;
+    if (folder != f.folder || now - f.checked >= 2000) {
+        f.folder = folder;
+        f.checked = now;
+        found.clear();
+        for (std::wstring dir = folder; !dir.empty();) {
+            const std::wstring candidate = dir + L"\\tinta.css";
+            const DWORD attributes = GetFileAttributesW(candidate.c_str());
+            if (attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                found = candidate;
+                break;
+            }
+            const size_t up = dir.find_last_of(L"\\/");
+            if (up == std::wstring::npos || up < 3) break;  // past the drive's root
+            dir.resize(up);
+        }
+    }
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (found.empty() || !GetFileAttributesExW(found.c_str(), GetFileExInfoStandard, &data)) {
+        f.path.clear();
+        f.sheet.reset();
+        return {};
+    }
+    if (found != f.path || CompareFileTime(&data.ftLastWriteTime, &f.time) != 0 || !f.sheet) {
+        std::string text;
+        if (FILE* in = _wfopen(found.c_str(), L"rb")) {
+            char buf[4096];
+            for (size_t n; (n = fread(buf, 1, sizeof buf, in)) > 0;) text.append(buf, n);
+            fclose(in);
+        }
+        if (text.compare(0, 3, "\xEF\xBB\xBF") == 0) text.erase(0, 3);
+        auto narrow = [](const std::wstring& w) {
+            const int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+            std::string out((size_t)(n > 0 ? n : 0), ' ');
+            WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), out.data(), n, nullptr, nullptr);
+            return out;
+        };
+        // Its @imports are files beside it
+        const css::ImportSource imports = [&](std::string_view name, std::string_view from, std::string& out,
+                                              std::string& file) {
+            std::wstring base = wide(std::string(from));
+            const size_t cut = base.find_last_of(L"\\/");
+            const std::wstring path = (cut == std::wstring::npos ? std::wstring() : base.substr(0, cut + 1)) +
+                                      wide(std::string(name));
+            FILE* in = _wfopen(path.c_str(), L"rb");
+            if (!in) return false;
+            char buf[4096];
+            out.clear();
+            for (size_t n; (n = fread(buf, 1, sizeof buf, in)) > 0;) out.append(buf, n);
+            fclose(in);
+            file = narrow(path);
+            return true;
+        };
+        std::vector<css::Diagnostic> problems;
+        f.sheet = css::parse(text, narrow(found), css::Origin::Folder, imports, problems);
+        f.path = found;
+        f.time = data.ftLastWriteTime;
+    }
+    return f.path;
+}
+
+bool folderSheetOff(const App& app) {
+    return std::find(app.folderSheetOff.begin(), app.folderSheetOff.end(), app.currentFile) != app.folderSheetOff.end();
+}
+
+void setFolderSheetOff(App& app, bool off) {
+    auto& list = app.folderSheetOff;
+    list.erase(std::remove(list.begin(), list.end(), app.currentFile), list.end());
+    if (off) list.push_back(app.currentFile);
+    app.layoutDirty = true;
+}
+
+std::string folderSheetCss(App& app) {
+    if (app.folderSheetPath.empty() || folderSheetOff(app) || !app.pageState || !app.pageState->folder.sheet) return {};
+    return css::serialize(*app.pageState->folder.sheet);
+}
+
 void begin(App& app, float width) {
     std::shared_ptr<const css::Sheet> sheet = themeSheet(app.currentThemeIndex);
-    if (!sheet) {
+    // The document's folder sheet, unless turned off for it (the page's chip says which)
+    app.folderSheetPath = folderSheetOf(app, app.currentFile);
+    std::shared_ptr<const css::Sheet> local;
+    if (!app.folderSheetPath.empty() && !folderSheetOff(app)) local = app.pageState->folder.sheet;
+    if (!sheet && !local) {
+        app.pageBackground.reset();
         if (app.pageState) {
             app.pageState->active = false;
             app.pageState->depth = 0;
@@ -423,19 +524,23 @@ void begin(App& app, float width) {
     State& s = *app.pageState;
     css::Media media{app.theme.isDark, app.printLayout, width};
     std::string base = baseSheet(app.theme);
-    if (sheet != s.sheet || base != s.baseText) {
+    if (sheet != s.sheet || local != s.local || base != s.baseText) {
         std::vector<css::Diagnostic> ignored;
         s.base = css::parse(base, "base", css::Origin::Base, nullptr, ignored);
         s.baseText = std::move(base);
         s.sheet = sheet;
-        s.engine.load({s.base, s.sheet}, media);
+        s.local = local;
+        std::vector<std::shared_ptr<const css::Sheet>> sheets{s.base};
+        if (s.sheet) sheets.push_back(s.sheet);
+        if (s.local) sheets.push_back(s.local);
+        s.engine.load(sheets, media);
         s.media = media;
     } else if (media.dark != s.media.dark || media.print != s.media.print || media.width != s.media.width) {
         s.engine.setMedia(media);
         s.media = media;
     }
     s.active = true;
-    s.colors = !app.printLayout || css::mentionsPrint(*sheet);
+    s.colors = !app.printLayout || (sheet && css::mentionsPrint(*sheet)) || (local && css::mentionsPrint(*local));
     s.gap = 0;
     s.depth = 0;
     s.counters.clear();
@@ -470,6 +575,15 @@ void begin(App& app, float width) {
     Frame& page = s.push(app.root.get());
     page.style = s.styleOf(s.engine.child(rootStyle.context, bodyElement), &rootStyle);
     page.self = bodyElement;
+    // The page's background, when a sheet sets the body's or the root's
+    app.pageBackground.reset();
+    if (!app.printLayout) {
+        if (page.style.has(Prop::BackgroundColor) && page.style->backgroundColor.a > 0) {
+            app.pageBackground = color(page.style->backgroundColor);
+        } else if (rootStyle.has(Prop::BackgroundColor) && rootStyle->backgroundColor.a > 0) {
+            app.pageBackground = color(rootStyle->backgroundColor);
+        }
+    }
 }
 
 bool active(const App& app) { return state(app) != nullptr; }

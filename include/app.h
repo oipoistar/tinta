@@ -578,6 +578,13 @@ struct App {
     std::shared_ptr<page::State> pageState;
     // The CSS inspector's card (inspector.h)
     std::shared_ptr<InspectorCard> inspector;
+    // A folder's own sheet (docs/specs/theming.md): the tinta.css styling
+    // the document, empty when none does; the documents it is turned off
+    // for, by path; and the page's background when a sheet sets the body's
+    std::wstring folderSheetPath;
+    FILETIME folderSheetTime{};  // as the file timer last saw it
+    std::vector<std::string> folderSheetOff;
+    std::optional<D2D1_COLOR_F> pageBackground;
 
     // Folder browser text format
     IDWriteTextFormat* folderBrowserFormat = nullptr;

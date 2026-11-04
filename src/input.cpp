@@ -32,6 +32,7 @@
 #include "selection.h"
 #include "css.h"
 #include "inspector.h"
+#include "page_style.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -3867,6 +3868,12 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
 
 void followDocumentLink(App& app, HWND hwnd, const std::string& url) {
     if (url.empty()) return;
+    // The page's tinta.css chip turns the folder sheet off for this document, or on
+    if (url == "tinta:folder-sheet") {
+        page::setFolderSheetOff(app, !page::folderSheetOff(app));
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
     if (url.rfind("wiki:", 0) == 0) {
         if (!app.editMode) {
             std::string fromPath = app.currentFile;
@@ -5010,6 +5017,18 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
         if (app.editMode) editorReparse(app);
         else app.lastFileWriteTime = {};
         InvalidateRect(hwnd, nullptr, FALSE);
+    }
+    // A folder's tinta.css restyles its documents when it is saved
+    if (!app.folderSheetPath.empty()) {
+        WIN32_FILE_ATTRIBUTE_DATA data{};
+        if (GetFileAttributesExW(app.folderSheetPath.c_str(), GetFileExInfoStandard, &data) &&
+            CompareFileTime(&data.ftLastWriteTime, &app.folderSheetTime) != 0) {
+            if (app.folderSheetTime.dwLowDateTime || app.folderSheetTime.dwHighDateTime) {
+                app.layoutDirty = true;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            app.folderSheetTime = data.ftLastWriteTime;
+        }
     }
     // A CSS theme follows its file as documents do (docs/specs/theming.md)
     if (themeReloadIfChanged(app.currentThemeIndex)) {

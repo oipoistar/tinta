@@ -224,8 +224,8 @@ void render(App& app) {
         goto render_document;
     }
 
-    // Clear background
-    app.renderTarget->Clear(app.theme.background);
+    // Clear background: a CSS sheet's body background, else the theme's
+    app.renderTarget->Clear(app.pageBackground.value_or(app.theme.background));
     app.drawCalls++;
 
     // Folder browser open: the document shifts right in sync with the

@@ -4630,6 +4630,34 @@ bool layoutBegin(App& app) {
     // starts there too (#245). Paper has no strip: the first page
     // starts at its top margin (#257).
     app.layoutCursorY = app.printLayout ? 0.0f : documentContentTop(app);
+    // A folder's tinta.css styling the page says so, at the top right, and
+    // a click turns it off for this document or on again
+    if (!app.folderSheetPath.empty() && !app.printLayout && app.folderBrowserFormat) {
+        const bool off = page::folderSheetOff(app);
+        const std::wstring label = off ? tr(app, "page.folder_sheet_off") : tr(app, "page.folder_sheet_on");
+        LayoutInfo info = createLayout(app, label, app.folderBrowserFormat, 20.0f * scale, nullptr);
+        if (info.layout) {
+            const float padX = 8.0f * app.contentScale, h = 22.0f * app.contentScale;
+            const float right = app.layoutIndent + app.layoutMaxWidth;
+            const float left = right - info.width - padX * 2;
+            const float top = app.layoutCursorY + 6.0f * scale;
+            App::LayoutRect chip;
+            chip.rect = D2D1::RectF(left, top, right, top + h);
+            chip.color = app.theme.codeBackground;
+            chip.radius = h / 2;
+            app.layoutRects.push_back(chip);
+            D2D1_COLOR_F ink = off ? app.theme.text : app.theme.accent;
+            if (off) ink.a = 0.6f;
+            const float textTop = top + (h - info.height) / 2;
+            addTextRun(app, std::move(info), D2D1::Point2F(left + padX, textTop),
+                       D2D1::RectF(left + padX, textTop, right - padX, top + h), ink, 0, 0, false);
+            App::LinkRect link;
+            link.bounds = chip.rect;
+            link.url = "tinta:folder-sheet";
+            app.linkRects.push_back(link);
+            app.layoutCursorY = top + h + 4.0f * scale;
+        }
+    }
     app.layoutNextBlock = 0;
     app.layoutComplete = false;
     app.contentWidth = layoutWidth;

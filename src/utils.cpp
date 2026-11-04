@@ -4,6 +4,7 @@
 #include "render.h"
 #include "i18n.h"
 #include "signals.h"
+#include "page_style.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -215,6 +216,13 @@ bool scrollToHeadingId(App& app, const std::string& id) {
 
 void handleLinkClick(App& app) {
     if (app.hoveredLink.empty()) return;
+    // The page's tinta.css chip turns the folder sheet off for this
+    // document, or on again (page_style.h)
+    if (app.hoveredLink == "tinta:folder-sheet") {
+        page::setFolderSheetOff(app, !page::folderSheetOff(app));
+        if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
+        return;
+    }
     if (app.hoveredLink[0] == '#') {
         if (scrollToHeadingId(app, qmd::decodeLinkComponent(app.hoveredLink.substr(1))) && app.editMode) {
             // The next frame follows the source pane. Move it with the

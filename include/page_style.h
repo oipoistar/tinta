@@ -41,9 +41,18 @@ struct Style {
     const css::ComputedStyle& operator*() const { return *computed; }
 };
 
-// Readies the theme's sheet for a layout of the page, `width` the reading
-// area's width in CSS pixels for (min-width) and (max-width)
+// Readies the theme's sheet, and the document's folder sheet, for a layout
+// of the page, `width` the reading area's width in CSS pixels for
+// (min-width) and (max-width)
 void begin(App& app, float width);
+// The folder sheet styling a document: tinta.css in its folder or a
+// parent, empty when there is none; looked up again after two seconds
+std::wstring folderSheetOf(App& app, const std::string& document);
+// The folder sheet as CSS, for the HTML export; empty when none applies
+std::string folderSheetCss(App& app);
+// Whether the folder sheet is turned off for the open document, and turns it on or off
+bool folderSheetOff(const App& app);
+void setFolderSheetOff(App& app, bool off);
 // A CSS theme styles this layout
 bool active(const App& app);
 // The style of the block being laid out (empty without a CSS theme)

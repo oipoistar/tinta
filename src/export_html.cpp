@@ -6,6 +6,7 @@
 
 #include "export.h"
 #include "css.h"
+#include "page_style.h"
 #include "font_faces.h"
 
 #include "editor.h"
@@ -1719,6 +1720,10 @@ bool exportHtmlFile(App& app, const std::wstring& path) {
     // and what Tinta leaves to it (docs/specs/theming.md)
     if (std::string sheet = themeSheetCss(app.currentThemeIndex); !sheet.empty()) {
         ctx.out += "<style>\n" + sheet + "</style>\n";
+    }
+    // and the folder's tinta.css after it, as on screen
+    if (std::string local = page::folderSheetCss(app); !local.empty()) {
+        ctx.out += "<style>\n" + local + "</style>\n";
     }
     // Its @font-face files go beside the page, in a folder named for it,
     // and faces declared after the sheet's own point a browser there

@@ -121,6 +121,16 @@ theme's alone. The HTML export copies the files beside the page.
 body { font-family: "Literata", Georgia, serif }
 ```
 
+## A folder's own sheet
+
+A `tinta.css` in a document's folder, or in a folder above it, styles
+that folder's documents on top of the theme in use, whichever it is,
+built-in themes included: a project's fonts, spacing or heading colours.
+A chip at the top of the page says **Styled by tinta.css**; a click on it
+turns the sheet off for that document, and another turns it on again, so
+a folder from elsewhere cannot restyle what you read without saying so.
+Saving the sheet restyles the page, and the HTML export carries it.
+
 ## The inspector
 
 With a CSS theme in use, **Ctrl+Alt+click** anything on the page: a card

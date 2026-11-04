@@ -14,6 +14,7 @@
 #include "input.h"
 #include "inspector.h"
 #include "overlays.h"
+#include "page_style.h"
 #include "render.h"
 #include "utils.h"
 
@@ -424,6 +425,55 @@ void inspecting(App& app, const fs::path& dir) {
     applyTheme(app, 0);
     check(!inspectorOpen(app, x, y), "without a CSS theme there is nothing to inspect");
 }
+
+// A folder's own tinta.css styles the documents under it, under a built-in
+// theme too; the page's chip says so, and a click on it turns the sheet off
+// for that document and on again; the HTML export carries it
+void folderSheets(App& app, const fs::path& dir) {
+    const fs::path project = dir / "project";
+    const fs::path notes = project / "notes";
+    fs::create_directories(notes);
+    { std::ofstream(project / "tinta.css", std::ios::binary) << "h1 { color: #ff00ff; }\nbody { background: #fafaf0; }\n"; }
+    const std::string text = "# A note\n\nIts text.\n";
+    { std::ofstream(notes / "note.md", std::ios::binary) << text; }
+    applyTheme(app, 0);
+    const std::string before = app.currentFile;
+    app.currentFile = toUtf8((notes / "note.md").wstring());
+    app.root = parseDocument(app.parser, text, (notes / "note.md").wstring()).root;
+    app.scrollY = app.targetScrollY = 0;
+    layoutDocument(app);
+    check(app.folderSheetPath == (project / "tinta.css").wstring(), "the tinta.css a folder up styles the note");
+    const auto* title = runOf(app, L"A note");
+    check(title && sameColor(title->color, 0xFF00FF), "its h1 rule colours the heading under a built-in theme");
+    check(app.pageBackground && sameColor(*app.pageBackground, 0xFAFAF0), "and its body rule the page");
+    bool chip = false;
+    for (const auto& link : app.linkRects) chip = chip || link.url == "tinta:folder-sheet";
+    check(chip, "a chip at the top of the page says it does");
+    check(saveFramePreview(app, dir / "folder-sheet.png"), "saved folder-sheet.png");
+    check(exportHtmlFile(app, (dir / "folder.html").wstring()), "the HTML export succeeds");
+    {
+        std::ifstream page(dir / "folder.html", std::ios::binary);
+        const std::string html((std::istreambuf_iterator<char>(page)), std::istreambuf_iterator<char>());
+        check(html.find("#ff00ff") != std::string::npos, "and carries the folder's sheet");
+    }
+    app.hoveredLink = "tinta:folder-sheet";
+    handleLinkClick(app);
+    layoutDocument(app);
+    title = runOf(app, L"A note");
+    check(page::folderSheetOff(app) && title && !sameColor(title->color, 0xFF00FF) && !app.pageBackground,
+          "a click on the chip turns the sheet off for the note");
+    chip = false;
+    for (const auto& link : app.linkRects) chip = chip || link.url == "tinta:folder-sheet";
+    check(chip, "and the chip stays, to turn it on again");
+    handleLinkClick(app);
+    layoutDocument(app);
+    title = runOf(app, L"A note");
+    check(!page::folderSheetOff(app) && title && sameColor(title->color, 0xFF00FF), "a second click turns it on again");
+    app.hoveredLink.clear();
+    app.currentFile = before;
+    std::error_code ignored;
+    fs::remove_all(project, ignored);
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -446,6 +496,7 @@ int testPageStyles(App&, const fs::path& dir) {
     importing(app, dir);
     settingsPreview(app, dir);
     inspecting(app, dir);
+    folderSheets(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;
