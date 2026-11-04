@@ -1,6 +1,6 @@
 ---
 title: "Scholar: write the paper"
-status: Phase 1 built (2026-11-04); phases 2 and 3 to come
+status: Phase 1 built (2026-11-04); phase 2's writing aids built (2026-11-04), its other parts and phase 3 to come
 created: 2026-11-03
 ---
 
@@ -13,7 +13,9 @@ builds unchanged with pandoc and the reverse.
 
 Status: phase 1 is built: citations, references, numbered figures, tables
 and equations, hover cards, and the exports (see [Phases](#phases) and
-`tests/scholar-validation.md`).
+`tests/scholar-validation.md`). From phase 2, the writing aids are built:
+completion in Live and Source, the Cite button and Zotero's picker
+(`tests/citation-completion-validation.md`).
 
 ## Why
 
@@ -190,7 +192,8 @@ Nothing fails silently and nothing blocks reading:
 - Typing `[@` or `@` (in a document with a bibliography) opens a completion
   list of keys, filtered by key, author, year and title as you type; Enter
   inserts the key. Typing `@fig:` lists the figure ids in the document.
-  (Phase 2.)
+  (Phase 2, built: `@tbl:`, `@eq:` and `@sec:` list theirs too, and the
+  rail's Cite button opens Zotero's picker, or types `[@` without it.)
 
 ### Following changes
 
@@ -243,6 +246,7 @@ From front matter: `title`, `subtitle`, `author` (a list, each with
 | `include/csl.h`, `src/csl.cpp` (+ `csl_*.cpp`) | CSL styles and locales, and the processor | `bib.h`, `cite.h`, `xml.h` |
 | `src/scholar.cpp`, `include/scholar.h` | the document side: loading libraries and styles per document, caching, collecting citations and cross-references from the parsed document, giving layout and exports their text | everything above, `markdown.h`, `frontmatter.h` |
 | `tools/csl_pack.cpp` | build-time: strips `<info>`, comments and indentation from the bundled styles and locales and compresses them | |
+| `include/zotero.h`, `src/zotero.cpp` | phase 2: Better BibTeX's Cite As You Write picker, probed and asked over WinHTTP on a worker thread | |
 
 The first five are plain C++ with no Windows calls, tested as console
 programs. Only `scholar.cpp` knows Tinta's document and settings.
@@ -408,7 +412,8 @@ the Windows compression API (XPRESS Huffman); the results are RCDATA in
    for its picker, and its auto-exported `.bib`/`.json` followed live);
    note styles (Chicago notes-bibliography: citations become footnotes);
    inline `references:` in front matter; section numbers and `@sec:`; a
-   "Cite" button on the tool rail.
+   "Cite" button on the tool rail. Built: the completion (with `@sec:`
+   ids listed), the picker and the Cite button; the rest to come.
 3. **Paper export**: title block, authors and affiliations, abstract,
    two-column PDF, running heads and page numbers, Word paper styles.
 

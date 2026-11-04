@@ -48,6 +48,33 @@ addresses never become citations. Neither does a key the library does not
 hold, outside brackets. In brackets, an unknown key is reported, and so is
 an unreadable library or style: a notice names the file and the line.
 
+## Citing as you type
+
+In Live and in Source, typing `[@`, or an `@` at the start of a word, opens
+a list of the bibliography's keys under the caret. Each row is a key and
+the work it names: the first author (both of two, "et al." for more), the
+year and the title. Typing narrows the list by the key, an author's name
+(`muller` finds Müller), the year or a word of the title, the best matches
+first. The arrow keys or the mouse choose, Enter or Tab puts the key in,
+with the `]` a `[@` still needs, and Esc closes the list and keeps what was
+typed. An e-mail address, an `@` inside a word and code open nothing, and
+neither does an `@` in a document that names no bibliography.
+
+`@fig:`, `@tbl:`, `@eq:` and `@sec:` list the document's own figures,
+tables, equations and sections, in any document: the ids their `{#fig:id}`
+attributes and `\label{eq:id}` give them, each with its caption or heading.
+
+## Zotero
+
+The **Cite** button on the edit rail, **@**, opens Zotero's own citation
+picker when Zotero runs with the [Better BibTeX](https://retorque.re/zotero-better-bibtex/)
+add-on, and puts the citation picked, such as `[@doe2024; @smith2020]`, at
+the caret of the document that asked, even if another tab came to the front
+meanwhile. Cancelling the picker changes nothing. Without Zotero the button
+types `[@` and opens the list above. Better BibTeX can also keep a `.bib`
+file exported as the library changes: name that file as the bibliography
+and open documents follow it.
+
 ## Figures, tables and equations
 
 ```markdown
@@ -87,6 +114,7 @@ As @fig:nib shows, and [@tbl:density; @eq:energy] confirm...
 
 Try the [paper](../tests/fixtures/scholar/paper.md), its
 [Chinese companion](../tests/fixtures/scholar/paper-zh.md), the
-[citation syntax](../tests/fixtures/scholar/citation-syntax.md) and the
-[numbered figures](../tests/fixtures/scholar/crossref.md). The design is in
-[docs/specs/scholar.md](specs/scholar.md).
+[citation syntax](../tests/fixtures/scholar/citation-syntax.md), the
+[numbered figures](../tests/fixtures/scholar/crossref.md) and
+[citing as you type](../tests/fixtures/scholar/completion.md). The design
+is in [docs/specs/scholar.md](specs/scholar.md).
