@@ -37,6 +37,12 @@ slow for reasons [see @brooks1995, pp. 33-35; also @smith2020, chap. 1].
   `nocite: '@*'` lists every work in the library; `link-citations: false`
   keeps citations from being links.
 
+A note style (`class="note"` in its CSL file, as Chicago's notes and
+bibliography style is) turns each citation in the text into a footnote of
+its own, numbered with the document's own footnotes; its mark follows the
+word and the punctuation after it, and a citation inside a footnote stays
+in its sentence. Repeated works take the style's short form or Ibid.
+
 A citation reads as the style formats it, in the link colour. Click it to
 go to its reference, and Back to return; rest the pointer on it to read the
 whole reference. The references follow the document's last section, before

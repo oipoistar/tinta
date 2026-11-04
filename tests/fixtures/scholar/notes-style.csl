@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A small note style for Tinta's tests: Chicago-like footnotes, with
+     Ibid. and short forms for citations seen before -->
+<style xmlns="http://purl.org/net/xbiblio/csl" class="note" version="1.0" default-locale="en-US">
+  <info>
+    <title>Tinta test notes</title>
+    <id>tinta-test-notes</id>
+    <updated>2026-11-04T00:00:00+00:00</updated>
+  </info>
+  <citation>
+    <layout suffix="." delimiter="; ">
+      <choose>
+        <if position="ibid-with-locator">
+          <group delimiter=", ">
+            <text value="Ibid"/>
+            <text variable="locator"/>
+          </group>
+        </if>
+        <else-if position="ibid">
+          <text value="Ibid"/>
+        </else-if>
+        <else-if position="subsequent">
+          <group delimiter=", ">
+            <names variable="author"><name form="short"/></names>
+            <text variable="title" form="short" font-style="italic"/>
+            <text variable="locator"/>
+          </group>
+        </else-if>
+        <else>
+          <group delimiter=", ">
+            <names variable="author"><name/></names>
+            <text variable="title" font-style="italic"/>
+            <date variable="issued"><date-part name="year"/></date>
+            <text variable="locator"/>
+          </group>
+        </else>
+      </choose>
+    </layout>
+  </citation>
+  <bibliography>
+    <sort>
+      <key variable="author"/>
+    </sort>
+    <layout suffix=".">
+      <group delimiter=". ">
+        <names variable="author"><name name-as-sort-order="first"/></names>
+        <text variable="title" font-style="italic"/>
+        <date variable="issued"><date-part name="year"/></date>
+      </group>
+    </layout>
+  </bibliography>
+</style>

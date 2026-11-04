@@ -282,6 +282,64 @@ void sections(const fs::path& fixtures) {
     for (const auto& block : loose.root->children)
         if (block->type == ElementType::Heading) check(plain(block).find("1") == std::string::npos, "and nothing is numbered");
 }
+void notes(const fs::path& fixtures) {
+    auto result = parse(fixtures / "notes.md");
+    for (const auto& problem : result.problems) check(false, "notes.md has no problems: " + problem);
+    // The marks in the text, in order: the written note keeps one number
+    std::vector<int> marks;
+    std::function<void(const ElementPtr&)> walk = [&](const ElementPtr& e) {
+        if (e->type == ElementType::Footnotes) return;
+        if (e->type == ElementType::FootnoteReference) marks.push_back(e->level);
+        for (const auto& c : e->children) walk(c);
+    };
+    walk(result.root);
+    check(marks == std::vector<int>({1, 2, 3, 4, 5, 6, 1, 7}),
+          "citations become notes 2 to 6 between the written notes 1 and 7");
+    int inText = 0;
+    for (const auto& c : all(result.root, ElementType::Citation)) {
+        bool inNote = false;
+        for (const qmd::Element* up = c->parent; up; up = up->parent) inNote |= up->type == ElementType::FootnoteDefinition;
+        if (!inNote) ++inText;
+        else check(contains(plain(c), "Smith"), "a citation inside a note stays in its sentence: " + plain(c));
+    }
+    check(inText == 0, "no citation is left in the text");
+    // Marks sit against the word, after the punctuation that follows
+    std::string body;
+    std::function<void(const ElementPtr&)> read = [&](const ElementPtr& e) {
+        if (e->type == ElementType::Footnotes) return;
+        if (e->type == ElementType::FootnoteReference) { body += "^" + std::to_string(e->level); return; }
+        if (e->type == ElementType::Text) body += e->text;
+        if (e->type == ElementType::SoftBreak) body += " ";
+        for (const auto& c : e->children) read(c);
+    };
+    read(result.root);
+    check(contains(body, "it first,^2 and said it again.^3 Doe disagreed.^4"),
+          "a note's mark follows the word and its punctuation: " + body.substr(0, 400));
+    auto smith = all(result.root, ElementType::Citation);
+    check(!smith.empty() && smith[0]->parent && contains(plain(smith[0]), "2020.") &&
+              !contains(plain(all(result.root, ElementType::FootnoteDefinition).back()), ".."),
+          "a citation's own period takes the place of the sentence's");
+    auto defs = all(result.root, ElementType::FootnoteDefinition);
+    check(defs.size() == 7, "seven notes, got " + std::to_string(defs.size()));
+    for (size_t i = 0; i < defs.size(); ++i) {
+        check(defs[i]->level == (int)i + 1 && defs[i]->url == "tinta-fn-" + std::to_string(i + 1),
+              "the notes are listed in order, each where its marks lead");
+    }
+    if (defs.size() == 7) {
+        const std::string second = plain(defs[1]);
+        check(contains(second, "Knuth") && contains(second, "Literate Programming") && contains(second, "4"),
+              "the first citation's note gives the work in full, with its page: " + second);
+        check(contains(plain(defs[0]), "A note the author wrote"), "the written note keeps its text");
+        auto back = all(defs[0], ElementType::FootnoteBacklink);
+        check(back.size() == 2 && back[0]->url == "#tinta-fnref-1-1" && back[1]->url == "#tinta-fnref-1-2",
+              "and leads back to both its marks");
+        check(contains(plain(defs[6]), "stays in its sentence"), "the second written note is the last");
+    }
+    ElementPtr list = bibliographyOf(result.root);
+    check(list && listsKey(list, "knuth1984") && listsKey(list, "doe2024") && listsKey(list, "brooks1995") &&
+              listsKey(list, "smith2020"),
+          "a note style keeps its bibliography");
+}
 }  // namespace
 
 int main() {
@@ -292,6 +350,7 @@ int main() {
     citationsInChinese(fixtures);
     citationsWithout(fixtures);
     sections(fixtures);
+    notes(fixtures);
     std::cout << "Scholar: " << failures << " failures\n";
     return failures ? 1 : 0;
 }

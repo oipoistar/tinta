@@ -14,10 +14,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <sstream>
 
 namespace scholar {
@@ -336,6 +339,192 @@ void collect(const ElementPtr& elem, ElementType type, std::vector<ElementPtr>& 
     for (const auto& child : elem->children) collect(child, type, out);
 }
 
+// Citations as a reader meets them: the text in order, and each footnote's
+// at its first mark rather than where the notes are listed
+void inReadingOrder(const ElementPtr& root, std::vector<ElementPtr>& out) {
+    std::map<int, ElementPtr> notes;
+    for (const auto& block : root->children) {
+        if (block->type != ElementType::Footnotes) continue;
+        for (const auto& note : block->children)
+            if (note->type == ElementType::FootnoteDefinition) notes[note->level] = note;
+    }
+    std::set<int> visited;
+    std::function<void(const ElementPtr&)> walk = [&](const ElementPtr& e) {
+        if (e->type == ElementType::Footnotes) return;
+        if (e->type == ElementType::Citation) {
+            out.push_back(e);
+            return;
+        }
+        if (e->type == ElementType::FootnoteReference && visited.insert(e->level).second) {
+            auto note = notes.find(e->level);
+            if (note != notes.end()) {
+                for (const auto& child : note->second->children) walk(child);
+            }
+        }
+        for (const auto& child : e->children) walk(child);
+    };
+    walk(root);
+}
+
+bool insideNote(const Element* e) {
+    for (; e; e = e->parent)
+        if (e->type == ElementType::FootnoteDefinition) return true;
+    return false;
+}
+
+// The text just before and just after an element among its siblings, if
+// those are text
+ElementPtr textBefore(const Element* e) {
+    if (!e->parent) return nullptr;
+    const auto& kids = e->parent->children;
+    for (size_t i = 1; i < kids.size(); ++i)
+        if (kids[i].get() == e) return kids[i - 1]->type == ElementType::Text ? kids[i - 1] : nullptr;
+    return nullptr;
+}
+ElementPtr textAfter(const Element* e) {
+    if (!e->parent) return nullptr;
+    const auto& kids = e->parent->children;
+    for (size_t i = 0; i + 1 < kids.size(); ++i)
+        if (kids[i].get() == e) return kids[i + 1]->type == ElementType::Text ? kids[i + 1] : nullptr;
+    return nullptr;
+}
+
+// A note's mark sits against the word before it and after the punctuation
+// that follows (pandoc's notes-after-punctuation): "first [@key]." reads
+// "first.1"
+void placeMark(const ElementPtr& mark) {
+    ElementPtr before = textBefore(mark.get());
+    if (before) {
+        while (!before->text.empty() && before->text.back() == ' ') before->text.pop_back();
+    }
+    ElementPtr after = textAfter(mark.get());
+    size_t take = 0;
+    while (after && take < after->text.size() && std::strchr(".,;:!?", after->text[take])) ++take;
+    if (!take || !before) return;
+    before->text += after->text.substr(0, take);
+    after->text.erase(0, take);
+}
+
+// A citation that ends with a period does not take the sentence's own:
+// "(2020.)." reads "(2020.)" as pandoc reads it
+void collapsePeriod(const ElementPtr& citation) {
+    std::string tail;
+    std::function<void(const ElementPtr&)> last = [&](const ElementPtr& e) {
+        if (e->type == ElementType::Text && !e->text.empty()) tail = e->text;
+        for (const auto& c : e->children) last(c);
+    };
+    last(citation);
+    if (tail.empty() || tail.back() != '.') return;
+    ElementPtr after = textAfter(citation.get());
+    if (after && !after->text.empty() && after->text[0] == '.') after->text.erase(0, 1);
+}
+
+// The paragraph under a note that leads back to its marks, as footnotes.cpp
+// writes it
+ElementPtr backlinks(Element* note, int number, int marks) {
+    auto back = std::make_shared<Element>(ElementType::Paragraph);
+    back->parent = note;
+    back->language = "footnote-backlinks";
+    if (marks > 1) back->children.push_back(text("Back to references: ", back.get()));
+    for (int r = 1; r <= marks; ++r) {
+        if (r > 1) back->children.push_back(text(", ", back.get()));
+        auto link = std::make_shared<Element>(ElementType::FootnoteBacklink);
+        link->parent = back.get();
+        link->url = "#tinta-fnref-" + std::to_string(number) + "-" + std::to_string(r);
+        link->children.push_back(text(marks == 1 ? "Back to reference" : std::to_string(r), link.get()));
+        back->children.push_back(link);
+    }
+    return back;
+}
+
+// A note style's citations in the text become footnotes: one footnote each,
+// numbered with the document's own footnotes in the order their marks come.
+// The notes the document wrote keep their text and backlinks, renumbered
+void intoNotes(const ElementPtr& root, const std::vector<ElementPtr>& cited, const std::vector<csl::Rich>& texts,
+               bool links) {
+    std::map<const Element*, size_t> citationAt;
+    for (size_t i = 0; i < cited.size() && i < texts.size(); ++i)
+        if (!insideNote(cited[i].get())) citationAt[cited[i].get()] = i;
+    if (citationAt.empty()) return;
+    ElementPtr section;
+    std::map<int, ElementPtr> written;  // the document's notes by their old number
+    for (const auto& block : root->children) {
+        if (block->type != ElementType::Footnotes) continue;
+        section = block;
+        for (const auto& note : block->children)
+            if (note->type == ElementType::FootnoteDefinition) written[note->level] = note;
+    }
+    // Number every mark in the text in order: a written note keeps one
+    // number for all its marks, each citation gets its own
+    std::map<int, int> renumbered;   // old note number -> new
+    std::map<int, int> marks;        // new note number -> marks so far
+    std::vector<std::pair<int, ElementPtr>> notes;  // new number -> definition
+    int next = 0;
+    std::function<void(const ElementPtr&)> walk = [&](const ElementPtr& e) {
+        if (e->type == ElementType::Footnotes) return;
+        if (e->type == ElementType::FootnoteReference) {
+            auto known = renumbered.find(e->level);
+            const int n = known != renumbered.end() ? known->second : (renumbered[e->level] = ++next);
+            const int mark = ++marks[n];
+            if (known == renumbered.end()) {
+                auto note = written.find(e->level);
+                if (note != written.end()) notes.push_back({n, note->second});
+            }
+            e->level = n;
+            e->url = "#tinta-fn-" + std::to_string(n);
+            e->title = "tinta-fnref-" + std::to_string(n) + "-" + std::to_string(mark);
+            e->children = {text(std::to_string(n), e.get())};
+            return;
+        }
+        auto citation = citationAt.find(e.get());
+        if (citation != citationAt.end()) {
+            const int n = ++next;
+            marks[n] = 1;
+            auto note = std::make_shared<Element>(ElementType::FootnoteDefinition);
+            note->level = n;
+            note->url = "tinta-fn-" + std::to_string(n);
+            auto paragraph = std::make_shared<Element>(ElementType::Paragraph);
+            paragraph->parent = note.get();
+            appendRich(texts[citation->second], paragraph.get(), paragraph->children, links);
+            note->children.push_back(paragraph);
+            notes.push_back({n, note});
+            e->type = ElementType::FootnoteReference;
+            e->level = n;
+            e->url = "#tinta-fn-" + std::to_string(n);
+            e->title = "tinta-fnref-" + std::to_string(n) + "-1";
+            e->children = {text(std::to_string(n), e.get())};
+            placeMark(e);
+            return;
+        }
+        for (const auto& child : e->children) walk(child);
+    };
+    walk(root);
+    // Written notes no mark reaches keep their place after the rest
+    for (const auto& note : written)
+        if (!renumbered.count(note.first)) notes.push_back({renumbered[note.first] = ++next, note.second});
+    if (!section) {
+        section = std::make_shared<Element>(ElementType::Footnotes);
+        section->parent = root.get();
+        root->children.push_back(section);
+    }
+    std::sort(notes.begin(), notes.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    section->children.clear();
+    for (auto& [n, note] : notes) {
+        note->level = n;
+        note->url = "tinta-fn-" + std::to_string(n);
+        note->parent = section.get();
+        // A written note's own backlinks go; fresh ones lead to its marks now
+        auto& kids = note->children;
+        kids.erase(std::remove_if(kids.begin(), kids.end(),
+                                  [](const ElementPtr& c) {
+                                      return c->type == ElementType::Paragraph && c->language == "footnote-backlinks";
+                                  }),
+                   kids.end());
+        kids.push_back(backlinks(note.get(), n, std::max(1, marks[n])));
+        section->children.push_back(note);
+    }
+}
+
 // The last heading among the top-level blocks
 ElementPtr lastHeading(const ElementPtr& root) {
     for (auto it = root->children.rbegin(); it != root->children.rend(); ++it) {
@@ -610,10 +799,11 @@ std::vector<std::string> finish(const ElementPtr& root, const Session& session) 
     }
 
     // Citations, formatted all at once: numbers, disambiguation and ibid
-    // depend on the order they come in
+    // depend on the order they come in, which is a reader's: a footnote's
+    // citations at its mark
     if (!session.cites || !session.style || !session.library) return problems;
     std::vector<ElementPtr> elements;
-    collect(root, ElementType::Citation, elements);
+    inReadingOrder(root, elements);
     std::vector<cite::Citation> citations;
     std::vector<ElementPtr> cited;
     for (const auto& elem : elements) {
@@ -631,7 +821,14 @@ std::vector<std::string> finish(const ElementPtr& root, const Session& session) 
     };
     csl::Result result = csl::process(*session.style, locales, *session.library, citations, options);
     for (const auto& warning : result.warnings) problems.push_back(warning);
+    if (csl::info(*session.style).note) {
+        // A note style: each citation in the text becomes a footnote of its
+        // own, numbered with the document's footnotes; one inside a footnote
+        // stays where it is
+        intoNotes(root, cited, result.citations, session.linkCitations);
+    }
     for (size_t i = 0; i < cited.size() && i < result.citations.size(); ++i) {
+        if (cited[i]->type != ElementType::Citation) continue;  // now a note mark
         const ElementPtr& elem = cited[i];
         std::vector<ElementPtr> kids;
         elem->level = appendRich(result.citations[i], elem.get(), kids, false);  // cites a missing key
@@ -641,6 +838,7 @@ std::vector<std::string> finish(const ElementPtr& root, const Session& session) 
         elem->language = keys;  // data-cites in the HTML export
         elem->url = session.linkCitations ? "#ref-" + citations[i].items[0].id : std::string();
         elem->title = "cite-" + std::to_string(i + 1);
+        collapsePeriod(elem);
     }
     if (result.bibliography.entries.empty()) return problems;
 
