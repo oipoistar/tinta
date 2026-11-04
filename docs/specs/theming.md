@@ -1,6 +1,6 @@
 ---
 title: "Theming: CSS themes"
-status: Phase 1 built (2026-11-04), and phase 3's --ui-* and --mermaid-* (2026-11-04); the rest of phases 2 and 3 to come
+status: Phases 1, 2 and 3 built (2026-11-04)
 created: 2026-11-03
 ---
 
@@ -373,7 +373,9 @@ families cost `tinta.exe` 20,992 bytes.
 
 Ctrl+Alt+click an element: a card shows its selector path (`blockquote > p >
 strong`), the rules that apply in cascade order with file and line, the
-computed values, and swatches; editing a value writes it back to the sheet.
+ones they beat struck through, Tinta's base sheet where it decides, what
+the element inherits, and swatches. Clicking a rule opens its sheet at that
+line, where the value is edited; the card does not write the sheet itself.
 
 ## Performance and size
 
@@ -404,13 +406,16 @@ computed values, and swatches; editing a value writes it back to the sheet.
    fonts, sizes and line height; built-ins and themes.ini through the
    mapping; `.css` themes in the chooser; following the file; diagnostics;
    HTML export carrying the sheet.
-2. **Per-element styles**: the renderer and Live read computed styles;
-   spacing, borders, radii, letter spacing, alignment, OpenType features,
-   list markers, reading width; `@font-face`; Word and print from styles.
-3. **Beyond the page**: counters and generated content, folder sheets and
-   `cssclasses`, `--ui-*` and `--mermaid-*` (built; see
-   `tests/css-themes-validation.md`), the inspector, importing Typora
-   (`#write`) and Obsidian (its variables) themes.
+2. **Per-element styles** (built; see `tests/css-themes-validation.md`):
+   the renderer reads computed styles per element, Live its code, list and
+   quote looks; spacing, borders, radii, letter spacing, alignment (with
+   justify), OpenType features, list markers, reading width; `@font-face`;
+   Word and print from styles.
+3. **Beyond the page** (built; see `tests/css-themes-validation.md`):
+   counters and generated content, folder sheets and `cssclasses`,
+   `--ui-*` and `--mermaid-*`, `box-shadow`, `opacity` on pictures and
+   `caret-color`, the inspector, importing Typora (`#write`) and Obsidian
+   (its variables) themes.
 
 ## Decisions
 

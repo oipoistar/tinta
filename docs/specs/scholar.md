@@ -1,6 +1,6 @@
 ---
 title: "Scholar: write the paper"
-status: Phases 1 and 3 built (2026-11-04); phase 2 built but for inline references (2026-11-04)
+status: Phases 1, 2 and 3 built (2026-11-04)
 created: 2026-11-03
 ---
 
@@ -18,8 +18,9 @@ title block, two columns, page numbers, running heads and Word's paper
 styles (`tests/paper-export-validation.md`). From phase 2, the
 writing aids (completion in Live and Source, the Cite button and
 Zotero's picker, `tests/citation-completion-validation.md`), note
-styles, section numbers with `@sec:`, and following a saved library
-are built; inline `references:` is to come.
+styles, section numbers with `@sec:`, following a saved library,
+and inline `references:` (`tests/inline-references-validation.md`)
+are built.
 
 ## Why
 
@@ -445,7 +446,7 @@ the Windows compression API (XPRESS Huffman); the results are RCDATA in
    inline `references:` in front matter; section numbers and `@sec:`; a
    "Cite" button on the tool rail. Built: the completion (with `@sec:`
    ids listed), the picker and the Cite button, note styles, sections
-   and following the library; inline `references:` to come.
+   following the library, and inline `references:`.
 3. **Paper export** (built): title block, authors and affiliations,
    abstract, two-column PDF, running heads and page numbers, Word paper
    styles and SEQ fields.

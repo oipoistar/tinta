@@ -1,0 +1,11 @@
+/* A folder's own sheet (docs/css-themes.md): the documents in this folder
+   and the folders under it take these rules over the theme in use, any
+   theme. The page's "Styled by tinta.css" chip turns it off for one. */
+body { max-width: 40em; }
+body.wide { max-width: none; }
+h1, h2 { color: #2f6f9c; }
+h2 { border-bottom: 2px solid #2f6f9c; padding-bottom: 0.2em; }
+p { line-height: 1.8; }
+blockquote { border-left-color: #2f6f9c; }
+li::marker { color: #2f6f9c; }
+th { background-color: #e8f0f7; }

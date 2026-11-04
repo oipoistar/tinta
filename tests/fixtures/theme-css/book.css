@@ -1,0 +1,54 @@
+/* Book: CSS themes' phases 2 and 3 on one page. Justified text with a
+   first-line indent, headings the sheet numbers, small capitals, its own
+   list markers, a striped table, boxed quotes and code with shadows.
+   Open mixed.md with it, and Ctrl+Alt+click anything to see why it looks
+   as it does. */
+@import "Paper";
+
+:root { caret-color: #9c2f2f; }
+body {
+  font: 17px/1.6 Georgia, serif;
+  max-width: 38em;
+  counter-reset: h2;
+}
+p { margin: 0 0 0.6em; text-align: justify; }
+p + p { text-indent: 1.5em; }
+
+h1 {
+  text-align: center;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid #c9bfae;
+  padding-bottom: 0.4em;
+}
+h2 { counter-reset: h3; margin-top: 2em; font-variant-caps: small-caps; letter-spacing: 0.03em; }
+h2::before { counter-increment: h2; content: counter(h2, upper-roman) ". "; color: #9c2f2f; }
+h3::before { counter-increment: h3; content: counter(h2) "." counter(h3) " "; color: #9c2f2f; }
+
+a { color: #9c2f2f; text-decoration: none; }
+a[href^="http"]::after { content: " \2197"; }
+
+ul { list-style-type: square; padding-left: 1.8em; }
+ul ul { list-style-type: circle; }
+ol { list-style-type: lower-roman; }
+li::marker { color: #9c2f2f; }
+
+blockquote {
+  border-left: 3px solid #9c2f2f;
+  background: #f5efe4;
+  padding: 0.6em 1em;
+  border-radius: 4px;
+  font-style: italic;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+blockquote strong { color: #9c2f2f; }
+
+code { background: #efe8da; padding: 0 0.3em; border-radius: 3px; }
+pre { padding: 14px 18px; border-radius: 8px; box-shadow: 0 2px 8px rgb(0 0 0 / 0.18); }
+
+th, td { padding: 4px 14px; border-bottom: 1px solid #d8cfbf; }
+tbody tr:nth-child(even) td { background: #f7f2e9; }
+
+hr { border: 0; border-top: 2px dashed #c9bfae; }
+figcaption { text-align: center; font-style: italic; }
+img { opacity: 0.92; }

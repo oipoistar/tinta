@@ -216,6 +216,7 @@ void previews(const fs::path& dir) {
         {L"night-dark", false, "css-night-dark.png", 0, true},
         {L"ink-light-dark", false, "css-ink-light.png", 0x1F2328, false},
         {L"ink-light-dark", true, "css-ink-dark.png", 0xD8DEE9, true},
+        {L"book", false, "css-book.png", 0, false},
     };
     for (const auto& look : looks) {
         int index = -1;

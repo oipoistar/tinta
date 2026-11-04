@@ -246,3 +246,127 @@ they cost another 11,776.
   `git0`...) have no part of their own in Tinta's diagrams; they are
   reported as not drawn. Every chart's series take `pie1`-`pie12`.
 - Print and PDF keep Paper's print palette for diagrams, as for the page.
+
+
+# Phase 2, and the rest of phase 3: the page element by element
+
+Validated on Windows with the Release build on 2026-11-04.
+
+## What was asked
+
+The renderer reading a CSS theme's computed style for each element, not a
+theme-wide palette: spacing, borders, radii, letter spacing, alignment,
+OpenType features, list markers and the reading width; the theme's own
+fonts with `@font-face`; Word and print from the styles; Live reading them
+too. Then phase 3: counters and generated content, folder sheets and
+`cssclasses`, the inspector, and importing Typora and Obsidian themes.
+
+## The change
+
+- **Per-element styles** (`page_style.h`, `src/page_style.cpp`): layout
+  carries a style context down the page, block by block (with their places
+  among siblings, so `p + p` and `tr:nth-child(even)` work) and span by
+  span. A base sheet holds Tinta's own heading sizes, bold and code faces,
+  so a page's font or colour reaches only what a browser would let it
+  reach; only what the theme authored is drawn from the sheet
+  (`ComputedStyle::authored`). Margins collapse between blocks as CSS's
+  do. Paragraphs, headings and captions take boxes (padding, background,
+  borders, corners), text-align with justify, text-indent; quotes their
+  bar, padding and background; code blocks padding, corners and an edge;
+  inline code its chip; lists their indent, `list-style-type` and
+  `::marker`; tables padding, borders and row backgrounds; `hr` its border;
+  links, `del` and `ins` their decorations; `body` its `max-width`.
+  Fonts per element are formats made and cached per face, size, weight,
+  slant and stretch; OpenType features are typographies per feature set.
+- **Fonts** (`font_faces.h`): TTF, OTF, TTC, WOFF and WOFF2 files load
+  into DirectWrite collections of their own; `local()` names a face this
+  PC has. The HTML export copies the files beside the page.
+- **Print and Word**: print layout asks the sheet with print media; its
+  colours apply on paper only when it has `@media print` rules. Word's
+  styles take the theme's type sizes and line height and the sheet's
+  margins, heading borders and alignment, code shading and quote bar.
+- **Live** reads the theme's code padding, list indent and quote colour.
+- **Counters and generated content**: `::before` and `::after` with
+  `counter()` and `counters()` around paragraphs, headings (Contents shows
+  the numbers), list items, captions and inline spans; `counter-reset`
+  and `counter-increment` as the page is laid out.
+- **Folder sheets**: `tinta.css` in a document's folder or above styles its
+  documents under any theme, as a third origin; a chip at the top of the
+  page says so and turns it off per document; saves restyle; the HTML
+  export carries it.
+- **`cssclasses`** in the front matter put classes on `body`.
+- **The inspector** (`inspector.h`): Ctrl+Alt+click relays the page out
+  recording where each block and run was drawn and in which style; the
+  card lists `Engine::explain()`'s rules, beaten ones struck through, with
+  swatches; a click on a rule opens its sheet at its line.
+- **Import**: Settings > Appearance > Themes > Import runs
+  `css::importTheme` on a Typora or Obsidian sheet, writes it beside the
+  other themes with what was left out at its top, copies its font files and
+  switches to it.
+- **`box-shadow`**, **`opacity`** on pictures and **`caret-color`**.
+- **Scholar** also gained inline `references:` (`tests/inline-references-validation.md`).
+
+## Fixtures
+
+- `tests/fixtures/theme-css/book.css` over `mixed.md`: justified text with
+  a first-line indent, numbered small-caps headings, square and roman
+  markers, boxed quotes and code with shadows, a striped table with only
+  bottom borders, an arrow after the outside link.
+- `tests/fixtures/theme-css/folder/tinta.css` with
+  `folder/notes/project-note.md`: a folder sheet under any theme, its chip,
+  and `cssclasses: [wide]`.
+- `tests/fixtures/theme-css/import/` (Typora's Night, Obsidian's Dusk and
+  Midnight) for the import.
+
+## Automated checks
+
+`tests/page_style_tests.cpp`, run by `inline_code_theme`, lays the page out
+under sheets and checks the drawn primitives: the reading column; centred
+text; the `p + p` indent and `p`'s margin; a link with its rule taken away;
+the inline code chip's corners; a heading's border as its rule; the quote's
+bar, indent and colours, and `blockquote strong`; square and roman markers
+in `::marker`'s colour; the code block's corners, edge and padding; the
+table's grid, padding and a stripe on the second body row only; `hr`'s
+border; and the same page under Paper with its round bullets and square
+boxes. Then `@font-face` (a file under a family of the sheet's own, a
+missing file reported, a heading falling through to the sheet's face, the
+HTML export's copy), counters and generated content (Contents included,
+the arrow on the outside link only, `li::before`), `cssclasses`, the
+import (listed, applied, notes at the top, the next name on a second
+import), Settings with its Import button (saved wide and narrow), the
+inspector's card for `blockquote strong` (path, winner with file and line,
+the beaten rule, Tinta's bold), folder sheets (found a folder up, under a
+built-in theme, the chip, the export, off and on again), print with and
+without `@media print`, Live's look, Word's styles, `box-shadow`, image
+`opacity` and `caret-color`. `css_tests`, `css_import` and `yaml` cover
+the engine's `explain()`, the import and the YAML reader.
+
+## In the built app
+
+Frames saved by the tests and looked at: `page-styles.png`,
+`css-book.png`, `css-paper-light.png`, `css-ink-light.png`,
+`css-ink-dark.png`, `css-night-dark.png`, `inspector.png`,
+`folder-sheet.png`, `settings-appearance.png` and
+`settings-appearance-narrow.png`. Two things the Book preview showed were
+fixed: a strike through sat near the baseline under a sheet's line height,
+and a table whose sheet set only bottom borders still drew vertical lines
+in the quote's colour. Real windows cannot be captured over this machine's
+remote session, so the inspector's card, the chip's click and Settings'
+Import were driven through their functions rather than by the mouse.
+
+## Limitations
+
+- Justified text widens spaces; Chinese, Japanese and Korean lines, which
+  have none, stay as they are.
+- Margins collapse between siblings, and through a quote or list into its
+  first child; Tinta's own spacing, where the sheet sets none, adds to
+  a margin rather than collapsing with it.
+- `li::before` draws in a list item's first run of text; an item that
+  starts with a paragraph shows the paragraph's own `p::before`.
+- Inline code's vertical padding is not drawn: the chip spans the line.
+- `border-radius` rounds boxes, not pictures; an image takes `opacity`
+  only.
+- The inspector shows the rules and opens the sheet at a line; it does not
+  edit values in place.
+- An arrow such as U+2197 in generated content takes the emoji font's
+  shape where the theme's face lacks it, as elsewhere in Tinta.
