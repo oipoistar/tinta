@@ -13,6 +13,7 @@
 #include "i18n.h"
 #include "link_target.h"
 #include "network_path.h"
+#include "paper.h"
 #include "plantuml_app.h"
 #include "plantuml_queue.h"
 
@@ -4357,7 +4358,8 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
 
     switch (elem->type) {
         case ElementType::Properties:
-            layoutProperties(app, elem, y, indent, maxWidth);
+            // A paper prints its title block in the strip's place (paper.h)
+            if (!layoutTitleBlock(app, elem, y, indent, maxWidth)) layoutProperties(app, elem, y, indent, maxWidth);
             break;
         case ElementType::Paragraph:
             layoutParagraph(app, elem, y, indent, maxWidth);

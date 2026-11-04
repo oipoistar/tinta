@@ -1024,6 +1024,38 @@ struct App {
     D2D1_RECT_F printPreviewPaperBtn[4]{};
     D2D1_RECT_F printPreviewOrientBtn[2]{};   // 0 portrait, 1 landscape
     D2D1_RECT_F printPreviewMarginBtn[3]{};   // PRINT_MARGINS_MM presets
+    // Paper export (docs/specs/scholar.md, phase 3). The preview's choices
+    // for one document, -1 following its front matter; a margin chip
+    // clicked overrides the front matter's geometry
+    struct PrintChoices {
+        std::string file;
+        int columns = -1, pageNumbers = -1, runningHeads = -1;
+        bool ownMargin = false;
+    };
+    PrintChoices printChoices;
+    // What the open preview prints with: two columns, page numbers,
+    // running heads (PrintOption order), and the heads' words
+    bool printOptionOn[3] = {};
+    D2D1_RECT_F printPreviewOptionBtn[3]{};
+    std::wstring printHeadLeft, printHeadRight;
+    float printPreviewMarginMm = 19.05f;      // the margin it prints with
+
+    // Where the laid-out document lands on paper: a page's stretch in one
+    // column, each column's in two, the title block above them
+    struct PrintFrame {
+        int page = 0;
+        float yStart = 0, yEnd = 0;  // document Y
+        float x = 0, y = 0;          // where yStart lands on the page
+        D2D1_RECT_F clip{};          // the column's box on the page; empty draws unclipped
+    };
+    std::vector<PrintFrame> printPreviewFrames;
+    // Set while print lays a paper out: its front matter lays out as a
+    // title block (paper.h) across `width`, and says where it ended
+    struct PaperPrint {
+        bool titleBlock = false;
+        float width = 0;
+        float titleBottom = 0;
+    } paperPrint;
 
     // Blocks wider than the printable area (mermaid diagrams, wide tables)
     // are shrunk uniformly to fit the margins when printing; each band is a

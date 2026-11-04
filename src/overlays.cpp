@@ -2359,6 +2359,7 @@ void renderPrintPreview(App& app) {
     app.renderTarget->FillRectangle(D2D1::RectF(0, 0, w, h), app.brush);
 
     float topBarH = 52.0f * ui;
+    float optionRowH = PRINT_OPTION_ROW_H * ui;  // the paper options, under the header
     float bottomBarH = 64.0f * ui;
 
     // Current page, uploaded from the CPU rasterization. Preview repaints
@@ -2374,7 +2375,8 @@ void renderPrintPreview(App& app) {
         if (bmp) {
             float pw = (float)app.printPreviewPxW, ph = (float)app.printPreviewPxH;
             float px = (w - pw) / 2.0f;
-            float py = topBarH + (h - topBarH - bottomBarH - ph) / 2.0f;
+            float top = topBarH + optionRowH;
+            float py = top + (h - top - bottomBarH - ph) / 2.0f;
             for (int i = 3; i >= 1; i--) {  // soft shadow ring
                 app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.06f * i));
                 app.renderTarget->DrawRectangle(
@@ -2454,6 +2456,27 @@ void renderPrintPreview(App& app) {
     drawChip(portR, tr(app, "print.portrait"), !app.printPreviewLandscape);
     drawChip(landR, tr(app, "print.landscape"), app.printPreviewLandscape);
 
+    // Paper options, centred under the header (docs/specs/scholar.md,
+    // phase 3): toggles, each filled while on, as wide as its label
+    {
+        const char* keys[PRINT_OPTION_COUNT] = {"print.two_columns", "print.page_numbers",
+                                                "print.running_heads"};
+        float widths[PRINT_OPTION_COUNT];
+        float total = 0.0f;
+        for (int i = 0; i < PRINT_OPTION_COUNT; i++) {
+            widths[i] = (uiFmt ? measureText(app, tr(app, keys[i]), uiFmt) : 90.0f * ui) + 28.0f * ui;
+            total += widths[i] + (i ? chipGap : 0.0f);
+        }
+        float ox = (w - total) / 2.0f;
+        const float oy = topBarH + (optionRowH - chipH) / 2.0f;
+        for (int i = 0; i < PRINT_OPTION_COUNT; i++) {
+            D2D1_RECT_F rect = D2D1::RectF(ox, oy, ox + widths[i], oy + chipH);
+            app.printPreviewOptionBtn[i] = rect;
+            drawChip(rect, tr(app, keys[i]), app.printOptionOn[i]);
+            ox += widths[i] + chipGap;
+        }
+    }
+
     // Buttons, bottom right
     float btnH = 34.0f * ui;
     float printW = 110.0f * ui, cancelW = 90.0f * ui;
@@ -2486,7 +2509,8 @@ void renderPrintPreview(App& app) {
 
     // Margin presets, bottom left (#257), in mm or inches by the locale's
     // measurement system like the default paper; a settings.ini margin
-    // outside the presets shows as its own active chip
+    // outside the presets, or a paper's geometry: margin=, shows as its
+    // own active chip
     wchar_t measure[2] = L"0";
     const bool inches = GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IMEASURE,
                                         measure, 2) && measure[0] == L'1';
@@ -2514,14 +2538,14 @@ void renderPrintPreview(App& app) {
     for (int i = 0; i < PRINT_MARGIN_COUNT; i++) {
         D2D1_RECT_F rect = D2D1::RectF(mx, marginChipY, mx + marginChipW, marginChipY + chipH);
         app.printPreviewMarginBtn[i] = rect;
-        const bool active = std::fabs(app.printMarginMm - PRINT_MARGINS_MM[i]) < 0.05f;
+        const bool active = std::fabs(app.printPreviewMarginMm - PRINT_MARGINS_MM[i]) < 0.05f;
         preset = preset || active;
         drawChip(rect, marginLabel(PRINT_MARGINS_MM[i]).c_str(), active);
         mx += marginChipW + chipGap;
     }
     if (!preset) {
         D2D1_RECT_F rect = D2D1::RectF(mx, marginChipY, mx + marginChipW, marginChipY + chipH);
-        drawChip(rect, marginLabel(app.printMarginMm).c_str(), true);
+        drawChip(rect, marginLabel(app.printPreviewMarginMm).c_str(), true);
         mx += marginChipW + chipGap;
     }
 

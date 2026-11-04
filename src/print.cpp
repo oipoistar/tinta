@@ -3,6 +3,7 @@
 #include "d2d_init.h"
 #include "document.h"
 #include "editor.h"
+#include "paper.h"
 #include "settings.h"
 #include "utils.h"
 
@@ -47,18 +48,44 @@ D2DTheme printTheme(const D2DTheme& screen) {
 
 namespace {
 
-// Page margins on every side (#257): the preview's choice, kept in
-// settings.ini, 0.75 in unless changed
-float printMarginDips(const App& app) {
-    return app.printMarginMm * 96.0f / 25.4f;
+// What paper asks of the document (docs/specs/scholar.md, phase 3): its
+// front matter in pandoc's variables, then the preview's choices for it
+struct PaperSetup {
+    paper::Front front;
+    bool titleBlock = false, twoColumns = false, pageNumbers = false, runningHeads = false;
+    float zoom = 1.0f;      // fontsize, against the 12 pt the page sets
+    float marginMm = 19.05f;
+    int paper = -1;         // papersize, into PRINT_PAPERS
+};
+
+PaperSetup paperSetup(const App& app) {
+    PaperSetup s;
+    s.front = paper::frontOf(app.root);
+    s.titleBlock = s.front.titleBlock();
+    const bool mine = app.printChoices.file == app.currentFile;
+    auto choice = [&](int chosen, bool otherwise) { return mine && chosen >= 0 ? chosen != 0 : otherwise; };
+    s.twoColumns = choice(app.printChoices.columns, s.front.twoColumn);
+    // A paper numbers its pages and heads them; anything else asks
+    s.pageNumbers = choice(app.printChoices.pageNumbers, s.titleBlock);
+    s.runningHeads = choice(app.printChoices.runningHeads, s.titleBlock);
+    if (s.front.fontSizePt > 0) {
+        const float body = printTheme(app.theme).bodySize;
+        s.zoom = s.front.fontSizePt * 96.0f / 72.0f / (body > 0 ? body : 16.0f);
+    }
+    // Page margins on every side (#257): the preview's choice, kept in
+    // settings.ini, 0.75 in unless changed; a paper's geometry: first
+    s.marginMm = s.front.marginMm > 0 && !(mine && app.printChoices.ownMargin) ? s.front.marginMm
+                                                                                 : app.printMarginMm;
+    s.paper = paper::paperIndex(s.front);
+    return s;
 }
 
 using SavedView = App::PrintSavedView;
 
-// Saves the screen view state and switches to the print palette at 96 DPI,
-// zoom 1. layoutAtPrintWidth does the actual re-layout; leavePrintLayout
-// restores everything.
-void enterPrintLayout(App& app, SavedView& saved) {
+// Saves the screen view state and switches to the print palette at 96 DPI
+// and the given zoom (a paper's fontsize). layoutAtPrintWidth does the
+// actual re-layout; leavePrintLayout restores everything.
+void enterPrintLayout(App& app, SavedView& saved, float zoom = 1.0f) {
     saved.width = app.width;
     saved.height = app.height;
     saved.contentScale = app.contentScale;
@@ -79,7 +106,7 @@ void enterPrintLayout(App& app, SavedView& saved) {
     app.showToc = app.showFolderBrowser = app.showSearchPanel = false;
     app.printLayout = true;
     app.contentScale = 1.0f;
-    app.zoomFactor = 1.0f;
+    app.zoomFactor = zoom;
     app.theme = printTheme(app.theme);
     updateTextFormats(app);
 }
@@ -89,8 +116,9 @@ void enterPrintLayout(App& app, SavedView& saved) {
 // overflowing primitive seeds a vertical band that grows to swallow every
 // primitive it overlaps — the whole diagram or table scales together about
 // its own top-left, leaving whitespace below rather than moving later
-// content (pagination keeps using the unscaled bounds).
-void computeShrinkBands(App& app, float contentW) {
+// content (pagination keeps using the unscaled bounds). Above `fromY` lies
+// a title block spanning both columns, which stays as it is.
+void computeShrinkBands(App& app, float contentW, float fromY = 0.0f) {
     app.printShrinkBands.clear();
     const float eps = 0.5f;
 
@@ -112,6 +140,11 @@ void computeShrinkBands(App& app, float contentW) {
         items.push_back({b.destRect.top, b.destRect.bottom, b.destRect.right});
     for (const auto& t : app.layoutTextRuns)
         items.push_back({t.bounds.top, t.bounds.bottom, t.bounds.right});
+    if (fromY > 0.0f) {
+        items.erase(std::remove_if(items.begin(), items.end(),
+                                   [&](const Item& it) { return it.top < fromY; }),
+                    items.end());
+    }
 
     // Seed bands from overflowing items
     struct Band { float top, bottom, right; };
@@ -167,6 +200,7 @@ void layoutAtPrintWidth(App& app, float contentWidthDips) {
 
 void leavePrintLayout(App& app, const SavedView& saved) {
     app.printLayout = false;
+    app.paperPrint = {};
     app.editMode = saved.editMode;
     app.showToc = saved.showToc;
     app.showFolderBrowser = saved.showFolderBrowser;
@@ -187,43 +221,47 @@ void leavePrintLayout(App& app, const SavedView& saved) {
     if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
-// Page break positions in document Y. Breaks avoid slicing text lines,
-// images, and diagram shapes by pulling the cut above any straddling atom;
-// an atom taller than most of a page is sliced rather than looping.
+// Where a stretch of the document that starts at pageTop and may run
+// pageContentH ends. Breaks avoid slicing text lines, images, and diagram
+// shapes by pulling the cut above any straddling atom; an atom taller than
+// most of the stretch is sliced rather than looping - unless a taller
+// stretch follows (a column under a title block), which then takes it
+// whole, from the stretch's very top if need be.
+float breakAfter(const App& app, float pageTop, float pageContentH, bool tallerFollows = false) {
+    float proposed = pageTop + pageContentH;
+    for (int pass = 0; pass < 4; pass++) {
+        float adjusted = proposed;
+        auto consider = [&](float top, float bottom) {
+            if (top < adjusted && bottom > adjusted && (top > pageTop || (tallerFollows && top >= pageTop))) {
+                adjusted = top;
+            }
+        };
+        for (const auto& line : app.lineBuckets) consider(line.top, line.bottom);
+        // List markers have no selection line bucket. Protect every text
+        // run so it cannot straddle a cut and be replayed on both pages.
+        for (const auto& run : app.layoutTextRuns) consider(run.bounds.top, run.bounds.bottom);
+        for (const auto& bmp : app.layoutBitmaps) consider(bmp.destRect.top, bmp.destRect.bottom);
+        for (const auto& shape : app.layoutShapes) consider(shape.rect.top, shape.rect.bottom);
+        // Shrink bands page-break as a unit: a scaled diagram split
+        // across pages would render discontinuously
+        for (const auto& band : app.printShrinkBands) consider(band.top, band.bottom);
+        if (adjusted == proposed) break;
+        proposed = adjusted;
+    }
+    // Monster atom (taller than 70% of a page): slice it instead
+    if (proposed - pageTop < pageContentH * 0.3f && !tallerFollows) {
+        return pageTop + pageContentH;
+    }
+    return proposed;
+}
+
+// Page break positions in document Y, a page's worth apart at most
 std::vector<float> computePageBreaks(const App& app, float pageContentH) {
     std::vector<float> breaks;
     float docEnd = app.contentHeight;
     float y = 0.0f;
-
-    auto pullAbove = [&](float proposed, float pageTop) {
-        for (int pass = 0; pass < 4; pass++) {
-            float adjusted = proposed;
-            auto consider = [&](float top, float bottom) {
-                if (top < adjusted && bottom > adjusted && top > pageTop) {
-                    adjusted = top;
-                }
-            };
-            for (const auto& line : app.lineBuckets) consider(line.top, line.bottom);
-            // List markers have no selection line bucket. Protect every text
-            // run so it cannot straddle a cut and be replayed on both pages.
-            for (const auto& run : app.layoutTextRuns) consider(run.bounds.top, run.bounds.bottom);
-            for (const auto& bmp : app.layoutBitmaps) consider(bmp.destRect.top, bmp.destRect.bottom);
-            for (const auto& shape : app.layoutShapes) consider(shape.rect.top, shape.rect.bottom);
-            // Shrink bands page-break as a unit: a scaled diagram split
-            // across pages would render discontinuously
-            for (const auto& band : app.printShrinkBands) consider(band.top, band.bottom);
-            if (adjusted == proposed) break;
-            proposed = adjusted;
-        }
-        // Monster atom (taller than 70% of a page): slice it instead
-        if (proposed - pageTop < pageContentH * 0.3f) {
-            return pageTop + pageContentH;
-        }
-        return proposed;
-    };
-
     while (y + pageContentH < docEnd) {
-        float next = pullAbove(y + pageContentH, y);
+        float next = breakAfter(app, y, pageContentH);
         breaks.push_back(next);
         y = next;
     }
@@ -451,8 +489,8 @@ struct PageGeometry {
     float margin;                // on every side
 };
 
-PageGeometry pageGeometry(const App& app, float pageW, float pageH) {
-    const float margin = printMarginDips(app);
+PageGeometry pageGeometry(float pageW, float pageH, float marginMm) {
+    const float margin = marginMm * 96.0f / 25.4f;
     return {pageW, pageH, pageW - margin * 2, pageH - margin * 2, margin};
 }
 
@@ -462,13 +500,218 @@ PageGeometry pageGeometry(const App& app, float pageW, float pageH) {
 // error, for one) just to read a paper size — the real printer is consulted
 // after the user confirms the print dialog, and re-pagination handles any
 // difference.
-PageGeometry defaultPageGeometry(const App& app) {
+PageGeometry defaultPageGeometry(float marginMm) {
     wchar_t measure[2] = L"0";
     if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IMEASURE, measure, 2) &&
         measure[0] == L'1') {
-        return pageGeometry(app, 816.0f, 1056.0f);  // US customary: Letter
+        return pageGeometry(816.0f, 1056.0f, marginMm);  // US customary: Letter
     }
-    return pageGeometry(app, 794.0f, 1123.0f);  // A4
+    return pageGeometry(794.0f, 1123.0f, marginMm);  // A4
+}
+
+// A paper's own paper, else the last preview's, else the locale's
+PageGeometry setupPageGeometry(const App& app, const PaperSetup& setup) {
+    const int index = setup.paper >= 0 ? setup.paper : app.printPreviewPaper;
+    if (index < 0 || index >= PRINT_PAPER_COUNT) return defaultPageGeometry(setup.marginMm);
+    const PrintPaper& paper = PRINT_PAPERS[index];
+    return pageGeometry(app.printPreviewLandscape ? paper.h : paper.w,
+                        app.printPreviewLandscape ? paper.w : paper.h, setup.marginMm);
+}
+
+// --- Paper (docs/specs/scholar.md, phase 3) ---------------------------------
+
+// Two columns share the text width, a quarter inch apart
+constexpr float kColumnGap = 24.0f;
+
+float columnWidth(const PageGeometry& geo) { return std::floor((geo.contentW - kColumnGap) / 2.0f); }
+
+// Lays the document out for paper: at the text width, or at a column's
+// with two, a paper's title block across both. Returns the width laid out.
+float layoutPaper(App& app, const PaperSetup& setup, const PageGeometry& geo) {
+    const float width = setup.twoColumns ? columnWidth(geo) : geo.contentW;
+    app.paperPrint.titleBlock = true;
+    app.paperPrint.width = setup.twoColumns ? geo.contentW : 0.0f;
+    app.paperPrint.titleBottom = 0.0f;
+    app.width = (int)width;
+    app.height = 4000;  // layout does not clip vertically; any tall value
+    app.layoutDirty = true;
+    ensureLayoutComplete(app);
+    computeShrinkBands(app, width, setup.twoColumns ? app.paperPrint.titleBottom : 0.0f);
+    return width;
+}
+
+// Where the laid-out document lands on paper. One column: a page a
+// stretch, as print always did. Two: the title block across the top of
+// the first page, then each page's left column and its right, every
+// stretch cut where a page would be.
+std::vector<App::PrintFrame> paperFrames(const App& app, const PaperSetup& setup, const PageGeometry& geo,
+                                          float columnW) {
+    std::vector<App::PrintFrame> frames;
+    const float end = app.contentHeight;
+    if (!setup.twoColumns) {
+        std::vector<float> breaks = computePageBreaks(app, geo.contentH);
+        breaks.push_back(end + 1.0f);  // final page sentinel
+        float y = 0.0f;
+        for (size_t i = 0; i < breaks.size(); i++) {
+            frames.push_back({(int)i, y, breaks[i], geo.margin, geo.margin, {}});
+            y = breaks[i];
+        }
+        return frames;
+    }
+    int page = 0;
+    float y = 0.0f, top = 0.0f;  // top: where the columns start on the page
+    const float title = app.paperPrint.titleBottom;
+    if (title > 0.0f) {
+        // A title block longer than a page takes pages of its own
+        while (title - y > geo.contentH) {
+            const float next = breakAfter(app, y, geo.contentH);
+            frames.push_back({page++, y, next, geo.margin, geo.margin, {}});
+            y = next;
+        }
+        frames.push_back({page, y, title, geo.margin, geo.margin, {}});
+        top = title - y;
+        y = title;
+        // Columns shorter than a fifth of the page start on the next
+        if (geo.contentH - top < geo.contentH * 0.2f) {
+            ++page;
+            top = 0.0f;
+        }
+    }
+    const float rightX = geo.margin + geo.contentW - columnW;
+    const float gutter = (geo.margin + columnW + rightX) * 0.5f;
+    int column = 0;
+    while (y < end) {
+        const float height = geo.contentH - top;
+        const float next = y + height >= end ? end + 1.0f
+                                             : breakAfter(app, y, height, height < geo.contentH - 0.5f);
+        const float frameTop = geo.margin + top;
+        // Each column is clipped to its own box: what straddles a cut shows
+        // in one column, never over the title block or the other column
+        const D2D1_RECT_F clip = column ? D2D1::RectF(gutter, frameTop, geo.pageW, frameTop + (next - y))
+                                        : D2D1::RectF(0.0f, frameTop, gutter, frameTop + (next - y));
+        frames.push_back({page, y, next, column ? rightX : geo.margin, frameTop, clip});
+        y = next;
+        if (column) {
+            ++page;
+            top = 0.0f;
+        }
+        column ^= 1;
+    }
+    return frames;
+}
+
+// Each page's first stretch and the end: the page boundaries the preview
+// counts its pages by
+std::vector<float> pageBounds(const std::vector<App::PrintFrame>& frames) {
+    std::vector<float> bounds;
+    for (const auto& frame : frames) {
+        if ((int)bounds.size() == frame.page) bounds.push_back(frame.yStart);
+    }
+    bounds.push_back(frames.empty() ? 0.0f : frames.back().yEnd);
+    return bounds;
+}
+
+// What the margins carry: page numbers, and running heads from the second page
+struct Furniture {
+    bool numbers = false, heads = false;
+    std::wstring left, right;  // the short title or title; the first author et al.
+};
+
+Furniture paperFurniture(const App& app, const PaperSetup& setup) {
+    Furniture f;
+    f.numbers = setup.pageNumbers;
+    f.heads = setup.runningHeads;
+    const std::string& head = setup.front.shortTitle.empty() ? setup.front.title : setup.front.shortTitle;
+    f.left = toWide(paper::plainText(head));
+    // A document without a title is headed by its first heading
+    if (f.left.empty() && !app.headings.empty()) f.left = app.headings.front().text;
+    f.right = toWide(paper::headAuthors(setup.front.authors, setup.front.lang));
+    return f;
+}
+
+// Page numbers centred in the bottom margin, running heads in the top one
+// from the second page on, in a small muted face; a margin too narrow for
+// the line drops them rather than set them over the text
+void drawFurniture(App& app, ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brush,
+                   const PageGeometry& geo, int page, const Furniture& f) {
+    const bool heads = f.heads && page > 0 && !(f.left.empty() && f.right.empty());
+    if (!f.numbers && !heads) return;
+    const float body = app.textFormat ? app.textFormat->GetFontSize() : 16.0f;
+    const float size = std::min(body * 0.75f, (geo.margin - 4.0f) / 1.3f);
+    if (size < 6.0f) return;
+    IDWriteTextFormat* format = nullptr;
+    app.dwriteFactory->CreateTextFormat(app.theme.fontFamily, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, L"en-us",
+                                        &format);
+    if (!format) return;
+    format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    const float lineH = size * 1.3f;
+    D2D1_COLOR_F muted = app.theme.text;
+    muted.a *= 0.6f;
+    brush->SetColor(muted);
+    auto layoutOf = [&](const std::wstring& text, float width, DWRITE_TEXT_ALIGNMENT align) {
+        IDWriteTextLayout* layout = nullptr;
+        app.dwriteFactory->CreateTextLayout(text.c_str(), (UINT32)text.size(), format, std::max(1.0f, width), lineH,
+                                            &layout);
+        if (!layout) return layout;
+        IDWriteTextLayout2* layout2 = nullptr;
+        if (app.fontFallback &&
+            SUCCEEDED(layout->QueryInterface(__uuidof(IDWriteTextLayout2), (void**)&layout2))) {
+            layout2->SetFontFallback(app.fontFallback);
+            layout2->Release();
+        }
+        layout->SetTextAlignment(align);
+        // A head too long for its room ends in an ellipsis
+        DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+        IDWriteInlineObject* ellipsis = nullptr;
+        app.dwriteFactory->CreateEllipsisTrimmingSign(format, &ellipsis);
+        layout->SetTrimming(&trimming, ellipsis);
+        if (ellipsis) ellipsis->Release();
+        return layout;
+    };
+    auto draw = [&](IDWriteTextLayout* layout, float left, float centreY) {
+        if (!layout) return;
+        dc->DrawTextLayout(D2D1::Point2F(left, centreY - lineH * 0.5f), layout, brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        layout->Release();
+    };
+    const float left = geo.margin, width = geo.contentW;
+    if (f.numbers) {
+        draw(layoutOf(std::to_wstring(page + 1), width, DWRITE_TEXT_ALIGNMENT_CENTER), left,
+             geo.pageH - geo.margin * 0.5f);
+    }
+    if (heads) {
+        // The authors keep their width; the title takes what is left
+        float rightW = 0.0f;
+        if (!f.right.empty()) {
+            if (IDWriteTextLayout* measure = layoutOf(f.right, width * 0.45f, DWRITE_TEXT_ALIGNMENT_TRAILING)) {
+                DWRITE_TEXT_METRICS metrics{};
+                measure->GetMetrics(&metrics);
+                rightW = std::min(width * 0.45f, metrics.widthIncludingTrailingWhitespace + 1.0f);
+                measure->Release();
+            }
+            draw(layoutOf(f.right, rightW, DWRITE_TEXT_ALIGNMENT_TRAILING), left + width - rightW, geo.margin * 0.5f);
+        }
+        if (!f.left.empty()) {
+            draw(layoutOf(f.left, width - rightW - (rightW > 0 ? 24.0f : 0.0f), DWRITE_TEXT_ALIGNMENT_LEADING), left,
+                 geo.margin * 0.5f);
+        }
+    }
+    format->Release();
+}
+
+// One page: its stretches of the document, then the margins' furniture
+void drawPaperPage(App& app, ID2D1DeviceContext* dc, ID2D1SolidColorBrush* brush,
+                   const std::vector<App::PrintFrame>& frames, int page, const PageGeometry& geo,
+                   const Furniture& furniture) {
+    for (const auto& frame : frames) {
+        if (frame.page != page) continue;
+        const bool clip = frame.clip.right > frame.clip.left;
+        if (clip) dc->PushAxisAlignedClip(frame.clip, D2D1_ANTIALIAS_MODE_ALIASED);
+        drawDocumentRange(app, dc, brush, frame.yStart, frame.yEnd, frame.x, frame.y);
+        if (clip) dc->PopAxisAlignedClip();
+    }
+    drawFurniture(app, dc, brush, geo, page, furniture);
 }
 
 // Rasterizes one page of the active print layout into the preview pixel
@@ -508,10 +751,14 @@ bool rasterizePreviewPage(App& app, int page) {
         ID2D1SolidColorBrush* brush = nullptr;
         dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
         if (brush) {
-            drawDocumentRange(app, dc, brush,
-                              app.printPreviewBounds[page],
-                              app.printPreviewBounds[page + 1],
-                              printMarginDips(app), printMarginDips(app));
+            Furniture furniture;
+            furniture.numbers = app.printOptionOn[PRINT_PAGE_NUMBERS];
+            furniture.heads = app.printOptionOn[PRINT_RUNNING_HEADS];
+            furniture.left = app.printHeadLeft;
+            furniture.right = app.printHeadRight;
+            drawPaperPage(app, dc, brush, app.printPreviewFrames, page,
+                          pageGeometry(app.printPreviewPageW, app.printPreviewPageH, app.printPreviewMarginMm),
+                          furniture);
             brush->Release();
         }
         dc->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -541,7 +788,7 @@ bool rasterizePreviewPage(App& app, int page) {
 // Runs layout + pagination + per-page drawing. emitPage receives a closed
 // command list per page. Returns page count, or -1 on failure.
 template <typename EmitFn>
-int renderPages(App& app, const PageGeometry& geo, EmitFn emitPage) {
+int renderPages(App& app, const PageGeometry& geo, const PaperSetup& setup, EmitFn emitPage) {
     if (!app.deviceContext || !app.root) return -1;
 
     ID2D1Device* device = nullptr;
@@ -549,7 +796,7 @@ int renderPages(App& app, const PageGeometry& geo, EmitFn emitPage) {
     if (!device) return -1;
 
     SavedView saved{};
-    enterPrintLayout(app, saved);
+    enterPrintLayout(app, saved, setup.zoom);
     // Print/PDF run synchronously and have no message pump: the async
     // PlantUML queue can never deliver here, so the print layout is the
     // single place allowed to render a missing diagram inline, bounded by
@@ -558,23 +805,22 @@ int renderPages(App& app, const PageGeometry& geo, EmitFn emitPage) {
     // reflow timer refreshes an open preview when a render lands.
     app.plantumlPrintLayout = true;
     app.plantumlPrintBudgetMsLeft = 30000;
-    layoutAtPrintWidth(app, geo.contentW);
+    const float columnW = layoutPaper(app, setup, geo);
     // Cleared right after the layout: the post-print relayout at screen
     // width is interactive again (message pump available), so it schedules
     // through the async queue instead of blocking the UI thread.
     app.plantumlPrintLayout = false;
     app.plantumlPrintBudgetMsLeft = 0;
-    std::vector<float> breaks = computePageBreaks(app, geo.contentH);
-    breaks.push_back(app.contentHeight + 1.0f);  // final page sentinel
+    const std::vector<App::PrintFrame> frames = paperFrames(app, setup, geo, columnW);
+    const Furniture furniture = paperFurniture(app, setup);
+    const int pageCount = frames.empty() ? 0 : frames.back().page + 1;
 
     ID2D1DeviceContext* pageDc = nullptr;
     device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &pageDc);
     int pages = 0;
     bool ok = pageDc != nullptr;
 
-    float yStart = 0.0f;
-    for (size_t i = 0; ok && i < breaks.size(); i++) {
-        float yEnd = breaks[i];
+    for (int i = 0; ok && i < pageCount; i++) {
         ID2D1CommandList* commandList = nullptr;
         if (FAILED(pageDc->CreateCommandList(&commandList)) || !commandList) {
             ok = false;
@@ -586,8 +832,7 @@ int renderPages(App& app, const PageGeometry& geo, EmitFn emitPage) {
         ID2D1SolidColorBrush* brush = nullptr;
         pageDc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
         if (brush) {
-            drawDocumentRange(app, pageDc, brush, yStart, yEnd,
-                              geo.margin, geo.margin);
+            drawPaperPage(app, pageDc, brush, frames, i, geo, furniture);
             brush->Release();
         }
         ok = SUCCEEDED(pageDc->EndDraw()) && SUCCEEDED(commandList->Close());
@@ -597,7 +842,6 @@ int renderPages(App& app, const PageGeometry& geo, EmitFn emitPage) {
         }
         commandList->Release();
         pageDc->SetTarget(nullptr);
-        yStart = yEnd;
     }
 
     if (pageDc) pageDc->Release();
@@ -647,7 +891,8 @@ bool printDocument(App& app) {
         pageW = 794.0f;   // A4
         pageH = 1123.0f;
     }
-    PageGeometry geo = pageGeometry(app, pageW, pageH);
+    const PaperSetup setup = paperSetup(app);
+    PageGeometry geo = pageGeometry(pageW, pageH, setup.marginMm);
 
     // Printer name from the DEVNAMES block
     std::wstring printerName;
@@ -685,7 +930,7 @@ bool printDocument(App& app) {
 
     bool ok = false;
     if (printControl) {
-        int pages = renderPages(app, geo, [&](ID2D1CommandList* list, int) {
+        int pages = renderPages(app, geo, setup, [&](ID2D1CommandList* list, int) {
             return SUCCEEDED(printControl->AddPage(
                 list, D2D1::SizeF(geo.pageW, geo.pageH), nullptr));
         });
@@ -704,20 +949,24 @@ static void refreshPreviewLayout(App& app) {
     float pageH = app.printPreviewLandscape ? paper.w : paper.h;
     app.printPreviewPageW = pageW;
     app.printPreviewPageH = pageH;
-    const PageGeometry geo = pageGeometry(app, pageW, pageH);
+    const PaperSetup setup = paperSetup(app);
+    app.printPreviewMarginMm = setup.marginMm;
+    const PageGeometry geo = pageGeometry(pageW, pageH, setup.marginMm);
 
-    layoutAtPrintWidth(app, geo.contentW);
+    const float columnW = layoutPaper(app, setup, geo);
+    app.printPreviewFrames = paperFrames(app, setup, geo, columnW);
+    app.printPreviewBounds = pageBounds(app.printPreviewFrames);
+    const Furniture furniture = paperFurniture(app, setup);
+    app.printOptionOn[PRINT_TWO_COLUMNS] = setup.twoColumns;
+    app.printOptionOn[PRINT_PAGE_NUMBERS] = furniture.numbers;
+    app.printOptionOn[PRINT_RUNNING_HEADS] = furniture.heads;
+    app.printHeadLeft = furniture.left;
+    app.printHeadRight = furniture.right;
 
-    std::vector<float> breaks = computePageBreaks(app, geo.contentH);
-    app.printPreviewBounds.clear();
-    app.printPreviewBounds.push_back(0.0f);
-    for (float b : breaks) app.printPreviewBounds.push_back(b);
-    app.printPreviewBounds.push_back(app.contentHeight + 1.0f);
-
-    // Fit the page between the header and the button bar
+    // Fit the page between the header, the paper options and the button bar
     float ui = app.printSaved.contentScale;
     float availW = app.printSaved.width - 80.0f * ui;
-    float availH = app.printSaved.height - 130.0f * ui;
+    float availH = app.printSaved.height - (130.0f + PRINT_OPTION_ROW_H) * ui;
     app.printPreviewFit = std::max(0.05f,
         std::min(availW / pageW, availH / pageH));
     app.printPreviewPxW = (unsigned)(pageW * app.printPreviewFit);
@@ -731,7 +980,7 @@ static void refreshPreviewLayout(App& app) {
 // First open: start from the default printer's paper, matched to the
 // closest offered format
 static void detectDefaultFormat(App& app) {
-    PageGeometry geo = defaultPageGeometry(app);
+    PageGeometry geo = defaultPageGeometry(app.printMarginMm);
     bool landscape = geo.pageW > geo.pageH;
     float w = landscape ? geo.pageH : geo.pageW;
     float h = landscape ? geo.pageW : geo.pageH;
@@ -751,12 +1000,28 @@ void openPrintPreview(App& app, HWND hwnd) {
         editorReparse(app);  // include unsaved edits in the preview and printout
     }
     if (app.printPreviewPaper < 0) detectDefaultFormat(app);
+    // A paper names its paper and type size (pandoc's papersize, fontsize)
+    const PaperSetup setup = paperSetup(app);
+    if (setup.paper >= 0) app.printPreviewPaper = setup.paper;
 
-    enterPrintLayout(app, app.printSaved);
+    enterPrintLayout(app, app.printSaved, setup.zoom);
     app.printPreviewPage = 0;
     refreshPreviewLayout(app);
     app.showPrintPreview = true;
     InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void printPreviewToggle(App& app, int option) {
+    if (option < 0 || option >= PRINT_OPTION_COUNT) return;
+    const PaperSetup setup = paperSetup(app);
+    const bool on[PRINT_OPTION_COUNT] = {setup.twoColumns, setup.pageNumbers, setup.runningHeads};
+    if (app.printChoices.file != app.currentFile) app.printChoices = {app.currentFile};
+    int* choice[PRINT_OPTION_COUNT] = {&app.printChoices.columns, &app.printChoices.pageNumbers,
+                                       &app.printChoices.runningHeads};
+    *choice[option] = on[option] ? 0 : 1;
+    if (!app.showPrintPreview) return;
+    refreshPreviewLayout(app);
+    if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 void printPreviewSetFormat(App& app, int paper, bool landscape) {
@@ -781,9 +1046,15 @@ void printPreviewRefresh(App& app) {
 
 void printPreviewSetMargin(App& app, float mm) {
     mm = std::max(5.0f, std::min(mm, 50.0f));
-    if (std::fabs(mm - app.printMarginMm) < 0.005f) return;
-    app.printMarginMm = mm;
-    persistPrintMargin(app);
+    // A chip clicked wins over a paper's geometry: margin= for this document
+    const float printed = paperSetup(app).marginMm;
+    if (app.printChoices.file != app.currentFile) app.printChoices = {app.currentFile};
+    app.printChoices.ownMargin = true;
+    if (std::fabs(mm - app.printMarginMm) < 0.005f && std::fabs(mm - printed) < 0.005f) return;
+    if (std::fabs(mm - app.printMarginMm) >= 0.005f) {
+        app.printMarginMm = mm;
+        persistPrintMargin(app);
+    }
     if (!app.showPrintPreview) return;
     refreshPreviewLayout(app);
     if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
@@ -796,6 +1067,7 @@ void closePrintPreview(App& app, HWND hwnd) {
     app.printPreviewPixels.clear();
     app.printPreviewPixels.shrink_to_fit();
     app.printPreviewBounds.clear();
+    app.printPreviewFrames.clear();
     if (app.editMode) {
         // Editor line layouts were built against the print-layout formats
         app.clearEditorLineLayoutCache();
@@ -821,7 +1093,10 @@ void printPreviewConfirm(App& app, HWND hwnd) {
 }
 
 int printDebugPages(App& app, const std::wstring& outDir) {
-    PageGeometry geo = pageGeometry(app, 794.0f, 1123.0f);  // A4
+    // A4, or the paper a paper names
+    const PaperSetup setup = paperSetup(app);
+    const PrintPaper& paper = PRINT_PAPERS[setup.paper >= 0 ? setup.paper : 0];
+    PageGeometry geo = pageGeometry(paper.w, paper.h, setup.marginMm);
 
     ID2D1Device* device = nullptr;
     app.deviceContext->GetDevice(&device);
@@ -852,7 +1127,7 @@ int printDebugPages(App& app, const std::wstring& outDir) {
 
     CreateDirectoryW(outDir.c_str(), nullptr);
 
-    int pages = renderPages(app, geo, [&](ID2D1CommandList* list, int index) {
+    int pages = renderPages(app, geo, setup, [&](ID2D1CommandList* list, int index) {
         rasterDc->SetTarget(pageBitmap);
         rasterDc->BeginDraw();
         rasterDc->Clear(D2D1::ColorF(1.0f, 1.0f, 1.0f));
@@ -904,21 +1179,17 @@ int printDebugPages(App& app, const std::wstring& outDir) {
 // The print pipeline already produces vector pages with driver-side font
 // embedding; routing the same job to the Microsoft Print to PDF driver
 // with the job output redirected into a file stream yields the PDF at the
-// chosen path with no dialog. Pages use the last print-preview paper
-// choice, or the locale default before any preview ran.
+// chosen path with no dialog. Pages use the paper a paper names, else the
+// last print-preview paper choice, or the locale default before any
+// preview ran.
 bool exportPdfFile(App& app, const std::wstring& path) {
     if (!app.root || !app.deviceContext) return false;
     if (app.editMode) {
         editorReparse(app);  // include unsaved edits, like the preview
     }
 
-    PageGeometry geo = defaultPageGeometry(app);
-    if (app.printPreviewPaper >= 0 &&
-        app.printPreviewPaper < PRINT_PAPER_COUNT) {
-        const PrintPaper& paper = PRINT_PAPERS[app.printPreviewPaper];
-        geo = pageGeometry(app, app.printPreviewLandscape ? paper.h : paper.w,
-                           app.printPreviewLandscape ? paper.w : paper.h);
-    }
+    const PaperSetup setup = paperSetup(app);
+    const PageGeometry geo = setupPageGeometry(app, setup);
 
     IStream* fileStream = nullptr;
     if (FAILED(SHCreateStreamOnFileEx(
@@ -956,7 +1227,7 @@ bool exportPdfFile(App& app, const std::wstring& path) {
 
     bool ok = false;
     if (printControl) {
-        int pages = renderPages(app, geo, [&](ID2D1CommandList* list, int) {
+        int pages = renderPages(app, geo, setup, [&](ID2D1CommandList* list, int) {
             return SUCCEEDED(printControl->AddPage(
                 list, D2D1::SizeF(geo.pageW, geo.pageH), nullptr));
         });

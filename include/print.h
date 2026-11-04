@@ -47,8 +47,17 @@ D2DTheme printTheme(const D2DTheme& screen);
 inline constexpr float PRINT_MARGINS_MM[] = {12.7f, 19.05f, 25.4f};
 inline constexpr int PRINT_MARGIN_COUNT = 3;
 
-// Sets the margin on every side, re-paginates an open preview and saves it
+// Sets the margin on every side, re-paginates an open preview and saves it.
+// It wins over a paper's geometry: margin= for the document.
 void printPreviewSetMargin(App& app, float mm);
+
+// Paper options (docs/specs/scholar.md, phase 3). A paper's front matter
+// sets them - pandoc's classoption: twocolumn, and page numbers and
+// running heads for a title block - and the preview toggles them for the
+// document in a row of its own under the header.
+enum PrintOption { PRINT_TWO_COLUMNS, PRINT_PAGE_NUMBERS, PRINT_RUNNING_HEADS, PRINT_OPTION_COUNT };
+inline constexpr float PRINT_OPTION_ROW_H = 36.0f;  // DIPs at 100%
+void printPreviewToggle(App& app, int option);
 
 // Debug/testing: renders each paginated page to <outDir>\page-N.png using
 // the same layout and pagination as printing. Returns the page count.
