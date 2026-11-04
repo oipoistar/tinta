@@ -320,15 +320,15 @@ struct FlowStyle {
     float strokeWidth = 1.5f;
     bool customFill = false;
     bool customStroke = false;
-    bool customText = false;
 };
 
 FlowStyle flowResolveStyle(const App& app, const mermaid::Diagram& diagram,
                            const mermaid::Node& node, float scale) {
     FlowStyle resolved;
-    resolved.fill = app.theme.codeBackground;
-    resolved.stroke = app.theme.accent;
-    resolved.text = app.theme.text;
+    const FlowchartColors colors = flowchartColors(app);
+    resolved.fill = colors.nodeFill;
+    resolved.stroke = colors.nodeBorder;
+    resolved.text = colors.nodeText;
     resolved.strokeWidth = 1.5f * scale;
     auto apply = [&](const mermaid::Style& style) {
         if (style.hasFill) {
@@ -339,10 +339,7 @@ FlowStyle flowResolveStyle(const App& app, const mermaid::Diagram& diagram,
             resolved.stroke = flowColor(style.stroke);
             resolved.customStroke = true;
         }
-        if (style.hasText) {
-            resolved.text = flowColor(style.text);
-            resolved.customText = true;
-        }
+        if (style.hasText) resolved.text = flowColor(style.text);
         if (style.hasStrokeWidth) {
             resolved.strokeWidth = style.strokeWidth * scale;
         }
@@ -551,16 +548,12 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& source,
         }
     }
 
-    D2D1_COLOR_F connectorColor = app.theme.text;
-    connectorColor.a = app.theme.isDark ? 0.7f : 0.6f;
-    D2D1_COLOR_F chipStroke = connectorColor;
-    chipStroke.a *= 0.6f;
-    D2D1_COLOR_F groupFill = app.theme.codeBackground;
-    groupFill.a *= 0.55f;
-    D2D1_COLOR_F groupBorder = app.theme.text;
-    groupBorder.a = 0.28f;
-    D2D1_COLOR_F groupTitle = app.theme.text;
-    groupTitle.a = 0.78f;
+    const FlowchartColors colors = flowchartColors(app);
+    D2D1_COLOR_F connectorColor = colors.line;
+    D2D1_COLOR_F chipStroke = colors.labelBorder;
+    D2D1_COLOR_F groupFill = colors.clusterFill;
+    D2D1_COLOR_F groupBorder = colors.clusterBorder;
+    D2D1_COLOR_F groupTitle = colors.clusterText;
 
     struct FlowConn {
         std::vector<D2D1_POINT_2F> points;
@@ -851,13 +844,24 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& source,
         box.stroke = Role::Custom;
         primCustom(box, chipStroke);
         box.strokeWidth = 1.2f * scale;
+        if (app.theme.mermaid.edgeLabel) {
+            // A fill of its own (--mermaid-edge-label-background): a prim
+            // holds one custom colour, so the fill goes first on its own
+            Prim fill = box;
+            fill.fill = Role::Custom;
+            fill.stroke = Role::None;
+            primCustom(fill, colors.labelFill);
+            result.prims.push_back(std::move(fill));
+            box.fill = Role::None;
+        }
         result.prims.push_back(std::move(box));
 
         Prim label;
         label.type = PrimType::Text;
         label.text = toUtf8(chip.text);
         label.style = textStyle;
-        label.fill = Role::Text;
+        label.fill = Role::Custom;
+        primCustom(label, colors.labelText);
         label.x1 = chip.rect.left + labelPadX;
         label.y1 = chip.rect.top + labelPadY;
         label.x2 = chip.rect.right - labelPadX;
@@ -910,12 +914,9 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& source,
         label.type = PrimType::Text;
         label.text = toUtf8(labels[i]);
         label.style = textStyle;
-        if (style.customText) {
-            label.fill = Role::Custom;
-            primCustom(label, style.text);
-        } else {
-            label.fill = Role::Text;
-        }
+        // A node's own text colour, else the flowchart's
+        label.fill = Role::Custom;
+        primCustom(label, style.text);
         label.x1 = rect.left +
                    mermaid::leftNotch(node.shape, rect.bottom - rect.top) + insetX;
         label.y1 = rect.top + insetY;
@@ -1118,16 +1119,12 @@ std::string plantumlFenceSvg(ExportCtx& ctx, const std::string& code) {
     const std::wstring toolPath = ctx.app.plantumlTool.isJar
                                       ? ctx.app.plantumlTool.jar
                                       : ctx.app.plantumlTool.program;
-    mermaidext::Prim colorPrim{};
     const std::string preambleText = plantuml::preamble(
         wideToUtf8Str(ctx.app.theme.fontFamily), kDiagramFontSize,
-        colorHexNoHash(
-            resolveDiagramRole(ctx.app, colorPrim, mermaidext::Role::Text)),
+        colorHexNoHash(plantumlRoleColor(ctx.app, mermaidext::Role::Text)),
         ctx.app.theme.isDark,
-        colorHexNoHash(
-            resolveDiagramRole(ctx.app, colorPrim, mermaidext::Role::Fill)),
-        colorHexNoHash(
-            resolveDiagramRole(ctx.app, colorPrim, mermaidext::Role::Stroke)));
+        colorHexNoHash(plantumlRoleColor(ctx.app, mermaidext::Role::Fill)),
+        colorHexNoHash(plantumlRoleColor(ctx.app, mermaidext::Role::Stroke)));
 
     std::string sourceWithPreamble = code;
     if (!plantuml::injectPreamble(sourceWithPreamble, preambleText)) return {};

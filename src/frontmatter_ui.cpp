@@ -38,9 +38,9 @@ void text(App& app,const std::wstring& value,D2D1_RECT_F r,float size,D2D1_COLOR
 }
 void button(App& app,D2D1_RECT_F r,const std::wstring& value,int action,bool active=false,bool enabled=true) {
     float scale=app.frontmatterUiScale;
-    fill(app,r,color(active?app.theme.accent:app.theme.text,active?.16f:.045f),4*scale);
+    fill(app,r,color(active?themeUiAccent(app.theme):themeUiText(app.theme),active?.16f:.045f),4*scale);
     text(app,value,{r.left+7*scale,r.top,r.right-5*scale,r.bottom},11*scale,
-         color(active?app.theme.accent:app.theme.text,enabled?1.f:.3f),active);
+         color(active?themeUiAccent(app.theme):themeUiText(app.theme),enabled?1.f:.3f),active);
     if(enabled)app.settingsHits.push_back({r,action});
 }
 std::vector<fm::Property> previewProperties(const App& app) {
@@ -183,8 +183,8 @@ void renderFrontmatterSettings(App& app,const D2D1_RECT_F& area) {
     float x=area.left,y=area.top,w=area.right-x;
     float s=std::min({app.contentScale, w/360.f, (area.bottom-area.top)/390.f});
     app.frontmatterUiScale=s;
-    auto normal=app.theme.text,muted=color(normal,.5f),accent=app.theme.accent;
-    auto card=color(normal,app.theme.isDark?.045f:.028f);
+    auto normal=themeUiText(app.theme),muted=color(normal,.5f),accent=themeUiAccent(app.theme);
+    auto card=color(normal,themeUiDark(app.theme)?.045f:.028f);
     fill(app,{x,y,x+w,y+58*s},card,6*s);
     text(app,tr(app,"fm.title"),{x+12*s,y+5*s,x+w-140*s,y+29*s},13*s,normal,true);
     text(app,tr(app,"fm.strip_hint"),{x+12*s,y+29*s,x+w-10*s,y+51*s},11*s,muted);
@@ -226,7 +226,7 @@ void renderFrontmatterSettings(App& app,const D2D1_RECT_F& area) {
         if(enabled)clippedHit({x,ry,x+24*s,ry+rowH},id);
         D2D1_RECT_F box={showX+7*s,ry+11*s,showX+21*s,ry+25*s};
         fill(app,box,color(r.show?accent:normal,r.show&&enabled?1.f:.10f),3*s);
-        if(r.show)text(app,L"\u2713",{box.left+2*s,box.top-1*s,box.right,box.bottom},11*s,color(app.theme.background,enabled?1.f:.3f),true);
+        if(r.show)text(app,L"\u2713",{box.left+2*s,box.top-1*s,box.right,box.bottom},11*s,color(themeUiPanel(app.theme,app.theme.background),enabled?1.f:.3f),true);
         if(enabled)clippedHit({showX,ry,sideX,ry+rowH},id+1);
         size_t before=app.settingsHits.size();
         button(app,{sideX,ry+7*s,sideX+25*s,ry+30*s},tr(app,"fm.left_short"),id+2,!r.right,details);
@@ -274,7 +274,7 @@ void renderFrontmatterSettings(App& app,const D2D1_RECT_F& area) {
         auto row=app.frontmatterRows[app.frontmatterMenu];float my=std::clamp(row.bottom,area.top,area.bottom-menuH);
         D2D1_RECT_F menu={x+w-menuW,my,x+w,my+menuH};app.frontmatterMenuRect=menu;
         fill(app,{menu.left-3*s,menu.top-2*s,menu.right+3*s,menu.bottom+4*s},D2D1::ColorF(0,0,0,.15f),7*s);
-        fill(app,menu,app.theme.background,6*s);
+        fill(app,menu,themeUiPanel(app.theme,app.theme.background),6*s);
         for(size_t i=0;i<opts.size();++i)button(app,{menu.left+5*s,my+6*s+i*29*s,menu.right-5*s,my+31*s+i*29*s},formatLabel(app,opts[i]),FM_PICK+(int)opts[i],r.format==opts[i]);
         if(r.hint==fm::Kind::List) {
             float ly=menu.bottom-38*s;
@@ -354,7 +354,7 @@ void renderFrontmatterOverflow(App& app) {
         IDWriteTextLayout* layout=nullptr;app.dwriteFactory->CreateTextLayout(o.text.c_str(),(UINT32)o.text.size(),app.folderBrowserFormat,w-20*s,10000,&layout);
         if(!layout)return;
         layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);DWRITE_TEXT_METRICS m{};layout->GetMetrics(&m);
-        fill(app,{x,y,x+w,y+m.height+16*s},app.theme.codeBackground,6*s);
-        app.brush->SetColor(app.theme.text);app.renderTarget->DrawTextLayout({x+10*s,y+8*s},layout,app.brush);layout->Release();return;
+        fill(app,{x,y,x+w,y+m.height+16*s},themeUiPanel(app.theme,app.theme.codeBackground),6*s);
+        app.brush->SetColor(themeUiText(app.theme));app.renderTarget->DrawTextLayout({x+10*s,y+8*s},layout,app.brush);layout->Release();return;
     }
 }

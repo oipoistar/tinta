@@ -101,6 +101,26 @@ struct StartupMetrics {
 // Syntax highlighting token types
 enum class SyntaxTokenType { Plain, Keyword, String, Comment, Number, Function, TypeName, Operator, ControlFlow };
 
+// Diagram colours a CSS theme gives with Mermaid's theme variables, written
+// --mermaid-primary-color and so on (docs/css-themes.md). Each is the first
+// of its variables the sheet sets; a missing one keeps what Tinta derives
+// from the page for that part of a diagram
+struct DiagramColors {
+    std::optional<D2D1_COLOR_F> nodeFill;       // mainBkg, primaryColor
+    std::optional<D2D1_COLOR_F> nodeBorder;     // nodeBorder, primaryBorderColor
+    std::optional<D2D1_COLOR_F> nodeText;       // nodeTextColor, primaryTextColor: flowchart labels
+    std::optional<D2D1_COLOR_F> text;           // textColor, primaryTextColor
+    std::optional<D2D1_COLOR_F> line;           // lineColor
+    std::optional<D2D1_COLOR_F> link;           // defaultLinkColor: flowchart edges, else line
+    std::optional<D2D1_COLOR_F> secondary;      // secondaryColor: notes, activations, bands
+    std::optional<D2D1_COLOR_F> edgeLabel;      // edgeLabelBackground, secondaryColor
+    std::optional<D2D1_COLOR_F> clusterFill;    // clusterBkg, tertiaryColor
+    std::optional<D2D1_COLOR_F> clusterBorder;  // clusterBorder, tertiaryBorderColor
+    std::optional<D2D1_COLOR_F> clusterText;    // titleColor, tertiaryTextColor
+    std::optional<D2D1_COLOR_F> background;     // background
+    std::optional<D2D1_COLOR_F> series[12];     // pie1..pie12: every chart's series
+};
+
 // Theme colors
 struct D2DTheme {
     const wchar_t* name;
@@ -150,6 +170,12 @@ struct D2DTheme {
     bool headingItalic[6] = {};
     // The file a CSS theme came from, for following its changes; else empty
     const wchar_t* sourcePath = nullptr;
+    // The window around the page as a CSS theme sets it with --ui-* on
+    // :root (docs/specs/theming.md, phase 3): the tab strip and caption,
+    // the chrome's text and accent, panels, menus, popups and cards, and
+    // their edges. A missing one keeps what the page gives that part
+    std::optional<D2D1_COLOR_F> uiBackground, uiText, uiAccent, uiPanel, uiBorder;
+    DiagramColors mermaid;
 };
 
 // What a theme's type sizes are, as text: text formats are rebuilt when it
@@ -205,6 +231,26 @@ inline D2D1_COLOR_F themeSelectionColor(const D2DTheme& theme, D2D1_COLOR_F own)
     color.a = own.a;
     return color;
 }
+
+// The chrome's colours (--ui-*): the theme's where it sets them, else the
+// page's, so a theme without them draws its window as before. Out of line
+// (themes.cpp): the chrome calls them in a few hundred places
+D2D1_COLOR_F themeUiText(const D2DTheme& theme);
+D2D1_COLOR_F themeUiAccent(const D2DTheme& theme);
+// Strong chrome text (a panel's title, the row in use): --ui-text, else
+// the page's heading colour
+D2D1_COLOR_F themeUiHeading(const D2DTheme& theme);
+// A panel, menu, popup or card's fill: --ui-panel at the surface's own
+// opacity (its fade and translucency), else the surface's own colour
+D2D1_COLOR_F themeUiPanel(const D2DTheme& theme, D2D1_COLOR_F own);
+// Their edges and dividers: --ui-border as it is, faded in with the
+// surface, else the surface's own
+D2D1_COLOR_F themeUiBorder(const D2DTheme& theme, D2D1_COLOR_F own, float fade = 1.0f);
+// Whether a colour reads as dark, as the CSS compiler decides a page is
+bool themeColorIsDark(const D2D1_COLOR_F& c);
+// Whether the chrome's panels are dark: --ui-panel's when the theme sets
+// it, else the page's
+bool themeUiDark(const D2DTheme& theme);
 
 // Helper to create color from hex
 inline D2D1_COLOR_F hexColor(uint32_t hex, float alpha = 1.0f) {

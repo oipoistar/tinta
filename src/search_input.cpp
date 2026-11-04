@@ -309,12 +309,12 @@ void renderSearchField(App& app, int field, const D2D1_RECT_F& textRect,
         layout->HitTestTextRange(start, length, origin.x, origin.y, nullptr, 0, &count);
         std::vector<DWRITE_HIT_TEST_METRICS> hits(count);
         if (count && SUCCEEDED(layout->HitTestTextRange(start, length, origin.x, origin.y, hits.data(), count, &count))) {
-            auto color = app.theme.accent; color.a = 0.25f * alpha; app.brush->SetColor(color);
+            auto color = themeUiAccent(app.theme); color.a = 0.25f * alpha; app.brush->SetColor(color);
             for (const auto& hit : hits) app.renderTarget->FillRectangle(
                 D2D1::RectF(hit.left, hit.top, hit.left+hit.width, hit.top+hit.height), app.brush);
         }
     }
-    auto color = app.theme.text; color.a = (text.empty() ? 0.4f : 1.0f) * alpha;
+    auto color = themeUiText(app.theme); color.a = (text.empty() ? 0.4f : 1.0f) * alpha;
     app.brush->SetColor(color);
     if (text.empty()) app.renderTarget->DrawText(placeholder, static_cast<UINT32>(wcslen(placeholder)), app.searchTextFormat, textRect, app.brush);
     else if (layout) app.renderTarget->DrawTextLayout(origin, layout.Get(), app.brush);

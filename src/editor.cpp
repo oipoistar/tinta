@@ -5235,20 +5235,21 @@ void renderGotoLinePrompt(App& app) {
     if (!app.gotoLineOpen || !format) return;
     const D2D1_RECT_F box = gotoLinePromptBox(app);
     const float h = box.bottom - box.top;
-    D2D1_COLOR_F shadow = D2D1::ColorF(0, 0, 0, app.theme.isDark ? 0.35f : 0.12f);
+    // A popup: a CSS theme's --ui-panel, --ui-text and --ui-accent
+    D2D1_COLOR_F shadow = D2D1::ColorF(0, 0, 0, themeUiDark(app.theme) ? 0.35f : 0.12f);
     app.brush->SetColor(shadow);
     app.renderTarget->FillRoundedRectangle(
         D2D1::RoundedRect(D2D1::RectF(box.left, box.top + dpi(app, 2.0f), box.right, box.bottom + dpi(app, 3.0f)),
                           dpi(app, 9.0f), dpi(app, 9.0f)), app.brush);
-    app.brush->SetColor(app.theme.background);
+    app.brush->SetColor(themeUiPanel(app.theme, app.theme.background));
     app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(box, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush);
-    D2D1_COLOR_F border = app.theme.accent;
+    D2D1_COLOR_F border = themeUiAccent(app.theme);
     border.a = 0.6f;
     app.brush->SetColor(border);
     app.renderTarget->DrawRoundedRectangle(D2D1::RoundedRect(box, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush,
                                            dpi(app, 1.2f));
     // "Go to line  123|        1–N"
-    D2D1_COLOR_F muted = app.theme.text;
+    D2D1_COLOR_F muted = themeUiText(app.theme);
     muted.a = 0.55f;
     const float pad = dpi(app, 12.0f);
     // The format draws from the top: centre its line in the box
@@ -5263,11 +5264,11 @@ void renderGotoLinePrompt(App& app) {
     app.renderTarget->DrawText(range.c_str(), (UINT32)range.size(), format,
                                D2D1::RectF(box.right - pad - rangeW, textTop, box.right - pad, box.bottom), app.brush);
     const float inputX = box.left + pad + labelW + dpi(app, 12.0f);
-    app.brush->SetColor(app.theme.text);
+    app.brush->SetColor(themeUiText(app.theme));
     app.renderTarget->DrawText(app.gotoLineInput.c_str(), (UINT32)app.gotoLineInput.size(), format,
                                D2D1::RectF(inputX, textTop, box.right - pad - rangeW, box.bottom), app.brush);
     const float caretX = inputX + measureText(app, app.gotoLineInput.c_str(), format) + dpi(app, 1.0f);
-    app.brush->SetColor(app.theme.accent);
+    app.brush->SetColor(themeUiAccent(app.theme));
     app.renderTarget->FillRectangle(
         D2D1::RectF(caretX, box.top + h * 0.25f, caretX + dpi(app, 1.5f), box.bottom - h * 0.25f), app.brush);
 }

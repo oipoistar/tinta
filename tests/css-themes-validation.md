@@ -108,3 +108,141 @@ means dropping parts of CSS the later phases need.
   next face in its list that is installed.
 - Every `.css` file in `themes\` is listed, including sheets meant only to
   be imported; keep those in a subfolder.
+
+# Phase 3: the window and diagrams
+
+Validated on Windows with the Release build on 2026-11-04.
+
+## What was asked
+
+Two of phase 3's variable families: `--ui-*` for a window that differs
+from the page (a dark frame around a light page, say), and `--mermaid-*`
+so a theme can colour Mermaid diagrams with Mermaid's own variable names.
+A theme without them, every built-in and `themes.ini` theme among them,
+must draw exactly as before.
+
+## The change
+
+- **`--ui-background`, `--ui-text`, `--ui-accent`, `--ui-panel`,
+  `--ui-border`** are read from the page (`:root`, or `body`) into optional
+  `D2DTheme` fields, light and dark. The chrome draws through
+  `themeUiText`, `themeUiAccent`, `themeUiHeading`, `themeUiPanel` and
+  `themeUiBorder` (`app.h`, `themes.cpp`), which return today's derivation
+  when a field is unset. `--ui-background` is the tab strip, the edit rail, the Windows
+  caption and its dark-mode flag, and the print preview's backdrop;
+  `--ui-panel` the Contents and browser panels, the search results, the
+  find bar and go-to-line prompt, every menu (context, tab, editor, Live's),
+  the tab switcher and hover card, notices and prompts, the settings (its
+  cards lift from it), help, the theme chooser, the shortcut and theme
+  editors, annotation popups, the link peek and the start page's buttons and
+  cards. Dark or light tuned details (warning hues, shadows, wells) follow
+  the panel's own lightness.
+- **`--mermaid-*`**: Mermaid's theme variables in kebab case map onto the
+  parts of a diagram Tinta draws (`DiagramColors`), the narrower variable
+  first: `mainBkg`/`primaryColor` the nodes, `nodeBorder`/
+  `primaryBorderColor` their outlines, `nodeTextColor`/`primaryTextColor`
+  flowchart labels, `textColor`/`primaryTextColor` the rest of the text,
+  `lineColor` (and `defaultLinkColor` for flowcharts) edges, messages and
+  frames, `secondaryColor` notes, activations and bands,
+  `edgeLabelBackground` edge labels, `clusterBkg`/`tertiaryColor`,
+  `clusterBorder`/`tertiaryBorderColor` and `titleColor`/
+  `tertiaryTextColor` subgraphs, `background`, and `pie1`-`pie12` the series
+  palette. They are read from `body > div.diagram`, so a rule on
+  `.diagram` reaches them. The page and the HTML and Word exports share the
+  role resolver and a new `flowchartColors`; a `style`/`classDef` still
+  wins. PlantUML's preamble keeps the page's colours. Tinta reads no
+  `%%{init}%%` directive (such lines are comments to it), so there is no
+  per-diagram `themeVariables` to win over the sheet.
+- **Problems**: a misspelt `--ui-*` or `--mermaid-*` name is a warning
+  with the name it is nearest; an unknown `--ui-*` lists the five; a
+  Mermaid variable Tinta has no part for is a note; a value that is no
+  colour is a warning. Each has its file and line.
+
+## Fixtures
+
+`fixtures/theme-css/chrome.css` ("Harbour": a light page in a dark window,
+following Windows, with diagram colours) and `chrome.md`, a mixed page: a
+table, a quote, tasks, a flowchart with a subgraph, edge labels and a node
+styled in the diagram, a sequence diagram with a note and an activation, a
+pie, code and a list.
+
+## Automated checks
+
+`inline_code_theme` (theme_tests) runs `tests/theme_chrome_tests.cpp`:
+
+- chrome.css compiles cleanly; the five `--ui-*` colours and the Mermaid
+  parts, light and dark; what it leaves out stays unset; the precedence
+  (`mainBkg` over `primaryColor`, `secondaryColor` filling edge labels,
+  `tertiaryTextColor` titling subgraphs, `textColor` against
+  `primaryTextColor`), a rule on `.diagram`, `--ui-*` on `body`.
+- All ten built-ins: `themeToCss` names no new variable and compiles back
+  with none set.
+- Five problems on their lines, nothing for a `var()` or a sheet's own
+  variable, and a `var()` fallback read as a colour.
+- `tabStripBackground` and `promptChipSurface` keep their derivations for
+  Paper and Midnight and every helper returns the page's colour; with the
+  sheet, the strip is `--ui-background`, the side panels `--ui-panel`
+  (at their own opacity), `paint::surface` takes all four.
+- The page laid out with the sheet: nodes and actors, the styled node's own
+  colours, edge labels, every edge and message in `lineColor`, the
+  subgraph and its title, node and edge labels, the note, the four pie
+  slices; the table beside them in the page's text; PlantUML's role colours
+  stay the page's. The HTML export's SVG carries eight of the colours, the
+  export's flowchart mirror matches the page, the Word export succeeds.
+  Paper's diagrams keep today's colours.
+
+## In the built app
+
+The test draws each chrome surface over the fixture with the real drawing
+code and saves the frames (`build/theme-test-Release/chrome-frames/`): the
+strip, Contents, the browser, the find bar, the context and tab menus, the
+tab switcher, settings, help, notices, the unsaved-changes prompt, the
+theme chooser, the edit rail with the editor's menu, the start page, and
+the page at its diagrams (replayed through `drawLayoutRange`, shapes and
+connectors included).
+
+- **Pixel for pixel**: the same capture was built into the parent commit
+  (`886d159`, with `TINTA_CHROME_BASELINE`, which leaves out the new
+  checks) and run with `TINTA_CHROME_ALL_THEMES=1`. All 160 frames, 16
+  surfaces in each of the ten built-in themes, are identical between the
+  two builds.
+- **chrome.css, Windows light**: a navy strip with light tab names, the
+  active tab in the page's cream with its dark name; Contents, the browser
+  and every menu in the navy panel with light text, orange current rows and
+  pins, hairlines in `--ui-border`; settings cards lifted from the panel;
+  notices and the prompt on the panel with hues tuned for a dark surface;
+  the start page's buttons and Learn cards in the panel, its title and
+  recent list on the page. Diagrams: pale blue nodes with blue outlines,
+  slate edges, cream edge labels, an orange subgraph title, the styled node
+  in its own yellow, the note and activation in the secondary peach, the pie
+  in pie1-pie4.
+- **chrome.css, Windows dark**: the same window darker, the page dark, the
+  diagrams on their dark side.
+
+As in phase 1, a real window could not be captured in this session; the
+caption Windows draws (DWM) was not seen, only set from the same strip
+colour. The Word export's three diagram images were opened and match the
+page; the HTML export's are checked by their SVG colours.
+
+The rest of the suite, 65 tests without the three that use the clipboard,
+passes. `editor_context_selection`'s case for a clipboard held for a moment
+failed once while other builds shared the machine; it passed run alone and
+in the next full run.
+
+## Size
+
+`tinta.exe` grew by 20,992 bytes, from 4,738,560 to 4,759,552 (Release,
+against the parent commit built the same way). The chrome's colour
+helpers are called out of line: inlined at their few hundred call sites
+they cost another 11,776.
+
+## Limitations (phase 3)
+
+- A sheet's canvas keeps the page's colours, its toolbars included: their
+  icons are the page's ink. Scholar's reference card, the editor's reading
+  button and word count, table editing and the code block buttons stand on
+  the page and keep its colours too.
+- Mermaid's per-diagram variables (`actorBkg`, `noteBkgColor`,
+  `git0`...) have no part of their own in Tinta's diagrams; they are
+  reported as not drawn. Every chart's series take `pie1`-`pie12`.
+- Print and PDF keep Paper's print palette for diagrams, as for the page.

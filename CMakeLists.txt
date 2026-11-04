@@ -571,7 +571,7 @@ if(BUILD_TESTING)
     add_test(NAME blockquote_layout COMMAND blockquote_layout_tests)
 
     add_executable(theme_tests tests/theme_tests.cpp tests/theme_colour_tests.cpp tests/theme_css_tests.cpp
-        tests/page_style_tests.cpp ${INPUT_TEST_SOURCES})
+        tests/page_style_tests.cpp tests/theme_chrome_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(theme_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(theme_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
     target_compile_definitions(theme_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>

@@ -461,18 +461,25 @@ void renderStartPage(App& app) {
     D2D1_COLOR_F white = D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f);
     D2D1_COLOR_F text = th.text;
     D2D1_COLOR_F heading = th.heading;
-    D2D1_COLOR_F accent = th.accent;
+    D2D1_COLOR_F accent = themeUiAccent(th);
+    // The buttons and Learn's cards are the window's surfaces: a CSS
+    // theme's --ui-panel, --ui-text and --ui-border; what stands on the
+    // page keeps the page's colours
+    const D2D1_COLOR_F ink = themeUiText(th);
 
     // Theme-derived surfaces: dark themes lift toward the (light) text,
     // light themes toward paper white, mirroring the settings cards
-    D2D1_COLOR_F surface = th.isDark ? mixToward(th.background, text, 0.06f)
-                                     : mixToward(th.background, white, 0.60f);
-    D2D1_COLOR_F surfaceBorder = withA(text, th.isDark ? 0.12f : 0.14f);
-    D2D1_COLOR_F card = th.isDark ? mixToward(th.background, text, 0.05f)
-                                  : mixToward(th.background, white, 0.55f);
-    D2D1_COLOR_F cardBorder = withA(text, 0.10f);
+    D2D1_COLOR_F surface = themeUiPanel(th, th.isDark ? mixToward(th.background, text, 0.06f)
+                                                      : mixToward(th.background, white, 0.60f));
+    D2D1_COLOR_F surfaceBorder = themeUiBorder(th, withA(ink, th.isDark ? 0.12f : 0.14f));
+    D2D1_COLOR_F card = themeUiPanel(th, th.isDark ? mixToward(th.background, text, 0.05f)
+                                                   : mixToward(th.background, white, 0.55f));
+    D2D1_COLOR_F cardBorder = themeUiBorder(th, withA(ink, 0.10f));
     D2D1_COLOR_F chipBg = mixToward(th.background, text, 0.07f);
     D2D1_COLOR_F chipFg = withA(text, 0.60f);
+    // A key chip on a button
+    const D2D1_COLOR_F buttonChipBg = th.uiPanel ? mixToward(surface, ink, 0.07f) : chipBg;
+    const D2D1_COLOR_F buttonChipFg = withA(ink, 0.60f);
     D2D1_COLOR_F hoverBg = mixToward(th.background, text, 0.06f);
     float accentLum =
         0.299f * accent.r + 0.587f * accent.g + 0.114f * accent.b;
@@ -592,7 +599,7 @@ void renderStartPage(App& app) {
             app.renderTarget->FillRoundedRectangle(rr, app.brush);
         } else {
             D2D1_COLOR_F fill = surface;
-            if (hov) fill = mixToward(surface, text, 0.04f);
+            if (hov) fill = mixToward(surface, ink, 0.04f);
             app.brush->SetColor(fill);
             app.renderTarget->FillRoundedRectangle(rr, app.brush);
             app.brush->SetColor(surfaceBorder);
@@ -600,10 +607,10 @@ void renderStartPage(App& app) {
         }
         DWRITE_TEXT_METRICS lm = spMetrics(labels[i]);
         spDraw(app, labels[i], bx + dpi(app, 14.0f), by + (btnH - lm.height) * 0.5f,
-               b.primary ? onAccent : text);
+               b.primary ? onAccent : ink);
         if (labels[i]) labels[i]->Release();
-        D2D1_COLOR_F kBg = b.primary ? withA(onAccent, 0.14f) : chipBg;
-        D2D1_COLOR_F kFg = b.primary ? withA(onAccent, 0.75f) : chipFg;
+        D2D1_COLOR_F kBg = b.primary ? withA(onAccent, 0.14f) : buttonChipBg;
+        D2D1_COLOR_F kFg = b.primary ? withA(onAccent, 0.75f) : buttonChipFg;
         if (!b.key.empty())
             spChip(app, b.key, r.right - dpi(app, 12.0f), by + btnH * 0.5f,
                    kBg, kFg, true);
@@ -773,9 +780,9 @@ void renderStartPage(App& app) {
             D2D1_ROUNDED_RECT rr =
                 D2D1::RoundedRect(r, dpi(app, 9.0f), dpi(app, 9.0f));
             bool hov = app.startPageHover == 20 + i;
-            app.brush->SetColor(hov ? mixToward(card, text, 0.03f) : card);
+            app.brush->SetColor(hov ? mixToward(card, ink, 0.03f) : card);
             app.renderTarget->FillRoundedRectangle(rr, app.brush);
-            app.brush->SetColor(hov ? withA(text, 0.20f) : cardBorder);
+            app.brush->SetColor(hov ? withA(ink, 0.20f) : cardBorder);
             app.renderTarget->DrawRoundedRectangle(rr, app.brush, 1.0f);
 
             IDWriteTextLayout* ic = spLayout(app, cards[i].ic, 14.0f,
@@ -786,10 +793,10 @@ void renderStartPage(App& app) {
                    ly + padY + (tm.height - im.height) * 0.5f, accent);
             if (ic) ic->Release();
             spDraw(app, title, x1 + padX + im.width + dpi(app, 9.0f),
-                   ly + padY, heading);
+                   ly + padY, themeUiHeading(th));
             if (title) title->Release();
             spDraw(app, desc, x1 + padX, ly + padY + tm.height + dpi(app, 5.0f),
-                   withA(text, 0.52f));
+                   withA(ink, 0.52f));
             if (desc) desc->Release();
             addHit(r.left, r.top, r.right, r.bottom, 20 + i);
             ly += cardH + dpi(app, 10.0f);

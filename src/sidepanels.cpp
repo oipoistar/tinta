@@ -148,8 +148,10 @@ void renderSidePanelResizeGrip(App& app, SidePanel panel) {
     const float x = sidePanelResizeEdge(app, panel);
     const bool active = app.panelResize.panel == panel ||
         sidePanelResizeAt(app, static_cast<float>(app.mouseX), static_cast<float>(app.mouseY)) == panel;
-    D2D1_COLOR_F color = active ? app.theme.accent : app.theme.text;
+    // The panel's edge: --ui-border when a CSS theme gives one
+    D2D1_COLOR_F color = active ? themeUiAccent(app.theme) : themeUiText(app.theme);
     color.a = active ? 0.55f : 0.10f;
+    if (!active) color = themeUiBorder(app.theme, color);
     app.brush->SetColor(color);
     const float left = std::floor(x) - (panel == SidePanel::Browser || app.tocOnLeft ? 1.0f : 0.0f);
     app.renderTarget->FillRectangle(
@@ -347,7 +349,7 @@ void renderPanelScrollbar(App& app, PanelList which, float alpha) {
     const ScrollbarGeometry bar = panelListScrollbar(app, view);
     // Under the pointer and while dragged the thumb widens and darkens
     const bool hot = panelScrollbarHot(app, which);
-    D2D1_COLOR_F color = app.theme.text;
+    D2D1_COLOR_F color = themeUiText(app.theme);
     color.a = (hot ? 0.45f : 0.25f) * alpha;
     app.brush->SetColor(color);
     app.renderTarget->FillRoundedRectangle(

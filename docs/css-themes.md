@@ -97,6 +97,8 @@ Tinta's own look stays.
   `oklch()`, `color-mix()`, `light-dark()`, `@import` (a built-in theme by
   name, a `themes.ini` theme by name, or a file beside the sheet), `@media`
   (`prefers-color-scheme`, `print`, widths), `@supports` and `@font-face`.
+- **Variables:** `--ui-*` colour the window and `--mermaid-*` the diagrams,
+  below.
 
 Mistakes and properties Tinta does not use are reported in a notice with
 the file and line, and the rest of the sheet applies.
@@ -210,6 +212,55 @@ Limits: the dropped `#write` and `.markdown-preview-view` prefixes carried
 specificity, so where the theme relied on it rather than on order a rule
 can now lose to an earlier one; light and dark rules are placed after the
 others, which keeps the usual case right.
+
+## The window
+
+Five variables on `:root` colour the window around the page. Each one a
+theme leaves out keeps the colour Tinta takes from the page, as before.
+
+```css
+:root {
+  --ui-background: #1d2b38;  /* the tab strip and the title bar */
+  --ui-text: #e6edf3;        /* tab names, panel, menu and dialog text */
+  --ui-accent: #f59e42;      /* the row in use, focus, toggles, buttons */
+  --ui-panel: #243444;       /* side panels, menus, popups, cards, notices */
+  --ui-border: #3b4f63;      /* their edges and dividers */
+}
+```
+
+`light-dark()` works in each. The tab in use keeps the page's colours,
+since it carries on into the page, and so does text that stands on the page
+itself, such as the start page's title. `--ui-text` is the text on
+`--ui-background` and `--ui-panel`, so a dark window on a light page wants
+all three.
+
+## Diagrams
+
+Mermaid diagrams take Mermaid's own theme variables, written in kebab case
+after `--mermaid-`: `primaryColor` is `--mermaid-primary-color`. Set them on
+`:root`, or on `.diagram` for the diagrams alone. The HTML and Word exports
+draw the same colours.
+
+| Variable | Colours |
+| --- | --- |
+| `--mermaid-main-bkg`, else `--mermaid-primary-color` | nodes: flowchart boxes, actors, classes, states |
+| `--mermaid-node-border`, else `--mermaid-primary-border-color` | their outlines |
+| `--mermaid-node-text-color`, else `--mermaid-primary-text-color` | flowchart labels |
+| `--mermaid-text-color`, else `--mermaid-primary-text-color` | the rest of the text: titles, messages, legends |
+| `--mermaid-line-color` | edges, messages, arrows and frames |
+| `--mermaid-default-link-color` | flowchart edges, before `--mermaid-line-color` |
+| `--mermaid-secondary-color` | notes, activations and highlighted bands |
+| `--mermaid-edge-label-background`, else `--mermaid-secondary-color` | flowchart edge labels |
+| `--mermaid-cluster-bkg`, else `--mermaid-tertiary-color` | subgraphs |
+| `--mermaid-cluster-border`, else `--mermaid-tertiary-border-color` | their borders |
+| `--mermaid-title-color`, else `--mermaid-tertiary-text-color` | their titles |
+| `--mermaid-background` | what a diagram draws in the page's colour: slice edges, text on slices |
+| `--mermaid-pie1` to `--mermaid-pie12` | pie slices and every chart's series, in turn |
+
+A `style` or `classDef` in the diagram still wins. Tinta reads no
+`%%{init: ...}%%` directive, so `themeVariables` given there do nothing.
+PlantUML diagrams keep the page's colours. Mermaid's other variables are
+reported as not drawn, and a misspelt name with the one it is nearest.
 
 ## Exports
 

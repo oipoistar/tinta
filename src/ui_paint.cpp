@@ -125,7 +125,7 @@ void shadow(App& app, const D2D1_RECT_F& r, float radius, D2D1_COLOR_F color, fl
     }
 }
 
-Surface surface(const App& app) {
+Surface pageSurface(const App& app) {
     const D2DTheme& th = app.theme;
     const D2D1_COLOR_F white = D2D1::ColorF(1, 1, 1, 1);
     Surface s;
@@ -136,6 +136,19 @@ Surface surface(const App& app) {
     s.muted = alpha(th.text, 0.56f);
     s.accent = th.accent;
     s.shadow = D2D1::ColorF(0, 0, 0, th.isDark ? 0.40f : 0.12f);
+    return s;
+}
+
+Surface surface(const App& app) {
+    // A CSS theme's --ui-* colours where it sets them (docs/css-themes.md)
+    const D2DTheme& th = app.theme;
+    Surface s = pageSurface(app);
+    s.fill = themeUiPanel(th, s.fill);
+    s.text = themeUiText(th);
+    s.border = themeUiBorder(th, alpha(s.text, th.isDark ? 0.16f : 0.15f));
+    s.muted = alpha(s.text, 0.56f);
+    s.accent = themeUiAccent(th);
+    s.shadow = D2D1::ColorF(0, 0, 0, themeUiDark(th) ? 0.40f : 0.12f);
     return s;
 }
 

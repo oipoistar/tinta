@@ -223,6 +223,34 @@ const D2DTheme THEMES[] = {
 
 const int THEME_COUNT = sizeof(THEMES) / sizeof(THEMES[0]);
 
+// ---- The window's colours (--ui-*, docs/specs/theming.md) ----
+
+D2D1_COLOR_F themeUiText(const D2DTheme& theme) { return theme.uiText.value_or(theme.text); }
+D2D1_COLOR_F themeUiAccent(const D2DTheme& theme) { return theme.uiAccent.value_or(theme.accent); }
+D2D1_COLOR_F themeUiHeading(const D2DTheme& theme) { return theme.uiText.value_or(theme.heading); }
+
+D2D1_COLOR_F themeUiPanel(const D2DTheme& theme, D2D1_COLOR_F own) {
+    if (!theme.uiPanel) return own;
+    D2D1_COLOR_F color = *theme.uiPanel;
+    color.a *= own.a;
+    return color;
+}
+
+D2D1_COLOR_F themeUiBorder(const D2DTheme& theme, D2D1_COLOR_F own, float fade) {
+    if (!theme.uiBorder) return own;
+    D2D1_COLOR_F color = *theme.uiBorder;
+    color.a *= fade;
+    return color;
+}
+
+bool themeColorIsDark(const D2D1_COLOR_F& c) {
+    return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b < 0.5f;
+}
+
+bool themeUiDark(const D2DTheme& theme) {
+    return theme.uiPanel ? themeColorIsDark(*theme.uiPanel) : theme.isDark;
+}
+
 // ---- Dynamic theme registry (#82) ----
 //
 // User themes live in %APPDATA%\Tinta\themes.ini as repeated [theme]

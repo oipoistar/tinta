@@ -1706,9 +1706,10 @@ static ResolvedMermaidStyle resolveMermaidStyle(
         const App& app, const mermaid::Diagram& diagram,
         const mermaid::Node& node, float scale) {
     ResolvedMermaidStyle resolved;
-    resolved.fill = app.theme.codeBackground;
-    resolved.stroke = app.theme.accent;
-    resolved.text = app.theme.text;
+    const FlowchartColors colors = flowchartColors(app);
+    resolved.fill = colors.nodeFill;
+    resolved.stroke = colors.nodeBorder;
+    resolved.text = colors.nodeText;
     resolved.strokeWidth = 1.5f * scale;
 
     auto apply = [&](const mermaid::Style& style) {
@@ -1887,8 +1888,8 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
     std::vector<MermaidTextItem> textItems;
     textItems.reserve(diagram.nodes.size() + diagram.edges.size());
 
-    D2D1_COLOR_F connectorColor = app.theme.text;
-    connectorColor.a = app.theme.isDark ? 0.7f : 0.6f;
+    const FlowchartColors colors = flowchartColors(app);
+    D2D1_COLOR_F connectorColor = colors.line;
 
     // Subgraph group boxes: fill goes through layoutRects (drawn before the
     // connectors), the border rides with the node shapes, the title with the
@@ -1923,12 +1924,9 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
             boxes[s].right += boxPad;
             boxes[s].bottom += boxPad;
         }
-        D2D1_COLOR_F groupFill = app.theme.codeBackground;
-        groupFill.a *= 0.55f;
-        D2D1_COLOR_F groupBorder = app.theme.text;
-        groupBorder.a = 0.28f;
-        D2D1_COLOR_F groupTitle = app.theme.text;
-        groupTitle.a = 0.78f;
+        D2D1_COLOR_F groupFill = colors.clusterFill;
+        D2D1_COLOR_F groupBorder = colors.clusterBorder;
+        D2D1_COLOR_F groupTitle = colors.clusterText;
         for (size_t s = 0; s < diagram.subgraphs.size(); s++) {
             if (boxes[s].left == kEmpty) continue;
             app.layoutRects.push_back({boxes[s], groupFill});
@@ -2146,13 +2144,11 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
             // Draw the label as a visible chip on the edge — an invisible
             // background-colored pill erases the line under it, which makes
             // edges look disconnected and labels look like floating text
-            D2D1_COLOR_F chipStroke = connectorColor;
-            chipStroke.a *= 0.6f;
             app.layoutShapes.push_back({
                 App::LayoutShapeType::RoundedRectangle,
                 labelRect,
-                app.theme.codeBackground,
-                chipStroke,
+                colors.labelFill,
+                colors.labelBorder,
                 1.2f * scale,
                 4.0f * scale,
             });
@@ -2165,7 +2161,7 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
                 labelRect.top + labelPaddingY,
                 labelRect.right - labelPaddingX,
                 labelRect.bottom - labelPaddingY);
-            textItems.push_back({edgeLabel.text, textRect, app.theme.text});
+            textItems.push_back({edgeLabel.text, textRect, colors.labelText});
         }
     }
 
@@ -2323,8 +2319,14 @@ static void hslToRgb(float h, float s, float l, float& r, float& g, float& b) {
 }
 
 // Categorical palette derived from the theme accent: golden-angle hue steps
-// keep neighboring series distinct in any theme
-static D2D1_COLOR_F diagramSeriesColor(const App& app, int index) {
+// keep neighboring series distinct in any theme. A CSS theme's
+// --mermaid-pie1 to --mermaid-pie12 take the places they name, in turn
+static D2D1_COLOR_F diagramSeriesColor(const App& app, int index,
+                                       const DiagramColors* mermaid) {
+    if (mermaid && index >= 0) {
+        const auto& own = mermaid->series[index % 12];
+        if (own) return *own;
+    }
     float h, s, l;
     rgbToHsl(app.theme.accent.r, app.theme.accent.g, app.theme.accent.b,
              h, s, l);
@@ -2336,40 +2338,57 @@ static D2D1_COLOR_F diagramSeriesColor(const App& app, int index) {
     return D2D1::ColorF(r, g, b, 1.0f);
 }
 
-D2D1_COLOR_F resolveDiagramRoleImpl(const App& app,
-                                const mermaidext::Prim& prim,
-                                mermaidext::Role role) {
+// A role's colour. `mermaid` holds a CSS theme's --mermaid-* variables
+// (docs/css-themes.md); null keeps the page's, as PlantUML does
+static D2D1_COLOR_F diagramRoleColor(const App& app,
+                                     const mermaidext::Prim& prim,
+                                     mermaidext::Role role,
+                                     const DiagramColors* mermaid) {
+    static const DiagramColors pageOnly;
+    const DiagramColors& m = mermaid ? *mermaid : pageOnly;
+    // The diagram's text, which its dimmed text and lines derive from
+    const D2D1_COLOR_F text = m.text.value_or(app.theme.text);
     int seriesIndex = prim.seriesIndex;
-    D2D1_COLOR_F color = app.theme.text;
+    D2D1_COLOR_F color = text;
     switch (role) {
         case mermaidext::Role::Text:
-            color = app.theme.text;
+            color = text;
             break;
         case mermaidext::Role::Muted:
-            color = app.theme.text;
+            // Lines, arrows and frames take the line colour; text stays
+            // dimmed text
+            if (m.line && prim.type != mermaidext::PrimType::Text) {
+                color = *m.line;
+                break;
+            }
+            color = text;
             color.a = app.theme.isDark ? 0.72f : 0.62f;
             break;
         case mermaidext::Role::Stroke:
-            color = app.theme.accent;
+            color = m.nodeBorder.value_or(app.theme.accent);
             break;
         case mermaidext::Role::Fill:
-            color = app.theme.codeBackground;
+            color = m.nodeFill.value_or(app.theme.codeBackground);
             break;
         case mermaidext::Role::Accent:
             color = app.theme.accent;
             break;
         case mermaidext::Role::AccentSoft:
+            if (m.secondary) {
+                color = *m.secondary;
+                break;
+            }
             color = app.theme.accent;
             color.a = app.theme.isDark ? 0.20f : 0.13f;
             break;
         case mermaidext::Role::Background:
-            color = app.theme.background;
+            color = m.background.value_or(app.theme.background);
             break;
         case mermaidext::Role::Series:
-            color = diagramSeriesColor(app, seriesIndex);
+            color = diagramSeriesColor(app, seriesIndex, mermaid);
             break;
         case mermaidext::Role::SeriesSoft:
-            color = diagramSeriesColor(app, seriesIndex);
+            color = diagramSeriesColor(app, seriesIndex, mermaid);
             color.a = 0.30f;
             break;
         case mermaidext::Role::Custom:
@@ -2381,6 +2400,12 @@ D2D1_COLOR_F resolveDiagramRoleImpl(const App& app,
             break;
     }
     return color;
+}
+
+D2D1_COLOR_F resolveDiagramRoleImpl(const App& app,
+                                    const mermaidext::Prim& prim,
+                                    mermaidext::Role role) {
+    return diagramRoleColor(app, prim, role, &app.theme.mermaid);
 }
 
 // Per-layout-pass cache of text formats for the diagram text styles
@@ -2850,16 +2875,12 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
             // The print layout swaps app.theme for the light Paper palette
             // before reaching here, so printed diagrams stay on that light
             // path by design.
-            mermaidext::Prim colorPrim{};
             const std::string preambleText = plantuml::preamble(
                 wideToUtf8(app.theme.fontFamily), 14.0f,
-                colorHexNoHash(resolveDiagramRoleImpl(
-                    app, colorPrim, mermaidext::Role::Text)),
+                colorHexNoHash(plantumlRoleColor(app, mermaidext::Role::Text)),
                 app.theme.isDark,
-                colorHexNoHash(resolveDiagramRoleImpl(
-                    app, colorPrim, mermaidext::Role::Fill)),
-                colorHexNoHash(resolveDiagramRoleImpl(
-                    app, colorPrim, mermaidext::Role::Stroke)));
+                colorHexNoHash(plantumlRoleColor(app, mermaidext::Role::Fill)),
+                colorHexNoHash(plantumlRoleColor(app, mermaidext::Role::Stroke)));
             std::string sourceWithPreamble = code;
             // No @startuml anchor: nothing to render, fall through to the
             // existing source-code rendering unchanged.
@@ -4791,6 +4812,37 @@ void ensureLayoutComplete(App& app) {
 D2D1_COLOR_F resolveDiagramRole(const App& app, const mermaidext::Prim& prim,
                                 mermaidext::Role role) {
     return resolveDiagramRoleImpl(app, prim, role);
+}
+
+D2D1_COLOR_F plantumlRoleColor(const App& app, mermaidext::Role role) {
+    return diagramRoleColor(app, mermaidext::Prim{}, role, nullptr);
+}
+
+FlowchartColors flowchartColors(const App& app) {
+    const DiagramColors& m = app.theme.mermaid;
+    const D2D1_COLOR_F text = m.text.value_or(app.theme.text);
+    FlowchartColors c;
+    c.nodeFill = m.nodeFill.value_or(app.theme.codeBackground);
+    c.nodeBorder = m.nodeBorder.value_or(app.theme.accent);
+    c.nodeText = m.nodeText.value_or(text);
+    c.line = text;
+    c.line.a = app.theme.isDark ? 0.7f : 0.6f;
+    if (m.link || m.line) c.line = m.link ? *m.link : *m.line;
+    // The chips on edges wear the nodes' colours unless a variable says
+    c.labelFill = m.edgeLabel.value_or(c.nodeFill);
+    c.labelBorder = c.line;
+    c.labelBorder.a *= 0.6f;
+    c.labelText = c.nodeText;
+    c.clusterFill = app.theme.codeBackground;
+    c.clusterFill.a *= 0.55f;
+    if (m.clusterFill) c.clusterFill = *m.clusterFill;
+    c.clusterBorder = text;
+    c.clusterBorder.a = 0.28f;
+    if (m.clusterBorder) c.clusterBorder = *m.clusterBorder;
+    c.clusterText = text;
+    c.clusterText.a = 0.78f;
+    if (m.clusterText) c.clusterText = *m.clusterText;
+    return c;
 }
 
 // Scholar's hover cards: above the page's own drawing, in its coordinates
