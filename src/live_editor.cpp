@@ -18,6 +18,7 @@
 #include "live_text.h"
 #include "print.h"
 #include "render.h"
+#include "scholar.h"
 #include "settings.h"
 #include "signals.h"
 #include "ui_paint.h"
@@ -676,6 +677,7 @@ live::Host hostFor(App& app, HWND hwnd, LiveEditor& L) {
     };
     host.positionAt = [&app, &L](float x, float y, int direction) { return positionAtShown(app, L, x, y, direction); };
     host.names = [&app, &L](const std::wstring& typed) { return noteNames(app, L, typed); };
+    host.cites = [&app](const std::wstring& text, size_t from, size_t caret) { return citeChoices(app, text, from, caret); };
     host.pickImage = [&app, hwnd]() { return pickImage(app, hwnd); };
     host.undo = [&app, &L](bool redo) {
         editorUndoRedo(app, redo);
@@ -1028,6 +1030,27 @@ bool liveRailCommand(App& app, HWND hwnd, int id) {
     }
     finish(app, hwnd, L);
     return true;
+}
+
+std::vector<LiveText::Choice> citeChoices(App& app, const std::wstring& text, size_t from, size_t caret) {
+    // The bibliography is found beside the document; an untitled note has none
+    const std::wstring folder =
+        app.currentFile.empty() ? std::wstring() : std::filesystem::path(toWide(app.currentFile)).parent_path().wstring();
+    std::vector<LiveText::Choice> list;
+    for (auto& row : scholar::suggest(text, from, caret, folder)) {
+        LiveText::Choice choice;
+        choice.label = std::move(row.key);
+        choice.detail = std::move(row.detail);
+        list.push_back(std::move(choice));
+    }
+    return list;
+}
+
+void liveTypeCitation(App& app, HWND hwnd) {
+    LiveEditor& L = begin(app);
+    live::replace(L.e, L"[@");
+    live::updatePopup(app, L.e, hostFor(app, hwnd, L));
+    finish(app, hwnd, L);
 }
 
 // --- The pointer -------------------------------------------------------------------

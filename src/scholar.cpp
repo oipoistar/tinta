@@ -1,6 +1,7 @@
 // Scholar (scholar.h): figures, tables and equations numbered as
 // pandoc-crossref numbers them, and citations formatted by the CSL
-// processor from the document's bibliography, as pandoc's citeproc does.
+// processor from the document's bibliography, as pandoc's citeproc does;
+// and the keys and ids the editors offer as a citation is typed.
 
 #pragma optimize("s", on)
 
@@ -14,6 +15,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cwchar>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -590,6 +593,270 @@ std::vector<std::string> finish(const ElementPtr& root, const Session& session) 
     }
     root->children.insert(at, list);
     return problems;
+}
+
+// --- Completion ------------------------------------------------------------------
+
+namespace {
+
+// Lower case without accents, so typing finds a name as it is written
+// with them; the letters that do not come apart are spelled out
+std::wstring folded(const std::wstring& s) {
+    std::wstring parts = s;
+    if (int n = s.empty() ? 0 : FoldStringW(MAP_COMPOSITE, s.c_str(), (int)s.size(), nullptr, 0); n > 0) {
+        parts.assign((size_t)n, L'\0');
+        FoldStringW(MAP_COMPOSITE, s.c_str(), (int)s.size(), parts.data(), n);
+    }
+    std::wstring out;
+    out.reserve(parts.size());
+    for (wchar_t c : parts) {
+        if (c >= 0x300 && c <= 0x36F) continue;  // an accent, apart from its letter
+        switch (c) {
+            case 0xD8: case 0xF8: out += L'o'; break;
+            case 0xC6: case 0xE6: out += L"ae"; break;
+            case 0x152: case 0x153: out += L"oe"; break;
+            case 0xDF: out += L"ss"; break;
+            case 0x141: case 0x142: out += L'l'; break;
+            case 0x110: case 0x111: out += L'd'; break;
+            case 0x131: out += L'i'; break;
+            default: out += (wchar_t)towlower(c); break;
+        }
+    }
+    return out;
+}
+
+bool startsWith(const std::wstring& s, const std::wstring& start) { return s.compare(0, start.size(), start) == 0; }
+
+// CSL rich text read as words: its markup gone, its entities and runs of
+// spaces made plain
+std::wstring words(const std::string& rich) {
+    std::string out;
+    for (size_t i = 0; i < rich.size(); ++i) {
+        const char c = rich[i];
+        if (c == '<' && rich.find('>', i) != std::string::npos) {
+            i = rich.find('>', i);
+        } else if (c == '&' && rich.compare(i, 5, "&amp;") == 0) {
+            out += '&';
+            i += 4;
+        } else if (c == '&' && (rich.compare(i, 4, "&lt;") == 0 || rich.compare(i, 4, "&gt;") == 0)) {
+            out += rich[i + 1] == 'l' ? '<' : '>';
+            i += 3;
+        } else if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            if (!out.empty() && out.back() != ' ') out += ' ';
+        } else {
+            out += c;
+        }
+    }
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return wide(out);
+}
+
+// Cut at a word near `limit` characters, with an ellipsis
+std::wstring shortened(std::wstring s, size_t limit) {
+    if (s.size() <= limit) return s;
+    size_t cut = s.rfind(L' ', limit);
+    s.resize(cut == std::wstring::npos || cut < limit / 2 ? limit : cut);
+    while (!s.empty() && wcschr(L" ,:;.", s.back())) s.pop_back();
+    return s + (wchar_t)0x2026;
+}
+
+// A work of the library as the list shows it, and what typing finds it by
+struct Work {
+    std::wstring key, detail;
+    std::wstring keyFolded, title, year;
+    std::vector<std::wstring> names;  // folded, with and without their particles
+};
+
+// "Doe 2024, Ink Flow in DNA-Printed Nibs": the first author's family name
+// (both of two, et al. for more), the year, the title shortened
+Work workOf(const bib::Item& item) {
+    Work w;
+    w.key = wide(item.id);
+    w.keyFolded = folded(w.key);
+    const std::vector<bib::Name>* names = item.namesOf("author");
+    if (!names || names->empty()) names = item.namesOf("editor");
+    std::vector<std::wstring> shown;
+    bool others = false;
+    for (size_t i = 0; names && i < names->size(); ++i) {
+        const bib::Name& n = (*names)[i];
+        if (n.literal == "others") {
+            others = true;
+            continue;
+        }
+        const std::wstring family = wide(!n.literal.empty() ? n.literal : n.family.empty() ? n.given : n.family);
+        std::string particles = n.droppingParticle;
+        if (!n.nonDroppingParticle.empty()) particles += (particles.empty() ? "" : " ") + n.nonDroppingParticle;
+        const std::wstring whole = particles.empty() ? family : wide(particles) + L" " + family;
+        shown.push_back(whole);
+        w.names.push_back(folded(whole));
+        if (whole != family) w.names.push_back(folded(family));
+    }
+    std::wstring detail;
+    if (!shown.empty()) {
+        detail = shown[0];
+        if (shown.size() > 2 || others) detail += L" et al.";
+        else if (shown.size() == 2) detail += L" & " + shown[1];
+    }
+    if (const bib::Date* date = item.date("issued")) {
+        w.year = date->from.year ? std::to_wstring(date->from.year) : wide(date->literal);
+    }
+    if (!w.year.empty()) detail += (detail.empty() ? L"" : L" ") + w.year;
+    if (const std::string* field = item.field("title")) {
+        const std::wstring title = words(*field);
+        w.title = folded(title);
+        if (!title.empty()) detail += (detail.empty() ? L"" : L", ") + shortened(title, 40);
+    }
+    w.detail = std::move(detail);
+    return w;
+}
+
+// How well a work answers what was typed: 0 by its key, 1 an author, 2 its
+// year, 3 inside its key, 4 a word of its title; -1 not at all
+int score(const Work& w, const std::wstring& typed) {
+    if (typed.empty() || startsWith(w.keyFolded, typed)) return 0;
+    for (const auto& name : w.names) {
+        if (startsWith(name, typed)) return 1;
+    }
+    // A name and a year run together, as keys are made: knuth1984
+    const size_t digits = typed.find_first_of(L"0123456789");
+    if (digits != std::wstring::npos && digits > 0 && !w.year.empty() &&
+        typed.find_first_not_of(L"0123456789", digits) == std::wstring::npos &&
+        startsWith(w.year, typed.substr(digits))) {
+        for (const auto& name : w.names) {
+            if (startsWith(name, typed.substr(0, digits))) return 1;
+        }
+    }
+    if (startsWith(w.year, typed)) return 2;
+    if (w.keyFolded.find(typed) != std::wstring::npos) return 3;
+    for (size_t at = w.title.find(typed); at != std::wstring::npos; at = w.title.find(typed, at + 1)) {
+        if (at == 0 || !iswalnum(w.title[at - 1])) return 4;
+    }
+    return -1;
+}
+
+// The properties at a document's start, as UTF-8 for fm::parse
+std::string frontMatter(const std::wstring& doc) {
+    if (doc.compare(0, 3, L"---") != 0) return {};
+    for (size_t nl = doc.find(L'\n'); nl != std::wstring::npos; nl = doc.find(L'\n', nl + 1)) {
+        if (doc.compare(nl + 1, 3, L"---") == 0 || doc.compare(nl + 1, 3, L"...") == 0) {
+            const size_t end = doc.find(L'\n', nl + 1);
+            return utf8(doc.substr(0, end == std::wstring::npos ? doc.size() : end + 1));
+        }
+    }
+    return {};
+}
+
+// The works of the bibliography a document names: kept while its
+// properties and folder stay, and read again after two seconds, for a
+// library its reference manager saves as the writer types
+const std::vector<Work>& libraryWorks(const std::wstring& doc, const std::wstring& folder) {
+    static std::string front;
+    static std::wstring where;
+    static unsigned long long made = 0;
+    static std::vector<Work> works;
+    std::string now = frontMatter(doc);
+    const unsigned long long ms = GetTickCount64();
+    if (made && now == front && folder == where && ms - made < 2000) return works;
+    front = std::move(now);
+    where = folder;
+    made = ms;
+    works.clear();
+    if (front.empty()) return works;
+    const Session session = begin(fm::parse(front).properties, folder);
+    if (!session.library) return works;
+    works.reserve(session.library->items.size());
+    for (const auto& item : session.library->items) works.push_back(workOf(item));
+    return works;
+}
+
+// What a line holding an id says of it: an image's words, a diagram's
+// caption, a table's caption, a heading or an equation's TeX
+std::wstring describe(const std::wstring& doc, size_t at) {
+    const size_t ls = doc.rfind(L'\n', at), le = doc.find(L'\n', at);
+    std::wstring line = doc.substr(ls == std::wstring::npos ? 0 : ls + 1,
+                                    (le == std::wstring::npos ? doc.size() : le) - (ls == std::wstring::npos ? 0 : ls + 1));
+    const size_t image = line.find(L"![");
+    const size_t shown = image == std::wstring::npos ? image : line.find(L"](", image);
+    const size_t caption = line.find(L"caption=\"");
+    if (shown != std::wstring::npos) {
+        line = line.substr(image + 2, shown - image - 2);
+    } else if (caption != std::wstring::npos && line.find(L'"', caption + 9) != std::wstring::npos) {
+        line = line.substr(caption + 9, line.find(L'"', caption + 9) - caption - 9);
+    } else {
+        // The line without its attributes, its \label, its marks and spaces
+        for (const wchar_t* open : {L"{#", L"\\label{"}) {
+            for (size_t a = line.find(open); a != std::wstring::npos; a = line.find(open, a)) {
+                const size_t b = line.find(L'}', a);
+                line.erase(a, b == std::wstring::npos ? std::wstring::npos : b - a + 1);
+            }
+        }
+        size_t from = line.find_first_not_of(L"# \t$");
+        if (from != std::wstring::npos && line.compare(from, 6, L"Table:") == 0) from += 6;
+        else if (from != std::wstring::npos && line[from] == L':') from += 1;
+        from = from == std::wstring::npos ? line.size() : line.find_first_not_of(L" \t", from);
+        const size_t to = line.find_last_not_of(L" \t$");
+        line = from == std::wstring::npos || to == std::wstring::npos || to < from ? std::wstring() : line.substr(from, to - from + 1);
+    }
+    line.erase(std::remove_if(line.begin(), line.end(), [](wchar_t c) { return c == L'*' || c == L'`'; }), line.end());
+    return shortened(line, 48);
+}
+
+// The document's own ids of a kind (fig, tbl, eq, sec), in order: {#fig:id}
+// in attributes and \label{eq:id} in equations; those starting with what
+// was typed first, then those holding it
+std::vector<Suggestion> documentIds(const std::wstring& doc, const std::wstring& kind, const std::wstring& typed, bool capital) {
+    const std::wstring prefix = kind + L":";
+    const std::wstring shown = (capital ? std::wstring(1, (wchar_t)towupper(kind[0])) + kind.substr(1) : kind) + L":";
+    std::vector<Suggestion> rows;
+    for (int holding = 0; holding < 2; ++holding) {
+        for (size_t at = doc.find(prefix); at != std::wstring::npos; at = doc.find(prefix, at + 1)) {
+            bool id = at >= 7 && doc.compare(at - 7, 7, L"\\label{") == 0;
+            if (!id && at >= 2 && doc[at - 1] == L'#') {
+                // In an attribute block: { before it on the line with no } between
+                for (size_t i = at - 1; i > 0 && doc[i - 1] != L'\n' && doc[i - 1] != L'}' && !id; --i) id = doc[i - 1] == L'{';
+            }
+            size_t end = at + prefix.size();
+            while (id && end < doc.size() && (iswalnum(doc[end]) || wcschr(L"_-.:", doc[end]))) ++end;
+            while (end > at + prefix.size() && wcschr(L".:-", doc[end - 1])) --end;
+            if (end == at + prefix.size()) continue;
+            const std::wstring name = doc.substr(at + prefix.size(), end - at - prefix.size()), key = folded(name);
+            if (holding ? startsWith(key, typed) || key.find(typed) == std::wstring::npos : !startsWith(key, typed)) continue;
+            const std::wstring label = shown + name;
+            if (std::any_of(rows.begin(), rows.end(), [&](const Suggestion& row) { return row.key == label; })) continue;
+            rows.push_back({label, describe(doc, at)});
+        }
+    }
+    return rows;
+}
+
+}  // namespace
+
+std::vector<Suggestion> suggest(const std::wstring& doc, size_t from, size_t caret, const std::wstring& folder) {
+    if (from > caret || caret > doc.size()) return {};
+    const std::wstring typed = doc.substr(from, caret - from);
+    // @fig:, @tbl:, @eq: and @sec: refer to the document's own figures and the like
+    const size_t colon = typed.find(L':');
+    if (colon != std::wstring::npos) {
+        const std::wstring kind = folded(typed.substr(0, colon));
+        if (kind == L"fig" || kind == L"tbl" || kind == L"eq" || kind == L"sec") {
+            return documentIds(doc, kind, folded(typed.substr(colon + 1)), iswupper(typed[0]) != 0);
+        }
+    }
+    // Otherwise the library's works, the best first, then by their keys
+    const std::wstring wanted = folded(typed);
+    std::vector<std::pair<int, const Work*>> ranked;
+    for (const Work& w : libraryWorks(doc, folder)) {
+        const int s = score(w, wanted);
+        if (s >= 0) ranked.push_back({s, &w});
+    }
+    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+        if (a.first != b.first) return a.first < b.first;
+        return a.second->keyFolded != b.second->keyFolded ? a.second->keyFolded < b.second->keyFolded
+                                                          : a.second->key < b.second->key;
+    });
+    std::vector<Suggestion> rows;
+    for (size_t i = 0; i < ranked.size() && rows.size() < 200; ++i) rows.push_back({ranked[i].second->key, ranked[i].second->detail});
+    return rows;
 }
 
 }

@@ -835,12 +835,37 @@ void drawPopup(App& app, LiveText& e, D2D1_POINT_2F caretTop, float caretBottom,
     if (e.popup == LiveText::Popup::None || e.choices.empty()) return;
     paint::Surface s = paint::surface(app);
     const bool slash = e.popup == LiveText::Popup::Slash;
-    const float rowH = dpi(app, slash ? 32.0f : 26.0f), w = dpi(app, slash ? 300.0f : 280.0f), pad = dpi(app, 4.0f);
+    // Citations: each key in the editor's face and its work beside it
+    const bool cite = e.popup == LiveText::Popup::Cite;
+    const float rowH = dpi(app, slash ? 32.0f : 26.0f), pad = dpi(app, 4.0f);
+    float w = dpi(app, slash ? 300.0f : 280.0f);
     const int count = (int)e.choices.size();
     const int shown = std::min(count, 8);
     if (e.choice < e.popupTop) e.popupTop = e.choice;
     if (e.choice >= e.popupTop + shown) e.popupTop = e.choice - shown + 1;
     e.popupTop = std::clamp(e.popupTop, 0, std::max(0, count - shown));
+    const wchar_t* face = cite && app.theme.codeFontFamily && *app.theme.codeFontFamily ? app.theme.codeFontFamily : paint::uiFace();
+    IDWriteTextFormat* nameFormat =
+        paint::textFormat(app, face, dpi(app, cite ? 12.5f : 13.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
+    IDWriteTextFormat* detailFormat = paint::textFormat(app, slash ? L"Consolas" : paint::uiFace(), dpi(app, 11.0f),
+                                                        DWRITE_FONT_WEIGHT_NORMAL, false);
+    // The keys shown make a column, at most half the list, their works after
+    // it; the list as wide as they need, up to the room there is
+    float keys = 0;
+    if (cite) {
+        const float room = std::max(dpi(app, 200.0f), std::min(dpi(app, 460.0f), bounds.right - bounds.left - dpi(app, 12.0f)));
+        float works = 0;
+        for (int k = e.popupTop; k < e.popupTop + shown; ++k) {
+            IDWriteTextLayout* l = paint::makeLayout(app, e.choices[k].label, nameFormat, room, rowH);
+            keys = std::max(keys, paint::metrics(l).width);
+            if (l) l->Release();
+            l = paint::makeLayout(app, e.choices[k].detail, detailFormat, room, rowH);
+            works = std::max(works, paint::metrics(l).width);
+            if (l) l->Release();
+        }
+        keys = std::min(keys, (room - pad * 2) * 0.5f);
+        w = std::clamp(keys + works + pad * 2 + dpi(app, 38.0f), std::min(room, dpi(app, 240.0f)), room);
+    }
     float h = rowH * (float)shown + pad * 2;
     float x = std::clamp(caretTop.x - dpi(app, 10.0f), bounds.left + dpi(app, 6.0f),
                          std::max(bounds.left + dpi(app, 6.0f), bounds.right - w - dpi(app, 6.0f)));
@@ -850,9 +875,6 @@ void drawPopup(App& app, LiveText& e, D2D1_POINT_2F caretTop, float caretBottom,
     paint::shadow(app, box, dpi(app, 8.0f), s.shadow, 1.4f);
     paint::fillRound(app, box, dpi(app, 8.0f), s.fill);
     paint::strokeRound(app, box, dpi(app, 8.0f), s.border, dpi(app, 1.0f));
-    IDWriteTextFormat* nameFormat = paint::textFormat(app, paint::uiFace(), dpi(app, 13.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
-    IDWriteTextFormat* detailFormat = paint::textFormat(app, slash ? L"Consolas" : paint::uiFace(), dpi(app, 11.0f),
-                                                        DWRITE_FONT_WEIGHT_NORMAL, false);
     for (int k = e.popupTop; k < e.popupTop + shown; ++k) {
         const LiveText::Choice& item = e.choices[k];
         float top = box.top + pad + rowH * (float)(k - e.popupTop);
@@ -860,6 +882,20 @@ void drawPopup(App& app, LiveText& e, D2D1_POINT_2F caretTop, float caretBottom,
         if (k == e.choice) paint::fillRound(app, row, dpi(app, 5.0f), paint::alpha(s.accent, 0.18f));
         else if (k == e.hoverHit) paint::fillRound(app, row, dpi(app, 5.0f), paint::alpha(s.text, 0.06f));
         float textLeft = row.left + dpi(app, 8.0f);
+        if (cite) {
+            IDWriteTextLayout* nl = paint::makeLayout(app, item.label, nameFormat, std::max(1.0f, keys + 1.0f), rowH);
+            DWRITE_TEXT_METRICS nm = paint::metrics(nl);
+            paint::drawText(app, nl, textLeft, (row.top + row.bottom - nm.height) * 0.5f, s.text);
+            const float detailLeft = textLeft + keys + dpi(app, 14.0f);
+            IDWriteTextLayout* dl =
+                paint::makeLayout(app, item.detail, detailFormat, std::max(1.0f, row.right - dpi(app, 8.0f) - detailLeft), rowH);
+            DWRITE_TEXT_METRICS dm = paint::metrics(dl);
+            paint::drawText(app, dl, detailLeft, (row.top + row.bottom - dm.height) * 0.5f, paint::alpha(s.text, 0.5f));
+            if (nl) nl->Release();
+            if (dl) dl->Release();
+            e.popupHits.push_back({row, k});
+            continue;
+        }
         if (slash) {
             float b = dpi(app, 22.0f);
             D2D1_RECT_F mark = D2D1::RectF(row.left + dpi(app, 5.0f), (row.top + row.bottom - b) * 0.5f, row.left + dpi(app, 5.0f) + b,

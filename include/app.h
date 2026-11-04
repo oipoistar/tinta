@@ -82,6 +82,10 @@ inline int64_t usElapsed(Clock::time_point start) {
 // (todo 5 wires the handler; no App state is touched here yet)
 #define WM_APP_PLANTUML_READY (WM_APP + 7)
 
+// Zotero's picker answered the rail's Cite button (zotero.h): wParam the
+// request's number, lParam a zotero::Answer* the handler deletes
+#define WM_APP_ZOTERO (WM_APP + 8)
+
 // Startup metrics
 struct StartupMetrics {
     int64_t windowInitUs = 0;
@@ -642,6 +646,11 @@ struct App {
     // Ctrl+G's go-to-line prompt (#276): open, and the digits typed so far
     bool gotoLineOpen = false;
     std::wstring gotoLineInput;
+    // The rail's Cite button (docs/citations.md): the request Zotero's
+    // picker is answering, while it is, and the tab (its id) that asked
+    unsigned citeRequest = 0;
+    bool citeWaiting = false;
+    int citeTab = -1;
     // The wheel over the tab strip steps through tabs (#272): notches of a
     // high-resolution wheel or touchpad add up here, and a pause resets
     float tabWheelAccum = 0.0f;

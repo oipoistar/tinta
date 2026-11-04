@@ -2,9 +2,9 @@
 // The editing engine Tinta's Live editor and sheet cards share: the text,
 // its caret and selection, undo, the edits Markdown's rules call for, the
 // keys and characters that make them, the text laid out live (the caret's
-// line as typed, the others as they read), the slash menu and [[ names
-// under the caret, the format bar over a selection, and the menu a
-// right-click opens on the text.
+// line as typed, the others as they read), the slash menu, [[ names and
+// citation keys under the caret, the format bar over a selection, and the
+// menu a right-click opens on the text.
 #pragma once
 
 #include "app.h"
@@ -54,8 +54,8 @@ struct LiveText {
     unsigned long long lastClickMs = 0;
     size_t pressFrom = 0, pressTo = 0;  // the word or line a double or triple click took
 
-    // The slash menu and [[ names under the caret
-    enum class Popup { None, Slash, Names };
+    // The slash menu, [[ names and citation keys under the caret
+    enum class Popup { None, Slash, Names, Cite };
     struct Choice {
         std::wstring label, detail;     // what the row says, and what it says beside it
         int insert = -1;                // Slash: the block it makes (live::Insert)
@@ -64,6 +64,8 @@ struct LiveText {
     Popup popup = Popup::None;
     size_t popupFrom = 0;               // where what is typed for it starts
     size_t dismissedSlash = (size_t)-1; // a / whose menu Esc put away
+    size_t dismissedCite = (size_t)-1;  // an @ whose keys Esc put away
+    unsigned long long popupRevision = 0;  // the text's revision the popup last followed
     std::vector<Choice> choices;
     int choice = 0;
     int popupTop = 0;                   // the first row shown
@@ -290,6 +292,9 @@ struct Host {
     // [[ names for what was typed after the brackets, and one picked (Ctrl held)
     std::function<std::vector<LiveText::Choice>(const std::wstring& typed)> names;
     std::function<void(const LiveText::Choice& choice, bool ctrl)> picked;
+    // Citation keys and the document's own ids for the key typed in
+    // text[from, caret) after an @ (docs/citations.md); none: no list
+    std::function<std::vector<LiveText::Choice>(const std::wstring& text, size_t from, size_t caret)> cites;
     // An image to insert, as the text will link it (empty: none)
     std::function<std::wstring()> pickImage;
     // Undo and redo kept by the host instead
@@ -311,6 +316,19 @@ void character(App& app, LiveText& e, wchar_t ch, const Host& host);
 void updatePopup(App& app, LiveText& e, const Host& host);
 void closePopup(LiveText& e);
 void pickChoice(App& app, LiveText& e, int index, bool ctrl, const Host& host);
+
+// Citations (docs/citations.md). The @ whose key the caret is typing: at a
+// line's start or after a space, [ or ;, a - between them too ([-@key), and
+// not in code
+bool citeAt(const std::wstring& text, size_t caret, size_t& at);
+// A key picked for the one typed from `from`, after its @: it replaces what
+// was typed and the rest of the key after the caret, and a ] follows it in
+// brackets nothing closes yet. `after`: where the caret goes, past them
+MarkEdit citeEdit(const std::wstring& text, size_t caret, size_t from, const std::wstring& key, size_t& after);
+// The citation list alone, for a host keeping its own text (the source
+// editor). Typing a key after an @ opens it, moving along the key keeps it,
+// leaving the key closes it; `edited`: the text changed since it last followed
+void followCites(LiveText& e, const std::wstring& text, size_t caret, bool edited, const Host& host);
 
 // --- Layout and drawing --------------------------------------------------------
 

@@ -22,6 +22,7 @@
 
 #include "export.h"
 #include "sheet_ui.h"
+#include "zotero.h"
 
 #include <filesystem>
 #include <fstream>
@@ -3663,6 +3664,10 @@ void editRailInvoke(App& app, HWND hwnd, int id) {
         setEditorLive(app, hwnd, id == 31);
         return;
     }
+    if (id == 24) {
+        editorCite(app, hwnd);  // Zotero's picker, or [@ and the list, in Source and Live alike
+        return;
+    }
     if (editorLiveOn(app) && liveRailCommand(app, hwnd, id)) return;
     // Marks act at every caret, and list and quote marks on every line the
     // carets and the selections take in (#251, #306); links, snippets and
@@ -3914,6 +3919,194 @@ static void editorCharInputAtCaret(App& app, HWND hwnd, WPARAM wParam) {
     scheduleReparse(app);
     editorEnsureCursorVisible(app);
     InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// --- The citation list and the Cite button (docs/citations.md) ---
+// Live's popup, kept for the source: typing a key after an @ opens it under
+// the @, with the bibliography's keys or the document's own ids
+
+static LiveText& sourceCites(const App& app) {
+    static std::map<const App*, LiveText> lists;
+    return lists[&app];
+}
+
+const LiveText& editorCompletion(const App& app) { return sourceCites(app); }
+
+// One caret in the source as it shows, with the keys
+static bool sourceTyping(const App& app) {
+    return app.editMode && !editorLiveOn(app) && !app.editorReadingPreview && app.editorExtraCarets.empty() &&
+           !app.editorHasSelection && !(app.showSearch && app.searchActive) && !app.gotoLineOpen && !app.confirmExitPending;
+}
+
+// Open, with its key still under the caret; a list left from another
+// document or mode is put away
+static bool sourceCitesOpen(App& app) {
+    LiveText& list = sourceCites(app);
+    if (list.popup == LiveText::Popup::None) return false;
+    size_t at = 0;
+    if (sourceTyping(app) && !list.choices.empty() && live::citeAt(app.editorText, app.editorCursorPos, at) &&
+        at + 1 == list.popupFrom) {
+        return true;
+    }
+    list.popup = LiveText::Popup::None;
+    list.choices.clear();
+    return false;
+}
+
+void editorCompletionFollow(App& app, bool typed) {
+    LiveText& list = sourceCites(app);
+    // Typing opens it; a key that only moves the caret, or edits elsewhere, does not
+    const bool edited = typed && list.popupRevision != app.editorTextRevision;
+    list.popupRevision = app.editorTextRevision;
+    if (!sourceTyping(app)) {
+        list.popup = LiveText::Popup::None;
+        list.choices.clear();
+        return;
+    }
+    live::Host host;
+    host.cites = [&app](const std::wstring& text, size_t from, size_t caret) { return citeChoices(app, text, from, caret); };
+    live::followCites(list, app.editorText, app.editorCursorPos, edited, host);
+}
+
+// Text put in at the caret, over the selection, as one step
+static void editorPutAtCaret(App& app, HWND hwnd, const std::wstring& text) {
+    const size_t from = app.editorHasSelection ? editorSelMin(app) : app.editorCursorPos;
+    const size_t to = app.editorHasSelection ? editorSelMax(app) : app.editorCursorPos;
+    editorReplaceRangeExternal(app, from, to, text);
+    app.editorSelStart = app.editorSelEnd = app.editorCursorPos;
+    scheduleReparse(app);
+    editorEnsureCursorVisible(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+// The key picked, in place of the one typed, its ] with it
+static void editorPickCite(App& app, HWND hwnd, int index) {
+    LiveText& list = sourceCites(app);
+    if (index < 0 || index >= (int)list.choices.size()) return;
+    size_t after = 0;
+    const live::MarkEdit edit =
+        live::citeEdit(app.editorText, app.editorCursorPos, list.popupFrom, list.choices[index].label, after);
+    list.popup = LiveText::Popup::None;
+    list.choices.clear();
+    editorReplaceRangeExternal(app, edit.at, edit.at + edit.removed, edit.with);
+    app.editorCursorPos = app.editorSelStart = app.editorSelEnd = std::min(after, app.editorText.size());
+    list.popupRevision = app.editorTextRevision;  // what went in opens nothing
+    scheduleReparse(app);
+    editorEnsureCursorVisible(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+bool editorCompletionKeyDown(App& app, HWND hwnd, WPARAM key) {
+    if (!sourceCitesOpen(app)) return false;
+    LiveText& list = sourceCites(app);
+    const int count = (int)list.choices.size();
+    switch (key) {
+        case VK_UP:
+        case VK_DOWN:
+            if (GetKeyState(VK_CONTROL) & 0x8000) return false;
+            list.choice = (list.choice + (key == VK_DOWN ? 1 : count - 1)) % count;
+            break;
+        case VK_RETURN:
+        case VK_TAB:
+            editorPickCite(app, hwnd, list.choice);
+            break;
+        case VK_ESCAPE:
+            live::closePopup(list);  // and typing on keeps it closed
+            break;
+        default:
+            return false;
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+    return true;
+}
+
+void renderEditorCompletion(App& app) {
+    LiveText& list = sourceCites(app);
+    list.popupHits.clear();
+    D2D1_POINT_2F at{};
+    if (!sourceCitesOpen(app) || !app.editorTextFormat || !editorCaretPointAt(app, list.popupFrom, false, at)) return;
+    // Under the @'s line, over the page beside it if it must
+    const float lineHeight = app.editorTextFormat->GetFontSize() * 1.5f;
+    live::drawPopup(app, list, at, at.y + lineHeight,
+                    D2D1::RectF(editRailWidth(app), chromeTopHeight(app), (float)app.width, (float)app.height));
+}
+
+bool editorCompletionMouseDown(App& app, HWND hwnd, int x, int y) {
+    if (!sourceCitesOpen(app)) return false;
+    LiveText& list = sourceCites(app);
+    const int hit = live::hitAt(list, (float)x, (float)y);
+    if (hit >= 0) {
+        editorPickCite(app, hwnd, hit);
+        return true;
+    }
+    // A press elsewhere puts it away, and goes on
+    list.popup = LiveText::Popup::None;
+    list.choices.clear();
+    InvalidateRect(hwnd, nullptr, FALSE);
+    return false;
+}
+
+bool editorCompletionMouseMove(App& app, HWND hwnd, int x, int y) {
+    LiveText& list = sourceCites(app);
+    if (list.popup == LiveText::Popup::None) return false;
+    const int hit = live::hitAt(list, (float)x, (float)y);
+    if (hit != list.hoverHit) {
+        list.hoverHit = hit;
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
+    return hit >= 0;
+}
+
+void editorCite(App& app, HWND hwnd) {
+    // One picker at a time: a click while it is open waits with it
+    if (app.citeWaiting) return;
+    app.citeWaiting = true;
+    app.citeTab = app.tabs.empty() ? -1 : app.tabs[std::clamp(app.activeTab, 0, (int)app.tabs.size() - 1)].id;
+    zotero::ask(hwnd, ++app.citeRequest);
+}
+
+void editorCiteAnswer(App& app, HWND hwnd, WPARAM request, LPARAM answer) {
+    std::unique_ptr<zotero::Answer> got(reinterpret_cast<zotero::Answer*>(answer));
+    if (!got || (unsigned)request != app.citeRequest) return;
+    app.citeWaiting = false;
+    // The document that asked: in front, or parked in its tab
+    int asked = -1;
+    for (int i = 0; i < (int)app.tabs.size(); ++i) {
+        if (app.tabs[i].id == app.citeTab) asked = i;
+    }
+    const bool front = app.editMode && (app.tabs.empty() || asked == app.activeTab);
+    if (got->kind == zotero::Answer::Failed) {
+        signalPushKey(app, SIG_WARN, SIGI_WARNING, "toast.cite_failed");
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    if (got->kind == zotero::Answer::Picked) {
+        if (got->citation.empty()) return;  // the picker was cancelled
+        const std::wstring citation = fromUtf8(got->citation);
+        if (front) {
+            editorPutAtCaret(app, hwnd, citation);
+        } else if (asked >= 0 && app.tabs[asked].editMode) {
+            App::DocTab& tab = app.tabs[asked];
+            const size_t at = std::min(tab.editorCursor, tab.editorText.size());
+            tab.editorText.insert(at, citation);
+            tab.editorCursor = at + citation.size();
+            tab.editorDirty = true;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        return;
+    }
+    // No Zotero: [@ at the caret, and the document's list
+    if (!front) return;
+    if (editorLiveOn(app)) {
+        liveTypeCitation(app, hwnd);
+    } else {
+        editorPutAtCaret(app, hwnd, L"[@");
+        editorCompletionFollow(app, true);
+    }
+    // Nothing to list: a word on where citations come from
+    if ((editorLiveOn(app) ? liveText(app) : sourceCites(app)).popup == LiveText::Popup::None) {
+        signalHintKey(app, SIGI_INFO, "toast.cite_none");
+    }
 }
 
 // --- IME support ---

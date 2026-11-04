@@ -1553,6 +1553,11 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
             app.editRailHover = 0;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
+        // The source's citation list lights the row under the pointer
+        if (editorCompletionMouseMove(app, hwnd, app.mouseX, app.mouseY)) {
+            SetCursor(cursorArrow);
+            return;
+        }
         if (liveMouseMove(app, hwnd, app.mouseX, app.mouseY)) return;
         handleEditorMouseMove(app, hwnd, app.mouseX, app.mouseY);
         if (app.editCtxOpen) return;
@@ -2252,6 +2257,12 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     // The editor menu can cross the pane boundary. Its action or dismissal
     // consumes both halves of the click, including over preview content.
     if (app.editMode && editCtxMouseDown(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
+        app.swallowNextMouseUp = true;
+        return;
+    }
+    // So can the source's citation list: a row puts its key in, a press
+    // elsewhere puts the list away and goes on
+    if (app.editMode && editorCompletionMouseDown(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) {
         app.swallowNextMouseUp = true;
         return;
     }
@@ -4118,11 +4129,15 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             bool consumed = false;
             if (liveKeyDown(app, hwnd, wParam, consumed)) return consumed;
         }
+        // The source's citation list takes its keys first: Enter puts a
+        // key in, and no new line follows
+        if (!app.confirmExitPending && editorCompletionKeyDown(app, hwnd, wParam)) return true;
         const bool wasReading=app.editorReadingPreview;
         // A key the unsaved-changes dialog takes types nothing after it:
         // Keep mine leaves the editor open under it (#311)
         const bool asking = app.confirmExitPending;
         handleEditorKeyDown(app, hwnd, wParam);
+        editorCompletionFollow(app, false);
         // Save As runs a modal loop: Ctrl may already be released when it
         // returns. Do not translate its original S into newly typed text (#206).
         return asking || (ctrl && wParam == 'S') || (wasReading && !app.editorReadingPreview);
@@ -4633,6 +4648,7 @@ void handleCharInput(App& app, HWND hwnd, WPARAM wParam) {
             return;
         }
         handleEditorCharInput(app, hwnd, wParam);
+        editorCompletionFollow(app, true);  // a key typed after an @ opens the citation list
         return;
     }
 

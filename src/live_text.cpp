@@ -1724,6 +1724,7 @@ void openPopup(LiveText& e, LiveText::Popup kind, LiveText::Popup was, size_t fr
     if (!same) {
         e.choice = 0;
         e.popupTop = 0;
+        e.hoverHit = -1;  // the pointer lights a row of the new list when it moves
     }
     e.popup = kind;
     e.popupFrom = from;
@@ -1731,10 +1732,96 @@ void openPopup(LiveText& e, LiveText::Popup kind, LiveText::Popup was, size_t fr
     e.choice = std::clamp(e.choice, 0, (int)e.choices.size() - 1);
 }
 
+// What a citation key holds: letters, digits, _ and the marks pandoc allows inside one
+bool keyChar(wchar_t c) { return iswalnum(c) || c == L'_' || (c && wcschr(L":.#$%&-+?<>~/", c)); }
+
+// The citation list: true while the caret is on a key after an @, the list
+// open or kept shut (Esc, or only the caret moved there)
+bool citeList(LiveText& e, const std::wstring& text, size_t caret, bool edited, LiveText::Popup was, const Host& host) {
+    size_t at = 0;
+    if (!host.cites || !citeAt(text, caret, at)) {
+        e.dismissedCite = std::wstring::npos;
+        return false;
+    }
+    // Typing opens it; the caret moving opens nothing, but keeps it on its key
+    const bool kept = was == LiveText::Popup::Cite && e.popupFrom == at + 1;
+    if (at != e.dismissedCite && (edited || kept)) {
+        std::vector<LiveText::Choice> list = host.cites(text, at + 1, caret);
+        if (!list.empty()) {
+            openPopup(e, LiveText::Popup::Cite, was, at + 1, std::move(list));
+            return true;
+        }
+    }
+    e.choices.clear();
+    return true;
+}
+
 }  // namespace
+
+bool citeAt(const std::wstring& t, size_t caret, size_t& at) {
+    caret = std::min(caret, t.size());
+    size_t from = caret;
+    while (from > 0 && caret - from < 100 && keyChar(t[from - 1])) --from;
+    if (from == 0 || t[from - 1] != L'@') return false;
+    // A key starts with a letter, a digit or _, as pandoc's do
+    if (from < caret && !iswalnum(t[from]) && t[from] != L'_') return false;
+    // The @ starts a word: a line's start, after a space, [ or ;, or -@ there
+    const size_t mark = from - 1;
+    size_t word = mark;
+    if (word > 0 && t[word - 1] == L'-') --word;
+    const wchar_t before = word > 0 ? t[word - 1] : L'\n';
+    if (before != L'\n' && before != L' ' && before != L'\t' && before != L'[' && before != L';') return false;
+    // Not in code: a fence, or a span of backticks before it on the line
+    const size_t ls = lineStart(t, mark);
+    size_t ticks = 0;
+    for (size_t i = ls; i < mark; ++i) ticks += t[i] == L'`';
+    if (ticks % 2 == 1 || fenceState(t, ls) != 0) return false;
+    at = mark;
+    return true;
+}
+
+MarkEdit citeEdit(const std::wstring& t, size_t caret, size_t from, const std::wstring& key, size_t& after) {
+    caret = std::min(caret, t.size());
+    from = std::min(from, caret);
+    // The key runs on past the caret; a mark after it ends a sentence, not the key
+    size_t end = caret;
+    while (end < t.size() && keyChar(t[end])) ++end;
+    while (end > caret && !iswalnum(t[end - 1]) && t[end - 1] != L'_') --end;
+    MarkEdit edit{from, end - from, key};
+    // In brackets, the nearest [ or ] before the @ on its line being a [,
+    // that no ] closes after the key, before another [ opens
+    bool bracket = false;
+    for (size_t i = from > 0 ? from - 1 : 0, ls = lineStart(t, i); i > ls; --i) {
+        if (t[i - 1] == L']') break;
+        if (t[i - 1] == L'[') {
+            bracket = true;
+            break;
+        }
+    }
+    if (bracket) {
+        bool closed = false;
+        for (size_t i = end; i < t.size() && t[i] != L'\n' && t[i] != L'['; ++i) {
+            if (t[i] == L']') {
+                closed = true;
+                break;
+            }
+        }
+        if (!closed) edit.with += L']';
+    }
+    after = from + edit.with.size();
+    return edit;
+}
+
+void followCites(LiveText& e, const std::wstring& text, size_t caret, bool edited, const Host& host) {
+    const LiveText::Popup was = e.popup;
+    e.popup = LiveText::Popup::None;
+    if (!citeList(e, text, caret, edited, was, host)) e.choices.clear();
+}
 
 void updatePopup(App& app, LiveText& e, const Host& host) {
     const LiveText::Popup was = e.popup;
+    const bool edited = e.revision != e.popupRevision;
+    e.popupRevision = e.revision;
     e.popup = LiveText::Popup::None;
     if (!e.multiline || e.hasSelection()) {
         e.choices.clear();
@@ -1759,6 +1846,8 @@ void updatePopup(App& app, LiveText& e, const Host& host) {
             if (c == L']' || c == L'|' || c == L'#' || c == L'\n') break;
         }
     }
+    // An @ and a key: the library's keys, or the document's own ids
+    if (citeList(e, e.text, caret, edited, was, host)) return;
     // A / at a line's start or after a space, with a few letters after it
     size_t slash = std::wstring::npos;
     for (size_t i = caret; i > ls && caret - i <= 24; --i) {
@@ -1799,6 +1888,7 @@ void updatePopup(App& app, LiveText& e, const Host& host) {
 
 void closePopup(LiveText& e) {
     if (e.popup == LiveText::Popup::Slash && e.popupFrom > 0) e.dismissedSlash = e.popupFrom - 1;
+    if (e.popup == LiveText::Popup::Cite && e.popupFrom > 0) e.dismissedCite = e.popupFrom - 1;
     e.popup = LiveText::Popup::None;
     e.choices.clear();
 }
@@ -1817,6 +1907,14 @@ void pickChoice(App& app, LiveText& e, int index, bool ctrl, const Host& host) {
             }
         }
         applyInsert(e, pick.insert, image);
+    } else if (e.popup == LiveText::Popup::Cite) {
+        // The key typed, and the rest of it, become the key picked
+        size_t after = 0;
+        const MarkEdit edit = citeEdit(e.text, e.caret, e.popupFrom, pick.label, after);
+        pushUndo(e, false);
+        splice(e, edit.at, edit.removed, edit.with);
+        settle(e, after, after);
+        e.popupRevision = e.revision;  // what went in opens nothing
     } else {
         // What was typed after [[ becomes the name; the brackets close unless they follow
         size_t caret = std::min(e.caret, e.text.size());
