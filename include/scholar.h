@@ -46,4 +46,9 @@ qmd::CitationFinder finder(const Session& session);
 // found, a line each
 std::vector<std::string> finish(const qmd::ElementPtr& root, const Session& session);
 
+// The files a parsed document cites from, its bibliographies and a style
+// file, followed as the document is: a library saved by Zotero reformats
+// its citations
+std::vector<std::wstring> followedFiles(const qmd::ElementPtr& root, const std::wstring& folder);
+
 }

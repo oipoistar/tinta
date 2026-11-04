@@ -12,7 +12,9 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <string>
 
@@ -91,6 +93,45 @@ int runScholarAppTests(const char* fixtureDir) {
                   "a click on the citation scrolls to its reference" + at);
             app.hoveredLink.clear();
         }
+    }
+
+    // The library is followed: saved with a new title, the references show it
+    {
+        const fs::path copy = fs::current_path() / "followed";
+        std::error_code ec;
+        fs::remove_all(copy, ec);
+        fs::copy(fixtures, copy, fs::copy_options::recursive, ec);
+        check(!ec, "the fixtures copy");
+        check(openDocumentInViewer(app, (copy / "paper.md").wstring()), "the copied paper opens");
+        app.layoutDirty = true;
+        ensureLayoutComplete(app);
+        handleFileWatchTimer(app, app.hwnd);  // sees the library as it is
+        std::string bib;
+        {
+            std::ifstream in(copy / "references.bib", std::ios::binary);
+            bib.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
+        const std::string from = "Literate Programming}";
+        const size_t at = bib.find(from);
+        check(at != std::string::npos, "Knuth's title is in the library");
+        if (at != std::string::npos) bib.replace(at, from.size(), "Literate Programming Revisited}");
+        std::ofstream(copy / "references.bib", std::ios::binary) << bib;
+        FILETIME later{};
+        GetSystemTimeAsFileTime(&later);
+        later.dwHighDateTime += 1;  // well after the first look
+        HANDLE file = CreateFileW((copy / "references.bib").c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, nullptr,
+                                  OPEN_EXISTING, 0, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            SetFileTime(file, nullptr, nullptr, &later);
+            CloseHandle(file);
+        }
+        handleFileWatchTimer(app, app.hwnd);  // notices, and reads the paper again
+        handleFileWatchTimer(app, app.hwnd);
+        app.layoutDirty = true;
+        ensureLayoutComplete(app);
+        auto card = app.referenceCards.find("ref-knuth1984");
+        check(card != app.referenceCards.end() && card->second.find(L"Revisited") != std::wstring::npos,
+              "a library saved again reformats the references");
     }
 
     // GB/T 7714: the numbers in a column, the entries beside it

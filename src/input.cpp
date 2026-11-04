@@ -12,6 +12,7 @@
 #include "tabs.h"
 #include "document.h"
 #include "editor.h"
+#include "scholar.h"
 #include "file_utils.h"
 #include "utils.h"
 #include "search.h"
@@ -4824,7 +4825,35 @@ void reportThemeProblems(App& app) {
     signalPush(app, SIG_WARN, SIGI_WARNING, text, problems.front(), all);
 }
 
+// The active document's bibliography or style file changed since it was
+// last looked at (docs/specs/scholar.md)
+static bool scholarFilesChanged(App& app) {
+    if (app.currentFile.empty() || !app.root) return false;
+    const std::wstring path = toWide(app.currentFile);
+    const size_t slash = path.find_last_of(L"\\/");
+    const std::wstring folder = slash == std::wstring::npos ? std::wstring() : path.substr(0, slash);
+    bool changed = false;
+    for (const auto& file : scholar::followedFiles(app.root, folder)) {
+        WIN32_FILE_ATTRIBUTE_DATA data{};
+        if (!GetFileAttributesExW(file.c_str(), GetFileExInfoStandard, &data)) continue;
+        auto seen = app.scholarFileTimes.emplace(file, data.ftLastWriteTime);
+        if (!seen.second && CompareFileTime(&seen.first->second, &data.ftLastWriteTime) != 0) {
+            seen.first->second = data.ftLastWriteTime;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 void handleFileWatchTimer(App& app, HWND hwnd) {
+    // A library saved by Zotero's auto-export, or an edited style, formats
+    // the citations again: the editor parses its buffer anew, the reader
+    // reads the document again below, keeping its place
+    if (scholarFilesChanged(app)) {
+        if (app.editMode) editorReparse(app);
+        else app.lastFileWriteTime = {};
+        InvalidateRect(hwnd, nullptr, FALSE);
+    }
     // A CSS theme follows its file as documents do (docs/specs/theming.md)
     if (themeReloadIfChanged(app.currentThemeIndex)) {
         applyTheme(app, app.currentThemeIndex);

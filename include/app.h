@@ -543,6 +543,9 @@ struct App {
     std::wstring formatsFontFamily, formatsCodeFontFamily, formatsHeadingFontFamily;
     std::string formatsTypeKey;  // and the type sizes (themeTypeKey)
     std::wstring themeProblemsShown;  // the CSS theme's problems last reported
+    // The active document's bibliographies and style file as last seen
+    // (docs/specs/scholar.md): a change formats its citations again
+    std::map<std::wstring, FILETIME> scholarFileTimes;
     int themeProblemsIndex = -1;      // and the theme they were for
 
     // Overlay text formats (cached)

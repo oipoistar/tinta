@@ -491,6 +491,22 @@ Session begin(const std::vector<fm::Property>& front, const std::wstring& folder
     return session;
 }
 
+std::vector<std::wstring> followedFiles(const ElementPtr& root, const std::wstring& folder) {
+    std::vector<std::wstring> files;
+    const auto& front = frontOf(root);
+    if (const fm::Property* bibliography = property(front, "bibliography")) {
+        std::vector<std::string> names = bibliography->items;
+        if (names.empty() && !bibliography->text.empty()) names.push_back(bibliography->text);
+        for (const auto& name : names) files.push_back(resolve(name, folder));
+    }
+    std::string style = scalar(front, "csl");
+    if (style.empty()) style = scalar(front, "citation-style");
+    if (!style.empty() && (bundledStyleName(style).empty() || style.find_first_of("/\\") != std::string::npos)) {
+        files.push_back(resolve(style, folder));
+    }
+    return files;
+}
+
 qmd::CitationFinder finder(const Session& session) {
     auto library = session.library;
     const bool cites = session.cites;
