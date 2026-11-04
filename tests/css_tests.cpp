@@ -556,6 +556,13 @@ void varTests() {
         check(sameColor(one.p().color, "#0000ff") && sameColor(one.p().backgroundColor, "#ff0000"), "fallbacks, nested");
     }
     {
+        // A custom property holding var() is written out again; a hash
+        // starting with a digit must stay a colour, not become an escape
+        One one(":root { --a: #00ff00; --b: var(--a); --c: 1px solid var(--a) } p { color: var(--b); border-top: var(--c) }");
+        check(sameColor(one.p().color, "#00ff00") && sameColor(one.p().border[0].color, "#00ff00") &&
+              one.p().custom("--b") == "#00ff00", "#00ff00 through two var()s: " + one.p().custom("--b"));
+    }
+    {
         One one("body { color: #00ff00 } p { color: var(--missing); background-color: var(--missing) }");
         check(sameColor(one.p().color, "#00ff00") && one.p().backgroundColor.a == 0,
               "a var() with no value makes the declaration unset");
@@ -1180,6 +1187,179 @@ void diagnosticTests() {
           hasDiagnostic(families, "`scroll-margin-top` has no effect"), "families of properties Tinta leaves alone\n" + dump(families));
 }
 
+// --- Explaining the cascade, for the inspector -------------------------------------------------------
+
+// The entries explain() lists for one property, in its order
+std::vector<Applied> entries(const std::vector<Applied>& all, const std::string& property) {
+    std::vector<Applied> out;
+    for (const Applied& a : all) {
+        if (a.property == property) out.push_back(a);
+    }
+    return out;
+}
+
+std::string showApplied(const std::vector<Applied>& list) {
+    std::string out;
+    for (const Applied& a : list) {
+        out += std::string("  ") + "WOI"[a.state] + " " + a.property + " = " + a.value + " | " + a.selector + " | " +
+               a.declaration + " | " + a.file + ":" + std::to_string(a.line) + ":" + std::to_string(a.column) + " origin " +
+               std::to_string((int)a.origin) + " specificity " + std::to_string(a.specificity) +
+               (a.important ? " !important" : "") + " up " + std::to_string(a.ancestor) + " pseudo " +
+               std::to_string((int)a.pseudo) + "\n";
+    }
+    return out;
+}
+
+void explainTests() {
+    {
+        One one("p { color: #ff0000 }\n.x { color: #0000ff }\n#y {\n  color: #00ff00;\n}\np.x { color: #800080; margin-top: 1px }\n");
+        std::vector<Applied> all = one.engine.explain(at(one.page, {0, 0}).ctx);
+        std::vector<Applied> color = entries(all, "color");
+        check(color.size() == 4 && color[0].state == Applied::Winning && color[0].selector == "#y" &&
+              color[0].value == "#00ff00" && color[0].declaration == "color: #00ff00" && color[0].specificity == S(1, 0, 0) &&
+              color[0].line == 4 && color[0].column == 3 && color[0].file == "one.css" && color[0].ancestor == 0 &&
+              color[0].pseudo == -1 && color[0].origin == Origin::Theme && !color[0].important,
+              "the winner is the id's, with where it is written\n" + showApplied(all));
+        check(color.size() == 4 && color[1].selector == "p.x" && color[1].specificity == S(0, 1, 1) &&
+              color[2].selector == ".x" && color[3].selector == "p" && color[3].specificity == S(0, 0, 1) &&
+              color[1].state == Applied::Overridden && color[3].state == Applied::Overridden && color[3].line == 1,
+              "then the declarations it beat, the most specific first");
+        std::vector<Applied> margin = entries(all, "margin-top");
+        check(margin.size() == 1 && margin[0].state == Applied::Winning && margin[0].value == "1px" &&
+              margin[0].declaration == "margin-top: 1px", "a property one rule sets");
+        check(sameColor(one.p().color, "#00ff00") && all.size() == 5, "explain() agrees with style(), and lists nothing more");
+    }
+    {
+        // Origins and !important: the base's important beats the theme, the
+        // folder's important beats both, and the folder beats the theme's id
+        Engine engine;
+        engine.load({sheetOf("p { color: #111111 !important; font-size: 10px }", nullptr, Origin::Base, nullptr, "base.css"),
+                     sheetOf("p { color: #222222; font-size: 12px }\n#y { font-weight: bold }", nullptr, Origin::Theme, nullptr,
+                             "theme.css"),
+                     sheetOf("p { font-size: 14px !important; font-weight: normal }", nullptr, Origin::Folder, nullptr,
+                             "tinta.css")},
+                    Media());
+        El page;
+        Engine::Context p = paragraph(engine, page);
+        std::vector<Applied> all = engine.explain(p);
+        std::vector<Applied> color = entries(all, "color"), size = entries(all, "font-size"), weight = entries(all, "font-weight");
+        check(color.size() == 2 && color[0].origin == Origin::Base && color[0].important && color[0].file == "base.css" &&
+              color[0].declaration == "color: #111111 !important" && color[1].origin == Origin::Theme,
+              "an important base declaration wins over the theme\n" + showApplied(all));
+        check(size.size() == 3 && size[0].origin == Origin::Folder && size[0].important && size[1].origin == Origin::Theme &&
+              size[2].origin == Origin::Base && size[0].file == "tinta.css", "the folder's important, the theme, the base");
+        check(weight.size() == 2 && weight[0].origin == Origin::Folder && weight[0].selector == "p" &&
+              weight[1].selector == "#y" && weight[1].specificity == S(1, 0, 0), "an origin beats any specificity");
+        const ComputedStyle& s = engine.style(p);
+        check(sameColor(s.color, "#111111") && s.fontSize == 14 && s.fontWeight == 400, "as style() has it");
+    }
+    {
+        // A shorthand sets its longhands; the list's selector that matched is named
+        One one("blockquote, p { border-left: 3px solid #b35900 !important }\np { border-left-color: #ff0000 }\n");
+        std::vector<Applied> all = one.engine.explain(at(one.page, {0, 0}).ctx);
+        std::vector<Applied> color = entries(all, "border-left-color"), width = entries(all, "border-left-width");
+        check(color.size() == 2 && color[0].value == "#b35900" && color[0].important && color[0].selector == "p" &&
+              color[0].declaration == "border-left: 3px solid #b35900 !important" && color[1].value == "#ff0000" &&
+              color[1].state == Applied::Overridden && width.size() == 1 && width[0].value == "3px",
+              "border-left: by longhand\n" + showApplied(all));
+    }
+    {
+        // var(): the custom properties a declaration reads, and those they read
+        One one(":root { --base: #123456; --unused: 1px }\nbody { --ink: var(--base) }\np { color: var(--ink); border: var(--rule) }\n"
+                ":root { --rule: 1px solid var(--ink) }");
+        std::vector<Applied> all = one.engine.explain(at(one.page, {0, 0}).ctx);
+        std::vector<Applied> color = entries(all, "color"), ink = entries(all, "--ink"), base = entries(all, "--base"),
+                             rule = entries(all, "--rule"), top = entries(all, "border-top-color");
+        check(color.size() == 1 && color[0].value == "var(--ink)" && ink.size() == 1 && ink[0].state == Applied::Inherited &&
+              ink[0].ancestor == 1 && ink[0].selector == "body" && ink[0].value == "var(--base)" && base.size() == 1 &&
+              base[0].ancestor == 2 && base[0].selector == ":root" && base[0].value == "#123456",
+              "var() is followed up the page\n" + showApplied(all));
+        check(top.size() == 1 && top[0].value == "var(--rule)" && top[0].declaration == "border: var(--rule)" && rule.size() == 1 &&
+              rule[0].ancestor == 2 && entries(all, "--unused").empty(), "a shorthand with var(), and what is not read is left out");
+    }
+    {
+        // Imported sheets keep their own names and lines
+        std::map<std::string, std::string> files = {{"/t/base.css", "/* the base */\np {\n  color: #ff0000;\n  margin-top: 2px\n}\n"}};
+        auto sheet = sheetOf("@import \"base.css\";\np { color: #0000ff }\n", nullptr, Origin::Theme, memorySource(files), "/t/theme.css");
+        Engine engine;
+        engine.load({sheet}, Media());
+        El page;
+        std::vector<Applied> all = engine.explain(paragraph(engine, page));
+        std::vector<Applied> color = entries(all, "color"), margin = entries(all, "margin-top");
+        check(color.size() == 2 && color[0].file == "/t/theme.css" && color[0].line == 2 && color[1].file == "/t/base.css" &&
+              color[1].line == 3 && color[1].column == 3 && color[1].declaration == "color: #ff0000" && color[1].selector == "p",
+              "an imported declaration, with its file and line\n" + showApplied(all));
+        check(margin.size() == 1 && margin[0].file == "/t/base.css" && margin[0].declaration == "margin-top: 2px",
+              "a last declaration without its ;");
+    }
+    {
+        // Inherited properties come from the nearest ancestor that declares them
+        Engine engine;
+        engine.load({sheetOf("body { color: #0000ff; font-family: Inter; background-color: #eeeeee }\n"
+                             "blockquote { color: #00ff00 }\nstrong { font-weight: 900 }\n:root { --unused: 1 }")},
+                    Media());
+        El page = el("html", {el("body", {el("blockquote", {el("p", {el("strong")})})})});
+        layout(engine, page);
+        std::vector<Applied> all = engine.explain(at(page, {0, 0, 0, 0}).ctx);
+        std::vector<Applied> color = entries(all, "color"), family = entries(all, "font-family");
+        check(color.size() == 1 && color[0].state == Applied::Inherited && color[0].ancestor == 2 &&
+              color[0].selector == "blockquote" && family.size() == 1 && family[0].ancestor == 3 && family[0].value == "Inter",
+              "inherited from the blockquote and the body\n" + showApplied(all));
+        check(entries(all, "background-color").empty() && entries(all, "--unused").empty() && all.size() == 3 &&
+              all[0].property == "font-weight" && all[0].state == Applied::Winning, "own declarations first; nothing that does not reach it");
+    }
+    {
+        // Pseudo-elements: their own rules, then the element they belong to
+        One one("p { font-size: 20px; color: #0000ff }\np::before { content: \"x\"; color: #ff0000 }\nbody { line-height: 2 }");
+        Engine::Context p = at(one.page, {0, 0}).ctx;
+        std::vector<Applied> before = one.engine.explain(p, Pseudo::Before);
+        std::vector<Applied> content = entries(before, "content"), color = entries(before, "color"), size = entries(before, "font-size"),
+                             height = entries(before, "line-height");
+        check(content.size() == 1 && content[0].pseudo == (int8_t)Pseudo::Before && content[0].selector == "p::before" &&
+              color.size() == 1 && color[0].value == "#ff0000" && color[0].state == Applied::Winning,
+              "::before's own rules\n" + showApplied(before));
+        check(size.size() == 1 && size[0].state == Applied::Inherited && size[0].ancestor == 0 && size[0].pseudo == -1 &&
+              size[0].selector == "p" && height.size() == 1 && height[0].ancestor == 1, "inherited from its element, then the body");
+        One sel(":root::selection { background-color: #ff0000 }\np::selection { color: #00ff00 }");
+        std::vector<Applied> selection = sel.engine.explain(at(sel.page, {0, 0}).ctx, Pseudo::Selection);
+        std::vector<Applied> back = entries(selection, "background-color");
+        check(entries(selection, "color").size() == 1 && back.size() == 1 && back[0].ancestor == 2 &&
+              back[0].pseudo == (int8_t)Pseudo::Selection && back[0].selector == ":root::selection",
+              "::selection inherits from the ancestors' ::selection\n" + showApplied(selection));
+    }
+    {
+        // Only rules whose media match
+        std::string css = "@media print { p { color: #ff0000 } }\np { color: #0000ff }";
+        One screen(css);
+        One print(css, Media{false, true, 800});
+        std::vector<Applied> onScreen = entries(screen.engine.explain(at(screen.page, {0, 0}).ctx), "color");
+        std::vector<Applied> printed = entries(print.engine.explain(at(print.page, {0, 0}).ctx), "color");
+        check(onScreen.size() == 1 && printed.size() == 2 && printed[0].value == "#0000ff" && printed[1].value == "#ff0000",
+              "a print rule shows when printing");
+    }
+    {
+        // Selectors and declarations over lines read on one
+        One one("h1,\n  p.x\n    > span ,\nem\n{\n  color:\n    #ff0000 ;\n  font-family: \"A; B\", serif /* why */\n}");
+        std::vector<Applied> all = one.engine.explain(at(one.page, {0, 0, 0}).ctx);
+        std::vector<Applied> color = entries(all, "color"), family = entries(all, "font-family");
+        check(color.size() == 1 && color[0].selector == "p.x > span" && color[0].declaration == "color: #ff0000" &&
+              color[0].line == 6 && family.size() == 1 && family[0].declaration == "font-family: \"A; B\", serif /* why */",
+              "written over lines\n" + showApplied(all));
+    }
+    {
+        One one("p { color: #ff0000 }");
+        check(one.engine.explain(one.page.ctx).empty() && one.engine.explain(999999).empty() &&
+              one.engine.explain(at(one.page, {0, 0, 0}).ctx).size() == 1, "the root, a context that is not there, and a span");
+    }
+    std::vector<Element> path(5);
+    const char* tags[] = {"html", "body", "blockquote", "p", "strong"};
+    for (size_t i = 0; i < 5; ++i) path[i].tag = tags[i];
+    path[2].classes = {"alert-note"};
+    path[3].id = "intro";
+    check(selectorPath(path) == "body > blockquote.alert-note > p#intro > strong", "a selector path: " + selectorPath(path));
+    check(selectorPath({}).empty() && selectorPath({path[0]}) == "html", "an empty path, and the root alone");
+}
+
 // --- Interning ---------------------------------------------------------------------------------------
 
 void internTests() {
@@ -1525,6 +1705,13 @@ void performanceTests() {
     check(us < 200 * slack, "a context's style computes quickly: " + std::to_string(us) + " us");
     std::cout << "  speed: 500-line sheets parse in " << typicalMs << " ms (typical) and " << heavyMs
               << " ms (heavy); a style computes in " << us << " us, over " << all.size() << " contexts\n";
+    // The inspector's explain() is for one click: it may take longer
+    size_t listed = 0;
+    auto explainStart = std::chrono::steady_clock::now();
+    for (Engine::Context c : all) listed += engine.explain(c).size();
+    double explainUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - explainStart).count() / all.size();
+    check(listed > all.size() && explainUs < 5000 * slack, "explain() lists the declarations: " + std::to_string(explainUs) + " us");
+    std::cout << "  explain(): " << explainUs << " us a context, " << listed << " declarations over " << all.size() << " contexts\n";
 }
 
 }  // namespace
@@ -1548,6 +1735,7 @@ int main() {
     pseudoTests();
     serializeTests();
     diagnosticTests();
+    explainTests();
     internTests();
     paperTests();
     nightTests();

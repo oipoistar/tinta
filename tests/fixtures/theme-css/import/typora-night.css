@@ -1,0 +1,71 @@
+/* Night Ink: a hand-written Typora theme for Tinta's importer tests.
+   MIT licence; this comment is kept in the imported sheet. */
+@import url("https://fonts.googleapis.com/css2?family=Inter&display=swap");
+@include-when-export url(https://fonts.loli.net/css?family=Open+Sans:400,700);
+@charset "UTF-8";
+
+:root {
+  --bg-color: #1e2125;
+  --text-color: #c9d1d9;
+  --side-bar-bg-color: #16181b;
+  --monospace: "JetBrains Mono", Consolas, monospace;
+  --select-text-bg-color: #3b5070;
+  --primary-color: #58a6ff;
+  --md-char-color: #6e7681;
+}
+
+html, body {
+  font-family: "Inter", "Segoe UI", sans-serif;
+  font-size: 16px;
+}
+
+#write {
+  max-width: 860px;
+  padding: 30px 40px;
+  color: var(--text-color);
+}
+
+#write h1 { color: #ffa657; font-size: 2.2em; }
+#write > h2 { color: #d2a8ff; }
+h3, #write h3 { color: #7ee787; }
+#write a { color: #58a6ff; }
+
+#write code { color: #ff7b72; background-color: #2d333b; }
+.md-fences {
+  background-color: #161b22;
+  color: #e6edf3;
+}
+.md-fences .CodeMirror { padding: 8px 0; }
+.cm-s-inner .cm-keyword { color: #ff7b72; }
+.cm-s-inner .cm-comment { color: #8b949e; font-style: italic; }
+.cm-s-inner .cm-string { color: #a5d6ff; }
+.cm-s-inner .CodeMirror-gutters { background: #161b22; border-right: none; }
+.cm-s-inner .CodeMirror-cursor { border-left: 1px solid #c9d1d9; }
+
+blockquote { border-left-color: #3b434b; color: #8b949e; }
+mark { background-color: #bb800966; color: #e6edf3; }
+.md-task-list-item > input { accent-color: #58a6ff; }
+.task-list-item.task-list-done { color: #8b949e; }
+.md-alert-warning { border-left-color: #d29922; }
+.md-alert-text-warning { color: #d29922; }
+pre.md-meta-block { color: #8b949e; }
+[mdtype="heading"] { letter-spacing: 0.01em; }
+span[md-inline="highlight"] { border-radius: 2px; }
+
+#write .md-focus { opacity: 1; }
+#typora-sidebar { background-color: var(--side-bar-bg-color); }
+.file-list-item, .file-tree-node { color: #8b949e; }
+footer.ty-footer { border-top: 1px solid #30363d; }
+::-webkit-scrollbar { width: 8px; }
+.megamenu-menu, #megamenu-content { background: #16181b; }
+
+.typora-export #write { padding: 0; }
+
+@media print {
+  html { font-size: 12px; }
+}
+
+@keyframes blink {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

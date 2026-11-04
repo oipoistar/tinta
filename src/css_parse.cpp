@@ -671,7 +671,7 @@ struct Parser {
 
     Parser(Sheet& s, const ImportSource& i, std::vector<Diagnostic>& d, std::vector<std::string>& files)
         : sheet(s), imports(i), diagnostics(d), stack(files), tokens(tokenize(s.text)), lines(s.text),
-          file(std::make_shared<const std::string>(s.file)) {}
+          file(s.name = std::make_shared<const std::string>(s.file)) {}
 
     void run() { ruleList(0, tokens.size(), Scope(), true); }
 
@@ -780,6 +780,8 @@ struct Parser {
             return after;
         }
         for (size_t s = 0; s < rule.selectors.size(); ++s) {
+            rule.selectors[s].begin = reader.spans[s].first;
+            rule.selectors[s].end = reader.spans[s].second;
             std::string what = unreachable(rule.selectors[s]);
             if (!what.empty()) {
                 const auto& span = reader.spans[s];
@@ -864,6 +866,7 @@ struct Parser {
         Declaration d;
         if (!split(i, j, value, d.important)) return;
         lines.at(sheet.text, nameToken.begin, d.line, d.column);
+        d.begin = nameToken.begin;
         const std::string& name = nameToken.text;
         if (name.size() >= 2 && name[0] == '-' && name[1] == '-') {
             d.prop = PropCustom;
@@ -929,6 +932,7 @@ struct Parser {
             Declaration l;
             l.prop = (uint16_t)part.first;
             l.important = d.important;
+            l.begin = d.begin;
             l.line = d.line;
             l.column = d.column;
             l.value = std::move(part.second);

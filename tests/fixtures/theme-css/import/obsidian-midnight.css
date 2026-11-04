@@ -1,0 +1,23 @@
+/* Midnight: a hand-written dark-only Obsidian theme for Tinta's importer
+   tests. */
+.theme-dark {
+  --background-primary: #0f1419;
+  --text-normal: #bfbdb6;
+  --link-color: #39bae6;
+  --h1-color: #ffb454;
+  --h2-color: #ffb454;
+  --h3-color: #ffb454;
+  --h4-color: #ffb454;
+  --h5-color: #ffb454;
+  --h6-color: #ffb454;
+  --code-normal: #aad94c;
+  --code-background: #131721;
+  --bold-color: #f29668;
+  --italic-color: #d2a6ff;
+  --hr-color: #2d3640;
+  --callout-tip: 149, 230, 203;
+}
+body.theme-dark {
+  --text-selection: #273747;
+}
+.theme-dark .markdown-preview-view pre { border: 1px solid #2d3640; }

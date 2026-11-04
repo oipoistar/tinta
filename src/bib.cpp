@@ -1,10 +1,11 @@
-// References for citations (bib.h): the item model, and the BibTeX and
-// CSL-JSON readers that fill it.
+// References for citations (bib.h): the item model, and the BibTeX, CSL-JSON
+// and CSL YAML readers that fill it.
 
 #pragma optimize("s", on)
 
 #include "bib.h"
 #include "json.h"
+#include "yaml.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1764,11 +1765,13 @@ std::string numberText(double n) {
     return buf;
 }
 
-// A string as it is, a number written out; anything else is empty
+// A string as it is, a number written out; anything else is empty. Values
+// from YAML keep their text, so a number or true reads as it was written
 std::string jsonText(const Json* v) {
     if (!v) return {};
     if (v->type == Json::String) return v->text;
-    if (v->type == Json::Number) return numberText(v->number);
+    if (v->type == Json::Number) return v->text.empty() ? numberText(v->number) : v->text;
+    if (v->type == Json::Bool) return v->text;
     return {};
 }
 
@@ -1862,6 +1865,91 @@ std::string cslRich(std::string_view s) {
     return out;
 }
 
+// CSL YAML fields are pandoc Markdown: *x* and _x_ italic, **x** and __x__
+// bold, ^x^ and ~x~ super- and subscript, [x]{.smallcaps} and [x]{.nocase}.
+// Written as the tags cslRich() keeps; escapes and code spans as text
+bool wordByte(char c) { return isLetter(c) || isDigit(c) || (unsigned char)c >= 0x80; }
+
+void markdownInto(std::string_view s, std::string& out, int depth) {
+    size_t i = 0;
+    while (i < s.size()) {
+        char c = s[i];
+        if (c == '\\' && i + 1 < s.size() && oneOf(s[i + 1], "\\`*_{}[]()#+-.!^~<>&\"'|$@:;,/=?%")) {
+            appendEscaped(out, s.substr(i + 1, 1));
+            i += 2;
+            continue;
+        }
+        size_t n = 1;
+        while (i + n < s.size() && s[i + n] == c) ++n;
+        if (c == '`') {
+            size_t close = s.find(std::string(n, '`'), i + n);
+            if (close != std::string_view::npos) {
+                appendEscaped(out, s.substr(i + n, close - i - n));
+                i = close + n;
+                continue;
+            }
+        }
+        bool emphasis = c == '*' || c == '_';
+        if ((emphasis ? n <= 3 : (c == '^' || c == '~') && n == 1) && depth < 8 && i + n < s.size() &&
+            !isSpace(s[i + n]) && !(c == '_' && i > 0 && wordByte(s[i - 1]))) {
+            // The closing run: as long, after no space, and for _ before no letter
+            size_t close = std::string_view::npos;
+            for (size_t k = i + n; k < s.size(); ++k) {
+                if (s[k] == '\\') {
+                    ++k;
+                    continue;
+                }
+                if (!emphasis && isSpace(s[k])) break;  // ^ and ~ hold no spaces
+                if (s[k] != c) continue;
+                size_t m = 1;
+                while (k + m < s.size() && s[k + m] == c) ++m;
+                if (m == n && !isSpace(s[k - 1]) && !(c == '_' && k + m < s.size() && wordByte(s[k + m]))) {
+                    close = k;
+                    break;
+                }
+                k += m - 1;
+            }
+            if (close != std::string_view::npos) {
+                static const char* const opening[] = {"<sup>", "<i>", "<b>", "<b><i>"};
+                static const char* const closing[] = {"</sup>", "</i>", "</b>", "</i></b>"};
+                bool sub = c == '~';
+                out += sub ? "<sub>" : opening[emphasis ? n : 0];
+                markdownInto(s.substr(i + n, close - i - n), out, depth + 1);
+                out += sub ? "</sub>" : closing[emphasis ? n : 0];
+                i = close + n;
+                continue;
+            }
+        }
+        if (c == '[' && depth < 8) {
+            int level = 0;
+            size_t k = i;
+            for (; k < s.size(); ++k) {
+                if (s[k] == '\\') ++k;
+                else if (s[k] == '[') ++level;
+                else if (s[k] == ']' && --level == 0) break;
+            }
+            std::string_view rest = k < s.size() ? s.substr(k + 1) : std::string_view();
+            const char* span = rest.substr(0, 12) == "{.smallcaps}" ? smallCaps
+                             : rest.substr(0, 9) == "{.nocase}"     ? nocaseSpan
+                                                                     : nullptr;
+            if (span) {
+                out += span;
+                markdownInto(s.substr(i + 1, k - i - 1), out, depth + 1);
+                out += "</span>";
+                i = k + 1 + (span == smallCaps ? 12 : 9);
+                continue;
+            }
+        }
+        out.append(s.substr(i, n));
+        i += n;
+    }
+}
+
+// Variables that hold an identifier, not text: no Markdown there
+bool verbatimVariable(std::string_view variable) {
+    return in(variable, {"DOI", "ISBN", "ISSN", "PMCID", "PMID", "URL", "call-number", "citation-key", "language"});
+}
+
 // A CSL-JSON name. One without particles of its own takes them from its
 // words as citeproc-js does: "van Gogh" has the particle van, "Ludwig van"
 // the particle van after the given name
@@ -1916,6 +2004,21 @@ bool jsonDate(const Json& v, Date& date) {
         date.from.year = jsonInt(v);
         return !date.empty();
     }
+    if (v.type == Json::Array) {
+        // A list of years, months and days, as pandoc-citeproc wrote dates in
+        // YAML: the second ends a range
+        for (size_t i = 0; i < v.items.size() && i < 2; ++i) {
+            const Json& p = v.items[i];
+            DateParts d;
+            if (const Json* y = p.get("year")) d.year = jsonInt(*y);
+            if (const Json* m = p.get("month")) d.month = jsonInt(*m);
+            if (const Json* day = p.get("day")) d.day = jsonInt(*day);
+            if (d.month < 0 || d.month > 12) d.month = d.day = 0;
+            if (i == 0) date.from = d;
+            else if (d.year) date.to = d;
+        }
+        return !date.empty();
+    }
     if (v.type != Json::Object) return false;
     const Json* parts = v.get("date-parts");
     if (parts && parts->type == Json::Array) {
@@ -1963,10 +2066,13 @@ bool jsonDate(const Json& v, Date& date) {
     return !date.empty();
 }
 
-void jsonItem(const Json& v, std::string_view source, const Lines& lines, Library& library) {
+// One reference. `base` is where the value's text starts in the text `lines`
+// counts; `markdown` reads its text fields as CSL YAML's pandoc Markdown
+void jsonItem(const Json& v, std::string_view source, const Lines& lines, Library& library, size_t base = 0,
+              bool markdown = false) {
     Item it;
     it.source = std::string(source);
-    it.line = lines.line(v.begin);
+    it.line = lines.line(base + v.begin);
     it.id = jsonText(v.get("id"));
     if (it.id.empty()) it.id = jsonText(v.get("citation-key"));
     if (it.id.empty()) {
@@ -2007,9 +2113,16 @@ void jsonItem(const Json& v, std::string_view source, const Lines& lines, Librar
             if (!list.empty()) it.names[variable] = std::move(list);
             continue;
         }
-        std::string text = value.type == Json::String ? cslRich(value.text)
-                         : value.type == Json::Number ? numberText(value.number)
-                                                      : std::string();
+        std::string text;
+        if (value.type != Json::String) {
+            text = escaped(jsonText(&value));
+        } else if (markdown && !verbatimVariable(variable)) {
+            std::string tags;
+            markdownInto(value.text, tags, 0);
+            text = cslRich(tags);
+        } else {
+            text = cslRich(value.text);
+        }
         if (text.empty() || (alias && it.fields.count(variable))) continue;
         it.fields[variable] = std::move(text);
     }
@@ -2127,6 +2240,85 @@ void readCslJson(std::string_view text, std::string_view source, Library& librar
     }
 }
 
+namespace {
+
+// The references in YAML that sits at `offset` in `whole` (a .yaml file, or
+// a document's front matter), its lines counted in `whole`
+void yamlReferences(std::string_view whole, size_t offset, std::string_view text, std::string_view source,
+                    Library& library) {
+    Lines lines(whole);
+    auto report = [&](size_t at, std::string message) {
+        library.diagnostics.push_back({std::string(source), lines.line(offset + at), std::move(message)});
+    };
+    Json root;
+    yaml::Error error;
+    const size_t none = std::string_view::npos;
+    size_t cut = none;  // a reference that reaches the mistake is left out
+    if (!yaml::parse(text, root, error)) {
+        report(error.offset, "not valid YAML: " + error.message);
+        cut = error.offset;
+    }
+    const Json* list = &root;
+    if (root.type == Json::Object && !root.get("id")) {
+        list = root.get("references");
+        if (!list) {
+            if (cut == none) report(root.begin, "CSL YAML is a list of references, or a mapping with references:");
+            return;
+        }
+    }
+    if (list->type == Json::Array) {
+        for (const Json& v : list->items) {
+            if (cut != none && v.end >= cut) break;
+            if (v.type == Json::Object) jsonItem(v, source, lines, library, offset, true);
+            else report(v.begin, "a reference that is not a mapping");
+        }
+    } else if (list->type == Json::Object) {
+        if (cut == none) jsonItem(*list, source, lines, library, offset, true);
+    } else if (list->type != Json::Null) {
+        report(list->begin, "references: holds a list of references");
+    }
+}
+
+// A front matter line that starts the references: key
+bool referencesKey(std::string_view line) {
+    size_t n = line.substr(0, 10) == "references" ? 10
+             : line.substr(0, 12) == "\"references\"" || line.substr(0, 12) == "'references'" ? 12 : 0;
+    if (!n) return false;
+    while (n < line.size() && (line[n] == ' ' || line[n] == '\t')) ++n;
+    return n < line.size() && line[n] == ':' && (n + 1 == line.size() || isSpace(line[n + 1]));
+}
+
+}  // namespace
+
+void readCslYaml(std::string_view yaml, std::string_view source, Library& library) {
+    yamlReferences(yaml, 0, yaml, source, library);
+}
+
+bool readFrontMatterReferences(std::string_view document, std::string_view source, Library& library) {
+    size_t begin = 0, end = 0;
+    if (!yaml::frontMatter(document, begin, end)) return false;
+    // Only the references: key is read, so a mistake elsewhere in the front
+    // matter costs no reference: its line, and the lines after it that are
+    // indented, empty, comments or its list's items
+    const size_t none = std::string_view::npos;
+    size_t from = none, to = end;
+    for (size_t at = begin; at < end;) {
+        size_t next = document.find('\n', at);
+        next = next == none || next >= end ? end : next + 1;
+        std::string_view line = document.substr(at, next - at);
+        if (from == none) {
+            if (referencesKey(line)) from = at;
+        } else if (!line.empty() && !isSpace(line[0]) && line[0] != '#' && line[0] != '-') {
+            to = at;
+            break;
+        }
+        at = next;
+    }
+    if (from == none) return false;
+    yamlReferences(document, from, document.substr(from, to - from), source, library);
+    return true;
+}
+
 bool readByExtension(std::string_view text, std::string_view path, Library& library) {
     size_t dot = path.find_last_of('.');
     size_t slash = path.find_last_of("/\\");
@@ -2138,6 +2330,10 @@ bool readByExtension(std::string_view text, std::string_view path, Library& libr
     }
     if (extension == "json") {
         readCslJson(text, path, library);
+        return true;
+    }
+    if (extension == "yaml" || extension == "yml") {
+        readCslYaml(text, path, library);
         return true;
     }
     return false;

@@ -21,9 +21,10 @@ slow for reasons [see @brooks1995, pp. 33-35; also @smith2020, chap. 1].
 ```
 
 - **Libraries:** BibTeX and BibLaTeX (`.bib`, as Zotero, JabRef, Mendeley
-  and Google Scholar export them) and CSL-JSON (`.json`). Paths are relative
-  to the document. Save the file from your reference manager and open
-  documents update.
+  and Google Scholar export them), CSL-JSON (`.json`) and CSL YAML
+  (`.yaml`, pandoc's YAML form of CSL-JSON, with Markdown such as
+  `*Sepia*` in its fields). Paths are relative to the document. Save the
+  file from your reference manager and open documents update.
 - **Styles:** `apa`, `chicago-author-date`, `ieee`, `nature` and `gb-t-7714`
   (China National Standard GB/T 7714-2015, numeric) are built in, the
   official files from the Citation Style Language project. Any other style

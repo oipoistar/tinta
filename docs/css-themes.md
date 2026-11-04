@@ -65,6 +65,71 @@ borders, letter spacing and list markers, is read and kept but not drawn
 yet. Mistakes and properties Tinta does not use are reported in a notice
 with the file and line, and the rest of the sheet applies.
 
+## Importing Typora and Obsidian themes
+
+**Settings > Appearance > Import theme...** takes a Typora or Obsidian
+theme's `.css` file and writes a Tinta theme beside your others, named as
+the file was. Tinta works out which app the theme is for, reads the sheets
+it imports along with it, and lists what it could not carry over, each
+with its line; the new theme is then in the chooser like any other.
+
+What the import rewrites:
+
+| In the app's theme | In Tinta's |
+| --- | --- |
+| Typora's `#write`, `.typora-export #write`; Obsidian's `.markdown-preview-view`, `.markdown-rendered` | `body`, or nothing before another selector: `#write h1` is `h1` |
+| `.typora-export` rules | the same rules for print only |
+| Obsidian's `.theme-light` and `.theme-dark` | one sheet that follows Windows: `:root { color-scheme: light dark }`, each variable set on both sides as `light-dark(light, dark)`; a theme with only `.theme-dark` is a dark theme |
+| Typora's `.md-fences`, `.CodeMirror`, `.cm-s-inner` | `pre` (a code block) |
+| CodeMirror's `.cm-keyword`, `.cm-string`, `.cm-comment`... | Tinta's `.token.keyword`, `.token.string`, `.token.comment`... |
+| Typora's `code` | `:not(pre) > code`: Typora's code blocks hold no `code`, so it means inline code |
+| `.md-task-list-item`, `.task-list-item` (`.task-list-done`, `.is-checked`) | `li.task` (`:checked`) |
+| Typora's `.md-alert-note`... and Obsidian's `.callout[data-callout="note"]`... | `blockquote.alert-note`, `-tip`, `-important`, `-warning`, `-caution`; their titles `p.alert-title` |
+| `.md-meta-block`, `.md-math-block`, `.md-diagram-panel`, Obsidian's `.internal-link` | `div.frontmatter`, `div.math-display`, `div.diagram`, `span.wikilink` |
+
+The variables each app themes with become declarations on Tinta's
+elements, ahead of the theme's own rules, which still win:
+
+- Typora: `--bg-color` and `--text-color` (the body), `--monospace` (code),
+  `--select-text-bg-color` (the selection), `--primary-color` (the accent),
+  `--side-bar-bg-color` (Tinta's panels).
+- Obsidian: `--background-primary`, `--text-normal`, `--font-text-theme`,
+  `--text-accent` or `--link-color`, `--interactive-accent`, `--h1-color`
+  to `--h6-color` with their sizes, weights and faces, `--bold-color`,
+  `--italic-color`, `--code-background`, `--code-normal`,
+  `--font-monospace-theme`, the `--code-*` token colours,
+  `--blockquote-border-color`, `--text-highlight-bg`, `--text-selection`,
+  `--hr-color`, the table, list and checkbox colours, and the callout
+  colours (`--callout-tip`, or `--callout-color` in a callout's rule, as an
+  RGB triplet or a colour).
+
+What is left out, with a note each:
+
+- Rules for the app's window and editor: Typora's sidebar, toolbar, menus,
+  footer, source mode and editing marks (`.md-focus`); Obsidian's
+  workspace, panes, file list, status bar, modals and its editor
+  (`.markdown-source-view`, `.cm-*`); scrollbars; and classes the app puts
+  on its window (`body.is-mobile`, a theme's own settings classes).
+- Callouts Tinta has not: it draws GitHub's five, so `info`, `todo`,
+  `bug` and the rest are dropped.
+- Web fonts: `@import url(https://fonts...)`, Typora's
+  `@include-when-export` and `@font-face` rules whose fonts are on the web.
+  Tinta fetches nothing: install the font, or put its files beside the
+  theme with `@font-face`.
+- At-rules Tinta does not read, such as `@keyframes` and `@page`;
+  `@layer` blocks are unwrapped.
+
+The variables a theme reads but never sets, because the app does
+(`var(--color-red)`), are noted too; Obsidian's sizes and weights
+(`--font-smaller`, `--font-semibold`...) are given their usual values. The
+theme's opening comment, its name and licence, is kept at the top.
+
+Limits: the dropped `#write` and `.markdown-preview-view` prefixes carried
+specificity, so where the theme relied on it rather than on order a rule
+can now lose to an earlier one; light and dark rules are placed after the
+others, which keeps the usual case right. Fonts a theme loads from files
+beside it must be copied beside the imported theme.
+
 ## Exports
 
 The HTML export carries the sheet after its own styles, so a browser shows
