@@ -229,37 +229,24 @@ inline D2D1_COLOR_F themeSelectionColor(const D2DTheme& theme, D2D1_COLOR_F own)
 }
 
 // The chrome's colours (--ui-*): the theme's where it sets them, else the
-// page's, so a theme without them draws its window as before
-inline D2D1_COLOR_F themeUiText(const D2DTheme& theme) { return theme.uiText.value_or(theme.text); }
-inline D2D1_COLOR_F themeUiAccent(const D2DTheme& theme) { return theme.uiAccent.value_or(theme.accent); }
+// page's, so a theme without them draws its window as before. Out of line
+// (themes.cpp): the chrome calls them in a few hundred places
+D2D1_COLOR_F themeUiText(const D2DTheme& theme);
+D2D1_COLOR_F themeUiAccent(const D2DTheme& theme);
 // Strong chrome text (a panel's title, the row in use): --ui-text, else
 // the page's heading colour
-inline D2D1_COLOR_F themeUiHeading(const D2DTheme& theme) { return theme.uiText.value_or(theme.heading); }
+D2D1_COLOR_F themeUiHeading(const D2DTheme& theme);
 // A panel, menu, popup or card's fill: --ui-panel at the surface's own
 // opacity (its fade and translucency), else the surface's own colour
-inline D2D1_COLOR_F themeUiPanel(const D2DTheme& theme, D2D1_COLOR_F own) {
-    if (!theme.uiPanel) return own;
-    D2D1_COLOR_F color = *theme.uiPanel;
-    color.a *= own.a;
-    return color;
-}
+D2D1_COLOR_F themeUiPanel(const D2DTheme& theme, D2D1_COLOR_F own);
 // Their edges and dividers: --ui-border as it is, faded in with the
 // surface, else the surface's own
-inline D2D1_COLOR_F themeUiBorder(const D2DTheme& theme, D2D1_COLOR_F own, float fade = 1.0f) {
-    if (!theme.uiBorder) return own;
-    D2D1_COLOR_F color = *theme.uiBorder;
-    color.a *= fade;
-    return color;
-}
+D2D1_COLOR_F themeUiBorder(const D2DTheme& theme, D2D1_COLOR_F own, float fade = 1.0f);
 // Whether a colour reads as dark, as the CSS compiler decides a page is
-inline bool themeColorIsDark(const D2D1_COLOR_F& c) {
-    return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b < 0.5f;
-}
+bool themeColorIsDark(const D2D1_COLOR_F& c);
 // Whether the chrome's panels are dark: --ui-panel's when the theme sets
 // it, else the page's
-inline bool themeUiDark(const D2DTheme& theme) {
-    return theme.uiPanel ? themeColorIsDark(*theme.uiPanel) : theme.isDark;
-}
+bool themeUiDark(const D2DTheme& theme);
 
 // Helper to create color from hex
 inline D2D1_COLOR_F hexColor(uint32_t hex, float alpha = 1.0f) {
