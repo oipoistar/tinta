@@ -1,0 +1,83 @@
+/* Dusk: a hand-written Obsidian theme for Tinta's importer tests, light and
+   dark. MIT licence. */
+@import url("https://fonts.googleapis.com/css2?family=Literata&display=swap");
+
+body {
+  --font-text-theme: "Literata", Georgia, serif;
+  --font-monospace-theme: "Cascadia Code", Consolas, monospace;
+  --h1-size: 2.1em;
+  --h1-weight: 700;
+  --h2-weight: var(--font-semibold);
+  --code-size: var(--font-smaller);
+  --blockquote-border-thickness: 3px;
+}
+
+.theme-light {
+  --background-primary: #fbf8f1;
+  --background-secondary: #f2ede2;
+  --text-normal: #2e3338;
+  --text-accent: #8a5cf5;
+  --interactive-accent: #8a5cf5;
+  --h1-color: var(--text-accent);
+  --h2-color: #b35900;
+  --code-background: #f0ebe0;
+  --code-normal: #4a4f55;
+  --code-keyword: #a626a4;
+  --code-string: #50a14f;
+  --code-comment: #a0a1a7;
+  --blockquote-border-color: #d7cfbf;
+  --text-highlight-bg: rgba(255, 208, 0, 0.4);
+  --text-selection: hsla(260, 80%, 70%, 0.25);
+  --line-width: 44rem;
+}
+
+.theme-dark {
+  --background-primary: #1b1d22;
+  --background-secondary: #15171b;
+  --text-normal: #d8dee9;
+  --text-accent: #b48ead;
+  --interactive-accent: #b48ead;
+  --h1-color: var(--text-accent);
+  --h2-color: #ebcb8b;
+  --code-background: #23262d;
+  --code-normal: #c0c5ce;
+  --code-keyword: #c678dd;
+  --code-string: #98c379;
+  --code-comment: #5c6370;
+  --blockquote-border-color: #4c566a;
+  --text-highlight-bg: rgba(235, 203, 139, 0.3);
+  --text-selection: hsla(300, 30%, 60%, 0.3);
+  --line-width: 46rem;
+}
+
+.markdown-preview-view h3,
+.markdown-source-view .HyperMD-header-3 {
+  color: var(--color-orange);
+  font-variant: small-caps;
+}
+.markdown-rendered h4 { color: var(--text-accent); }
+.theme-dark .markdown-rendered em { color: #88c0d0; }
+.markdown-preview-view strong { font-weight: var(--font-bold); }
+.markdown-preview-view blockquote { font-style: italic; }
+
+.callout[data-callout="warning"] { --callout-color: 236, 117, 0; }
+.callout[data-callout="tip"] .callout-title { font-weight: 600; }
+.callout[data-callout="info"] { --callout-color: 8, 109, 221; }
+.callout .callout-icon { display: none; }
+
+.markdown-preview-view .task-list-item.is-checked { color: var(--text-faint); }
+.markdown-preview-view .internal-link { text-decoration: none; }
+.markdown-preview-view ul > li:not(.is-collapsed) { margin-bottom: 2px; }
+
+.workspace-leaf-content { background: var(--background-primary); }
+.nav-file-title, .nav-folder-title { color: var(--text-muted); }
+.theme-dark .titlebar { background-color: #101114; }
+body.dusk-wide-lines .markdown-preview-view { max-width: 60rem; }
+.markdown-source-view.mod-cm6 .cm-line { padding: 0 2px; }
+.status-bar { font-size: 12px; }
+::-webkit-scrollbar-thumb { background: #4c566a; }
+
+@media (max-width: 600px) {
+  .markdown-preview-view h1 { font-size: 1.7em; }
+  .modal { width: 100%; }
+}

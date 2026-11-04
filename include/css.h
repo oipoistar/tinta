@@ -196,6 +196,27 @@ const std::vector<FontFace>& fontFaces(const Sheet& sheet);
 // declarations Tinta ignores are kept, since a browser may use them
 std::string serialize(const Sheet& sheet);
 
+// --- Themes from other apps ------------------------------------------------------
+
+enum class Flavor : uint8_t { Detect, Typora, Obsidian };
+
+// Which app a theme is for, from the names it uses; Detect when it cannot tell
+Flavor detectFlavor(std::string_view css);
+
+// A Typora or Obsidian theme rewritten as a Tinta sheet: its selectors onto
+// the elements of Tinta's page (#write and .markdown-preview-view are the
+// body, .md-fences pre, .callout[data-callout=tip] blockquote.alert-tip),
+// Obsidian's .theme-light and .theme-dark as one sheet with light-dark(),
+// and the variables each app themes with (--bg-color, --text-normal,
+// --h1-color...) as declarations on Tinta's elements. Rules for the app's
+// window, web fonts and at-rules Tinta does not read are dropped, a note in
+// `notes` for each, which also name the variables the theme reads but never
+// sets. `file` names the theme in notes and for `imports`, which reads the
+// sheets it imports so they are rewritten too; without it they stay
+// @imports. Detect works the app out with detectFlavor()
+std::string importTheme(std::string_view css, Flavor flavor, std::vector<Diagnostic>& notes,
+                        std::string_view file = {}, const ImportSource& imports = nullptr);
+
 // --- Styling elements ----------------------------------------------------------
 
 struct Media {

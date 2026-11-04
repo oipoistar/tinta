@@ -89,6 +89,7 @@ set(THEME_SOURCES
     src/css_props.cpp
     src/css_parse.cpp
     src/css_cascade.cpp
+    src/css_import.cpp
 )
 
 # Source files
@@ -824,6 +825,14 @@ if(BUILD_TESTING)
     target_compile_definitions(css_tests PRIVATE
         TINTA_CSS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/theme-css")
     add_test(NAME css_engine COMMAND css_tests)
+
+    # Typora and Obsidian themes imported as CSS themes, read back by the engine
+    add_executable(css_import_tests tests/css_import_tests.cpp src/css_import.cpp src/css.cpp src/css_values.cpp
+        src/css_props.cpp src/css_parse.cpp src/css_cascade.cpp)
+    target_include_directories(css_import_tests PRIVATE include)
+    target_compile_definitions(css_import_tests PRIVATE
+        TINTA_CSS_IMPORT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/theme-css/import")
+    add_test(NAME css_import COMMAND css_import_tests)
 
     # Scholar's CSL processor and XML reader against the bundled styles
     # (docs/specs/scholar.md); a console program, no window
