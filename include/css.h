@@ -109,6 +109,9 @@ enum class Prop : uint8_t {
 
 struct ComputedStyle {
     std::bitset<(size_t)Prop::Count> declared;
+    // Of those, the ones a theme or folder sheet set rather than the base
+    // sheet, which holds Tinta's own look
+    std::bitset<(size_t)Prop::Count> authored;
     bool has(Prop prop) const { return declared.test((size_t)prop); }
 
     // Inherited
@@ -195,6 +198,11 @@ const std::vector<FontFace>& fontFaces(const Sheet& sheet);
 // The sheet again as CSS with its imports inlined, for HTML export. Rules and
 // declarations Tinta ignores are kept, since a browser may use them
 std::string serialize(const Sheet& sheet);
+// Whether any of its rules sits under a print media query
+bool mentionsPrint(const Sheet& sheet);
+
+// Whether an element takes the property from its parent when no rule sets it
+bool inherited(Prop prop);
 
 // --- Styling elements ----------------------------------------------------------
 

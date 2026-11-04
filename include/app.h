@@ -270,6 +270,11 @@ bool themeReloadIfChanged(int index);
 std::vector<std::wstring> themeProblems(int index);
 // The sheet as CSS, its imports inlined, for the HTML export; else empty
 std::string themeSheetCss(int index);
+// The sheet itself, which layout asks for each element's style
+// (page_style.h); null for themes that are not CSS
+namespace css { struct Sheet; }
+std::shared_ptr<const css::Sheet> themeSheet(int index);
+namespace page { struct State; }
 
 // Persistent settings
 enum class SidePanel { None, Contents, Browser };
@@ -563,6 +568,9 @@ struct App {
     // OpenType typography
     IDWriteTypography* bodyTypography = nullptr;
     IDWriteTypography* codeTypography = nullptr;
+    // A CSS theme's styles as layout reads them, element by element, with
+    // the text formats made for them (page_style.h)
+    std::shared_ptr<page::State> pageState;
 
     // Folder browser text format
     IDWriteTextFormat* folderBrowserFormat = nullptr;
@@ -1333,6 +1341,10 @@ struct App {
     struct LayoutRect {
         D2D1_RECT_F rect{};
         D2D1_COLOR_F color{};
+        // A CSS theme's box (page_style.h): rounded corners and an edge
+        float radius = 0.0f;
+        D2D1_COLOR_F stroke{};
+        float strokeWidth = 0.0f;
     };
     struct LayoutLine {
         D2D1_POINT_2F p1{};

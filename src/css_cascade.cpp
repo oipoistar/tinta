@@ -738,6 +738,7 @@ struct Engine::Impl {
             const Win& w = wins[(size_t)p];
             if (w.decl) {
                 out.s.declared.set((size_t)p);
+                if (rules[w.rule].origin != (uint8_t)Origin::Base) out.s.authored.set((size_t)p);
                 const std::vector<Node>* v = &w.decl->value;
                 std::vector<Node> substituted;
                 bool ok = true;

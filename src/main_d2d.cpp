@@ -286,12 +286,27 @@ render_document:
             rect.rect.left > viewportRight + cullMargin) {
             continue;
         }
-        app.brush->SetColor(rect.color);
-        app.renderTarget->FillRectangle(
-            D2D1::RectF(rect.rect.left - app.scrollX, rect.rect.top - app.scrollY,
-                       rect.rect.right - app.scrollX, rect.rect.bottom - app.scrollY),
-            app.brush);
-        app.drawCalls++;
+        const D2D1_RECT_F box = D2D1::RectF(rect.rect.left - app.scrollX, rect.rect.top - app.scrollY,
+                                            rect.rect.right - app.scrollX, rect.rect.bottom - app.scrollY);
+        if (rect.color.a > 0.0f) {
+            app.brush->SetColor(rect.color);
+            if (rect.radius > 0.0f) {
+                app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(box, rect.radius, rect.radius), app.brush);
+            } else {
+                app.renderTarget->FillRectangle(box, app.brush);
+            }
+            app.drawCalls++;
+        }
+        if (rect.strokeWidth > 0.0f && rect.stroke.a > 0.0f) {
+            // The edge inside the box, as CSS draws a border
+            const float in = rect.strokeWidth * 0.5f;
+            const D2D1_RECT_F edge = D2D1::RectF(box.left + in, box.top + in, box.right - in, box.bottom - in);
+            app.brush->SetColor(rect.stroke);
+            app.renderTarget->DrawRoundedRectangle(
+                D2D1::RoundedRect(edge, std::max(0.0f, rect.radius - in), std::max(0.0f, rect.radius - in)),
+                app.brush, rect.strokeWidth);
+            app.drawCalls++;
+        }
     }
 
     // Dashed stroke is a factory object: create once, reuse every frame

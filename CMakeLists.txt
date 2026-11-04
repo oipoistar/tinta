@@ -83,6 +83,7 @@ set(SCHOLAR_SOURCES
 set(THEME_SOURCES
     src/themes.cpp
     src/themes_css.cpp
+    src/page_style.cpp
     src/css.cpp
     src/css_values.cpp
     src/css_props.cpp
@@ -550,7 +551,8 @@ if(BUILD_TESTING)
         TINTA_HTML_QUOTE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/html-blockquote-text.md")
     add_test(NAME blockquote_layout COMMAND blockquote_layout_tests)
 
-    add_executable(theme_tests tests/theme_tests.cpp tests/theme_colour_tests.cpp tests/theme_css_tests.cpp ${INPUT_TEST_SOURCES})
+    add_executable(theme_tests tests/theme_tests.cpp tests/theme_colour_tests.cpp tests/theme_css_tests.cpp
+        tests/page_style_tests.cpp ${INPUT_TEST_SOURCES})
     target_include_directories(theme_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(theme_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
     target_compile_definitions(theme_tests PRIVATE $<TARGET_PROPERTY:tinta,COMPILE_DEFINITIONS>

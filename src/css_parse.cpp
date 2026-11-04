@@ -1179,6 +1179,25 @@ std::shared_ptr<const Sheet> parse(std::string_view text, std::string_view file,
 
 const std::vector<FontFace>& fontFaces(const Sheet& sheet) { return sheet.faces; }
 
+namespace {
+bool namesPrint(const MediaExpr& e) {
+    if (e.kind == MediaExpr::Print) return true;
+    for (const MediaExpr& a : e.args) {
+        if (namesPrint(a)) return true;
+    }
+    return false;
+}
+}  // namespace
+
+bool mentionsPrint(const Sheet& sheet) {
+    for (const Rule& rule : sheet.rules) {
+        for (const auto& m : rule.media) {
+            if (m && namesPrint(*m)) return true;
+        }
+    }
+    return false;
+}
+
 std::string serialize(const Sheet& sheet) {
     std::string out;
     size_t at = 0;

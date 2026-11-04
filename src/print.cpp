@@ -268,11 +268,21 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
     for (const auto& rect : app.layoutRects) {
         if (!inRange(rect.rect.top, rect.rect.bottom)) continue;
         bool banded = applyBand(rect.rect.top, rect.rect.bottom);
-        brush->SetColor(rect.color);
-        dc->FillRectangle(
-            D2D1::RectF(rect.rect.left + dx, rect.rect.top + dy,
-                        rect.rect.right + dx, rect.rect.bottom + dy),
-            brush);
+        const D2D1_RECT_F box = D2D1::RectF(rect.rect.left + dx, rect.rect.top + dy,
+                                            rect.rect.right + dx, rect.rect.bottom + dy);
+        if (rect.color.a > 0.0f) {
+            brush->SetColor(rect.color);
+            if (rect.radius > 0.0f) dc->FillRoundedRectangle(D2D1::RoundedRect(box, rect.radius, rect.radius), brush);
+            else dc->FillRectangle(box, brush);
+        }
+        if (rect.strokeWidth > 0.0f && rect.stroke.a > 0.0f) {
+            const float in = rect.strokeWidth * 0.5f;
+            brush->SetColor(rect.stroke);
+            dc->DrawRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(box.left + in, box.top + in, box.right - in, box.bottom - in),
+                                  std::max(0.0f, rect.radius - in), std::max(0.0f, rect.radius - in)),
+                brush, rect.strokeWidth);
+        }
         resetBand(banded);
     }
 

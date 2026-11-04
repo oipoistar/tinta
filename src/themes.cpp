@@ -618,6 +618,11 @@ std::string themeSheetCss(int index) {
     return entry && entry->sheet ? css::serialize(*entry->sheet) : std::string();
 }
 
+std::shared_ptr<const css::Sheet> themeSheet(int index) {
+    const CssEntry* entry = cssEntryAt(index);
+    return entry ? entry->sheet : nullptr;
+}
+
 int themeCount() {
     return THEME_COUNT + (int)g_customThemes.size() + (int)g_cssThemes.size();
 }

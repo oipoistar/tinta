@@ -2,7 +2,9 @@
 #define TINTA_INLINE_STYLE_H
 
 #include "app.h"
+#include "page_style.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,6 +34,17 @@ struct InlineStyle {
     bool bold = false;
     bool italic = false;
     bool fixedSize = false;  // ^sup^/~sub~ own their font size
+
+    // A CSS theme's style for the span (page_style.h); empty without one
+    page::Style css;
+    // A link's rule as the theme sets it: -1 Tinta's own, 0 none, 1 drawn
+    int8_t linkRule = -1;
+    std::optional<D2D1_COLOR_F> ruleColor;  // text-decoration-color
+    // Inline code the theme styles: its face, colour, box and padding
+    IDWriteTextFormat* codeFormat = nullptr;
+    std::optional<D2D1_COLOR_F> codeColor, codeBox, codeEdge;
+    float codePadLeft = -1.0f, codePadRight = -1.0f;  // layout units; -1 Tinta's
+    float codeRadius = 0.0f, codeEdgeWidth = 0.0f;
 };
 
 struct StyledRun {

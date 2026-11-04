@@ -1,4 +1,5 @@
 #include "d2d_init.h"
+#include "page_style.h"
 #include "tabs.h"
 #include "math_render.h"
 #include "utils.h"
@@ -395,6 +396,8 @@ void updateTextFormats(App& app) {
     mathClearCache();
     // Baselines measured per format: a new format may reuse a freed address
     app.formatBaselines.clear();
+    // and so may the faces a CSS theme's elements were given (page_style.h)
+    page::releaseFormats(app);
     // Release existing formats
     if (app.textFormat) { app.textFormat->Release(); app.textFormat = nullptr; }
     if (app.headingFormat) { app.headingFormat->Release(); app.headingFormat = nullptr; }

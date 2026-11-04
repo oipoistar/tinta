@@ -36,8 +36,40 @@ bool saveFramePreview(App& app, const std::filesystem::path& path, Overlay overl
         dc->Clear(app.theme.background);
         dc->SetTransform(D2D1::Matrix3x2F::Translation(documentViewportX(app) - app.scrollX, -app.scrollY));
         for (const auto& item : app.layoutRects) {
+            // A CSS theme's boxes round their corners and draw an edge
+            const auto box = D2D1::RoundedRect(item.rect, item.radius, item.radius);
             app.brush->SetColor(item.color);
-            dc->FillRectangle(item.rect, app.brush);
+            if (item.radius > 0) dc->FillRoundedRectangle(box, app.brush);
+            else dc->FillRectangle(item.rect, app.brush);
+            if (item.strokeWidth > 0) {
+                const float in = item.strokeWidth / 2;
+                app.brush->SetColor(item.stroke);
+                dc->DrawRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(item.rect.left + in, item.rect.top + in, item.rect.right - in,
+                                                  item.rect.bottom - in),
+                                      std::max(0.0f, item.radius - in), std::max(0.0f, item.radius - in)),
+                    app.brush, item.strokeWidth);
+            }
+        }
+        // List bullets and the simple shapes; diagrams' paths are left out
+        for (const auto& item : app.layoutShapes) {
+            const auto ellipse = D2D1::Ellipse(D2D1::Point2F((item.rect.left + item.rect.right) / 2,
+                                                             (item.rect.top + item.rect.bottom) / 2),
+                                               (item.rect.right - item.rect.left) / 2,
+                                               (item.rect.bottom - item.rect.top) / 2);
+            const auto rounded = D2D1::RoundedRect(item.rect, item.radius, item.radius);
+            if (item.type == App::LayoutShapeType::Ellipse) {
+                app.brush->SetColor(item.fill);
+                if (item.fill.a > 0) dc->FillEllipse(ellipse, app.brush);
+                app.brush->SetColor(item.stroke);
+                if (item.stroke.a > 0 && item.strokeWidth > 0) dc->DrawEllipse(ellipse, app.brush, item.strokeWidth);
+            } else if (item.type == App::LayoutShapeType::Rectangle ||
+                       item.type == App::LayoutShapeType::RoundedRectangle) {
+                app.brush->SetColor(item.fill);
+                if (item.fill.a > 0) dc->FillRoundedRectangle(rounded, app.brush);
+                app.brush->SetColor(item.stroke);
+                if (item.stroke.a > 0 && item.strokeWidth > 0) dc->DrawRoundedRectangle(rounded, app.brush, item.strokeWidth);
+            }
         }
         for (const auto& item : app.layoutLines) {
             app.brush->SetColor(item.color);
