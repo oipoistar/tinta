@@ -361,10 +361,13 @@ void appendNumber(std::string& out, double v) {
     out += buffer;
 }
 
-void appendEscaped(std::string& out, const std::string& name) {
+// A name with what it cannot hold escaped. An identifier cannot start with a
+// digit; a hash's name can (#3366cc), and an escape there would make it hex
+void appendEscaped(std::string& out, const std::string& name, bool identifier = true) {
     for (size_t i = 0; i < name.size(); ++i) {
         unsigned char c = (unsigned char)name[i];
-        bool plain = isName(c) && !(i == 0 && isDigit(c)) && !(i == 1 && name[0] == '-' && isDigit(c));
+        bool plain = isName(c) && !(identifier && i == 0 && isDigit(c)) &&
+                     !(identifier && i == 1 && name[0] == '-' && isDigit(c));
         if (!plain) out += '\\';
         out += (char)c;
     }
@@ -377,7 +380,7 @@ void serializeNode(const Node& n, std::string& out) {
         case Tok::Ident: appendEscaped(piece, t.text); break;
         case Tok::Function: appendEscaped(piece, t.text); piece += '('; break;
         case Tok::AtKeyword: piece = "@"; appendEscaped(piece, t.text); break;
-        case Tok::Hash: piece = "#"; appendEscaped(piece, t.text); break;
+        case Tok::Hash: piece = "#"; appendEscaped(piece, t.text, false); break;
         case Tok::String:
         case Tok::BadString:
         case Tok::Url:

@@ -556,6 +556,13 @@ void varTests() {
         check(sameColor(one.p().color, "#0000ff") && sameColor(one.p().backgroundColor, "#ff0000"), "fallbacks, nested");
     }
     {
+        // A custom property holding var() is written out again; a hash
+        // starting with a digit must stay a colour, not become an escape
+        One one(":root { --a: #00ff00; --b: var(--a); --c: 1px solid var(--a) } p { color: var(--b); border-top: var(--c) }");
+        check(sameColor(one.p().color, "#00ff00") && sameColor(one.p().border[0].color, "#00ff00") &&
+              one.p().custom("--b") == "#00ff00", "#00ff00 through two var()s: " + one.p().custom("--b"));
+    }
+    {
         One one("body { color: #00ff00 } p { color: var(--missing); background-color: var(--missing) }");
         check(sameColor(one.p().color, "#00ff00") && one.p().backgroundColor.a == 0,
               "a var() with no value makes the declaration unset");
