@@ -856,6 +856,8 @@ int captionHitTest(const App& app, float x, float y) {
 // --- rendering ---
 
 D2D1_COLOR_F tabStripBackground(const App& app) {
+    // A CSS theme's --ui-background; else the page's, a shade deeper
+    if (app.theme.uiBackground) return *app.theme.uiBackground;
     D2D1_COLOR_F c = app.theme.background;
     float f = app.theme.isDark ? 0.78f : 0.955f;
     c.r *= f;
@@ -935,11 +937,14 @@ void renderTabStrip(App& app) {
     tabsInit(app);
     syncActiveTab(app);
 
-    D2D1_COLOR_F text = app.theme.text;
+    // The strip's ink (--ui-text); the active tab wears the page's colour,
+    // so it keeps the page's text
+    D2D1_COLOR_F text = themeUiText(app.theme);
     D2D1_COLOR_F muted = text;
     muted.a = 0.7f;
     D2D1_COLOR_F faint = text;
     faint.a = 0.06f;
+    const bool stripDark = app.theme.uiBackground ? themeColorIsDark(*app.theme.uiBackground) : app.theme.isDark;
 
     // Strip background: the full width in every mode, the docked edit
     // preview included (#245)
@@ -1093,12 +1098,15 @@ void renderTabStrip(App& app) {
             }
             float top = active ? dpi(app, 6.0f) : dpi(app, 10.0f);
             D2D1_RECT_F r = D2D1::RectF(x, top, x + width, stripH);
+            const D2D1_COLOR_F ink = active ? app.theme.text : text;
+            D2D1_COLOR_F inkMuted = ink;
+            inkMuted.a = muted.a;
 
             if (active) {
                 // The active tab drops a soft shadow onto its neighbors
                 // instead of an underline: layered halos, clipped to the
                 // strip so they spread sideways over the inactive tabs
-                float shadowAlpha = app.theme.isDark ? 0.34f : 0.16f;
+                float shadowAlpha = stripDark ? 0.34f : 0.16f;
                 for (int ring = 3; ring >= 1; ring--) {
                     float spread = dpi(app, (float)ring * 2.2f);
                     D2D1_COLOR_F shadow =
@@ -1139,7 +1147,7 @@ void renderTabStrip(App& app) {
                 if (layout) {
                     DWRITE_TEXT_METRICS tm{};
                     layout->GetMetrics(&tm);
-                    app.brush->SetColor(active ? text : muted);
+                    app.brush->SetColor(active ? ink : muted);
                     app.renderTarget->DrawTextLayout(
                         D2D1::Point2F(r.left + (width - tm.width) * 0.5f,
                                       top + (stripH - top - tm.height) * 0.5f),
@@ -1163,7 +1171,7 @@ void renderTabStrip(App& app) {
             // Label, ellipsis-trimmed, leaving room for the close/dot
             float labelRight = r.right - dpi(app, showClose ? 30.0f : 20.0f);
             if (app.folderBrowserFormat && labelRight > r.left + dpi(app, 12.0f)) {
-                app.brush->SetColor(active ? text : muted);
+                app.brush->SetColor(active ? ink : muted);
                 app.renderTarget->DrawText(
                     app.tabs[i].title.c_str(), (UINT32)app.tabs[i].title.size(),
                     app.folderBrowserFormat,
@@ -1190,7 +1198,7 @@ void renderTabStrip(App& app) {
                     app.mouseX >= cb.left && app.mouseX <= cb.right &&
                     app.mouseY >= cb.top && app.mouseY <= cb.bottom;
                 if (closeHover || !active) {
-                    D2D1_COLOR_F cbBg = text;
+                    D2D1_COLOR_F cbBg = ink;
                     cbBg.a = closeHover ? 0.12f : 0.07f;
                     app.brush->SetColor(cbBg);
                     app.renderTarget->FillRoundedRectangle(
@@ -1210,7 +1218,7 @@ void renderTabStrip(App& app) {
                 } else {
                     drawCloseGlyph(app, (cb.left + cb.right) * 0.5f,
                                    (cb.top + cb.bottom) * 0.5f,
-                                   dpi(app, 3.6f), muted);
+                                   dpi(app, 3.6f), inkMuted);
                 }
                 hit.closeRect = cb;
                 hit.hasClose = true;
@@ -1325,7 +1333,7 @@ void renderTabStrip(App& app) {
         }
         float cx = (r.left + r.right) * 0.5f;
         float cy = (r.top + r.bottom) * 0.5f - dpi(app, 1.0f);
-        D2D1_COLOR_F pin = app.alwaysOnTop ? app.theme.accent : text;
+        D2D1_COLOR_F pin = app.alwaysOnTop ? themeUiAccent(app.theme) : text;
         if (!app.alwaysOnTop && !hover) pin.a = 0.45f;
         app.brush->SetColor(pin);
         float bw = dpi(app, 3.0f);   // body half-width
@@ -1369,11 +1377,13 @@ void renderTabSwitcher(App& app) {
     if (x < dpi(app, 8.0f)) x = dpi(app, 8.0f);
     float y = stripH + dpi(app, 4.0f);
 
-    D2D1_COLOR_F text = app.theme.text;
+    D2D1_COLOR_F text = themeUiText(app.theme);
     D2D1_COLOR_F panel = stripBackground(app);
     panel.a = 0.97f;
+    panel = themeUiPanel(app.theme, panel);
     D2D1_COLOR_F border = text;
     border.a = 0.12f;
+    border = themeUiBorder(app.theme, border);
 
     D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(
         D2D1::RectF(x, y, x + width, y + height), dpi(app, 8.0f),
@@ -1416,7 +1426,7 @@ void renderTabSwitcher(App& app) {
                 app.brush);
         }
         if (active) {
-            app.brush->SetColor(app.theme.accent);
+            app.brush->SetColor(themeUiAccent(app.theme));
             app.renderTarget->FillRoundedRectangle(
                 D2D1::RoundedRect(
                     D2D1::RectF(row.left, rowY + dpi(app, 7.0f),
@@ -1718,7 +1728,7 @@ void renderTabHoverCard(App& app) {
     float radius = dpi(app, 8.0f);
 
     // A soft lift off the page underneath, then the strip's own surface
-    float shadowAlpha = app.theme.isDark ? 0.30f : 0.10f;
+    float shadowAlpha = themeUiDark(app.theme) ? 0.30f : 0.10f;
     for (int ring = 2; ring >= 1; ring--) {
         float spread = dpi(app, (float)ring * 2.0f);
         app.brush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f,
@@ -1730,11 +1740,13 @@ void renderTabHoverCard(App& app) {
                 radius + spread, radius + spread),
             app.brush);
     }
-    D2D1_COLOR_F text = app.theme.text;
+    D2D1_COLOR_F text = themeUiText(app.theme);
     D2D1_COLOR_F panel = stripBackground(app);
     panel.a = 1.0f;  // opaque: no page text ghosting through
+    panel = themeUiPanel(app.theme, panel);
     D2D1_COLOR_F border = text;
     border.a = 0.12f;
+    border = themeUiBorder(app.theme, border);
     D2D1_COLOR_F muted = text;
     muted.a = 0.62f;
     D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(rect, radius, radius);
@@ -2075,10 +2087,10 @@ void renderTabMenu(App& app) {
     float w = tabMenuWidth(app);
     float h = tabMenuTotalHeight(app);
 
-    D2D1_COLOR_F panelBg = app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
-                                            : hexColor(0xF8F8F8, 0.97f);
-    D2D1_COLOR_F borderColor = app.theme.isDark ? hexColor(0x3A3A40, 0.9f)
-                                                : hexColor(0xC8C8C8, 0.9f);
+    D2D1_COLOR_F panelBg = themeUiPanel(app.theme, app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
+                                                                    : hexColor(0xF8F8F8, 0.97f));
+    D2D1_COLOR_F borderColor = themeUiBorder(app.theme, app.theme.isDark ? hexColor(0x3A3A40, 0.9f)
+                                                                         : hexColor(0xC8C8C8, 0.9f));
     app.brush->SetColor(panelBg);
     app.renderTarget->FillRoundedRectangle(
         D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6, 6), app.brush);
@@ -2097,7 +2109,7 @@ void renderTabMenu(App& app) {
         bool enabled = tabMenuItemEnabled(app, i);
 
         if (i == app.tabMenuHover && enabled) {
-            D2D1_COLOR_F hoverColor = app.theme.accent;
+            D2D1_COLOR_F hoverColor = themeUiAccent(app.theme);
             hoverColor.a = 0.18f * anim;
             app.brush->SetColor(hoverColor);
             app.renderTarget->FillRoundedRectangle(
@@ -2106,7 +2118,7 @@ void renderTabMenu(App& app) {
                 app.brush);
         }
 
-        D2D1_COLOR_F textColor = app.theme.text;
+        D2D1_COLOR_F textColor = themeUiText(app.theme);
         textColor.a = (enabled ? 1.0f : 0.35f) * anim;
         app.brush->SetColor(textColor);
         float textY = top + (itemH - dpi(app, 18.0f)) / 2;
@@ -2138,7 +2150,7 @@ void renderTabMenu(App& app) {
             if (hint) {
                 DWRITE_TEXT_METRICS metrics{};
                 hint->GetMetrics(&metrics);
-                D2D1_COLOR_F hintColor = app.theme.text;
+                D2D1_COLOR_F hintColor = themeUiText(app.theme);
                 hintColor.a = 0.4f * anim;
                 app.brush->SetColor(hintColor);
                 app.renderTarget->DrawTextLayout(
@@ -2276,7 +2288,7 @@ void ghostCreate(App& app, const std::wstring& title, int screenX,
                                          (int)(radius * 2), (int)(radius * 2));
         HBRUSH fill = CreateSolidBrush(toColorref(tabStripBackground(app)));
         FillRgn(memory, region, fill);
-        D2D1_COLOR_F borderColor = app.theme.text;
+        D2D1_COLOR_F borderColor = themeUiBorder(app.theme, themeUiText(app.theme));
         HBRUSH border = CreateSolidBrush(toColorref(borderColor));
         FrameRgn(memory, region, border, 1, 1);
         DeleteObject(fill);
@@ -2291,7 +2303,7 @@ void ghostCreate(App& app, const std::wstring& title, int screenX,
                                  L"Segoe UI");
         HGDIOBJ oldFont = SelectObject(memory, font);
         SetBkMode(memory, TRANSPARENT);
-        SetTextColor(memory, toColorref(app.theme.text));
+        SetTextColor(memory, toColorref(themeUiText(app.theme)));
         RECT textRect = {(int)dpi(app, 12.0f), 0,
                          width - (int)dpi(app, 10.0f), height};
         DrawTextW(memory, title.c_str(), (int)title.size(), &textRect,

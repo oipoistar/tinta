@@ -604,8 +604,8 @@ void renderAnnotations(App& app) {
         D2D1_RECT_F btn = D2D1::RectF(bx, by, bx + bw, by + bh);
         bool hovered = app.mouseX >= btn.left && app.mouseX <= btn.right &&
                        app.mouseY >= btn.top && app.mouseY <= btn.bottom;
-        D2D1_COLOR_F bg = app.theme.isDark ? hexColor(0x1E1E1E, 0.95f)
-                                           : hexColor(0xF8F8F8, 0.95f);
+        D2D1_COLOR_F bg = themeUiPanel(app.theme, app.theme.isDark ? hexColor(0x1E1E1E, 0.95f)
+                                                                   : hexColor(0xF8F8F8, 0.95f));
         app.brush->SetColor(bg);
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(btn, 5, 5), app.brush);
@@ -615,7 +615,7 @@ void renderAnnotations(App& app) {
         app.renderTarget->DrawRoundedRectangle(
             D2D1::RoundedRect(btn, 5, 5), app.brush, 1.0f);
 
-        D2D1_COLOR_F glyph = app.theme.text;
+        D2D1_COLOR_F glyph = themeUiText(app.theme);
         glyph.a = hovered ? 1.0f : 0.75f;
         app.brush->SetColor(glyph);
         // Copy: two offset rectangles
@@ -720,8 +720,8 @@ void renderAnnotations(App& app) {
         }
 
         D2D1_RECT_F panel = D2D1::RectF(px, py, px + w, py + h);
-        D2D1_COLOR_F bg = app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
-                                           : hexColor(0xFCFCFA, 0.97f);
+        D2D1_COLOR_F bg = themeUiPanel(app.theme, app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
+                                                                   : hexColor(0xFCFCFA, 0.97f));
         app.brush->SetColor(bg);
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(panel, 6, 6), app.brush);
@@ -734,7 +734,7 @@ void renderAnnotations(App& app) {
         app.renderTarget->FillRectangle(
             D2D1::RectF(px, py + 6, px + dpi(app, 3.0f), py + h - 6), app.brush);
 
-        D2D1_COLOR_F quoteColor = app.theme.text;
+        D2D1_COLOR_F quoteColor = themeUiText(app.theme);
         quoteColor.a = 0.55f;
         app.brush->SetColor(quoteColor);
         app.renderTarget->DrawText(
@@ -743,7 +743,7 @@ void renderAnnotations(App& app) {
                         px + w - pad, py + pad + quoteH),
             app.brush);
         if (noteLayout) {
-            app.brush->SetColor(app.theme.text);
+            app.brush->SetColor(themeUiText(app.theme));
             app.renderTarget->DrawTextLayout(
                 D2D1::Point2F(px + pad + dpi(app, 4.0f),
                               py + pad + quoteH + dpi(app, 4.0f)),
@@ -1021,8 +1021,8 @@ void renderAnnotationEditor(App& app) {
     EditorGeom g = editorGeom(app);
     D2D1_COLOR_F color = annotColor(app);
 
-    D2D1_COLOR_F bg = app.theme.isDark ? hexColor(0x1E1E1E, 0.98f)
-                                       : hexColor(0xFCFCFA, 0.98f);
+    D2D1_COLOR_F bg = themeUiPanel(app.theme, themeUiDark(app.theme) ? hexColor(0x1E1E1E, 0.98f)
+                                                               : hexColor(0xFCFCFA, 0.98f));
     app.brush->SetColor(bg);
     app.renderTarget->FillRoundedRectangle(
         D2D1::RoundedRect(g.panel, 8, 8), app.brush);
@@ -1039,7 +1039,7 @@ void renderAnnotationEditor(App& app) {
                               : app.annotPendingQuote;
     std::wstring quote = toWide(quoteU8);
     if (quote.size() > 52) quote = quote.substr(0, 52) + L"...";
-    D2D1_COLOR_F quoteColor = app.theme.text;
+    D2D1_COLOR_F quoteColor = themeUiText(app.theme);
     quoteColor.a = 0.55f;
     app.brush->SetColor(quoteColor);
     float pad = dpi(app, 14.0f);
@@ -1050,12 +1050,12 @@ void renderAnnotationEditor(App& app) {
         app.brush);
 
     // Text area
-    D2D1_COLOR_F fieldBg = app.theme.isDark ? hexColor(0x161616, 1.0f)
+    D2D1_COLOR_F fieldBg = themeUiDark(app.theme) ? hexColor(0x161616, 1.0f)
                                             : hexColor(0xFFFFFF, 1.0f);
     app.brush->SetColor(fieldBg);
     app.renderTarget->FillRoundedRectangle(
         D2D1::RoundedRect(g.textArea, 4, 4), app.brush);
-    D2D1_COLOR_F fieldBorder = app.theme.text;
+    D2D1_COLOR_F fieldBorder = themeUiText(app.theme);
     fieldBorder.a = 0.2f;
     app.brush->SetColor(fieldBorder);
     app.renderTarget->DrawRoundedRectangle(
@@ -1072,7 +1072,7 @@ void renderAnnotationEditor(App& app) {
     if (layout) layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
     if (text.empty()) {
         const wchar_t* hint = tr(app, "annot.note_hint");
-        D2D1_COLOR_F hintColor = app.theme.text;
+        D2D1_COLOR_F hintColor = themeUiText(app.theme);
         hintColor.a = 0.35f;
         app.brush->SetColor(hintColor);
         app.renderTarget->DrawText(
@@ -1083,7 +1083,7 @@ void renderAnnotationEditor(App& app) {
     }
     float caretX = tx, caretY = ty, caretH = dpi(app, 16.0f);
     if (layout) {
-        app.brush->SetColor(app.theme.text);
+        app.brush->SetColor(themeUiText(app.theme));
         app.renderTarget->DrawTextLayout(D2D1::Point2F(tx, ty), layout,
                                          app.brush);
         DWRITE_HIT_TEST_METRICS m{};
@@ -1098,7 +1098,7 @@ void renderAnnotationEditor(App& app) {
         layout->Release();
     }
     if (app.cursorBlinkOn) {
-        app.brush->SetColor(app.theme.text);
+        app.brush->SetColor(themeUiText(app.theme));
         app.renderTarget->DrawLine(D2D1::Point2F(caretX, caretY),
                                    D2D1::Point2F(caretX, caretY + caretH),
                                    app.brush, 1.0f);
@@ -1106,7 +1106,7 @@ void renderAnnotationEditor(App& app) {
 
     // Buttons: vector glyphs so no icon font dependency
     auto buttonBg = [&](const D2D1_RECT_F& r, bool hovered) {
-        D2D1_COLOR_F hb = app.theme.text;
+        D2D1_COLOR_F hb = themeUiText(app.theme);
         hb.a = hovered ? 0.12f : 0.05f;
         app.brush->SetColor(hb);
         app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(r, 4, 4),
@@ -1116,7 +1116,7 @@ void renderAnnotationEditor(App& app) {
                                               (float)app.mouseY);
     // Confirm: check mark
     buttonBg(g.okBtn, hoveredBtn == 1);
-    D2D1_COLOR_F ok = app.theme.isDark ? hexColor(0x5FBF6E) : hexColor(0x2F8F44);
+    D2D1_COLOR_F ok = themeUiDark(app.theme) ? hexColor(0x5FBF6E) : hexColor(0x2F8F44);
     app.brush->SetColor(ok);
     {
         float cx = (g.okBtn.left + g.okBtn.right) / 2.0f;
@@ -1131,7 +1131,7 @@ void renderAnnotationEditor(App& app) {
     }
     // Cancel: X
     buttonBg(g.cancelBtn, hoveredBtn == 2);
-    app.brush->SetColor(app.theme.text);
+    app.brush->SetColor(themeUiText(app.theme));
     {
         float cx = (g.cancelBtn.left + g.cancelBtn.right) / 2.0f;
         float cy = (g.cancelBtn.top + g.cancelBtn.bottom) / 2.0f;
@@ -1144,7 +1144,7 @@ void renderAnnotationEditor(App& app) {
     // Delete: trash can (existing annotations only)
     if (g.trashBtn.right > g.trashBtn.left) {
         buttonBg(g.trashBtn, hoveredBtn == 3);
-        D2D1_COLOR_F trash = app.theme.isDark ? hexColor(0xE06A50)
+        D2D1_COLOR_F trash = themeUiDark(app.theme) ? hexColor(0xE06A50)
                                               : hexColor(0xB03A24);
         app.brush->SetColor(trash);
         float cx = (g.trashBtn.left + g.trashBtn.right) / 2.0f;

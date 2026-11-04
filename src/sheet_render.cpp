@@ -199,7 +199,8 @@ Palette palette(const App& app) {
     p.card.a = 1;
     p.cardBorder = alpha(th.text, th.isDark ? 0.16f : 0.17f);
     p.muted = alpha(th.text, 0.56f);
-    paint::Surface s = paint::surface(app);
+    // The canvas's bars draw the page's ink, so they keep its surface
+    paint::Surface s = paint::pageSurface(app);
     p.surface = s.fill;
     p.surfaceBorder = s.border;
     p.shadow = s.shadow;

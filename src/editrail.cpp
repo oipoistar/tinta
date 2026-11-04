@@ -173,11 +173,14 @@ void renderEditRail(App& app) {
     float slide = railW * (1.0f - app.editRailAnim);
     float H = (float)app.height;
 
+    // Part of the window's frame, as the strip is: a CSS theme's
+    // --ui-background, --ui-text and --ui-accent
     D2D1_COLOR_F railBg =
         th.isDark ? railMix(th.background, D2D1::ColorF(0, 0, 0, 1), 0.45f)
                   : railMix(th.background, D2D1::ColorF(0, 0, 0, 1), 0.06f);
-    D2D1_COLOR_F text = th.text;
-    D2D1_COLOR_F accent = th.accent;
+    if (th.uiBackground) railBg = *th.uiBackground;
+    D2D1_COLOR_F text = themeUiText(th);
+    D2D1_COLOR_F accent = themeUiAccent(th);
     float accentLum =
         0.299f * accent.r + 0.587f * accent.g + 0.114f * accent.b;
     D2D1_COLOR_F onAccent = accentLum > 0.45f
@@ -193,7 +196,7 @@ void renderEditRail(App& app) {
 
     app.brush->SetColor(railBg);
     app.renderTarget->FillRectangle(D2D1::RectF(0, 0, railW, H), app.brush);
-    app.brush->SetColor(railA(text, 0.07f));
+    app.brush->SetColor(themeUiBorder(th, railA(text, 0.07f)));
     app.renderTarget->FillRectangle(
         D2D1::RectF(railW - 1.0f, 0, railW, H), app.brush);
 
@@ -356,11 +359,11 @@ void renderEditRail(App& app) {
                                    : railMix(th.background,
                                              D2D1::ColorF(1, 1, 1, 1), 0.5f);
             fbg.a = 0.96f;
-            app.brush->SetColor(fbg);
+            app.brush->SetColor(themeUiPanel(th, fbg));
             app.renderTarget->FillRoundedRectangle(
                 D2D1::RoundedRect(fr, dpi(app, 7.0f), dpi(app, 7.0f)),
                 app.brush);
-            app.brush->SetColor(railA(text, 0.14f));
+            app.brush->SetColor(themeUiBorder(th, railA(text, 0.14f)));
             app.renderTarget->DrawRoundedRectangle(
                 D2D1::RoundedRect(fr, dpi(app, 7.0f), dpi(app, 7.0f)),
                 app.brush, 1.0f);
@@ -510,12 +513,13 @@ void renderEditCtxMenu(App& app) {
     if (!app.editCtxOpen || !app.renderTarget || !app.dwriteFactory) return;
 
     const D2DTheme& th = app.theme;
-    D2D1_COLOR_F text = th.text;
-    D2D1_COLOR_F accent = th.accent;
+    D2D1_COLOR_F text = themeUiText(th);
+    D2D1_COLOR_F accent = themeUiAccent(th);
     D2D1_COLOR_F menuBg =
         th.isDark ? railMix(th.background, D2D1::ColorF(0, 0, 0, 1), 0.25f)
                   : railMix(th.background, D2D1::ColorF(1, 1, 1, 1), 0.55f);
     menuBg.a = 0.97f;
+    menuBg = themeUiPanel(th, menuBg);
 
     float w = dpi(app, 232.0f);
     float rowH = dpi(app, 34.0f);
@@ -556,7 +560,7 @@ void renderEditCtxMenu(App& app) {
     app.brush->SetColor(menuBg);
     app.renderTarget->FillRoundedRectangle(
         D2D1::RoundedRect(panel, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush);
-    app.brush->SetColor(railA(text, 0.12f));
+    app.brush->SetColor(themeUiBorder(th, railA(text, 0.12f)));
     app.renderTarget->DrawRoundedRectangle(
         D2D1::RoundedRect(panel, dpi(app, 8.0f), dpi(app, 8.0f)), app.brush,
         1.0f);
@@ -654,7 +658,7 @@ void renderEditCtxMenu(App& app) {
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(sp, dpi(app, 8.0f), dpi(app, 8.0f)),
             app.brush);
-        app.brush->SetColor(railA(text, 0.12f));
+        app.brush->SetColor(themeUiBorder(th, railA(text, 0.12f)));
         app.renderTarget->DrawRoundedRectangle(
             D2D1::RoundedRect(sp, dpi(app, 8.0f), dpi(app, 8.0f)),
             app.brush, 1.0f);
@@ -724,7 +728,7 @@ void renderEditCtxMenu(App& app) {
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(sp, dpi(app, 8.0f), dpi(app, 8.0f)),
             app.brush);
-        app.brush->SetColor(railA(text, 0.12f));
+        app.brush->SetColor(themeUiBorder(th, railA(text, 0.12f)));
         app.renderTarget->DrawRoundedRectangle(
             D2D1::RoundedRect(sp, dpi(app, 8.0f), dpi(app, 8.0f)),
             app.brush, 1.0f);
@@ -788,7 +792,7 @@ void renderEditCtxMenu(App& app) {
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(sp, dpi(app, 8.0f), dpi(app, 8.0f)),
             app.brush);
-        app.brush->SetColor(railA(text, 0.12f));
+        app.brush->SetColor(themeUiBorder(th, railA(text, 0.12f)));
         app.renderTarget->DrawRoundedRectangle(
             D2D1::RoundedRect(sp, dpi(app, 8.0f), dpi(app, 8.0f)),
             app.brush, 1.0f);

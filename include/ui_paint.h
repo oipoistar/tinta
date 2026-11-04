@@ -33,10 +33,13 @@ ID2D1StrokeStyle* roundStyle(App& app);
 // A soft shadow under something raised: two widening, fading rounded rectangles
 void shadow(App& app, const D2D1_RECT_F& r, float radius, D2D1_COLOR_F color, float strength);
 
-// A raised surface on the theme: a menu, a popup, a bar
+// A raised surface on the theme: a menu, a popup, a bar. A CSS theme's
+// --ui-* colours apply; pageSurface keeps the page's, for bars whose ink is
+// the page's own (a sheet's canvas)
 struct Surface {
     D2D1_COLOR_F fill, border, text, muted, accent, shadow;
 };
 Surface surface(const App& app);
+Surface pageSurface(const App& app);
 
 }  // namespace paint

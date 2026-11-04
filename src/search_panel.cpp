@@ -194,7 +194,7 @@ void drawSnippet(App& app, const std::wstring& text, size_t start, size_t length
         UINT32 count = 0;
         if (SUCCEEDED(layout->HitTestTextRange(range.startPosition, range.length,
                                                0.0f, 0.0f, hits, 8, &count))) {
-            D2D1_COLOR_F wash = app.theme.accent;
+            D2D1_COLOR_F wash = themeUiAccent(app.theme);
             wash.a = 0.26f * alpha;
             app.brush->SetColor(wash);
             for (UINT32 i = 0; i < count; i++) {
@@ -210,7 +210,7 @@ void drawSnippet(App& app, const std::wstring& text, size_t start, size_t length
             }
         }
     }
-    D2D1_COLOR_F ink = app.theme.text;
+    D2D1_COLOR_F ink = themeUiText(app.theme);
     ink.a = 0.86f * alpha;
     app.brush->SetColor(ink);
     app.renderTarget->DrawTextLayout(D2D1::Point2F(box.left, ty), layout, app.brush,
@@ -244,12 +244,12 @@ float drawCount(App& app, int count, float right, float cy, float alpha) {
     float w = measureText(app, label, app.signalSmallFormat) + dpi(app, 11.0f);
     D2D1_RECT_F badge = D2D1::RectF(right - w, cy - dpi(app, 7.5f), right,
                                     cy + dpi(app, 7.5f));
-    D2D1_COLOR_F fill = app.theme.text;
+    D2D1_COLOR_F fill = themeUiText(app.theme);
     fill.a = 0.07f * alpha;
     app.brush->SetColor(fill);
     app.renderTarget->FillRoundedRectangle(
         D2D1::RoundedRect(badge, dpi(app, 7.0f), dpi(app, 7.0f)), app.brush);
-    D2D1_COLOR_F ink = app.theme.text;
+    D2D1_COLOR_F ink = themeUiText(app.theme);
     ink.a = 0.6f * alpha;
     app.brush->SetColor(ink);
     app.renderTarget->DrawText(label, (UINT32)wcslen(label), app.signalSmallFormat,
@@ -264,7 +264,7 @@ void drawCheckbox(App& app, float x, float cy, bool on, float alpha) {
     D2D1_RECT_F box = D2D1::RectF(x, cy - size * 0.5f, x + size, cy + size * 0.5f);
     D2D1_ROUNDED_RECT rounded = D2D1::RoundedRect(box, dpi(app, 3.0f), dpi(app, 3.0f));
     if (on) {
-        D2D1_COLOR_F fill = app.theme.accent;
+        D2D1_COLOR_F fill = themeUiAccent(app.theme);
         fill.a = alpha;
         app.brush->SetColor(fill);
         app.renderTarget->FillRoundedRectangle(rounded, app.brush);
@@ -277,7 +277,7 @@ void drawCheckbox(App& app, float x, float cy, bool on, float alpha) {
                                    D2D1::Point2F(x + 10.0f * s, cy - 2.4f * s),
                                    app.brush, 1.6f * s);
     } else {
-        D2D1_COLOR_F edge = app.theme.text;
+        D2D1_COLOR_F edge = themeUiText(app.theme);
         edge.a = 0.38f * alpha;
         app.brush->SetColor(edge);
         app.renderTarget->DrawRoundedRectangle(rounded, app.brush, 1.0f);
@@ -583,16 +583,17 @@ void renderSearchPanel(App& app) {
     if (!bold || !normal) return;
 
     float pad = dpi(app, 12.0f);
-    D2D1_COLOR_F text = app.theme.text;
+    D2D1_COLOR_F text = themeUiText(app.theme);
     D2D1_COLOR_F muted = text;
     muted.a = 0.55f * anim;
     D2D1_COLOR_F divider = text;
     divider.a = 0.1f;
+    divider = themeUiBorder(app.theme, divider);
     float mx = (float)app.mouseX, my = (float)app.mouseY;
 
     // Header: title and the close cross
     float headerY = card.top + dpi(app, 9.0f);
-    D2D1_COLOR_F heading = app.theme.heading;
+    D2D1_COLOR_F heading = themeUiHeading(app.theme);
     heading.a = anim;
     app.brush->SetColor(heading);
     const wchar_t* title = tr(app, "search.results.title");
@@ -674,7 +675,7 @@ void renderSearchPanel(App& app) {
                                   dpi(app, 6.0f), dpi(app, 6.0f)),
                 app.brush);
         } else if (current) {
-            D2D1_COLOR_F wash = app.theme.accent;
+            D2D1_COLOR_F wash = themeUiAccent(app.theme);
             wash.a = 0.13f * anim;
             app.brush->SetColor(wash);
             app.renderTarget->FillRoundedRectangle(
@@ -683,7 +684,7 @@ void renderSearchPanel(App& app) {
                 app.brush);
         }
         if (current) {
-            D2D1_COLOR_F bar = app.theme.accent;
+            D2D1_COLOR_F bar = themeUiAccent(app.theme);
             bar.a = anim;
             app.brush->SetColor(bar);
             app.renderTarget->FillRoundedRectangle(
@@ -705,7 +706,7 @@ void renderSearchPanel(App& app) {
             case SPR_SECTION: {
                 if (row.index < 0 || row.index >= (int)app.headings.size()) break;
                 const App::HeadingInfo& h = app.headings[row.index];
-                D2D1_COLOR_F ink = app.theme.heading;
+                D2D1_COLOR_F ink = themeUiHeading(app.theme);
                 ink.a = 0.78f * anim;
                 float indent = dpi(app, 4.0f) * (float)std::clamp(h.level - 1, 0, 3);
                 drawLabel(app, h.text, normal,

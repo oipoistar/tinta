@@ -27,22 +27,33 @@ double nowSeconds() {
     return duration<double>(steady_clock::now().time_since_epoch()).count();
 }
 
-// Severity hue on the theme's luminance row (design 13c: fixed pairs)
+// Severity hue on the theme's luminance row (design 13c: fixed pairs), for
+// the chip's own surface when a CSS theme gives one (--ui-panel)
 D2D1_COLOR_F signalHue(const App& app, int sev) {
+    const bool dark = themeUiDark(app.theme);
     switch (sev) {
         case SIG_SUCCESS:
-            return app.theme.isDark ? hexColor(0x7ED9A0) : hexColor(0x4E7A3A);
+            return dark ? hexColor(0x7ED9A0) : hexColor(0x4E7A3A);
         case SIG_WARN:
-            return app.theme.isDark ? hexColor(0xF0C27A) : hexColor(0xA66A12);
+            return dark ? hexColor(0xF0C27A) : hexColor(0xA66A12);
         case SIG_ERROR:
-            return app.theme.isDark ? hexColor(0xF2716A) : hexColor(0xB0433A);
+            return dark ? hexColor(0xF2716A) : hexColor(0xB0433A);
         default:
-            return app.theme.accent;
+            return themeUiAccent(app.theme);
     }
 }
 
-// Chip surfaces lift off the background like the settings cards
+// Chip surfaces lift off the background like the settings cards; a CSS
+// theme's --ui-panel, lifted as little as the dark chips are
 D2D1_COLOR_F chipSurface(const App& app, float extra = 0.0f) {
+    if (app.theme.uiPanel) {
+        D2D1_COLOR_F c = themeUiPanel(app.theme, D2D1::ColorF(0, 0, 0, 0.97f));
+        const float t = extra * 0.16f;
+        c.r += (1.0f - c.r) * t;
+        c.g += (1.0f - c.g) * t;
+        c.b += (1.0f - c.b) * t;
+        return c;
+    }
     float t = (app.theme.isDark ? 0.07f : 0.6f) + extra;
     D2D1_COLOR_F bg = app.theme.background;
     float target = app.theme.isDark ? 1.0f : 1.0f;
@@ -54,7 +65,7 @@ D2D1_COLOR_F chipSurface(const App& app, float extra = 0.0f) {
 }
 
 D2D1_COLOR_F inkAt(const App& app, float alpha) {
-    D2D1_COLOR_F c = app.theme.text;
+    D2D1_COLOR_F c = themeUiText(app.theme);
     c.a = alpha;
     return c;
 }
@@ -235,7 +246,7 @@ void chipShadow(App& app, const D2D1_RECT_F& r, float radius, float alpha) {
         float spread = dpi(app, (float)ring * 2.2f);
         D2D1_COLOR_F shadow = D2D1::ColorF(
             0.0f, 0.0f, 0.0f,
-            (app.theme.isDark ? 0.16f : 0.07f) * alpha / (float)(ring * ring));
+            (themeUiDark(app.theme) ? 0.16f : 0.07f) * alpha / (float)(ring * ring));
         app.brush->SetColor(shadow);
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(D2D1::RectF(r.left - spread, r.top - spread * 0.3f,
@@ -448,13 +459,13 @@ void renderSignalChips(App& app) {
                                             bell.top - dpi(app, 4.0f),
                                             bell.right + dpi(app, 3.0f),
                                             bell.top - dpi(app, 4.0f) + bw);
-            app.brush->SetColor(app.theme.accent);
+            app.brush->SetColor(themeUiAccent(app.theme));
             app.renderTarget->FillRoundedRectangle(
                 D2D1::RoundedRect(badge, bw * 0.5f, bw * 0.5f), app.brush);
             wchar_t n[4];
             swprintf_s(n, app.signalUnseen > 9 ? L"9+" : L"%d",
                        app.signalUnseen);
-            D2D1_COLOR_F bink = app.theme.background;
+            D2D1_COLOR_F bink = themeUiPanel(app.theme, app.theme.background);
             app.brush->SetColor(bink);
             IDWriteTextLayout* bl = nullptr;
             app.dwriteFactory->CreateTextLayout(n, (UINT32)wcslen(n),
@@ -512,7 +523,7 @@ void renderSignalChips(App& app) {
             app.brush->SetColor(srf);
             app.renderTarget->FillRoundedRectangle(
                 D2D1::RoundedRect(pill, ph * 0.5f, ph * 0.5f), app.brush);
-            app.brush->SetColor(inkAt(app, 0.14f * alpha));
+            app.brush->SetColor(themeUiBorder(app.theme, inkAt(app, 0.14f * alpha), alpha));
             app.renderTarget->DrawRoundedRectangle(
                 D2D1::RoundedRect(pill, ph * 0.5f, ph * 0.5f), app.brush, 1.0f);
             drawSignalIcon(app, c.icon, pill.left + dpi(app, 12.0f),
@@ -550,7 +561,7 @@ void renderSignalChips(App& app) {
         app.brush->SetColor(srf);
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(r, dpi(app, 10.0f), dpi(app, 10.0f)), app.brush);
-        D2D1_COLOR_F border = c.drains ? inkAt(app, 0.13f * alpha)
+        D2D1_COLOR_F border = c.drains ? themeUiBorder(app.theme, inkAt(app, 0.13f * alpha), alpha)
                                        : signalHue(app, c.severity);
         if (!c.drains) border.a = 0.4f * alpha;
         app.brush->SetColor(border);
@@ -672,7 +683,7 @@ void renderSignalChips(App& app) {
         app.brush->SetColor(chipSurface(app));
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(t, dpi(app, 12.0f), dpi(app, 12.0f)), app.brush);
-        app.brush->SetColor(inkAt(app, 0.14f));
+        app.brush->SetColor(themeUiBorder(app.theme, inkAt(app, 0.14f)));
         app.renderTarget->DrawRoundedRectangle(
             D2D1::RoundedRect(t, dpi(app, 12.0f), dpi(app, 12.0f)), app.brush,
             1.0f);
@@ -690,7 +701,7 @@ void renderSignalChips(App& app) {
         if (app.signalSmallFormat) {
             const wchar_t* clear = tr(app, "signal.clear_all");
             float cw = measureText(app, clear, app.signalSmallFormat);
-            D2D1_COLOR_F ac = app.theme.accent;
+            D2D1_COLOR_F ac = themeUiAccent(app.theme);
             app.brush->SetColor(ac);
             app.renderTarget->DrawText(
                 clear, (UINT32)wcslen(clear), app.signalSmallFormat,
@@ -736,13 +747,13 @@ void renderSignalChips(App& app) {
                     ry + (rowH - dpi(app, 21.0f)) * 0.5f,
                     t.right - dpi(app, 12.0f),
                     ry + (rowH + dpi(app, 21.0f)) * 0.5f);
-                D2D1_COLOR_F ac = app.theme.accent;
+                D2D1_COLOR_F ac = themeUiAccent(app.theme);
                 ac.a = 0.55f;
                 app.brush->SetColor(ac);
                 app.renderTarget->DrawRoundedRectangle(
                     D2D1::RoundedRect(ab, dpi(app, 6.0f), dpi(app, 6.0f)),
                     app.brush, 1.0f);
-                app.brush->SetColor(app.theme.accent);
+                app.brush->SetColor(themeUiAccent(app.theme));
                 app.renderTarget->DrawText(
                     actLbl, (UINT32)wcslen(actLbl), app.signalSmallFormat,
                     D2D1::RectF(ab.left + dpi(app, 9.0f), ab.top + dpi(app, 4.0f),

@@ -35,8 +35,10 @@ void applyWindowChrome(App& app) {
                    (BYTE)(c.b * 255.0f + 0.5f));
     };
 
-    // Windows 10 fallback: at least pick the right caption variant
-    BOOL dark = app.theme.isDark ? TRUE : FALSE;
+    // Windows 10 fallback: at least pick the right caption variant, for
+    // the strip's own colour when a CSS theme gives one (--ui-background)
+    const bool stripDark = app.theme.uiBackground ? themeColorIsDark(*app.theme.uiBackground) : app.theme.isDark;
+    BOOL dark = stripDark ? TRUE : FALSE;
     DwmSetWindowAttribute(app.hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
                           &dark, sizeof(dark));
 
@@ -48,7 +50,7 @@ void applyWindowChrome(App& app) {
                           &caption, sizeof(caption));
     DwmSetWindowAttribute(app.hwnd, DWMWA_BORDER_COLOR,
                           &caption, sizeof(caption));
-    COLORREF text = toColorref(app.theme.text);
+    COLORREF text = toColorref(themeUiText(app.theme));
     DwmSetWindowAttribute(app.hwnd, DWMWA_TEXT_COLOR,
                           &text, sizeof(text));
 }
