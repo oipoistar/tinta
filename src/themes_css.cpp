@@ -6,6 +6,8 @@
 
 #include "themes_css.h"
 
+#include "css_internal.h"
+
 #include <dwrite.h>
 
 #include <cstdio>
@@ -160,6 +162,134 @@ bool sameColor(const D2D1_COLOR_F& x, const D2D1_COLOR_F& y) {
 
 }  // namespace
 
+namespace {
+
+// --- The window and diagrams (phase 3): --ui-* and --mermaid-* ----------------
+
+struct UiVariable {
+    const char* name;
+    std::optional<D2D1_COLOR_F> D2DTheme::*field;
+};
+const UiVariable kUiVariables[] = {
+    {"--ui-background", &D2DTheme::uiBackground}, {"--ui-text", &D2DTheme::uiText},
+    {"--ui-accent", &D2DTheme::uiAccent},         {"--ui-panel", &D2DTheme::uiPanel},
+    {"--ui-border", &D2DTheme::uiBorder},
+};
+
+// Mermaid's theme variables in kebab case: each part of a diagram Tinta
+// draws, with the variables that colour it in Mermaid, the narrower first
+struct MermaidVariable {
+    std::optional<D2D1_COLOR_F> DiagramColors::*field;
+    const char* names[2];
+};
+const MermaidVariable kMermaidVariables[] = {
+    {&DiagramColors::nodeFill, {"--mermaid-main-bkg", "--mermaid-primary-color"}},
+    {&DiagramColors::nodeBorder, {"--mermaid-node-border", "--mermaid-primary-border-color"}},
+    {&DiagramColors::nodeText, {"--mermaid-node-text-color", "--mermaid-primary-text-color"}},
+    {&DiagramColors::text, {"--mermaid-text-color", "--mermaid-primary-text-color"}},
+    {&DiagramColors::line, {"--mermaid-line-color", nullptr}},
+    {&DiagramColors::link, {"--mermaid-default-link-color", nullptr}},
+    {&DiagramColors::secondary, {"--mermaid-secondary-color", nullptr}},
+    {&DiagramColors::edgeLabel, {"--mermaid-edge-label-background", "--mermaid-secondary-color"}},
+    {&DiagramColors::clusterFill, {"--mermaid-cluster-bkg", "--mermaid-tertiary-color"}},
+    {&DiagramColors::clusterBorder, {"--mermaid-cluster-border", "--mermaid-tertiary-border-color"}},
+    {&DiagramColors::clusterText, {"--mermaid-title-color", "--mermaid-tertiary-text-color"}},
+    {&DiagramColors::background, {"--mermaid-background", nullptr}},
+};
+constexpr int kPieVariables = 12;  // --mermaid-pie1 .. --mermaid-pie12
+
+// The chrome's colours as the page sets them (on :root, or body), and the
+// diagrams' as a diagram inherits them
+void readVariables(const css::ComputedStyle& page, const css::ComputedStyle& diagram, D2DTheme& t) {
+    for (const UiVariable& v : kUiVariables) {
+        if (auto c = page.customColor(v.name)) t.*v.field = d2d(*c);
+    }
+    for (const MermaidVariable& v : kMermaidVariables) {
+        for (const char* name : v.names) {
+            if (!name) continue;
+            if (auto c = diagram.customColor(name)) {
+                t.mermaid.*v.field = d2d(*c);
+                break;
+            }
+        }
+    }
+    for (int i = 0; i < kPieVariables; i++) {
+        if (auto c = diagram.customColor("--mermaid-pie" + std::to_string(i + 1))) t.mermaid.series[i] = d2d(*c);
+    }
+}
+
+std::vector<std::string> drawnVariables() {
+    std::vector<std::string> names;
+    for (const UiVariable& v : kUiVariables) names.push_back(v.name);
+    for (const MermaidVariable& v : kMermaidVariables) {
+        for (const char* name : v.names) {
+            if (name) names.push_back(name);
+        }
+    }
+    for (int i = 0; i < kPieVariables; i++) names.push_back("--mermaid-pie" + std::to_string(i + 1));
+    return names;
+}
+
+size_t editDistance(std::string_view a, std::string_view b) {
+    std::vector<size_t> row(b.size() + 1);
+    for (size_t j = 0; j <= b.size(); ++j) row[j] = j;
+    for (size_t i = 1; i <= a.size(); ++i) {
+        size_t diagonal = row[0];
+        row[0] = i;
+        for (size_t j = 1; j <= b.size(); ++j) {
+            size_t above = row[j];
+            row[j] = std::min({row[j] + 1, row[j - 1] + 1, diagonal + (a[i - 1] == b[j - 1] ? 0 : 1)});
+            diagonal = above;
+        }
+    }
+    return row[b.size()];
+}
+
+// Every --ui-* and --mermaid-* the sheet declares that Tinta does not read:
+// a misspelt one with the name it is nearest, and values that are no colour
+void checkVariables(const css::Sheet& sheet, bool dark, std::vector<css::Diagnostic>& out) {
+    const std::vector<std::string> drawn = drawnVariables();
+    for (const css::Rule& rule : sheet.rules) {
+        for (const css::Declaration& d : rule.declarations) {
+            const bool ui = d.name.rfind("--ui-", 0) == 0;
+            if (d.prop != css::PropCustom || (!ui && d.name.rfind("--mermaid-", 0) != 0)) continue;
+            const std::string& file = rule.file ? *rule.file : sheet.file;
+            auto report = [&](css::Diagnostic::Level level, const std::string& message) {
+                out.push_back({level, file, d.line, d.column, message});
+            };
+            if (std::find(drawn.begin(), drawn.end(), d.name) != drawn.end()) {
+                std::string value = css::toLower(d.text);
+                const bool keyword = value == "currentcolor" || value == "inherit" || value == "initial" ||
+                                     value == "unset" || value == "revert";
+                if (value.find("var(") == std::string::npos && !keyword && !css::parseColor(d.text, dark)) {
+                    report(css::Diagnostic::Warning, "`" + d.name + "` is not a colour: `" + d.text + "`");
+                }
+                continue;
+            }
+            std::string nearest;
+            size_t best = 3;
+            for (const std::string& name : drawn) {
+                const size_t distance = editDistance(d.name, name);
+                if (distance < best) {
+                    best = distance;
+                    nearest = name;
+                }
+            }
+            if (!nearest.empty()) {
+                report(css::Diagnostic::Warning, "unknown variable `" + d.name + "`: did you mean `" + nearest + "`?");
+            } else if (ui) {
+                report(css::Diagnostic::Warning, "unknown variable `" + d.name +
+                                                     "`: the window takes --ui-background, --ui-text, "
+                                                     "--ui-accent, --ui-panel and --ui-border");
+            } else {
+                report(css::Diagnostic::Note, "`" + d.name + "` is not drawn by Tinta");
+            }
+        }
+    }
+}
+
+}  // namespace
+
 CssTheme compileCssTheme(const std::string& text, const std::string& file, bool dark,
                          const css::ImportSource& imports, CustomTheme& out) {
     using css::Prop;
@@ -268,6 +398,12 @@ CssTheme compileCssTheme(const std::string& text, const std::string& file, bool 
     if (hr.has(Prop::BorderTopColor)) t.rule = d2d(hr.border[0].color);
     else if (hr.has(Prop::Color)) t.rule = d2d(hr.color);
     else if (hr.has(Prop::BackgroundColor)) t.rule = d2d(hr.backgroundColor);
+
+    // The window's colours and the diagrams' (phase 3)
+    css::Element diagram = tag("div");
+    diagram.classes = {"diagram"};
+    readVariables(bs, engine.style(engine.child(body, diagram)), t);
+    if (result.sheet) checkVariables(*result.sheet, dark, result.diagnostics);
 
     for (const auto& d : engine.diagnostics()) result.diagnostics.push_back(d);
     return result;

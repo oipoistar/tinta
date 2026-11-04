@@ -97,6 +97,26 @@ struct StartupMetrics {
 // Syntax highlighting token types
 enum class SyntaxTokenType { Plain, Keyword, String, Comment, Number, Function, TypeName, Operator, ControlFlow };
 
+// Diagram colours a CSS theme gives with Mermaid's theme variables, written
+// --mermaid-primary-color and so on (docs/css-themes.md). Each is the first
+// of its variables the sheet sets; a missing one keeps what Tinta derives
+// from the page for that part of a diagram
+struct DiagramColors {
+    std::optional<D2D1_COLOR_F> nodeFill;       // mainBkg, primaryColor
+    std::optional<D2D1_COLOR_F> nodeBorder;     // nodeBorder, primaryBorderColor
+    std::optional<D2D1_COLOR_F> nodeText;       // nodeTextColor, primaryTextColor: flowchart labels
+    std::optional<D2D1_COLOR_F> text;           // textColor, primaryTextColor
+    std::optional<D2D1_COLOR_F> line;           // lineColor
+    std::optional<D2D1_COLOR_F> link;           // defaultLinkColor: flowchart edges, else line
+    std::optional<D2D1_COLOR_F> secondary;      // secondaryColor: notes, activations, bands
+    std::optional<D2D1_COLOR_F> edgeLabel;      // edgeLabelBackground, secondaryColor
+    std::optional<D2D1_COLOR_F> clusterFill;    // clusterBkg, tertiaryColor
+    std::optional<D2D1_COLOR_F> clusterBorder;  // clusterBorder, tertiaryBorderColor
+    std::optional<D2D1_COLOR_F> clusterText;    // titleColor, tertiaryTextColor
+    std::optional<D2D1_COLOR_F> background;     // background
+    std::optional<D2D1_COLOR_F> series[12];     // pie1..pie12: every chart's series
+};
+
 // Theme colors
 struct D2DTheme {
     const wchar_t* name;
@@ -146,6 +166,12 @@ struct D2DTheme {
     bool headingItalic[6] = {};
     // The file a CSS theme came from, for following its changes; else empty
     const wchar_t* sourcePath = nullptr;
+    // The window around the page as a CSS theme sets it with --ui-* on
+    // :root (docs/specs/theming.md, phase 3): the tab strip and caption,
+    // the chrome's text and accent, panels, menus, popups and cards, and
+    // their edges. A missing one keeps what the page gives that part
+    std::optional<D2D1_COLOR_F> uiBackground, uiText, uiAccent, uiPanel, uiBorder;
+    DiagramColors mermaid;
 };
 
 // What a theme's type sizes are, as text: text formats are rebuilt when it
@@ -200,6 +226,39 @@ inline D2D1_COLOR_F themeSelectionColor(const D2DTheme& theme, D2D1_COLOR_F own)
     D2D1_COLOR_F color = *theme.selection;
     color.a = own.a;
     return color;
+}
+
+// The chrome's colours (--ui-*): the theme's where it sets them, else the
+// page's, so a theme without them draws its window as before
+inline D2D1_COLOR_F themeUiText(const D2DTheme& theme) { return theme.uiText.value_or(theme.text); }
+inline D2D1_COLOR_F themeUiAccent(const D2DTheme& theme) { return theme.uiAccent.value_or(theme.accent); }
+// Strong chrome text (a panel's title, the row in use): --ui-text, else
+// the page's heading colour
+inline D2D1_COLOR_F themeUiHeading(const D2DTheme& theme) { return theme.uiText.value_or(theme.heading); }
+// A panel, menu, popup or card's fill: --ui-panel at the surface's own
+// opacity (its fade and translucency), else the surface's own colour
+inline D2D1_COLOR_F themeUiPanel(const D2DTheme& theme, D2D1_COLOR_F own) {
+    if (!theme.uiPanel) return own;
+    D2D1_COLOR_F color = *theme.uiPanel;
+    color.a *= own.a;
+    return color;
+}
+// Their edges and dividers: --ui-border as it is, faded in with the
+// surface, else the surface's own
+inline D2D1_COLOR_F themeUiBorder(const D2DTheme& theme, D2D1_COLOR_F own, float fade = 1.0f) {
+    if (!theme.uiBorder) return own;
+    D2D1_COLOR_F color = *theme.uiBorder;
+    color.a *= fade;
+    return color;
+}
+// Whether a colour reads as dark, as the CSS compiler decides a page is
+inline bool themeColorIsDark(const D2D1_COLOR_F& c) {
+    return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b < 0.5f;
+}
+// Whether the chrome's panels are dark: --ui-panel's when the theme sets
+// it, else the page's
+inline bool themeUiDark(const D2DTheme& theme) {
+    return theme.uiPanel ? themeColorIsDark(*theme.uiPanel) : theme.isDark;
 }
 
 // Helper to create color from hex
