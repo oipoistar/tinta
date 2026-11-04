@@ -80,6 +80,16 @@ Tinta's own look stays.
   left and right down) and the rows' backgrounds.
 - **Rules:** `hr`'s top border, or its background as a bar when it has
   none.
+- **Generated content:** `::before` and `::after` with `content` (strings,
+  `counter()` and `counters()` in any list style), with `counter-reset`
+  and `counter-increment`, on paragraphs, headings, list items, captions
+  and inline elements. `h2::before { counter-increment: h2; content:
+  counter(h2) ". " }` numbers the headings, in Contents too, and
+  `a[href^="http"]::after { content: " ↗" }` marks the links that leave
+  the page.
+- **A document's own classes:** front matter `cssclasses: [wide, serif]`
+  (Obsidian's key) puts them on `body`, so a `body.wide` rule reaches that
+  document alone.
 - **The language:** comments, `!important`, every selector CSS has for a
   document (descendants, children, siblings, `:is()`, `:not()`,
   `:nth-child()`...), `var()`, `calc()`, `min()`, `max()`, `clamp()`, hex and

@@ -199,6 +199,15 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                 continue;
 
             case ElementType::Text:
+                // A block's ::before or ::after, in that pseudo-element's style
+                if (inherited.css && (elem->language == "css-before" || elem->language == "css-after")) {
+                    const page::Style generated = page::pseudoStyle(
+                        app, inherited.css, elem->language == "css-before" ? css::Pseudo::Before : css::Pseudo::After);
+                    if (generated) applyCss(app, *elem, generated, inherited, st);
+                }
+                out.push_back({elem, st});
+                continue;
+
             case ElementType::Ruby:
             case ElementType::SoftBreak:
             case ElementType::HardBreak:
@@ -303,6 +312,20 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
             if ((elem->type == ElementType::Citation || elem->type == ElementType::CrossReference) && elem->level) {
                 st.color = app.theme.isDark ? hexColor(0xF0C27A) : hexColor(0xA66A12);
             }
+            // The span's own ::before and ::after (a::after { content: " \2197" })
+            auto pseudoRun = [&](css::Pseudo which) {
+                const std::wstring text = page::generated(app, css, which, false);
+                if (text.empty()) return;
+                auto generated = std::make_shared<Element>(ElementType::Text);
+                generated->text = refToUtf8(text);
+                InlineStyle look = st;
+                if (const page::Style own = page::pseudoStyle(app, css, which)) applyCss(app, *generated, own, st, look);
+                out.push_back({generated, look});
+            };
+            pseudoRun(css::Pseudo::Before);
+            flattenInline(app, elem->children, st, lineHeight, out);
+            pseudoRun(css::Pseudo::After);
+            continue;
         }
         flattenInline(app, elem->children, st, lineHeight, out);
     }

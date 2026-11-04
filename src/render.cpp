@@ -549,48 +549,29 @@ struct BlockBox {
     }
 };
 
-// The marker text a list-style-type gives the nth item ("3", "c", "iii")
-static std::wstring counterText(int n, css::ListStyle style) {
-    switch (style) {
-        case css::ListStyle::DecimalLeadingZero:
-            return (n >= 0 && n < 10 ? L"0" : L"") + std::to_wstring(n);
-        case css::ListStyle::LowerAlpha:
-        case css::ListStyle::UpperAlpha:
-        case css::ListStyle::LowerGreek: {
-            if (n < 1) return std::to_wstring(n);
-            const bool greek = style == css::ListStyle::LowerGreek;
-            const int base = greek ? 24 : 26;
-            const wchar_t first = greek ? 0x03B1 : style == css::ListStyle::LowerAlpha ? L'a' : L'A';
-            std::wstring out;
-            for (int k = n; k > 0; k = (k - 1) / base) {
-                wchar_t c = (wchar_t)(first + (k - 1) % base);
-                if (greek && c >= 0x03C2) c++;  // no final sigma
-                out.insert(out.begin(), c);
-            }
-            return out;
-        }
-        case css::ListStyle::LowerRoman:
-        case css::ListStyle::UpperRoman: {
-            if (n < 1 || n > 3999) return std::to_wstring(n);
-            static const struct { int value; const wchar_t* text; } numerals[] = {
-                {1000, L"m"}, {900, L"cm"}, {500, L"d"}, {400, L"cd"}, {100, L"c"}, {90, L"xc"},
-                {50, L"l"}, {40, L"xl"}, {10, L"x"}, {9, L"ix"}, {5, L"v"}, {4, L"iv"}, {1, L"i"}};
-            std::wstring out;
-            for (const auto& numeral : numerals) {
-                for (; n >= numeral.value; n -= numeral.value) out += numeral.text;
-            }
-            if (style == css::ListStyle::UpperRoman) CharUpperBuffW(out.data(), (DWORD)out.size());
-            return out;
-        }
-        case css::ListStyle::CjkDecimal: {
-            static const wchar_t digits[] = {0x3007, 0x4E00, 0x4E8C, 0x4E09, 0x56DB, 0x4E94, 0x516D, 0x4E03, 0x516B, 0x4E5D};
-            std::wstring out;
-            for (wchar_t c : std::to_wstring(n)) out += c >= L'0' && c <= L'9' ? digits[c - L'0'] : c;
-            return out;
-        }
-        default:
-            return std::to_wstring(n);
-    }
+// A CSS theme's ::before and ::after content around a block's inline
+// children (page_style.h): runs of their own, which flattenInline styles
+// as the pseudo-elements; their counters step as the block is laid out
+static std::vector<ElementPtr> withGenerated(App& app, const page::Style& css, const std::vector<ElementPtr>& children,
+                                             std::wstring* before = nullptr) {
+    if (!css) return children;
+    const std::wstring first = page::generated(app, css, css::Pseudo::Before, true);
+    const std::wstring last = page::generated(app, css, css::Pseudo::After, true);
+    if (before) *before = first;
+    if (first.empty() && last.empty()) return children;
+    auto text = [](const std::wstring& t, const char* which) {
+        auto e = std::make_shared<Element>(ElementType::Text);
+        const int n = WideCharToMultiByte(CP_UTF8, 0, t.c_str(), (int)t.size(), nullptr, 0, nullptr, nullptr);
+        e->text.assign((size_t)std::max(0, n), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, t.c_str(), (int)t.size(), e->text.data(), n, nullptr, nullptr);
+        e->language = which;
+        return e;
+    };
+    std::vector<ElementPtr> out;
+    if (!first.empty()) out.push_back(text(first, "css-before"));
+    out.insert(out.end(), children.begin(), children.end());
+    if (!last.empty()) out.push_back(text(last, "css-after"));
+    return out;
 }
 
 static void layoutElement(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth);
@@ -1576,7 +1557,7 @@ static void layoutParagraph(App& app, const ElementPtr& elem, float& y, float in
     BlockBox box(app, css, y, indent, maxWidth);
     const LayoutSnapshot start = takeSnapshot(app);
     const float textIndent = css.has(css::Prop::TextIndent) ? page::px(app, css->textIndent) : 0.0f;
-    layoutInlineContent(app, elem->children, indent, y, maxWidth, format, color, {},
+    layoutInlineContent(app, withGenerated(app, css, elem->children), indent, y, maxWidth, format, color, {},
                         page::lineHeight(app, css, format, 0.0f), textIndent != 0.0f ? indent + textIndent : -1.0f);
     alignLines(app, start, indent, maxWidth, css);
     box.close(y, color);
@@ -1615,6 +1596,8 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
 
     y += page::before(app, elem->level == 1 ? 16.0f : 20.0f);
     BlockBox box(app, css, y, indent, maxWidth);
+    std::wstring number;  // a CSS theme's ::before, its counter() a heading number
+    const std::vector<ElementPtr> children = withGenerated(app, css, elem->children, &number);
 
     // All Markdown heading levels participate in Contents and anchor navigation (#210).
     // A section number (Scholar) shows in Contents but stays out of the slug,
@@ -1640,11 +1623,11 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
             id = (n == 0) ? baseId : (baseId + "-" + std::to_string(n));
             n++;
         }
-        app.headings.push_back({headingText, elem->level, y, id});
+        app.headings.push_back({number + headingText, elem->level, y, id});
     }
 
     const LayoutSnapshot start = takeSnapshot(app);
-    layoutInlineContent(app, elem->children, indent, y, maxWidth, format, color, {},
+    layoutInlineContent(app, children, indent, y, maxWidth, format, color, {},
                         page::lineHeight(app, css, format, 0.0f));
     alignLines(app, start, indent, maxWidth, css);
     box.close(y, color);
@@ -3351,7 +3334,7 @@ static void layoutList(App& app, const ElementPtr& elem, float& y, float indent,
             for (const auto& part : markerCss->content) {
                 if (part.kind == css::ContentPart::Text) themedMarker += toWide(part.text);
                 else if (part.kind == css::ContentPart::Counter || part.kind == css::ContentPart::Counters)
-                    themedMarker += counterText(itemNum, part.style);
+                    themedMarker += page::counterText(itemNum, part.style);
             }
         } else if (css.has(Prop::ListStyleType)) {
             switch (css->listStyle) {
@@ -3365,7 +3348,7 @@ static void layoutList(App& app, const ElementPtr& elem, float& y, float indent,
                     break;
                 default:
                     themedText = true;
-                    themedMarker = counterText(itemNum, css->listStyle) + L".";
+                    themedMarker = page::counterText(itemNum, css->listStyle) + L".";
                     break;
             }
         }
@@ -3448,8 +3431,10 @@ static void layoutList(App& app, const ElementPtr& elem, float& y, float indent,
 
         // MD4C omits paragraph wrappers in tight lists.
         // Hence list items can mix direct inline children with block children.
+        // A CSS theme's li::before and li::after go around the item's text
         std::vector<ElementPtr> inlineElements;
-        for (const auto& itemChild : child->children) {
+        const std::vector<ElementPtr> itemChildren = withGenerated(app, css, child->children);
+        for (const auto& itemChild : itemChildren) {
             if (isInlineElement(itemChild->type)) {
                 inlineElements.push_back(itemChild);
             } else {
@@ -4423,7 +4408,7 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
             y += page::before(app, 0);
             BlockBox box(app, css, y, indent, maxWidth);
             const LayoutSnapshot start = takeSnapshot(app);
-            layoutInlineContent(app, elem->children, indent, y, maxWidth, format, muted, {},
+            layoutInlineContent(app, withGenerated(app, css, elem->children), indent, y, maxWidth, format, muted, {},
                                 page::lineHeight(app, css, format, 0.0f));
             alignLines(app, start, indent, maxWidth, css);
             box.close(y, muted);

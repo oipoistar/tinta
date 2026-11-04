@@ -104,6 +104,11 @@ struct State {
     std::unordered_map<IDWriteTextFormat*, FontKey> made, known;
     std::map<Features, IDWriteTypography*> typographies;
     std::map<std::vector<std::string>, std::wstring> faces;  // a family list, the face it draws with
+    // CSS counters as the page's blocks set them, in layout order: one
+    // value a name, which numbering headings and sections needs
+    std::map<std::string, int> counters;
+    // Front matter cssclasses, the body's classes
+    std::vector<std::string> bodyClasses;
 
     ~State() { release(); }
     void release() {
@@ -140,6 +145,11 @@ struct State {
         if (parent) s.set |= parent->set & kInherited & ~s.computed->declared;
         if (!colors) s.set &= ~kColors;
         return s;
+    }
+
+    void count(const css::ComputedStyle& style) {
+        for (const auto& reset : style.counterReset) counters[reset.first] = reset.second;
+        for (const auto& step : style.counterIncrement) counters[step.first] += step.second;
     }
 };
 
@@ -424,10 +434,32 @@ void begin(App& app, float width) {
     s.colors = !app.printLayout || css::mentionsPrint(*sheet);
     s.gap = 0;
     s.depth = 0;
+    s.counters.clear();
+    // Front matter cssclasses: [wide, serif] (Obsidian's key) class the body
+    s.bodyClasses.clear();
+    if (app.root && !app.root->children.empty() && app.root->children[0]->type == ElementType::Properties) {
+        for (const auto& property : app.root->children[0]->properties) {
+            if (property.key != "cssclasses" && property.key != "cssclass") continue;
+            std::vector<std::string> names = property.items;
+            if (names.empty()) {
+                std::string word;
+                for (char c : property.text + " ") {
+                    if (c == ' ' || c == ',') {
+                        if (!word.empty()) names.push_back(word);
+                        word.clear();
+                    } else {
+                        word += c;
+                    }
+                }
+            }
+            for (const auto& name : names) s.bodyClasses.push_back(name);
+        }
+    }
     Frame& root = s.push(nullptr);
     root.style = s.styleOf(s.engine.root(), nullptr);
     css::Element bodyElement;
     bodyElement.tag = "body";
+    for (const auto& name : s.bodyClasses) bodyElement.classes.push_back(name);
     bodyElement.index = bodyElement.count = bodyElement.typeIndex = bodyElement.typeCount = 1;
     const Style rootStyle = root.style;
     Frame& page = s.push(app.root.get());
@@ -474,6 +506,7 @@ Block::Block(App& app, const Element* e) : app_(app) {
     const css::Engine::Context context = s->engine.child(parentStyle.context, d, previous, count);
     Frame& f = s->push(e);
     f.style = s->styleOf(context, &parentStyle);
+    s->count(*f.style.computed);
     pushed_ = true;
 }
 
@@ -485,6 +518,7 @@ Block::Block(App& app, const css::Element& d, const css::Element* previous, size
     const css::Engine::Context context = s->engine.child(parentStyle.context, d, previous, count);
     Frame& f = s->push(children);
     f.style = s->styleOf(context, &parentStyle);
+    s->count(*f.style.computed);
     pushed_ = true;
 }
 
@@ -512,9 +546,83 @@ Style child(App& app, const Style& parent, const Element& element) {
 const css::ComputedStyle* pseudo(App& app, const Style& style, css::Pseudo which) {
     State* s = state(app);
     if (!s || !style) return nullptr;
+    return s->engine.pseudo(style.context, which);
+}
+
+Style pseudoStyle(App& app, const Style& style, css::Pseudo which) {
+    State* s = state(app);
+    Style out;
+    if (!s || !style) return out;
     const css::ComputedStyle* p = s->engine.pseudo(style.context, which);
-    // A print without print rules keeps Tinta's palette for markers too
-    return p;
+    if (!p) return out;
+    out.computed = p;
+    out.context = style.context;
+    out.set = p->authored | (style.set & kInherited & ~p->declared);
+    if (!s->colors) out.set &= ~kColors;
+    return out;
+}
+
+std::wstring generated(App& app, const Style& style, css::Pseudo which, bool count) {
+    State* s = state(app);
+    if (!s || !style) return {};
+    const css::ComputedStyle* p = s->engine.pseudo(style.context, which);
+    if (!p || p->content.empty()) return {};
+    if (count) s->count(*p);
+    std::wstring text;
+    for (const auto& part : p->content) {
+        switch (part.kind) {
+            case css::ContentPart::Text: text += wide(part.text); break;
+            case css::ContentPart::Counter:
+            case css::ContentPart::Counters: text += counterText(s->counters[part.text], part.style); break;
+            case css::ContentPart::Attr: break;
+        }
+    }
+    return text;
+}
+
+std::wstring counterText(int n, css::ListStyle style) {
+    switch (style) {
+        case css::ListStyle::DecimalLeadingZero:
+            return (n >= 0 && n < 10 ? L"0" : L"") + std::to_wstring(n);
+        case css::ListStyle::LowerAlpha:
+        case css::ListStyle::UpperAlpha:
+        case css::ListStyle::LowerGreek: {
+            if (n < 1) return std::to_wstring(n);
+            const bool greek = style == css::ListStyle::LowerGreek;
+            const int base = greek ? 24 : 26;
+            const wchar_t first = greek ? 0x03B1 : style == css::ListStyle::LowerAlpha ? L'a' : L'A';
+            std::wstring out;
+            for (int k = n; k > 0; k = (k - 1) / base) {
+                wchar_t c = (wchar_t)(first + (k - 1) % base);
+                if (greek && c >= 0x03C2) c++;  // no final sigma
+                out.insert(out.begin(), c);
+            }
+            return out;
+        }
+        case css::ListStyle::LowerRoman:
+        case css::ListStyle::UpperRoman: {
+            if (n < 1 || n > 3999) return std::to_wstring(n);
+            static const struct { int value; const wchar_t* text; } numerals[] = {
+                {1000, L"m"}, {900, L"cm"}, {500, L"d"}, {400, L"cd"}, {100, L"c"}, {90, L"xc"},
+                {50, L"l"}, {40, L"xl"}, {10, L"x"}, {9, L"ix"}, {5, L"v"}, {4, L"iv"}, {1, L"i"}};
+            std::wstring out;
+            for (const auto& numeral : numerals) {
+                for (; n >= numeral.value; n -= numeral.value) out += numeral.text;
+            }
+            if (style == css::ListStyle::UpperRoman) CharUpperBuffW(out.data(), (DWORD)out.size());
+            return out;
+        }
+        case css::ListStyle::CjkDecimal: {
+            static const wchar_t digits[] = {0x3007, 0x4E00, 0x4E8C, 0x4E09, 0x56DB, 0x4E94, 0x516D, 0x4E03, 0x516B, 0x4E5D};
+            std::wstring out;
+            for (wchar_t c : std::to_wstring(n)) out += c >= L'0' && c <= L'9' ? digits[c - L'0'] : c;
+            return out;
+        }
+        case css::ListStyle::None:
+            return {};
+        default:
+            return std::to_wstring(n);
+    }
 }
 
 float px(const App& app, float css) { return css * app.contentScale * app.zoomFactor; }

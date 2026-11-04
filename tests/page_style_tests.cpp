@@ -275,6 +275,59 @@ void fontFaces(App& app, const fs::path& dir) {
     loadCustomThemes();
     applyTheme(app, 0);
 }
+
+// Counters and generated content: headings the sheet numbers, an item's
+// own marker, an arrow after outside links; and a class the front matter
+// puts on body
+void generatedContent(App& app, const fs::path& dir) {
+    const fs::path themes = dir / "themes";
+    fs::create_directories(themes);
+    {
+        std::ofstream(themes / "Numbers.css", std::ios::binary)
+            << "body { counter-reset: h2; max-width: 500px }\n"
+               "body.wide { max-width: none }\n"
+               "h2 { counter-reset: h3 }\n"
+               "h2::before { counter-increment: h2; content: counter(h2) \". \"; color: #cc0000 }\n"
+               "h3::before { counter-increment: h3; content: counter(h2) \".\" counter(h3, lower-alpha) \" \" }\n"
+               "a[href^=\"http\"]::after { content: \" \\2197\" }\n"
+               "ul { list-style-type: none }\n"
+               "li::before { content: \"\\2192  \" }\n";
+    }
+    loadCustomThemes();
+    int numbers = -1;
+    for (int i = 0; i < themeCount(); i++) {
+        if (std::wstring(themeAt(i).name) == L"Numbers") numbers = i;
+    }
+    check(numbers >= 0, "the numbering sheet is listed");
+    if (numbers < 0) return;
+    applyTheme(app, numbers);
+    const std::string page =
+        "## First\n\n### Sub\n\n### Sub two\n\n## Second\n\nA [link](https://example.com) and [a note](#first).\n\n"
+        "- item\n";
+    app.root = parseDocument(app.parser, page, (dir / "numbers.md").wstring()).root;
+    layoutDocument(app);
+    const auto* one = runOf(app, L"1.");
+    check(one && sameColor(one->color, 0xCC0000), "h2::before numbers the first heading, in its own colour");
+    check(runOf(app, L"1.b") != nullptr, "counter(h2) and counter(h3, lower-alpha) number the second subheading");
+    check(runOf(app, L"2.") != nullptr, "the second h2 counts on");
+    check(app.headings.size() >= 4 && app.headings[0].text == L"1. First" && app.headings[2].text == L"1.b Sub two",
+          "Contents shows the numbers");
+    int arrows = 0;
+    for (const auto& run : app.layoutTextRuns) {
+        if (run.docLength && app.docText.compare(run.docStart, run.docLength, L"\x2197") == 0) arrows++;
+    }
+    check(arrows == 1, "a[href^=http]::after marks the outside link only");
+    check(runOf(app, L"\x2192") != nullptr, "li::before gives the item a marker of its own");
+    check(app.layoutMaxWidth < 501 * app.contentScale * app.zoomFactor, "body's max-width applies without the class");
+
+    app.root = parseDocument(app.parser, "---\ncssclasses: [wide]\n---\n\n" + page, (dir / "numbers.md").wstring()).root;
+    layoutDocument(app);
+    check(app.layoutMaxWidth > 600 * app.contentScale * app.zoomFactor, "front matter cssclasses put .wide on body");
+    std::error_code ignored;
+    fs::remove(themes / "Numbers.css", ignored);
+    loadCustomThemes();
+    applyTheme(app, 0);
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -293,6 +346,7 @@ int testPageStyles(App&, const fs::path& dir) {
     styled(app, dir);
     unstyled(app);
     fontFaces(app, dir);
+    generatedContent(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;

@@ -81,6 +81,15 @@ Style child(App& app, const Style& parent, const css::Element& element, const cs
 Style child(App& app, const Style& parent, const Element& element);
 // A pseudo-element: ::marker, ::before, ::after; null when no rule styles it
 const css::ComputedStyle* pseudo(App& app, const Style& style, css::Pseudo which);
+// A pseudo-element's style as layout reads it; empty when no rule styles it
+Style pseudoStyle(App& app, const Style& style, css::Pseudo which);
+// The text ::before or ::after gives an element (strings, counter(),
+// counters(), attr()), empty when it has none. `count` applies the
+// pseudo-element's own counter-reset and counter-increment first, as a
+// block laid out once in the page's order does
+std::wstring generated(App& app, const Style& style, css::Pseudo which, bool count);
+// The marker text a list-style-type gives the nth item ("3", "c", "iii")
+std::wstring counterText(int n, css::ListStyle style);
 
 // Vertical space in layout units. A block's margin-top collapses with the
 // margin above it as CSS's do; without one, the renderer's own space (in
