@@ -340,6 +340,42 @@ void notes(const fs::path& fixtures) {
               listsKey(list, "smith2020"),
           "a note style keeps its bibliography");
 }
+
+// references: in the front matter cite with no library beside the note, and
+// win over a library's entry with the same id, as pandoc has it
+void inlineReferences(const fs::path& fixtures) {
+    auto result = parse(fixtures / "inline-references.md");
+    for (const auto& problem : result.problems) check(false, "inline-references.md has no problems: " + problem);
+    const auto cites = all(result.root, ElementType::Citation);
+    check(cites.size() == 4, "the front matter's references cite: " + std::to_string(cites.size()) + " citations");
+    check(!cites.empty() && contains(plain(cites[0]), "Watson & Crick, 1953"),
+          "in APA, from CSL YAML's date-parts: " + (cites.empty() ? std::string() : plain(cites[0])));
+    const auto entries = all(result.root, ElementType::BibEntry);
+    check(entries.size() == 3, "and each work is in the references");
+    // APA sets a book's title in italic, so its own *Sepia* turns upright:
+    // the title's italic runs hold the words around it, and not it
+    std::string slanted, book;
+    for (const auto& entry : entries) {
+        if (!contains(plain(entry), "Sepia")) continue;
+        book = plain(entry);
+        for (const auto& e : all(entry, ElementType::Emphasis)) slanted += "[" + plain(e) + "]";
+    }
+    check(contains(slanted, "The chemistry of") && contains(slanted, "ink, from the sea") && !contains(slanted, "Sepia") &&
+              contains(book, "Sepia"),
+          "a title's Markdown emphasis flips inside the italic title: " + slanted);
+
+    qmd::MarkdownParser parser;
+    auto both = parseDocument(parser,
+                              "---\nbibliography: references.bib\ncsl: apa\nreferences:\n"
+                              "- id: knuth1984\n  type: book\n  title: A title the front matter gives\n"
+                              "  author: [{family: Knuth, given: Donald}]\n  issued: 1984\n---\n\n"
+                              "As [@knuth1984] says, and [@brooks1995].\n",
+                              (fixtures / "both.md").wstring());
+    std::string list;
+    for (const auto& entry : all(both.root, ElementType::BibEntry)) list += plain(entry) + "\n";
+    check(contains(list, "A title the front matter gives") && contains(list, "Brooks"),
+          "the front matter's entry wins, and the library's others stay:\n" + list);
+}
 }  // namespace
 
 int main() {
@@ -351,6 +387,7 @@ int main() {
     citationsWithout(fixtures);
     sections(fixtures);
     notes(fixtures);
+    inlineReferences(fixtures);
     std::cout << "Scholar: " << failures << " failures\n";
     return failures ? 1 : 0;
 }

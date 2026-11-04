@@ -606,7 +606,7 @@ std::shared_ptr<const bib::Library> loadLibrary(const std::wstring& path, std::v
     if (!cached.library || CompareFileTime(&cached.time, &time) != 0) {
         auto library = std::make_shared<bib::Library>();
         if (!bib::readByExtension(bytes, utf8(path), *library)) {
-            cached.error = shown(path) + ": not a .bib or .json bibliography";
+            cached.error = shown(path) + ": not a .bib, .json or .yaml bibliography";
         } else {
             cached.error.clear();
         }
@@ -711,15 +711,25 @@ Words wordsFor(const std::vector<fm::Property>& front) {
     return words;
 }
 
-Session begin(const std::vector<fm::Property>& front, const std::wstring& folder) {
+Session begin(const std::vector<fm::Property>& front, const std::wstring& folder, std::string_view document) {
     Session session;
-    const fm::Property* bibliography = property(front, "bibliography");
-    if (!bibliography) return session;
-    std::vector<std::string> names = bibliography->items;
-    if (names.empty() && !bibliography->text.empty()) names.push_back(bibliography->text);
-    if (names.empty()) return session;
-    session.cites = true;
+    // The front matter's own references: first, so they win over a file's
+    // entries with the same id, as in pandoc
     auto merged = std::make_shared<bib::Library>();
+    const bool own = !document.empty() && bib::readFrontMatterReferences(document, "front matter", *merged);
+    for (const auto& d : merged->diagnostics) {
+        session.problems.push_back("references" + (d.line > 0 ? ", line " + std::to_string(d.line) : std::string()) +
+                                   ": " + d.message);
+    }
+    merged->diagnostics.clear();
+    const fm::Property* bibliography = property(front, "bibliography");
+    std::vector<std::string> names;
+    if (bibliography) {
+        names = bibliography->items;
+        if (names.empty() && !bibliography->text.empty()) names.push_back(bibliography->text);
+    }
+    if (names.empty() && !own) return session;
+    session.cites = true;
     for (const auto& name : names) {
         if (folder.empty() && !(name.size() > 2 && (name[1] == ':' || name[0] == '\\'))) {
             session.problems.push_back(name + ": save the note first, so the bibliography has a folder to be found in");
@@ -1039,7 +1049,7 @@ const std::vector<Work>& libraryWorks(const std::wstring& doc, const std::wstrin
     made = ms;
     works.clear();
     if (front.empty()) return works;
-    const Session session = begin(fm::parse(front).properties, folder);
+    const Session session = begin(fm::parse(front).properties, folder, front);
     if (!session.library) return works;
     works.reserve(session.library->items.size());
     for (const auto& item : session.library->items) works.push_back(workOf(item));

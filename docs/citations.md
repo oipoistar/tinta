@@ -25,6 +25,10 @@ slow for reasons [see @brooks1995, pp. 33-35; also @smith2020, chap. 1].
   (`.yaml`, pandoc's YAML form of CSL-JSON, with Markdown such as
   `*Sepia*` in its fields). Paths are relative to the document. Save the
   file from your reference manager and open documents update.
+- **No file at all:** a `references:` list in the front matter, in CSL
+  YAML as pandoc reads it, cites on its own, beside a `bibliography:` or
+  without one; an entry there wins over a library's with the same id.
+  See [inline references](../tests/fixtures/scholar/inline-references.md).
 - **Styles:** `apa`, `chicago-author-date`, `ieee`, `nature` and `gb-t-7714`
   (China National Standard GB/T 7714-2015, numeric) are built in, the
   official files from the Citation Style Language project. Any other style

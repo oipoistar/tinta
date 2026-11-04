@@ -278,7 +278,7 @@ static qmd::ParseResult parseMarkdown(qmd::MarkdownParser& parser, const std::st
                                       const std::wstring& path) {
     const size_t slash = path.find_last_of(L"\\/");
     const std::wstring folder = slash == std::wstring::npos ? std::wstring() : path.substr(0, slash);
-    const scholar::Session session = scholar::begin(fm::parse(content).properties, folder);
+    const scholar::Session session = scholar::begin(fm::parse(content).properties, folder, content);
     parser.setCitationFinder(scholar::finder(session));
     std::string cleaned;
     qmd::ParseResult result;

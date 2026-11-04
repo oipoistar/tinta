@@ -39,7 +39,10 @@ struct Session {
 };
 // folder is where the document's relative paths start (empty for an
 // untitled note)
-Session begin(const std::vector<fm::Property>& front, const std::wstring& folder);
+// `document` is the text the front matter came from: its references:, CSL
+// YAML as pandoc reads it, cite with or without a bibliography and win over
+// a bibliography's entries with the same id
+Session begin(const std::vector<fm::Property>& front, const std::wstring& folder, std::string_view document = {});
 // What in a run of the document's text cites, for the parser
 qmd::CitationFinder finder(const Session& session);
 // Numbers figures, tables and equations, resolves @fig:id and friends,
