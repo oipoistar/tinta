@@ -1,6 +1,6 @@
 ---
 title: "Theming: CSS themes"
-status: Phase 1 built (2026-11-04); phases 2 and 3 to come
+status: Phase 1 built (2026-11-04), and phase 3's --ui-* and --mermaid-* (2026-11-04); the rest of phases 2 and 3 to come
 created: 2026-11-03
 ---
 
@@ -211,8 +211,8 @@ the 148 named colours, `transparent`, `currentColor`, `rgb()`, `hsl()`,
 | `counter-reset`, `counter-increment` | 3 | numbering |
 | `box-shadow`, `opacity` | 3 | code blocks, images, callouts |
 | `caret-color` | 3 | the editor caret |
-| `--ui-*` custom properties | 3 | tab strip, panels, menus |
-| `--mermaid-*` custom properties | 3 | Mermaid's theme variables |
+| `--ui-*` custom properties | 3 (built) | tab strip and caption, panels, menus, popups, cards |
+| `--mermaid-*` custom properties | 3 (built) | Mermaid's theme variables, on screen and in the exports |
 
 A property listed for a later phase parses and inherits from phase 1; until
 its phase lands, a diagnostic says it is accepted but not drawn yet.
@@ -349,6 +349,26 @@ background, text and accent. Phase 3 adds `--ui-background`, `--ui-text`,
 `--ui-accent`, `--ui-panel`, `--ui-border` on `:root` for themes that want a
 different window.
 
+Built (2026-11-04): the compiler reads the five into optional `D2DTheme`
+fields, and the chrome draws through `themeUiText`, `themeUiAccent`,
+`themeUiPanel` and `themeUiBorder` (`app.h`, `themes.cpp`), which return
+today's derivation when a field is unset, so every other theme draws pixel
+for pixel as before. `--ui-background` is the tab strip, the edit rail, the
+caption Windows draws (DWM) and the print preview's backdrop; `--ui-panel`
+the side panels, menus, popups, notices, dialogs, the settings (its cards
+lift from it) and the start page's buttons and cards. The tab in use, a
+sheet's canvas bars and text standing on the page keep the page's colours.
+
+Mermaid's theme variables, `--mermaid-primary-color` and the rest in kebab
+case, map onto the parts of a diagram Tinta draws (`DiagramColors`: node
+fill, border and text, the other text, lines, notes, edge labels,
+subgraphs, the background and twelve series colours), read from
+`body > div.diagram` so a rule on `.diagram` reaches them. The role resolver
+and the flowchart's colours (`flowchartColors`) are shared by the page and
+the exports; PlantUML's preamble keeps the page's. Tinta honours no
+`%%{init}%%` directive, so nothing there competes with the sheet. The two
+families cost `tinta.exe` 20,992 bytes.
+
 ### The inspector (phase 3)
 
 Ctrl+Alt+click an element: a card shows its selector path (`blockquote > p >
@@ -388,8 +408,9 @@ computed values, and swatches; editing a value writes it back to the sheet.
    spacing, borders, radii, letter spacing, alignment, OpenType features,
    list markers, reading width; `@font-face`; Word and print from styles.
 3. **Beyond the page**: counters and generated content, folder sheets and
-   `cssclasses`, `--ui-*` and `--mermaid-*`, the inspector, importing
-   Typora (`#write`) and Obsidian (its variables) themes.
+   `cssclasses`, `--ui-*` and `--mermaid-*` (built; see
+   `tests/css-themes-validation.md`), the inspector, importing Typora
+   (`#write`) and Obsidian (its variables) themes.
 
 ## Decisions
 
