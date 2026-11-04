@@ -14,6 +14,7 @@
 #include "math_render.h"
 #include "mermaid_ext.h"
 #include "network_path.h"
+#include "paper.h"
 #include "plantuml.h"
 #include "plantuml_app.h"
 #include "plantuml_queue.h"
@@ -633,6 +634,9 @@ struct DocxCtx {
     // CJK faces the screen draws with, and the theme's own heading face
     // (empty: headings use the body face)
     std::string bodyEastAsia, monoEastAsia, headingFont, headingEastAsia;
+    // A paper's thanks: a footnote marked * on its title (paper.h)
+    int thanksId = 0;
+    std::string thanksXml;
 };
 
 // Latin and complex scripts in face, CJK in eastAsia. Without w:eastAsia
@@ -1306,6 +1310,121 @@ void emitDisplayMath(DocxCtx& ctx, const ElementPtr& elem, const ParaProps& prop
                 "</w:r><w:r><w:tab/><w:t>" + xmlEscape(toUtf8(tag)) + "</w:t></w:r></w:p>";
 }
 
+// Strong's run properties, the theme's bold colour with them (#310)
+RunProps strongRun(const DocxCtx& ctx) {
+    RunProps strong;
+    strong.bold = true;
+    if (!ctx.boldHex.empty()) {
+        strong.color = ctx.boldHex;
+        strong.emphasisColor = true;
+    }
+    return strong;
+}
+
+// A numbered caption as Word numbers its own: the label's words, a SEQ
+// field for the number and the rest, "Figure " { SEQ Figure \* ARABIC } ":"
+// and the caption, so Word's table of figures and cross-references find
+// it. Tables count in a sequence of their own (Scholar). The field is
+// written in parts, as Word writes it: an update takes the code's bold.
+void emitNumberedCaption(DocxCtx& ctx, const ElementPtr& figure, const ElementPtr& caption, ParaProps props) {
+    props.styleId = "Caption";
+    const std::string number = std::to_string(figure->level);
+    std::string label;
+    if (!caption->children.empty() && caption->children[0]->type == ElementType::Strong) {
+        for (const auto& child : caption->children[0]->children)
+            if (child->type == ElementType::Text) label += child->text;
+    }
+    const size_t at = label.rfind(number);
+    if (at == std::string::npos) {
+        emitParagraph(ctx, caption, props);
+        return;
+    }
+    const RunProps strong = strongRun(ctx);
+    const std::string run = "<w:r>" + runPropsXml(ctx, strong);
+    ctx.body += "<w:p>" + paraPropsXml(props);
+    emitTextRun(ctx, label.substr(0, at), strong, ctx.body);
+    ctx.body += run + "<w:fldChar w:fldCharType=\"begin\"/></w:r>" + run +
+                "<w:instrText xml:space=\"preserve\"> SEQ " + (figure->language == "tbl" ? "Table" : "Figure") +
+                " \\* ARABIC </w:instrText></w:r>" + run + "<w:fldChar w:fldCharType=\"separate\"/></w:r>";
+    emitTextRun(ctx, number, strong, ctx.body);
+    ctx.body += run + "<w:fldChar w:fldCharType=\"end\"/></w:r>";
+    emitTextRun(ctx, label.substr(at + number.size()), strong, ctx.body);
+    for (size_t i = 1; i < caption->children.size(); i++) walkInline(ctx, caption->children[i], RunProps{}, ctx.body);
+    ctx.body += "</w:p>";
+}
+
+// A paper's title block in the styles Word and pandoc name (Title,
+// Subtitle, Author, Date, Abstract Title, Abstract), Affiliation and
+// Keywords, so a journal's template restyles it; the thanks a footnote
+// marked * on the title, as LaTeX's \thanks (docs/specs/scholar.md, phase 3)
+void emitTitleBlock(DocxCtx& ctx, const ElementPtr& properties) {
+    const paper::Front front = paper::read(properties->text);
+    if (!front.titleBlock()) return;
+    // A field's Markdown inline when it is a paragraph of text, else as written
+    auto inlineRuns = [&](const std::string& markdown, std::string& out) {
+        MarkdownParser parser;
+        const auto parsed = parser.parse(markdown);
+        if (parsed.success && parsed.root && parsed.root->children.size() == 1 &&
+            parsed.root->children[0]->type == ElementType::Paragraph) {
+            for (const auto& child : parsed.root->children[0]->children) walkInline(ctx, child, RunProps{}, out);
+        } else {
+            emitTextRun(ctx, markdown, RunProps{}, out);
+        }
+    };
+    auto paragraph = [&](const char* style, const std::string& markdown, const std::string& after = {}) {
+        ctx.body += std::string("<w:p><w:pPr><w:pStyle w:val=\"") + style + "\"/></w:pPr>";
+        inlineRuns(markdown, ctx.body);
+        ctx.body += after + "</w:p>";
+    };
+
+    std::string mark;
+    if (!front.thanks.empty()) {
+        // Above every footnote the document numbers
+        std::function<void(const ElementPtr&)> highest = [&](const ElementPtr& e) {
+            if (e->type == ElementType::FootnoteDefinition) ctx.thanksId = std::max(ctx.thanksId, e->level);
+            for (const auto& child : e->children) highest(child);
+        };
+        highest(ctx.app.root);
+        ++ctx.thanksId;
+        const std::string id = std::to_string(ctx.thanksId);
+        mark = "<w:r><w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr><w:footnoteReference "
+               "w:customMarkFollows=\"1\" w:id=\"" + id + "\"/><w:t>*</w:t></w:r>";
+        ctx.thanksXml = "<w:footnote w:id=\"" + id + "\"><w:p><w:r><w:rPr><w:vertAlign w:val=\"superscript\"/>"
+                        "</w:rPr><w:t>*</w:t></w:r><w:r><w:t xml:space=\"preserve\"> </w:t></w:r>";
+        inlineRuns(front.thanks, ctx.thanksXml);
+        ctx.thanksXml += "</w:p></w:footnote>";
+    }
+    paragraph("Title", front.title, mark);
+    if (!front.subtitle.empty()) paragraph("Subtitle", front.subtitle);
+    if (!front.authors.empty()) paragraph("Author", paper::joinAuthors(front.authors, front.lang));
+    for (const auto& institute : front.institutes) paragraph("Affiliation", institute);
+    if (!front.date.empty()) paragraph("Date", front.date);
+    const paper::Words& words = paper::wordsFor(front.lang);
+    if (!front.abstract.empty()) {
+        ctx.body += "<w:p><w:pPr><w:pStyle w:val=\"AbstractTitle\"/></w:pPr>";
+        emitTextRun(ctx, words.abstract, RunProps{}, ctx.body);
+        ctx.body += "</w:p>";
+        MarkdownParser parser;
+        const auto parsed = parser.parse(front.abstract);
+        ParaProps abstract;
+        abstract.styleId = "Abstract";
+        if (parsed.success && parsed.root) {
+            for (const auto& block : parsed.root->children) walkBlocks(ctx, block, abstract, 0);
+        }
+    }
+    if (!front.keywords.empty()) {
+        ctx.body += "<w:p><w:pPr><w:pStyle w:val=\"Keywords\"/></w:pPr>";
+        RunProps label;
+        label.bold = label.italic = true;
+        emitTextRun(ctx, std::string(words.keywords) + words.colon, label, ctx.body);
+        for (size_t i = 0; i < front.keywords.size(); i++) {
+            if (i) emitTextRun(ctx, words.between, RunProps{}, ctx.body);
+            inlineRuns(front.keywords[i], ctx.body);
+        }
+        ctx.body += "</w:p>";
+    }
+}
+
 void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
                 int listDepth) {
     if (!elem) return;
@@ -1319,12 +1438,19 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
             ctx.footnotes = elem->children;
             break;
         case ElementType::Properties:
+            emitTitleBlock(ctx, elem);
             break;
         case ElementType::Paragraph:
             emitParagraph(ctx, elem, props);
             break;
         case ElementType::Figure:
-            for (const auto& child : elem->children) walkBlocks(ctx, child, props, listDepth);
+            for (const auto& child : elem->children) {
+                if (child->type == ElementType::Caption && elem->level > 0) {
+                    emitNumberedCaption(ctx, elem, child, props);
+                } else {
+                    walkBlocks(ctx, child, props, listDepth);
+                }
+            }
             break;
         case ElementType::Caption: {
             ParaProps caption = props;
@@ -1624,6 +1750,43 @@ std::string stylesXml(const DocxCtx& ctx) {
            "<w:name w:val=\"caption\"/><w:basedOn w:val=\"Normal\"/>"
            "<w:pPr><w:spacing w:after=\"200\"/></w:pPr>"
            "<w:rPr><w:i/><w:sz w:val=\"20\"/><w:szCs w:val=\"20\"/></w:rPr></w:style>";
+    // A paper's title block (paper.h): Word's Title and Subtitle and
+    // pandoc's Author, Date, Abstract Title and Abstract, centred and set
+    // off as LaTeX sets them, for a journal's template to restyle
+    const std::string headingFace =
+        ctx.headingFont.empty() ? std::string() : rFontsXml(ctx.headingFont, ctx.headingEastAsia);
+    xml += "<w:style w:type=\"paragraph\" w:styleId=\"Title\">"
+           "<w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/>"
+           "<w:pPr><w:keepNext/><w:spacing w:before=\"240\" w:after=\"120\"/><w:jc w:val=\"center\"/></w:pPr>"
+           "<w:rPr>" + headingFace + "<w:b/><w:color w:val=\"" + ctx.headingHex + "\"/>"
+           "<w:sz w:val=\"40\"/><w:szCs w:val=\"40\"/></w:rPr></w:style>";
+    xml += "<w:style w:type=\"paragraph\" w:styleId=\"Subtitle\">"
+           "<w:name w:val=\"Subtitle\"/><w:basedOn w:val=\"Title\"/><w:next w:val=\"Normal\"/>"
+           "<w:pPr><w:spacing w:before=\"0\" w:after=\"240\"/></w:pPr>"
+           "<w:rPr><w:b w:val=\"0\"/><w:sz w:val=\"30\"/><w:szCs w:val=\"30\"/></w:rPr></w:style>";
+    xml += "<w:style w:type=\"paragraph\" w:styleId=\"Author\">"
+           "<w:name w:val=\"Author\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/>"
+           "<w:pPr><w:keepNext/><w:spacing w:after=\"60\"/><w:jc w:val=\"center\"/></w:pPr>"
+           "<w:rPr><w:sz w:val=\"26\"/><w:szCs w:val=\"26\"/></w:rPr></w:style>";
+    xml += "<w:style w:type=\"paragraph\" w:styleId=\"Affiliation\">"
+           "<w:name w:val=\"Affiliation\"/><w:basedOn w:val=\"Author\"/><w:next w:val=\"Normal\"/>"
+           "<w:rPr><w:i/><w:color w:val=\"" + ctx.mutedHex + "\"/><w:sz w:val=\"22\"/><w:szCs w:val=\"22\"/>"
+           "</w:rPr></w:style>";
+    xml += "<w:style w:type=\"paragraph\" w:styleId=\"Date\">"
+           "<w:name w:val=\"Date\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/>"
+           "<w:pPr><w:keepNext/><w:spacing w:before=\"120\" w:after=\"240\"/><w:jc w:val=\"center\"/></w:pPr>"
+           "</w:style>";
+    xml += "<w:style w:type=\"paragraph\" w:styleId=\"AbstractTitle\">"
+           "<w:name w:val=\"Abstract Title\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Abstract\"/>"
+           "<w:pPr><w:keepNext/><w:spacing w:before=\"240\" w:after=\"60\"/><w:jc w:val=\"center\"/></w:pPr>"
+           "<w:rPr><w:b/><w:sz w:val=\"22\"/><w:szCs w:val=\"22\"/></w:rPr></w:style>";
+    xml += "<w:style w:type=\"paragraph\" w:styleId=\"Abstract\">"
+           "<w:name w:val=\"Abstract\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/>"
+           "<w:pPr><w:spacing w:after=\"120\"/><w:ind w:left=\"720\" w:right=\"720\"/></w:pPr>"
+           "<w:rPr><w:sz w:val=\"22\"/><w:szCs w:val=\"22\"/></w:rPr></w:style>";
+    xml += "<w:style w:type=\"paragraph\" w:styleId=\"Keywords\">"
+           "<w:name w:val=\"Keywords\"/><w:basedOn w:val=\"Abstract\"/><w:next w:val=\"Normal\"/>"
+           "<w:pPr><w:spacing w:after=\"360\"/></w:pPr></w:style>";
     xml += "<w:style w:type=\"character\" w:styleId=\"Hyperlink\">"
            "<w:name w:val=\"Hyperlink\"/><w:rPr><w:color w:val=\"" +
            ctx.linkHex + "\"/><w:u w:val=\"single\"/></w:rPr></w:style>";
@@ -1734,7 +1897,7 @@ bool exportDocxFile(App& app, const std::wstring& path) {
     ParaProps rootProps;
     walkBlocks(ctx, app.root, rootProps, 0);
     std::string footnoteXml;
-    if (!ctx.footnotes.empty()) {
+    if (!ctx.footnotes.empty() || ctx.thanksId) {
         footnoteXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
             "<w:footnotes xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" "
             "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" "
@@ -1758,7 +1921,7 @@ bool exportDocxFile(App& app, const std::wstring& path) {
             footnoteXml += "<w:footnote w:id=\"" + std::to_string(note->level) + "\">" + ctx.body + "</w:footnote>";
         }
         ctx.body = std::move(body);
-        footnoteXml += "</w:footnotes>";
+        footnoteXml += ctx.thanksXml + "</w:footnotes>";
     }
 
     std::string document =
