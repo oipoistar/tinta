@@ -134,6 +134,7 @@ set(SOURCES
     src/document.cpp src/frontmatter.cpp
     src/inline_style.cpp
     src/print.cpp
+    src/paper.cpp
     src/i18n.cpp
     src/selection.cpp
     src/math_render.cpp
@@ -186,6 +187,7 @@ set(HEADERS
     include/document.h
     include/inline_style.h
     include/print.h
+    include/paper.h
     include/i18n.h
     include/selection.h
     include/math_render.h

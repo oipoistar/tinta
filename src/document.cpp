@@ -262,6 +262,11 @@ static void insertProperties(qmd::ParseResult& result, const std::string& conten
     auto props = std::make_shared<qmd::Element>(qmd::ElementType::Properties);
     props->parent = result.root.get();
     props->properties = std::move(doc.properties);
+    // The YAML between the fences as written, for what the properties
+    // leave opaque: a paper's block scalars and author lists (paper.h)
+    const size_t opener = content.find('\n', doc.begin);
+    if (opener != std::string::npos && doc.closing > opener)
+        props->text = content.substr(opener + 1, doc.closing - opener - 1);
     result.root->children.insert(result.root->children.begin(), std::move(props));
 }
 

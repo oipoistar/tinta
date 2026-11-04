@@ -127,6 +127,12 @@ static void setPrintPreviewCursor(const App& app, float x, float y) {
             return;
         }
     }
+    for (const auto& rect : app.printPreviewOptionBtn) {
+        if (cursorPointInRect(x, y, rect)) {
+            SetCursor(cursorHand);
+            return;
+        }
+    }
     SetCursor(cursorArrow);
 }
 
@@ -3240,6 +3246,13 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
         for (int i = 0; i < PRINT_MARGIN_COUNT; i++) {
             if (hit(app.printPreviewMarginBtn[i])) {
                 printPreviewSetMargin(app, PRINT_MARGINS_MM[i]);
+                return;
+            }
+        }
+        // Two columns, page numbers, running heads (paper export)
+        for (int i = 0; i < PRINT_OPTION_COUNT; i++) {
+            if (hit(app.printPreviewOptionBtn[i])) {
+                printPreviewToggle(app, i);
                 return;
             }
         }
