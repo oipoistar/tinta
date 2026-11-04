@@ -1,0 +1,37 @@
+/* Harbour: a light page in a dark window, with diagrams in colours of its
+   own (docs/css-themes.md, "The window" and "Diagrams"). Follows Windows
+   between light and dark. Open chrome.md beside it. */
+:root {
+  color-scheme: light dark;
+  accent-color: light-dark(#0b6e99, #5fb3d9);
+
+  /* The window: tab strip and caption, its text and accent, panels, menus
+     and cards, and their edges */
+  --ui-background: light-dark(#1d2b38, #0d141a);
+  --ui-text: light-dark(#e6edf3, #d5dee6);
+  --ui-accent: #f59e42;
+  --ui-panel: light-dark(#243444, #151e27);
+  --ui-border: light-dark(#3b4f63, #2a3846);
+
+  /* Diagrams, in Mermaid's own variable names */
+  --mermaid-primary-color: light-dark(#e3f0f8, #1c3346);
+  --mermaid-primary-text-color: light-dark(#10283a, #e3eef6);
+  --mermaid-primary-border-color: light-dark(#0b6e99, #5fb3d9);
+  --mermaid-line-color: light-dark(#52677a, #8aa1b4);
+  --mermaid-secondary-color: light-dark(#fde8cf, #4a3420);
+  --mermaid-tertiary-color: light-dark(#eef3f6, #18242f);
+  --mermaid-title-color: light-dark(#b45309, #f59e42);
+  --mermaid-edge-label-background: light-dark(#fff8ef, #2b2318);
+  --mermaid-pie1: #0b6e99;
+  --mermaid-pie2: #f59e42;
+  --mermaid-pie3: #3f9d6b;
+  --mermaid-pie4: #c2410c;
+}
+body {
+  background: light-dark(#fbfaf6, #121a21);
+  color: light-dark(#1f2a33, #d5dee6);
+}
+h1, h2, h3 { color: light-dark(#10283a, #e6edf3); }
+a { color: light-dark(#0b6e99, #5fb3d9); }
+pre { background: light-dark(#f1f4f6, #19232c); }
+blockquote { border-left-color: light-dark(#b7c4cf, #3a4a58); }
