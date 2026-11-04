@@ -6,6 +6,7 @@
 
 #include "export.h"
 #include "font_faces.h"
+#include "page_style.h"
 #include "d2d_init.h"
 #include <functional>
 #include <set>
@@ -637,6 +638,16 @@ struct DocxCtx {
     // A paper's thanks: a footnote marked * on its title (paper.h)
     int thanksId = 0;
     std::string thanksXml;
+    // The type and spacing as the theme sets them (docs/specs/theming.md):
+    // sizes in half-points, spacing in twips, a line in 240ths of one
+    int bodyHalfPoints = 24, codeHalfPoints = 21;
+    int headingHalfPoints[6] = {48, 39, 33, 27, 24, 21};
+    bool headingBold[6] = {true, true, true, true, true, true};
+    bool headingItalic[6] = {};
+    int line = 312, bodyAfter = 160;
+    int headingBefore[6] = {280, 280, 280, 280, 280, 280}, headingAfter[6] = {120, 120, 120, 120, 120, 120};
+    std::string headingExtra[6];  // a CSS theme's border under a heading, its alignment
+    int quoteBorderEighths = 24;
 };
 
 // Latin and complex scripts in face, CJK in eastAsia. Without w:eastAsia
@@ -748,6 +759,9 @@ struct ParaProps {
     std::string extraRunProps;  // colored quote text etc.
 };
 
+// The width of a quote's bar, as the theme sets it (DocxCtx)
+int g_quoteBorderEighths = 24;
+
 std::string paraPropsXml(const ParaProps& props) {
     std::string xml;
     if (!props.styleId.empty()) {
@@ -759,8 +773,8 @@ std::string paraPropsXml(const ParaProps& props) {
                "\"/></w:numPr>";
     }
     if (!props.borderColor.empty()) {
-        xml += "<w:pBdr><w:left w:val=\"single\" w:sz=\"24\" w:space=\"12\" "
-               "w:color=\"" + props.borderColor + "\"/></w:pBdr>";
+        xml += "<w:pBdr><w:left w:val=\"single\" w:sz=\"" + std::to_string(g_quoteBorderEighths) +
+               "\" w:space=\"12\" w:color=\"" + props.borderColor + "\"/></w:pBdr>";
     }
     if (props.indentTwips > 0) {
         xml += "<w:ind w:left=\"" + std::to_string(props.indentTwips) +
@@ -1701,10 +1715,11 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
 std::string stylesXml(const DocxCtx& ctx) {
     // Viewer pixel sizes: body 16, code 14, headings 32/26/22/18/16/14.
     // Word half-points are px * 1.5 at 96dpi.
-    const int headingSizes[6] = {48, 39, 33, 27, 24, 21};
+    const int* headingSizes = ctx.headingHalfPoints;
+    const std::string bodySize = std::to_string(ctx.bodyHalfPoints), codeSize = std::to_string(ctx.codeHalfPoints);
     const std::string bodyRun = rFontsXml(ctx.bodyFont, ctx.bodyEastAsia) +
         "<w:color w:val=\"" + ctx.textHex + "\"/>"
-        "<w:sz w:val=\"24\"/><w:szCs w:val=\"24\"/>";
+        "<w:sz w:val=\"" + bodySize + "\"/><w:szCs w:val=\"" + bodySize + "\"/>";
     // The Normal style repeats the defaults: Word in Chinese otherwise sets
     // CJK text in its own East Asian default, DengXian, rather than the
     // theme's face (#256)
@@ -1715,7 +1730,8 @@ std::string stylesXml(const DocxCtx& ctx) {
         "main\">"
         "<w:docDefaults><w:rPrDefault><w:rPr>" + bodyRun +
         "</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>"
-        "<w:spacing w:after=\"160\" w:line=\"312\" w:lineRule=\"auto\"/>"
+        "<w:spacing w:after=\"" + std::to_string(ctx.bodyAfter) + "\" w:line=\"" + std::to_string(ctx.line) +
+        "\" w:lineRule=\"auto\"/>"
         "</w:pPr></w:pPrDefault></w:docDefaults>"
         "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\">"
         "<w:name w:val=\"Normal\"/><w:rPr>" + bodyRun + "</w:rPr></w:style>";
@@ -1724,12 +1740,12 @@ std::string stylesXml(const DocxCtx& ctx) {
         xml += "<w:style w:type=\"paragraph\" w:styleId=\"Heading" + n +
                "\"><w:name w:val=\"heading " + n +
                "\"/><w:basedOn w:val=\"Normal\"/>"
-               "<w:pPr><w:keepNext/><w:spacing w:before=\"280\" "
-               "w:after=\"120\"/><w:outlineLvl w:val=\"" +
-               std::to_string(i) + "\"/></w:pPr><w:rPr>" +
+               "<w:pPr><w:keepNext/><w:spacing w:before=\"" + std::to_string(ctx.headingBefore[i]) +
+               "\" w:after=\"" + std::to_string(ctx.headingAfter[i]) + "\"/>" + ctx.headingExtra[i] +
+               "<w:outlineLvl w:val=\"" + std::to_string(i) + "\"/></w:pPr><w:rPr>" +
                (ctx.headingFont.empty() ? std::string()
                                         : rFontsXml(ctx.headingFont, ctx.headingEastAsia)) +
-               "<w:b/><w:color "
+               (ctx.headingBold[i] ? "<w:b/>" : "") + (ctx.headingItalic[i] ? "<w:i/>" : "") + "<w:color "
                "w:val=\"" + ctx.headingColors[i] + "\"/><w:sz w:val=\"" +
                std::to_string(headingSizes[i]) + "\"/><w:szCs w:val=\"" +
                std::to_string(headingSizes[i]) + "\"/></w:rPr></w:style>";
@@ -1739,7 +1755,7 @@ std::string stylesXml(const DocxCtx& ctx) {
            "<w:pPr><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"" +
            ctx.codeBgHex + "\"/><w:spacing w:after=\"160\"/></w:pPr>"
            "<w:rPr>" + rFontsXml(ctx.monoFont, ctx.monoEastAsia) +
-           "<w:sz w:val=\"21\"/><w:szCs w:val=\"21\"/></w:rPr></w:style>";
+           "<w:sz w:val=\"" + codeSize + "\"/><w:szCs w:val=\"" + codeSize + "\"/></w:rPr></w:style>";
     // References with a hanging indent, and figure and table captions
     // (Scholar), as Word names its own
     xml += "<w:style w:type=\"paragraph\" w:styleId=\"Bibliography\">"
@@ -1882,6 +1898,54 @@ bool exportDocxFile(App& app, const std::wstring& path) {
     ctx.linkHex = hex6(theme.link);
     ctx.quoteBorderHex =
         dark ? "BBBBBB" : hex6(theme.blockquoteBorder);
+    // The theme's type: Word's half-points are px * 1.5 at 96 dpi, and its
+    // single line already holds a font's own leading, about 1.2 of its size
+    auto halfPoints = [](float px) { return std::max(2, (int)std::lround(px * 1.5f)); };
+    if (theme.bodySize > 0) ctx.bodyHalfPoints = halfPoints(theme.bodySize);
+    if (theme.codeSize > 0) ctx.codeHalfPoints = halfPoints(theme.codeSize);
+    for (int i = 0; i < 6; ++i) {
+        if (theme.headingSize[i] > 0) ctx.headingHalfPoints[i] = halfPoints(theme.headingSize[i]);
+        if (theme.headingWeight[i] > 0) ctx.headingBold[i] = theme.headingWeight[i] >= 600;
+        ctx.headingItalic[i] = theme.headingItalic[i];
+    }
+    if (theme.lineHeight > 0) ctx.line = std::clamp((int)std::lround(240.0f * theme.lineHeight / 1.2f), 240, 720);
+    // A CSS theme's own spacing, a heading's border and alignment, the code
+    // block's shading and the quote's bar (page_style.h); colours only on a
+    // light theme, as the paper is white
+    auto twips = [](float px) { return std::max(0, (int)std::lround(px * 15.0f)); };
+    if (const page::Style p = page::lookup(app, {"p"})) {
+        if (p.has(css::Prop::MarginBottom)) ctx.bodyAfter = twips(p->margin[2]);
+    }
+    static const char* const tags[6] = {"h1", "h2", "h3", "h4", "h5", "h6"};
+    for (int i = 0; i < 6; ++i) {
+        const page::Style h = page::lookup(app, {tags[i]});
+        if (!h) break;
+        if (h.has(css::Prop::MarginTop)) ctx.headingBefore[i] = twips(h->margin[0]);
+        if (h.has(css::Prop::MarginBottom)) ctx.headingAfter[i] = twips(h->margin[2]);
+        const css::Border& rule = h->border[2];
+        if ((h.has(css::Prop::BorderBottomWidth) || h.has(css::Prop::BorderBottomStyle)) &&
+            rule.style != css::LineStyle::None && rule.width > 0) {
+            const std::string color = !dark && h.has(css::Prop::BorderBottomColor) ? hex6(page::color(rule.color))
+                                                                                   : ctx.borderHex;
+            ctx.headingExtra[i] += "<w:pBdr><w:bottom w:val=\"single\" w:sz=\"" +
+                                   std::to_string(std::clamp((int)std::lround(rule.width * 6.0f), 2, 96)) +
+                                   "\" w:space=\"4\" w:color=\"" + color + "\"/></w:pBdr>";
+        }
+        if (h.has(css::Prop::TextAlign) && h->textAlign == css::TextAlign::Center) ctx.headingExtra[i] += "<w:jc w:val=\"center\"/>";
+        else if (h.has(css::Prop::TextAlign) && h->textAlign == css::TextAlign::Right) ctx.headingExtra[i] += "<w:jc w:val=\"right\"/>";
+    }
+    if (const page::Style pre = page::lookup(app, {"pre"}); pre && !dark && pre.has(css::Prop::BackgroundColor) &&
+                                                            pre->backgroundColor.a > 0) {
+        ctx.codeBgHex = hex6(page::color(pre->backgroundColor));
+    }
+    if (const page::Style quote = page::lookup(app, {"blockquote"})) {
+        const css::Border& bar = quote->border[3];
+        if (quote.has(css::Prop::BorderLeftWidth) || quote.has(css::Prop::BorderLeftStyle)) {
+            ctx.quoteBorderEighths = bar.style == css::LineStyle::None ? 0 : std::clamp((int)std::lround(bar.width * 6.0f), 2, 96);
+        }
+        if (!dark && quote.has(css::Prop::BorderLeftColor)) ctx.quoteBorderHex = hex6(page::color(bar.color));
+    }
+    g_quoteBorderEighths = ctx.quoteBorderEighths;
     ctx.bodyFont = xmlEscape(toUtf8(theme.fontFamily));
     ctx.monoFont = xmlEscape(toUtf8(theme.codeFontFamily));
     ctx.bodyEastAsia = xmlEscape(toUtf8(documentCjkFamily(app, theme.fontFamily)));

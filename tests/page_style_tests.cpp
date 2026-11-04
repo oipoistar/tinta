@@ -561,6 +561,47 @@ void liveLook(App& app, const fs::path& dir) {
     fs::remove(themes / "Looks.css", ignored);
     loadCustomThemes();
 }
+
+// Word from the theme's styles: the type sizes, the body's spacing, a
+// heading's border and alignment, the code block's shading, the quote's bar
+void wordStyles(App& app, const fs::path& dir) {
+    const fs::path themes = dir / "themes";
+    fs::create_directories(themes);
+    {
+        std::ofstream(themes / "Word.css", std::ios::binary)
+            << "body { font-size: 18px; line-height: 1.8; }\n"
+               "p { margin: 0 0 20px; }\n"
+               "h2 { font-size: 30px; border-bottom: 3px solid #ff0000; text-align: center; margin-top: 40px; }\n"
+               "pre { background: #eef4fa; }\n"
+               "blockquote { border-left: 6px solid #00aa00; }\n";
+    }
+    loadCustomThemes();
+    int word = -1;
+    for (int i = 0; i < themeCount(); i++) {
+        if (std::wstring(themeAt(i).name) == L"Word") word = i;
+    }
+    check(word >= 0, "the Word sheet is listed");
+    if (word < 0) return;
+    applyTheme(app, word);
+    app.root = app.parser.parse("## Ruled\n\nText.\n\n> Quoted.\n\n```\ncode\n```\n").root;
+    layoutDocument(app);
+    check(exportDocxFile(app, (dir / "styled.docx").wstring()), "the Word export succeeds");
+    std::ifstream in(dir / "styled.docx", std::ios::binary);
+    const std::string docx((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    auto has = [&](const char* part) { return docx.find(part) != std::string::npos; };
+    check(has("<w:sz w:val=\"27\"/>"), "the body's 18px is 13.5 points");
+    check(has("w:after=\"300\" w:line=\"360\""), "p's margin and the body's line height space the paragraphs");
+    check(has("<w:bottom w:val=\"single\" w:sz=\"18\" w:space=\"4\" w:color=\"FF0000\"/>"),
+          "h2's border is a rule under Word's Heading 2");
+    check(has("w:before=\"600\"") && has("<w:jc w:val=\"center\"/>") && has("<w:sz w:val=\"45\"/>"),
+          "with its margin, alignment and size");
+    check(has("w:fill=\"EEF4FA\""), "pre's background shades the code block");
+    check(has("<w:left w:val=\"single\" w:sz=\"36\" w:space=\"12\" w:color=\"00AA00\"/>"), "and the quote has its bar");
+    std::error_code ignored;
+    fs::remove(themes / "Word.css", ignored);
+    loadCustomThemes();
+    applyTheme(app, 0);
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -586,6 +627,7 @@ int testPageStyles(App&, const fs::path& dir) {
     folderSheets(app, dir);
     printing(app, dir);
     liveLook(app, dir);
+    wordStyles(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;
