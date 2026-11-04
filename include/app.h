@@ -279,6 +279,7 @@ std::string themeSheetCss(int index);
 namespace css { struct Sheet; }
 std::shared_ptr<const css::Sheet> themeSheet(int index);
 namespace page { struct State; }
+struct InspectorCard;
 
 // Persistent settings
 enum class SidePanel { None, Contents, Browser };
@@ -575,6 +576,8 @@ struct App {
     // A CSS theme's styles as layout reads them, element by element, with
     // the text formats made for them (page_style.h)
     std::shared_ptr<page::State> pageState;
+    // The CSS inspector's card (inspector.h)
+    std::shared_ptr<InspectorCard> inspector;
 
     // Folder browser text format
     IDWriteTextFormat* folderBrowserFormat = nullptr;

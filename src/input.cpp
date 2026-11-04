@@ -31,6 +31,7 @@
 #include "i18n.h"
 #include "selection.h"
 #include "css.h"
+#include "inspector.h"
 
 #include <windowsx.h>
 #include <shellapi.h>
@@ -2259,6 +2260,18 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             app.swallowNextMouseUp = true;
             return;
         }
+        // The CSS inspector's card takes a press while it is open, and
+        // Ctrl+Alt+click opens it on what is under the pointer
+        if (inspectorMouseDown(app, hwnd, (float)mx, (float)my)) {
+            app.swallowNextMouseUp = true;
+            return;
+        }
+        if ((GetKeyState(VK_CONTROL) & 0x8000) && (GetKeyState(VK_MENU) & 0x8000) && !app.showLightbox &&
+            (!app.editMode || app.editorShowPreview) && inspectorOpen(app, (float)mx, (float)my)) {
+            app.swallowNextMouseUp = true;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return;
+        }
     }
     // Signal chips ride above everything: presses on a chip, the bell,
     // or the open tray act; any other press parks the draining chips
@@ -3917,6 +3930,8 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     tabHoverCardDismiss(app, hwnd);
     // Ctrl+Alt+Up/Down add editor carets (#251) before the AltGr guard
     if (editorAltArrowKey(app, hwnd, wParam)) return true;
+    // Esc puts the CSS inspector's card away
+    if (inspectorKeyDown(app, hwnd, wParam)) return true;
     if (!shortcutModifiersAllowed(static_cast<unsigned>(wParam))) return false;
     if (app.appMenuPressed) {
         if (wParam == VK_ESCAPE) cancelAppMenuPress(app, hwnd);

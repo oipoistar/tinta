@@ -121,6 +121,15 @@ theme's alone. The HTML export copies the files beside the page.
 body { font-family: "Literata", Georgia, serif }
 ```
 
+## The inspector
+
+With a CSS theme in use, **Ctrl+Alt+click** anything on the page: a card
+shows its path from the page down (`body > blockquote > p > strong`), each
+rule that styles it in cascade order with its selector, file and line,
+the rules it beat struck through, where Tinta's own look decides, and
+what the element inherits, with colours as swatches. Click a rule to
+open its sheet at that line; Esc or a click elsewhere puts the card away.
+
 ## Print
 
 `@media print` rules apply when printing. A sheet without them prints in

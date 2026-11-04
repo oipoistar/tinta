@@ -113,8 +113,12 @@ static LayoutInfo createLayout(App& app, std::wstring_view text, IDWriteTextForm
     return info;
 }
 
+// The run of text being laid out, for the inspector's record (page_style.h)
+static const StyledRun* g_inspectedRun = nullptr;
+
 static void addTextRect(App& app, const D2D1_RECT_F& rect, size_t docStart, size_t docLength,
                         size_t runIndex = (size_t)-1) {
+    if (g_inspectedRun && page::recording(app)) page::recordRun(app, rect, g_inspectedRun->style.css, g_inspectedRun->elem.get());
     size_t idx = app.textRects.size();
     app.textRects.push_back({rect, docStart, docLength, runIndex});
 
@@ -905,8 +909,13 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
         app.layoutRects.push_back({rect, color});
     };
 
+    // The inspector's record (page_style.h) knows each word's run
+    struct InspectedRun {
+        ~InspectedRun() { g_inspectedRun = nullptr; }
+    } inspectedRun;
     for (size_t runIndex = 0; runIndex < runs.size(); runIndex++) {
         const auto& run = runs[runIndex];
+        g_inspectedRun = &run;
         const ElementPtr& elem = run.elem;
         IDWriteTextFormat* format = run.style.format;
         IDWriteTextFormat* textFormat = format ? format : baseFormat;
@@ -4326,6 +4335,14 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
     // The element's style for the layout below (page_style.h), and its
     // side margins and max-width when a CSS theme sets them
     page::Block block(app, elem.get());
+    struct Recorded {
+        App& app;
+        float& y;
+        float top, left, right;
+        ~Recorded() {
+            if (page::recording(app)) page::recordBlock(app, D2D1::RectF(left, top, right, y));
+        }
+    } recorded{app, y, y, indent, indent + maxWidth};
     if (const page::Style& css = block.style()) {
         using css::Prop;
         if (css.has(Prop::MarginLeft)) {

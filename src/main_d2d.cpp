@@ -1,4 +1,5 @@
 #include "frontmatter_ui.h"
+#include "inspector.h"
 // Direct2D + DirectWrite renderer for Windows
 // Much faster startup than OpenGL
 
@@ -1031,6 +1032,7 @@ render_document:
 
     if (!livePage) renderFrontmatterOverflow(app);
     if (!livePage) renderReferenceCard(app);
+    if (!livePage) renderInspector(app);
 
     // Back to screen coordinates: notifications, stats, and overlays
     // (including the folder browser panel itself) are not shifted

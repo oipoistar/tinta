@@ -18,6 +18,7 @@
 #include <bitset>
 #include <memory>
 #include <string>
+#include <vector>
 
 struct App;
 namespace qmd { struct Element; }
@@ -124,5 +125,26 @@ std::wstring transform(std::wstring text, const Style& style);
 
 // Text formats made for styles go when the theme's faces or the zoom change
 void releaseFormats(App& app);
+
+// The inspector's record of a layout (inspector.h): each block and run of
+// text, where it was drawn and the style it was drawn in, with its path
+// from the page down
+struct Inspected {
+    D2D1_RECT_F bounds{};
+    css::Engine::Context context = 0;
+    std::vector<css::Element> path;  // body first
+    const Element* element = nullptr;
+    bool block = true;
+};
+// Records the next layout (the record lasts until a layout without it)
+void record(App& app, bool on);
+bool recording(const App& app);
+void recordBlock(App& app, const D2D1_RECT_F& bounds);
+void recordRun(App& app, const D2D1_RECT_F& bounds, const Style& style, const Element* leaf);
+const std::vector<Inspected>& recorded(const App& app);
+// The rules behind an element's style, in cascade order (css::Engine::explain)
+std::vector<css::Applied> explain(App& app, css::Engine::Context context);
+// The style a context computed to; null without a CSS theme
+const css::ComputedStyle* computedStyle(App& app, css::Engine::Context context);
 
 }  // namespace page

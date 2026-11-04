@@ -42,6 +42,7 @@ const Bits kColors = colorBits();
 
 struct Frame {
     Style style;
+    css::Element self;                 // the element itself, for the inspector's path
     const Element* element = nullptr;  // whose children `kids` describes
     std::vector<css::Element> kids;
     std::vector<const Element*> kidOf;
@@ -109,6 +110,9 @@ struct State {
     std::map<std::string, int> counters;
     // Front matter cssclasses, the body's classes
     std::vector<std::string> bodyClasses;
+    // The inspector's record (inspector.h)
+    bool recording = false;
+    std::vector<Inspected> inspected;
 
     ~State() { release(); }
     void release() {
@@ -435,6 +439,7 @@ void begin(App& app, float width) {
     s.gap = 0;
     s.depth = 0;
     s.counters.clear();
+    if (s.recording) s.inspected.clear();
     // Front matter cssclasses: [wide, serif] (Obsidian's key) class the body
     s.bodyClasses.clear();
     if (app.root && !app.root->children.empty() && app.root->children[0]->type == ElementType::Properties) {
@@ -464,6 +469,7 @@ void begin(App& app, float width) {
     const Style rootStyle = root.style;
     Frame& page = s.push(app.root.get());
     page.style = s.styleOf(s.engine.child(rootStyle.context, bodyElement), &rootStyle);
+    page.self = bodyElement;
 }
 
 bool active(const App& app) { return state(app) != nullptr; }
@@ -499,13 +505,17 @@ Block::Block(App& app, const Element* e) : app_(app) {
     }
     if (!placed && (!e || !describe(*e, d))) {
         // Text and the like: the block it sits in styles it
-        s->push(e).style = parentStyle;
+        const css::Element same = parent.self;
+        Frame& f = s->push(e);
+        f.style = parentStyle;
+        f.self = same;
         pushed_ = true;
         return;
     }
     const css::Engine::Context context = s->engine.child(parentStyle.context, d, previous, count);
     Frame& f = s->push(e);
     f.style = s->styleOf(context, &parentStyle);
+    f.self = d;
     s->count(*f.style.computed);
     pushed_ = true;
 }
@@ -518,6 +528,7 @@ Block::Block(App& app, const css::Element& d, const css::Element* previous, size
     const css::Engine::Context context = s->engine.child(parentStyle.context, d, previous, count);
     Frame& f = s->push(children);
     f.style = s->styleOf(context, &parentStyle);
+    f.self = d;
     s->count(*f.style.computed);
     pushed_ = true;
 }
@@ -788,6 +799,65 @@ std::wstring transform(std::wstring text, const Style& style) {
             break;
     }
     return text;
+}
+
+void record(App& app, bool on) {
+    if (!app.pageState) app.pageState = std::make_shared<State>();
+    app.pageState->recording = on;
+    if (on) app.pageState->inspected.clear();
+}
+
+bool recording(const App& app) {
+    const State* s = state(app);
+    return s && s->recording;
+}
+
+void recordBlock(App& app, const D2D1_RECT_F& bounds) {
+    State* s = state(app);
+    if (!s || !s->recording || s->depth < 3) return;
+    Inspected box;
+    box.bounds = bounds;
+    box.context = s->top().style.context;
+    for (size_t i = 1; i < s->depth; ++i) box.path.push_back(s->frames[i]->self);
+    box.element = s->top().element;
+    s->inspected.push_back(std::move(box));
+}
+
+void recordRun(App& app, const D2D1_RECT_F& bounds, const Style& style, const Element* leaf) {
+    State* s = state(app);
+    if (!s || !s->recording || !style) return;
+    Inspected box;
+    box.bounds = bounds;
+    box.context = style.context;
+    box.block = false;
+    box.element = leaf;
+    for (size_t i = 1; i < s->depth; ++i) box.path.push_back(s->frames[i]->self);
+    // The spans from the block down to the text: strong, em, a...
+    const Element* block = s->top().element;
+    std::vector<css::Element> spans;
+    for (const Element* e = leaf ? leaf->parent : nullptr; e && e != block; e = e->parent) {
+        css::Element d;
+        if (describe(*e, d)) spans.push_back(d);
+    }
+    box.path.insert(box.path.end(), spans.rbegin(), spans.rend());
+    s->inspected.push_back(std::move(box));
+}
+
+const std::vector<Inspected>& recorded(const App& app) {
+    static const std::vector<Inspected> nothing;
+    return app.pageState ? app.pageState->inspected : nothing;
+}
+
+std::vector<css::Applied> explain(App& app, css::Engine::Context context) {
+    State* s = app.pageState.get();
+    if (!s || !s->active) return {};
+    return s->engine.explain(context);
+}
+
+const css::ComputedStyle* computedStyle(App& app, css::Engine::Context context) {
+    State* s = app.pageState.get();
+    if (!s || !s->active) return nullptr;
+    return &s->engine.style(context);
 }
 
 void releaseFormats(App& app) {

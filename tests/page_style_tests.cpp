@@ -12,6 +12,7 @@
 #include "font_faces.h"
 #include "frame_preview.h"
 #include "input.h"
+#include "inspector.h"
 #include "overlays.h"
 #include "render.h"
 #include "utils.h"
@@ -377,6 +378,52 @@ void settingsPreview(App& app, const fs::path& dir) {
     app.width = width;
     app.showSettings = false;
 }
+
+// The CSS inspector: Ctrl+Alt+click on a strong inside a quote shows its
+// path, the rule that colours it with its file and line, what that rule
+// beat, and what it inherits; the card is saved to look at
+void inspecting(App& app, const fs::path& dir) {
+    const fs::path themes = dir / "themes";
+    fs::create_directories(themes);
+    {
+        std::ofstream(themes / "Inspect.css", std::ios::binary)
+            << "body { color: #202020; }\n"
+               "blockquote { color: #555555; border-left: 6px solid #00aa00; }\n"
+               "strong { color: #0000aa; }\n"
+               "blockquote strong { color: #aa00aa; }\n";
+    }
+    loadCustomThemes();
+    int inspect = -1;
+    for (int i = 0; i < themeCount(); i++) {
+        if (std::wstring(themeAt(i).name) == L"Inspect") inspect = i;
+    }
+    check(inspect >= 0, "the sheet to inspect is listed");
+    if (inspect < 0) return;
+    applyTheme(app, inspect);
+    app.root = app.parser.parse("# Inspected\n\n> A quote with **strong** words.\n").root;
+    app.scrollY = app.targetScrollY = 0;
+    layoutDocument(app);
+    const auto* strong = runOf(app, L"strong");
+    check(strong != nullptr, "the strong word is drawn");
+    if (!strong) return;
+    const float x = (strong->bounds.left + strong->bounds.right) / 2 + documentViewportX(app) - app.scrollX;
+    const float y = (strong->bounds.top + strong->bounds.bottom) / 2 - app.scrollY;
+    check(inspectorOpen(app, x, y), "Ctrl+Alt+click opens the card on the word");
+    const std::wstring card = inspectorText(app);
+    check(card.rfind(L"body > blockquote > p > strong\n", 0) == 0, "the card names the word's path from the page");
+    check(card.find(L"color: #aa00aa   blockquote strong   Inspect.css:4") != std::wstring::npos,
+          "the rule that wins, with its file and line");
+    check(card.find(L"~color: #0000aa   strong   Inspect.css:3") != std::wstring::npos, "and the rule it beat, marked");
+    check(card.find(L"font-weight: 700   strong") != std::wstring::npos, "Tinta's own bold, from its base sheet");
+    check(saveFramePreview(app, dir / "inspector.png", [&] { renderInspector(app); }), "saved inspector.png");
+    inspectorClose(app);
+    check(inspectorText(app).empty(), "Esc or a click away closes it");
+    std::error_code ignored;
+    fs::remove(themes / "Inspect.css", ignored);
+    loadCustomThemes();
+    applyTheme(app, 0);
+    check(!inspectorOpen(app, x, y), "without a CSS theme there is nothing to inspect");
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -398,6 +445,7 @@ int testPageStyles(App&, const fs::path& dir) {
     generatedContent(app, dir);
     importing(app, dir);
     settingsPreview(app, dir);
+    inspecting(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;
