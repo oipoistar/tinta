@@ -1052,7 +1052,8 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 }
                 // ~~`code`~~ and <del>`code`</del>: struck like the text around it
                 if (hasStrike) {
-                    float strikeY = y + mathTextOffset + normalLineHeight * 0.55f;
+                    float strikeY = run.style.css ? y + mathTextOffset + baselineOf(textFormat) - textFormat->GetFontSize() * 0.28f
+                                               : y + mathTextOffset + normalLineHeight * 0.55f;
                     app.layoutLines.push_back({D2D1::Point2F(textX, strikeY),
                                                D2D1::Point2F(textX + textWidth, strikeY), color, 1.0f});
                 }
@@ -1094,7 +1095,8 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                         bgColor, bgSpan);
                 }
                 if (hasStrike) {
-                    float strikeY = y + mathTextOffset + normalLineHeight * 0.55f;
+                    float strikeY = run.style.css ? y + mathTextOffset + baselineOf(textFormat) - textFormat->GetFontSize() * 0.28f
+                                               : y + mathTextOffset + normalLineHeight * 0.55f;
                     app.layoutLines.push_back({D2D1::Point2F(x, strikeY),
                                                D2D1::Point2F(x + w, strikeY), color, 1.0f});
                 }
@@ -1324,7 +1326,8 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                              bgColor, bgSpan);
             }
             if (hasStrike) {
-                float strikeY = y + mathTextOffset + normalLineHeight * 0.55f;
+                float strikeY = run.style.css ? y + mathTextOffset + baselineOf(textFormat) - textFormat->GetFontSize() * 0.28f
+                                               : y + mathTextOffset + normalLineHeight * 0.55f;
                 app.layoutLines.push_back({D2D1::Point2F(segX, strikeY),
                                            D2D1::Point2F(segX + segWidth, strikeY),
                                            color, 1.0f});
@@ -4227,6 +4230,10 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
         const bool themedDown = side(3, d, downColor) | side(1, d, downColor);
         if (themedAcross) across = headerRule = a;
         if (themedDown) down = d;
+        // A sheet that draws some of the grid draws all of it: a side it
+        // leaves out is no line at all, as in a browser
+        if (themedAcross && !themedDown) down = 0.0f;
+        if (themedDown && !themedAcross) across = headerRule = 0.0f;
         const page::Style& head = cellCss[0][0];
         if (head.has(Prop::BorderBottomWidth) || head.has(Prop::BorderBottomStyle)) {
             headerRule = head->border[2].style == css::LineStyle::None ? 0.0f : page::px(app, head->border[2].width);

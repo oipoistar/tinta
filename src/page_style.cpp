@@ -100,7 +100,7 @@ struct State {
         std::wstring folder, path;
         FILETIME time{};
         std::shared_ptr<const css::Sheet> sheet;
-        unsigned long long checked = 0;
+        unsigned long long checked = 0, statted = 0;
     } folder;
     std::string baseText;
     css::Media media;
@@ -426,8 +426,9 @@ std::wstring folderSheetOf(App& app, const std::string& document) {
     const size_t slash = folder.find_last_of(L"\\/");
     if (slash == std::wstring::npos) return {};
     folder.resize(slash);
-    // The folders are walked again after two seconds; the file found is
-    // looked at every time, so a save restyles at once
+    // The folders are walked again after two seconds, and the file found
+    // looked at again after half of one, as the file timer looks: typing
+    // in a note on a share asks its server no more often than that
     const unsigned long long now = GetTickCount64();
     std::wstring found = f.path;
     if (folder != f.folder || now - f.checked >= 2000) {
@@ -446,6 +447,8 @@ std::wstring folderSheetOf(App& app, const std::string& document) {
             dir.resize(up);
         }
     }
+    if (!found.empty() && found == f.path && f.sheet && now - f.statted < 500) return f.path;
+    f.statted = now;
     WIN32_FILE_ATTRIBUTE_DATA data{};
     if (found.empty() || !GetFileAttributesExW(found.c_str(), GetFileExInfoStandard, &data)) {
         f.path.clear();
