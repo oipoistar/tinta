@@ -119,6 +119,7 @@ struct Complex {
     std::vector<Compound> compounds;      // the subject first, then leftwards
     std::vector<Combinator> combinators;  // [k] joins compounds[k] to compounds[k + 1]
     uint32_t specificity = 0;             // ids << 20 | classes << 10 | types
+    uint32_t begin = 0, end = 0;          // where a rule's selector is written in its sheet, for explain()
     int8_t pseudo = -1;                   // a Pseudo, or -1 for the element itself
 };
 
@@ -128,6 +129,7 @@ struct Declaration {
     uint16_t prop = 0;        // a PropId
     bool important = false;
     bool pending = false;     // holds var(): checked when computed
+    uint32_t begin = 0;       // where its name is written in its sheet, for explain()
     std::string name;         // a custom property's --name
     std::string text;         // a custom property's value as written
     std::vector<Node> value;  // trimmed, without !important
@@ -151,6 +153,7 @@ struct Rule {
 
 struct Sheet {
     std::string file, text;
+    std::shared_ptr<const std::string> name;  // what its rules' `file` points to, so explain() finds their text
     Origin origin = Origin::Theme;
     std::vector<Rule> rules;  // the imports' rules inlined where they were imported
     std::vector<FontFace> faces;

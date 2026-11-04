@@ -218,6 +218,31 @@ struct Element {
 
 enum class Pseudo : uint8_t { Before, After, Marker, Selection };
 
+// A declaration that reaches an element, as the inspector lists it
+// (Engine::explain)
+struct Applied {
+    enum State : uint8_t {
+        Winning,     // it sets the property
+        Overridden,  // a declaration listed before it, for the same property, wins
+        Inherited,   // it sets the property on an ancestor, which hands it down
+    } state = Winning;
+    std::string property;     // the longhand or custom property: "border-left-color", "--ink"
+    std::string value;        // what it gives that property, as CSS: "#b35900", "var(--ink)"
+    std::string declaration;  // as written: "border-left: 3px solid #b35900 !important"
+    std::string selector;     // the selector of its rule that matched, as written: "blockquote > p"
+    uint32_t specificity = 0; // ids << 20 | classes << 10 | types
+    Origin origin = Origin::Theme;
+    bool important = false;
+    int ancestor = 0;         // where it is declared: 0 the element explained, 1 its parent...
+    int8_t pseudo = -1;       // a Pseudo when its rule styles that pseudo-element, else -1
+    std::string file;
+    int line = 0, column = 0; // 1-based, of the declaration
+};
+
+// An element's path from the page down, for the inspector: "body >
+// blockquote.alert-note > p > strong". A leading html is left out
+std::string selectorPath(const std::vector<Element>& path);
+
 class Engine {
 public:
     using Context = uint32_t;
@@ -244,6 +269,15 @@ public:
     // Null when no rule styles that pseudo-element of this context, or (for
     // before/after) gives it no content
     const ComputedStyle* pseudo(Context context, Pseudo which);
+
+    // Which rules styled a context, for the inspector: for each property its
+    // rules declare, the winning declaration and then those it beat, in
+    // cascade order; then, for inherited properties it does not declare, the
+    // declaration on the nearest ancestor that does, and the custom
+    // properties its declarations' var()s read. Works the cascade out again,
+    // so it is slow; style() does not pay for it
+    std::vector<Applied> explain(Context context);
+    std::vector<Applied> explain(Context context, Pseudo which);
 
     // Changes on every load() and setMedia(); caches keyed on styles compare it
     uint64_t generation() const;

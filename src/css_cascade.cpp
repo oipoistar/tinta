@@ -201,6 +201,59 @@ struct Win {
 
 using Longhands = std::vector<std::pair<Prop, std::vector<Node>>>;
 
+// --- For explain() ---
+
+// Source text on one line: each run of white space one space
+std::string oneLine(std::string_view text) {
+    std::string out;
+    for (char c : text) {
+        bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+        if (!space) out += c;
+        else if (!out.empty() && out.back() != ' ') out += ' ';
+    }
+    while (!out.empty() && out.back() == ' ') out.pop_back();
+    return out;
+}
+
+// A declaration as written, from its name at `at` to its `;` or its block's end
+std::string declarationAt(std::string_view text, size_t at) {
+    size_t i = at;
+    int depth = 0;
+    while (i < text.size()) {
+        char c = text[i];
+        if (c == '"' || c == '\'') {
+            for (++i; i < text.size() && text[i] != c && text[i] != '\n'; ++i) {
+                if (text[i] == '\\') ++i;
+            }
+        } else if (c == '/' && i + 1 < text.size() && text[i + 1] == '*') {
+            size_t close = text.find("*/", i + 2);
+            i = close == std::string_view::npos ? text.size() : close + 1;
+        } else if (c == '(' || c == '[') {
+            ++depth;
+        } else if ((c == ')' || c == ']') && depth > 0) {
+            --depth;
+        } else if (depth == 0 && (c == ';' || c == '}' || c == '{')) {
+            break;
+        }
+        ++i;
+    }
+    return oneLine(text.substr(at, std::min(i, text.size()) - at));
+}
+
+// The custom properties a value reads with var()
+void varNames(const std::vector<Node>& nodes, std::vector<std::string>& out) {
+    for (const Node& n : nodes) {
+        if (n.function("var")) {
+            for (const Node& arg : n.children) {
+                if (arg.is(Tok::Space)) continue;
+                if (arg.is(Tok::Ident) && arg.token.text.compare(0, 2, "--") == 0) out.push_back(arg.token.text);
+                break;
+            }
+        }
+        varNames(n.children, out);
+    }
+}
+
 }  // namespace
 
 struct Engine::Impl {
@@ -816,6 +869,170 @@ struct Engine::Impl {
         return contexts[id].pseudo[w] ? &contexts[id].pseudo[w]->s : nullptr;
     }
 
+    // --- Explaining, for the inspector ---
+
+    struct Candidate {
+        uint64_t priority = 0;
+        const Declaration* decl = nullptr;
+        uint32_t rule = 0, subject = 0;  // the subject: the rule's selector that matched, the most specific
+    };
+
+    // The declarations whose rules match a context, or a pseudo-element of
+    // it, by property, the cascade's winner first
+    struct Reach {
+        std::vector<Candidate> props[(size_t)Prop::Count];
+        std::map<std::string, std::vector<Candidate>> customs;
+    };
+
+    void reach(uint32_t id, int8_t pseudo, Reach& out) {
+        const uint64_t* bits = pool.data() + contexts[id].bits;
+        std::vector<std::pair<uint32_t, uint32_t>> best;  // a rule, and its subject of the highest specificity
+        for (size_t w = 0; w < words; ++w) {
+            uint64_t b = bits[w] & subjectMask[w];
+            while (b) {
+                uint32_t p = (uint32_t)(w * 64) + (uint32_t)lowestBit(b);
+                b &= b - 1;
+                uint32_t si = (uint32_t)subjectOf[p];
+                const Subject& sub = subjects[si];
+                if (sub.pseudo != pseudo || !rules[sub.rule].active) continue;
+                auto it = std::find_if(best.begin(), best.end(), [&](const auto& m) { return m.first == sub.rule; });
+                if (it == best.end()) best.emplace_back(sub.rule, si);
+                else if (sub.specificity > subjects[it->second].specificity) it->second = si;
+            }
+        }
+        for (const auto& m : best) {
+            const RuleRef& ref = rules[m.first];
+            const std::vector<Declaration>& decls = ref.rule->declarations;
+            for (size_t k = 0; k < decls.size(); ++k) {
+                const Declaration& d = decls[k];
+                uint64_t band = d.important ? 5u - ref.origin : ref.origin;  // as cascade() ranks them
+                Candidate c{band << 61 | (uint64_t)subjects[m.second].specificity << 31 | (ref.sequence + k), &d, m.first,
+                            m.second};
+                if (d.prop == PropCustom) {
+                    out.customs[d.name].push_back(c);
+                } else if (d.prop < (uint16_t)Prop::Count) {
+                    out.props[d.prop].push_back(c);
+                } else {
+                    for (Prop p : longhands(d.prop)) out.props[(size_t)p].push_back(c);
+                }
+            }
+        }
+        auto first = [](const Candidate& a, const Candidate& b) { return a.priority > b.priority; };
+        for (auto& list : out.props) std::sort(list.begin(), list.end(), first);
+        for (auto& entry : out.customs) std::sort(entry.second.begin(), entry.second.end(), first);
+    }
+
+    std::vector<Applied> explain(uint32_t id, int8_t pseudo) {
+        // Each rule's sheet text, through the file its rules point to
+        std::unordered_map<const std::string*, const std::string*> texts;
+        std::vector<const Sheet*> todo;
+        for (const auto& s : sheets) todo.push_back(s.get());
+        while (!todo.empty()) {
+            const Sheet* s = todo.back();
+            todo.pop_back();
+            if (s->name) texts[s->name.get()] = &s->text;
+            for (const Sheet::Import& i : s->imports) {
+                if (i.sheet) todo.push_back(i.sheet.get());
+            }
+        }
+        std::vector<std::string> reads;  // custom properties the listed declarations read
+        auto describe = [&](const Candidate& c, const std::string& property, Applied::State state, int ancestor,
+                            int8_t which) {
+            Applied a;
+            const RuleRef& ref = rules[c.rule];
+            const Declaration& d = *c.decl;
+            a.state = state;
+            a.property = property;
+            if (d.prop == PropCustom) a.value = d.text;
+            else serializeNodes(d.value, a.value);
+            a.specificity = subjects[c.subject].specificity;
+            a.origin = (Origin)ref.origin;
+            a.important = d.important;
+            a.ancestor = ancestor;
+            a.pseudo = which;
+            if (ref.rule->file) a.file = *ref.rule->file;
+            a.line = d.line;
+            a.column = d.column;
+            auto text = texts.find(ref.rule->file.get());
+            if (text != texts.end()) {
+                const std::string& source = *text->second;
+                uint32_t first = c.subject;
+                while (first > 0 && subjects[first - 1].rule == c.rule) --first;
+                const Complex& selector = ref.rule->selectors[c.subject - first];
+                if (selector.begin <= selector.end && selector.end <= source.size()) {
+                    a.selector = oneLine(std::string_view(source).substr(selector.begin, selector.end - selector.begin));
+                }
+                if (d.begin < source.size()) a.declaration = declarationAt(source, d.begin);
+            }
+            if (state != Applied::Overridden) varNames(d.value, reads);
+            return a;
+        };
+
+        std::vector<Applied> out;
+        Reach own;
+        reach(id, pseudo, own);
+        for (size_t p = 0; p < (size_t)Prop::Count; ++p) {
+            for (size_t k = 0; k < own.props[p].size(); ++k) {
+                out.push_back(describe(own.props[p][k], propertyName((int)p), k ? Applied::Overridden : Applied::Winning, 0, pseudo));
+            }
+        }
+        for (const auto& entry : own.customs) {
+            for (size_t k = 0; k < entry.second.size(); ++k) {
+                out.push_back(describe(entry.second[k], entry.first, k ? Applied::Overridden : Applied::Winning, 0, pseudo));
+            }
+        }
+
+        // Where inherited values come from: the element itself first for its
+        // ::before, ::after and ::marker, then its ancestors; ::selection
+        // inherits from the ancestors' ::selection
+        struct Link {
+            uint32_t id;
+            int depth;
+            int8_t pseudo;
+        };
+        const bool selection = pseudo == (int8_t)Pseudo::Selection;
+        std::vector<Link> chain, customChain;
+        if (pseudo >= 0) customChain.push_back({id, 0, -1});
+        int depth = 0;
+        for (uint32_t c = contexts[id].parent; c != noContext; c = contexts[c].parent) {
+            customChain.push_back({c, ++depth, -1});
+            if (selection) chain.push_back({c, depth, pseudo});
+        }
+        if (!selection) chain = customChain;
+        std::map<std::pair<uint32_t, int8_t>, std::unique_ptr<Reach>> reaches;
+        auto reachOf = [&](const Link& link) -> const Reach& {
+            std::unique_ptr<Reach>& r = reaches[{link.id, link.pseudo}];
+            if (!r) {
+                r = std::make_unique<Reach>();
+                reach(link.id, link.pseudo, *r);
+            }
+            return *r;
+        };
+        for (size_t p = 0; p < (size_t)Prop::Count; ++p) {
+            if (!own.props[p].empty() || !(selection || inherited((Prop)p))) continue;
+            for (const Link& link : chain) {
+                const std::vector<Candidate>& list = reachOf(link).props[p];
+                if (list.empty()) continue;
+                out.push_back(describe(list[0], propertyName((int)p), Applied::Inherited, link.depth, link.pseudo));
+                break;
+            }
+        }
+        // The custom properties those read, and those that these read in turn
+        std::unordered_set<std::string> followed;
+        for (size_t r = 0; r < reads.size(); ++r) {
+            std::string name = reads[r];
+            if (!followed.insert(name).second || own.customs.count(name)) continue;
+            for (const Link& link : customChain) {
+                const Reach& at = reachOf(link);
+                auto found = at.customs.find(name);
+                if (found == at.customs.end()) continue;
+                out.push_back(describe(found->second[0], name, Applied::Inherited, link.depth, link.pseudo));
+                break;
+            }
+        }
+        return out;
+    }
+
     Impl() { compileAll(); }
 
     void load(std::vector<std::shared_ptr<const Sheet>> list, const Media& m) {
@@ -884,7 +1101,30 @@ const ComputedStyle* Engine::pseudo(Context context, Pseudo which) {
     return impl->pseudoOf(context < impl->contexts.size() ? context : 0, which);
 }
 
+std::vector<Applied> Engine::explain(Context context) {
+    impl->root();
+    return impl->explain(context < impl->contexts.size() ? context : 0, -1);
+}
+
+std::vector<Applied> Engine::explain(Context context, Pseudo which) {
+    impl->root();
+    return impl->explain(context < impl->contexts.size() ? context : 0, (int8_t)which);
+}
+
 uint64_t Engine::generation() const { return impl->generation; }
 const std::vector<Diagnostic>& Engine::diagnostics() const { return impl->diagnostics; }
+
+std::string selectorPath(const std::vector<Element>& path) {
+    std::string out;
+    for (size_t i = 0; i < path.size(); ++i) {
+        const Element& e = path[i];
+        if (i == 0 && e.tag == "html" && path.size() > 1) continue;
+        if (!out.empty()) out += " > ";
+        out += e.tag.empty() ? std::string_view("*") : e.tag;
+        if (!e.id.empty()) out.append("#").append(e.id);
+        for (std::string_view c : e.classes) out.append(".").append(c);
+    }
+    return out;
+}
 
 }
