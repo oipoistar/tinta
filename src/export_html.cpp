@@ -5,6 +5,8 @@
 // no external assets: local images are embedded as data URIs.
 
 #include "export.h"
+#include "css.h"
+#include "font_faces.h"
 
 #include "editor.h"
 #include "file_utils.h"
@@ -188,8 +190,9 @@ WrappedLines wrapLines(App& app, const std::wstring& text, float wrapWidth,
     if (text.empty() || !app.dwriteFactory) return out;
     constexpr float kHuge = 100000.0f;
     IDWriteTextFormat* format = nullptr;
+    const wchar_t* family = style.mono ? app.theme.codeFontFamily : app.theme.fontFamily;
     app.dwriteFactory->CreateTextFormat(
-        style.mono ? app.theme.codeFontFamily : app.theme.fontFamily, nullptr,
+        fontfaces::name(family), fontfaces::collection(family),
         style.bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
         style.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, diagramFontSize(style, scale), L"en-us",
@@ -959,7 +962,7 @@ mermaidext::Built buildDiagramPrims(App& app, const std::string& sourceUtf8,
         const wchar_t* family =
             style.mono ? app.theme.codeFontFamily : app.theme.fontFamily;
         app.dwriteFactory->CreateTextFormat(
-            family, nullptr,
+            fontfaces::name(family), fontfaces::collection(family),
             style.bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD
                        : DWRITE_FONT_WEIGHT_NORMAL,
             style.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
@@ -1716,6 +1719,41 @@ bool exportHtmlFile(App& app, const std::wstring& path) {
     // and what Tinta leaves to it (docs/specs/theming.md)
     if (std::string sheet = themeSheetCss(app.currentThemeIndex); !sheet.empty()) {
         ctx.out += "<style>\n" + sheet + "</style>\n";
+    }
+    // Its @font-face files go beside the page, in a folder named for it,
+    // and faces declared after the sheet's own point a browser there
+    if (std::shared_ptr<const css::Sheet> parsed = themeSheet(app.currentThemeIndex)) {
+        const size_t slash = path.find_last_of(L"/\\");
+        const std::wstring dir = slash == std::wstring::npos ? std::wstring(L".") : path.substr(0, slash);
+        std::wstring stem = slash == std::wstring::npos ? path : path.substr(slash + 1);
+        if (const size_t dot = stem.find_last_of(L'.'); dot != std::wstring::npos) stem.resize(dot);
+        const std::wstring folder = stem + L"_fonts";
+        std::string faces;
+        for (const css::FontFace& face : css::fontFaces(*parsed)) {
+            for (const auto& source : face.sources) {
+                if (source.rfind("local:", 0) == 0) continue;
+                const std::wstring from = toWide(source);
+                const size_t cut = from.find_last_of(L"/\\");
+                const std::wstring name = cut == std::wstring::npos ? from : from.substr(cut + 1);
+                CreateDirectoryW((dir + L"\\" + folder).c_str(), nullptr);
+                if (!CopyFileW(from.c_str(), (dir + L"\\" + folder + L"\\" + name).c_str(), FALSE)) continue;
+                std::string family;
+                for (char c : face.family) {
+                    if (c == '"' || c == '\\') family += '\\';
+                    family += c;
+                }
+                faces += "@font-face{font-family:\"" + family + "\";src:url(\"" + toUtf8(folder + L"/" + name) +
+                         "\");font-weight:" + std::to_string(face.weightMin) +
+                         (face.weightMax != face.weightMin ? " " + std::to_string(face.weightMax) : std::string()) +
+                         ";font-style:" +
+                         (face.style == css::FontStyle::Italic    ? "italic"
+                          : face.style == css::FontStyle::Oblique ? "oblique"
+                                                                  : "normal") +
+                         "}\n";
+                break;
+            }
+        }
+        if (!faces.empty()) ctx.out += "<style>\n" + faces + "</style>\n";
     }
     if (std::any_of(app.root->children.begin(), app.root->children.end(), [](const ElementPtr& e) { return e->type == ElementType::Footnotes; }))
         ctx.out += "<style>.footnote{position:relative;padding-left:2em}.footnote>span{position:absolute;left:0}.footnote>p:first-of-type{margin-top:0}.footnote-backlinks{font-size:.8em}</style>\n";

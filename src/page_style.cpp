@@ -4,6 +4,7 @@
 #include "page_style.h"
 
 #include "app.h"
+#include "font_faces.h"
 #include "markdown.h"
 
 #include <cstdio>
@@ -223,7 +224,8 @@ IDWriteTextFormat* formatFor(App& app, State& s, const FontKey& key) {
     if (found != s.formats.end()) return found->second;
     IDWriteTextFormat* format = nullptr;
     if (app.dwriteFactory) {
-        app.dwriteFactory->CreateTextFormat(key.family.c_str(), nullptr, (DWRITE_FONT_WEIGHT)key.weight,
+        app.dwriteFactory->CreateTextFormat(fontfaces::name(key.family.c_str()), fontfaces::collection(key.family.c_str()),
+                                            (DWRITE_FONT_WEIGHT)key.weight,
                                             (DWRITE_FONT_STYLE)key.style, (DWRITE_FONT_STRETCH)key.stretch, key.size,
                                             L"en-us", &format);
     }
@@ -257,7 +259,7 @@ std::wstring installedFace(App& app, const std::vector<std::string>& families) {
         else if (name == "cursive") family = L"Segoe Script";
         UINT32 index = 0;
         BOOL exists = FALSE;
-        if (SUCCEEDED(fonts->FindFamilyName(family.c_str(), &index, &exists)) && exists) {
+        if (fontfaces::has(family) || (SUCCEEDED(fonts->FindFamilyName(family.c_str(), &index, &exists)) && exists)) {
             face = family;
             break;
         }

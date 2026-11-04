@@ -85,6 +85,7 @@ set(THEME_SOURCES
     src/themes.cpp
     src/themes_css.cpp
     src/page_style.cpp
+    src/font_faces.cpp
     src/css.cpp
     src/css_values.cpp
     src/css_props.cpp

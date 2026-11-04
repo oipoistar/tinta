@@ -27,43 +27,94 @@ body {
   color: var(--ink);
   background: light-dark(#fbf8f1, #1b1d22);
   font: 17px/1.65 Georgia, serif;
+  max-width: 44em;                  /* the reading column */
 }
-h1 { font-size: 2.2em; font-weight: 600 }
-h2 { color: #a33; font-style: italic }
-a { color: #3366cc }
-code { background: none; color: #b35900 }
-pre { background: #f4f1ea }
-blockquote { border-left-color: #b35900 }
-mark { background: #ffe08a }
-strong { color: #222 }
+h1 { font-size: 2.2em; font-weight: 600; text-align: center }
+h2 { border-bottom: 1px solid #ddd; padding-bottom: .3em }
+p + p { text-indent: 1.5em }
+a { color: #3366cc; text-decoration: none }
+code { background: #f4f1ea; padding: .1em .4em; border-radius: 4px }
+pre { background: #f4f1ea; padding: 16px; border-radius: 8px }
+blockquote { border-left: 3px solid #b35900; color: #666; font-style: italic }
+blockquote strong { color: #b35900 }
+ul ul { list-style-type: circle }
+li::marker { color: #b35900 }
+tbody tr:nth-child(even) td { background: #f6f3ec }
 ::selection { background: rgb(51 102 204 / 0.3) }
-hr { border-top-color: #ccc }
 .token.keyword { color: #a626a4 }
 ```
 
-## What it reads
+## What it draws
 
-- **Elements:** `body`, `p`, `h1`-`h6`, `a`, `strong`, `em`, `code` (inline)
-  and `pre` (code blocks), `blockquote`, `mark`, `hr`, `::selection`, and the
-  code tokens `.token.keyword`, `.string`, `.comment`, `.number`,
-  `.function`, `.class-name` and `.control`.
-- **Properties, in this version:** `color`, `background` and
-  `background-color`, `accent-color`, `color-scheme`, `font-family` (the
-  first face this PC has), `font-size` for the body, code and each heading,
-  `font-weight` and `font-style` for headings, the body's `line-height`, and
-  the border colours of quotes and rules.
+Every element of the page takes its own rules, as in a browser: the second
+paragraph's indent, a heading's border, the quote's padding, the third
+row's background, a `strong` inside a quote. Where the sheet says nothing,
+Tinta's own look stays.
+
+- **Elements**, as the HTML export names them: `body`, `p`, `h1`-`h6`, `a`,
+  `strong`, `em`, `del`, `ins`, `mark`, `sup`, `sub`, `code` (inline) and
+  `pre` (code blocks), `blockquote` (callouts are `blockquote.alert-note`,
+  `-tip`, `-important`, `-warning`, `-caution`, with `p.alert-title`), `ul`,
+  `ol`, `li` (tasks are `li.task`) and `li::marker`, `table` with `thead`,
+  `tbody`, `tr`, `th` and `td`, `hr`, `figure` and `figcaption`,
+  `section.footnotes` and `div.footnote`, `span.citation` and the
+  references' `div#refs` and `div.csl-entry`, `::selection`, and the code
+  tokens `.token.keyword`, `.string`, `.comment`, `.number`, `.function`,
+  `.class-name` and `.control`. Sibling and position selectors work:
+  `h1 + p`, `li:last-child`, `tr:nth-child(even)`.
+- **Text:** `color`, `font-family` (the first face this PC or the sheet
+  has), `font-size`, `font-weight`, `font-style`, `font-stretch`,
+  `line-height`, `letter-spacing`, `text-transform`, `text-align` (with
+  `justify`), `text-indent`, `font-feature-settings` and `font-variant-*`,
+  and `text-decoration` on links, `del` and `ins`.
+- **Boxes:** `margin` (between blocks they collapse as CSS's do),
+  `padding`, `background-color`, `border` and `border-radius` for
+  paragraphs, headings, captions, quotes, code blocks, inline code and
+  table cells; `max-width`, which on `body` is the reading column.
+- **Lists:** `list-style-type` (`disc`, `circle`, `square`, `decimal`,
+  `decimal-leading-zero`, `lower-alpha`, `upper-alpha`, `lower-roman`,
+  `upper-roman`, `lower-greek`, `cjk-decimal`, `none` or a string),
+  `padding-left` on `ul` and `ol` as the indent the markers hang in, and
+  `::marker`'s `content` and `color`.
+- **Tables:** the cells' `padding`, their borders (top and bottom across,
+  left and right down) and the rows' backgrounds.
+- **Rules:** `hr`'s top border, or its background as a bar when it has
+  none.
 - **The language:** comments, `!important`, every selector CSS has for a
   document (descendants, children, siblings, `:is()`, `:not()`,
   `:nth-child()`...), `var()`, `calc()`, `min()`, `max()`, `clamp()`, hex and
   named colours, `rgb()`, `hsl()`, `hwb()`, `lab()`, `lch()`, `oklab()`,
   `oklch()`, `color-mix()`, `light-dark()`, `@import` (a built-in theme by
   name, a `themes.ini` theme by name, or a file beside the sheet), `@media`
-  (`prefers-color-scheme`, `print`, widths) and `@supports`.
+  (`prefers-color-scheme`, `print`, widths), `@supports` and `@font-face`.
 
-The rest of CSS that Tinta will draw in later versions, such as spacing,
-borders, letter spacing and list markers, is read and kept but not drawn
-yet. Mistakes and properties Tinta does not use are reported in a notice
-with the file and line, and the rest of the sheet applies.
+Mistakes and properties Tinta does not use are reported in a notice with
+the file and line, and the rest of the sheet applies.
+
+## Fonts
+
+`@font-face` loads a theme's own fonts: TTF, OTF, TTC, WOFF and WOFF2 files
+beside the sheet (`src: url(fonts/Literata.woff2)`), or a face this PC has
+(`src: local("Georgia")`). Nothing is installed; the faces are the
+theme's alone. The HTML export copies the files beside the page.
+
+```css
+@font-face {
+  font-family: "Literata";
+  src: url("fonts/Literata.ttf");
+}
+@font-face {
+  font-family: "Literata";
+  src: url("fonts/Literata-Italic.ttf");
+  font-style: italic;
+}
+body { font-family: "Literata", Georgia, serif }
+```
+
+## Print
+
+`@media print` rules apply when printing. A sheet without them prints in
+Tinta's print palette, black on white, with its fonts and spacing.
 
 ## Importing Typora and Obsidian themes
 

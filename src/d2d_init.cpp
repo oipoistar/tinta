@@ -1,4 +1,5 @@
 #include "d2d_init.h"
+#include "font_faces.h"
 #include "page_style.h"
 #include "tabs.h"
 #include "math_render.h"
@@ -356,11 +357,12 @@ const wchar_t* installedFace(App& app, const wchar_t* face, bool mono) {
         !fonts) {
         return face;
     }
+    // A face a CSS theme brought with @font-face counts as installed
     auto installed = [fonts](const wchar_t* name) {
         UINT32 index = 0;
         BOOL exists = FALSE;
-        return name && name[0] && SUCCEEDED(fonts->FindFamilyName(name, &index, &exists)) &&
-               exists;
+        return name && name[0] &&
+               (fontfaces::has(name) || (SUCCEEDED(fonts->FindFamilyName(name, &index, &exists)) && exists));
     };
     // Nearest first; Consolas and Segoe UI come with every Windows
     auto firstInstalled = [&](std::initializer_list<const wchar_t*> names) -> const wchar_t* {
@@ -435,46 +437,46 @@ void updateTextFormats(App& app) {
     const wchar_t* fontFamily = app.theme.fontFamily;
     const wchar_t* codeFont = app.theme.codeFontFamily;
 
-    app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(fontFamily), fontfaces::collection(fontFamily),
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         fontSize, L"en-us", &app.textFormat);
 
-    app.dwriteFactory->CreateTextFormat(themeHeadingFont(app.theme), nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(themeHeadingFont(app.theme)), fontfaces::collection(themeHeadingFont(app.theme)),
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         28.0f * scale, L"en-us", &app.headingFormat);
 
-    app.dwriteFactory->CreateTextFormat(codeFont, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(codeFont), fontfaces::collection(codeFont),
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         codeSize, L"en-us", &app.codeFormat);
 
-    app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(fontFamily), fontfaces::collection(fontFamily),
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         fontSize, L"en-us", &app.boldFormat);
 
-    app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(fontFamily), fontfaces::collection(fontFamily),
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
         fontSize, L"en-us", &app.italicFormat);
 
     // Inline spans nest, so every weight/style combination needs a format:
     // ***both***, **`code`**, *`code`*
-    app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(fontFamily), fontfaces::collection(fontFamily),
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
         fontSize, L"en-us", &app.boldItalicFormat);
 
-    app.dwriteFactory->CreateTextFormat(codeFont, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(codeFont), fontfaces::collection(codeFont),
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         codeSize, L"en-us", &app.codeBoldFormat);
 
-    app.dwriteFactory->CreateTextFormat(codeFont, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(codeFont), fontfaces::collection(codeFont),
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
         codeSize, L"en-us", &app.codeItalicFormat);
 
-    app.dwriteFactory->CreateTextFormat(codeFont, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(codeFont), fontfaces::collection(codeFont),
         DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
         codeSize, L"en-us", &app.codeBoldItalicFormat);
 
     // Small format for ^superscript^ / ~subscript~ spans
-    app.dwriteFactory->CreateTextFormat(fontFamily, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(fontFamily), fontfaces::collection(fontFamily),
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         fontSize * 0.68f, L"en-us", &app.supSubFormat);
 
@@ -488,13 +490,13 @@ void updateTextFormats(App& app) {
         if (app.theme.headingSize[i] > 0) headingSizes[i] = app.theme.headingSize[i];
         const DWRITE_FONT_WEIGHT weight = app.theme.headingWeight[i] > 0
             ? (DWRITE_FONT_WEIGHT)app.theme.headingWeight[i] : DWRITE_FONT_WEIGHT_BOLD;
-        app.dwriteFactory->CreateTextFormat(headingFont, nullptr,
+        app.dwriteFactory->CreateTextFormat(fontfaces::name(headingFont), fontfaces::collection(headingFont),
             weight, app.theme.headingItalic[i] ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, headingSizes[i] * scale, L"en-us", &app.headingFormats[i]);
-        app.dwriteFactory->CreateTextFormat(headingFont, nullptr,
+        app.dwriteFactory->CreateTextFormat(fontfaces::name(headingFont), fontfaces::collection(headingFont),
             DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STRETCH_NORMAL,
             headingSizes[i] * scale, L"en-us", &app.headingItalicFormats[i]);
-        app.dwriteFactory->CreateTextFormat(headingFont, nullptr,
+        app.dwriteFactory->CreateTextFormat(fontfaces::name(headingFont), fontfaces::collection(headingFont),
             DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             headingSizes[i] * scale * 0.68f, L"en-us", &app.headingScriptFormats[i]);
     }
@@ -549,7 +551,7 @@ void updateOverlayFormats(App& app) {
     float scale = app.contentScale;
 
     // Search overlay format
-    app.dwriteFactory->CreateTextFormat(app.theme.fontFamily, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(app.theme.fontFamily), fontfaces::collection(app.theme.fontFamily),
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         16.0f * scale, L"en-us", &app.searchTextFormat);
 
@@ -578,7 +580,7 @@ void updateOverlayFormats(App& app) {
 
     // Stats overlay format: fixed UI size so zooming the document cannot
     // overflow the fixed stats box
-    app.dwriteFactory->CreateTextFormat(app.theme.codeFontFamily, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(app.theme.codeFontFamily), fontfaces::collection(app.theme.codeFontFamily),
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         13.0f * scale, L"en-us", &app.statsFormat);
 
@@ -632,7 +634,7 @@ void updateOverlayFormats(App& app) {
     // Editor text format (monospace, same size as body)
     float editorScale = app.contentScale * app.zoomFactor;
     float editorFontSize = 14.0f * editorScale;
-    app.dwriteFactory->CreateTextFormat(app.theme.codeFontFamily, nullptr,
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(app.theme.codeFontFamily), fontfaces::collection(app.theme.codeFontFamily),
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         editorFontSize, L"en-us", &app.editorTextFormat);
     if (app.editorTextFormat) {
@@ -701,13 +703,13 @@ void ensureThemePreviewFormats(App& app) {
         // In the faces the theme will draw with
         D2DTheme t = themeAt(i);
         useInstalledFaces(app, t);
-        app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
+        app.dwriteFactory->CreateTextFormat(fontfaces::name(t.fontFamily), fontfaces::collection(t.fontFamily),
             DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             14.0f * scale, L"en-us", &app.themePreviewFormats[i].name);
-        app.dwriteFactory->CreateTextFormat(t.fontFamily, nullptr,
+        app.dwriteFactory->CreateTextFormat(fontfaces::name(t.fontFamily), fontfaces::collection(t.fontFamily),
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             11.0f * scale, L"en-us", &app.themePreviewFormats[i].preview);
-        app.dwriteFactory->CreateTextFormat(t.codeFontFamily, nullptr,
+        app.dwriteFactory->CreateTextFormat(fontfaces::name(t.codeFontFamily), fontfaces::collection(t.codeFontFamily),
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             10.0f * scale, L"en-us", &app.themePreviewFormats[i].code);
         useUiFontFallback(app, app.themePreviewFormats[i].name);

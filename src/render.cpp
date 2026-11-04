@@ -2,6 +2,7 @@
 #include "render.h"
 #include "file_utils.h"
 #include "inline_style.h"
+#include "font_faces.h"
 #include "page_style.h"
 #include "utils.h"
 #include "syntax.h"
@@ -2416,7 +2417,7 @@ struct DiagramFormats {
         float size = (style.mono ? 13.0f : 14.0f) * scale * style.scale;
         IDWriteTextFormat* format = nullptr;
         app.dwriteFactory->CreateTextFormat(
-            family, nullptr,
+            fontfaces::name(family), fontfaces::collection(family),
             style.bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD
                        : DWRITE_FONT_WEIGHT_NORMAL,
             style.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,

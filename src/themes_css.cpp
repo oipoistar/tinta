@@ -5,6 +5,7 @@
 #pragma optimize("s", on)
 
 #include "themes_css.h"
+#include "font_faces.h"
 
 #include <dwrite.h>
 
@@ -146,7 +147,7 @@ std::wstring faceOf(const css::ComputedStyle& style, const std::wstring& fallbac
         else if (name == "sans-serif" || name == "system-ui" || name == "ui-sans-serif") family = L"Segoe UI";
         else if (name == "monospace" || name == "ui-monospace") family = L"Consolas";
         else if (name == "cursive") family = L"Segoe Script";
-        if (installed(family)) return family;
+        if (fontfaces::has(family) || installed(family)) return family;
         if (first.empty()) first = family;
     }
     return first.empty() ? fallback : first;
@@ -165,6 +166,8 @@ CssTheme compileCssTheme(const std::string& text, const std::string& file, bool 
     using css::Prop;
     CssTheme result;
     result.sheet = css::parse(text, file, css::Origin::Theme, imports, result.diagnostics);
+    // Its own faces first, so a family it brings is one it can draw with
+    fontfaces::load(css::fontFaces(*result.sheet), result.diagnostics);
     css::Engine engine;
     engine.load({result.sheet}, css::Media{dark, false, 800});
     const auto root = engine.root();

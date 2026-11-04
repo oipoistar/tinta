@@ -7,6 +7,7 @@
 
 #include "live_text.h"
 #include "d2d_init.h"
+#include "font_faces.h"
 #include "i18n.h"
 #include "render.h"
 #include "syntax.h"
@@ -144,7 +145,8 @@ IDWriteTextFormat* baseFormat(App& app, const std::wstring& face, float size, bo
     auto it = cache.find(key);
     if (it != cache.end()) return it->second;
     IDWriteTextFormat* fmt = nullptr;
-    app.dwriteFactory->CreateTextFormat(face.empty() ? L"Segoe UI" : face.c_str(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+    const wchar_t* family = face.empty() ? L"Segoe UI" : face.c_str();
+    app.dwriteFactory->CreateTextFormat(fontfaces::name(family), fontfaces::collection(family), DWRITE_FONT_WEIGHT_NORMAL,
                                         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, std::max(1.0f, size), L"en-us",
                                         &fmt);
     if (fmt) {

@@ -5,6 +5,7 @@
 // same primitives the viewer draws, and land as embedded pictures.
 
 #include "export.h"
+#include "font_faces.h"
 #include "d2d_init.h"
 #include <functional>
 #include <set>
@@ -489,10 +490,9 @@ void drawPrims(App& app, RasterTarget& rt, const mermaidext::Built& built,
                 float fontSize =
                     (prim.style.mono ? 13.0f : 14.0f) *
                     (prim.style.scale > 0 ? prim.style.scale : 1.0f) * scale;
+                const wchar_t* family = prim.style.mono ? app.theme.codeFontFamily : app.theme.fontFamily;
                 app.dwriteFactory->CreateTextFormat(
-                    prim.style.mono ? app.theme.codeFontFamily
-                                    : app.theme.fontFamily,
-                    nullptr,
+                    fontfaces::name(family), fontfaces::collection(family),
                     prim.style.bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD
                                     : DWRITE_FONT_WEIGHT_NORMAL,
                     prim.style.italic ? DWRITE_FONT_STYLE_ITALIC

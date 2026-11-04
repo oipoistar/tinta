@@ -3,10 +3,13 @@
 // margins, a first-line indent and centred text; a heading's border; a
 // quote's bar, indent and colours; list markers; inline code chips; a code
 // block's box; a table's grid, padding and stripes; a rule; and the same
-// page under a built-in theme, which draws as it always has.
+// page under a built-in theme, which draws as it always has; and a sheet's
+// own fonts, loaded with @font-face.
 #include "d2d_init.h"
 #include "document.h"
 #include "editor.h"
+#include "export.h"
+#include "font_faces.h"
 #include "frame_preview.h"
 #include "render.h"
 #include "utils.h"
@@ -15,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -203,6 +207,74 @@ void unstyled(App& app) {
     check(second && closeTo(second->bounds.left, app.layoutIndent), "and starts every paragraph at the edge");
     for (const auto& rect : app.layoutRects) check(rect.radius == 0 && rect.strokeWidth == 0, "and square boxes");
 }
+// A sheet's own faces (@font-face): a file this PC has, under a family name
+// of the sheet's own, draws the body; a missing file is reported on its line
+void fontFaces(App& app, const fs::path& dir) {
+    wchar_t windows[MAX_PATH]{};
+    GetWindowsDirectoryW(windows, MAX_PATH);
+    const fs::path georgia = fs::path(windows) / L"Fonts" / L"georgia.ttf";
+    if (!fs::exists(georgia)) return;  // a Windows without Georgia: nothing to load
+    const fs::path themes = dir / "themes";
+    fs::create_directories(themes);
+    fs::copy_file(georgia, themes / "own-face.ttf", fs::copy_options::overwrite_existing);
+    {
+        std::ofstream(themes / "Faces.css", std::ios::binary)
+            << "@font-face { font-family: \"Tinta Own Serif\"; src: url(\"own-face.ttf\"); }\n"
+               "@font-face { font-family: \"Tinta Missing\"; src: url(\"fonts/missing.woff2\"); }\n"
+               "body { font-family: \"Tinta Own Serif\", sans-serif; }\n"
+               "h2 { font-family: \"Tinta Missing\", \"Tinta Own Serif\"; font-style: italic; }\n";
+    }
+    loadCustomThemes();
+    int faces = -1;
+    for (int i = 0; i < themeCount(); i++) {
+        if (std::wstring(themeAt(i).name) == L"Faces") faces = i;
+    }
+    check(faces >= 0, "the sheet with faces is listed");
+    if (faces < 0) return;
+    check(fontfaces::has(L"Tinta Own Serif") && fontfaces::collection(L"Tinta Own Serif") != nullptr,
+          "@font-face loads the file into a collection of its own");
+    check(std::wstring(fontfaces::name(L"Tinta Own Serif")) == L"Georgia", "known there by the file's own family name");
+    check(!fontfaces::has(L"Tinta Missing"), "a face whose file is missing is not loaded");
+    bool reported = false;
+    for (const auto& line : themeProblems(faces)) reported = reported || line.find(L"missing.woff2") != std::wstring::npos;
+    check(reported, "and the missing file is reported");
+    applyTheme(app, faces);
+    check(app.theme.fontFamily && std::wstring(app.theme.fontFamily) == L"Tinta Own Serif",
+          "the body's face is the sheet's own family");
+    UINT32 length = app.textFormat ? app.textFormat->GetFontFamilyNameLength() : 0;
+    std::wstring family(length + 1, L'\0');
+    if (app.textFormat) app.textFormat->GetFontFamilyName(family.data(), length + 1);
+    family.resize(length);
+    IDWriteFontCollection* collection = nullptr;
+    if (app.textFormat) app.textFormat->GetFontCollection(&collection);
+    check(family == L"Georgia" && collection == fontfaces::collection(L"Tinta Own Serif"),
+          "the body's format draws from the sheet's collection");
+    if (collection) collection->Release();
+    app.root = app.parser.parse("## An italic heading\n\nBody text.\n").root;
+    layoutDocument(app);
+    bool italic = false;
+    for (const auto& run : app.layoutTextRuns) {
+        if (!run.layout || !run.docLength || app.docText.compare(run.docStart, 2, L"An") != 0) continue;
+        IDWriteFontCollection* own = nullptr;
+        run.layout->GetFontCollection(0, &own);
+        DWRITE_FONT_STYLE style = DWRITE_FONT_STYLE_NORMAL;
+        run.layout->GetFontStyle(0, &style);
+        italic = style == DWRITE_FONT_STYLE_ITALIC && own == fontfaces::collection(L"Tinta Own Serif");
+        if (own) own->Release();
+    }
+    check(italic, "an element's face falls through a missing face to the sheet's own, in italic");
+    check(exportHtmlFile(app, (dir / "faces.html").wstring()), "the HTML export succeeds");
+    std::ifstream page(dir / "faces.html", std::ios::binary);
+    const std::string html((std::istreambuf_iterator<char>(page)), std::istreambuf_iterator<char>());
+    check(fs::exists(dir / "faces_fonts" / "own-face.ttf") &&
+              html.find("src:url(\"faces_fonts/own-face.ttf\")") != std::string::npos,
+          "and carries the sheet's font file beside the page, pointing at it");
+    std::error_code ignored;
+    fs::remove(themes / "Faces.css", ignored);
+    fs::remove(themes / "own-face.ttf", ignored);  // DirectWrite may still hold it
+    loadCustomThemes();
+    applyTheme(app, 0);
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -220,6 +292,7 @@ int testPageStyles(App&, const fs::path& dir) {
     createTypography(app);
     styled(app, dir);
     unstyled(app);
+    fontFaces(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;
