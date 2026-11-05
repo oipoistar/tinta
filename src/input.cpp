@@ -3173,7 +3173,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
                 std::wstring name = app.themeEditorName.empty()
                     ? tr(app, "theme.editor.default_name") : app.themeEditorName;
                 // The heading and code faces start from the base theme's,
-                // so deriving from Abyss keeps its pinned heading face
+                // so deriving from Abyss keeps its pinned heading face. A
+                // hand edit made since the themes loaded is read first, so
+                // the rewrite keeps it (#310)
+                if (customThemesChangedOnDisk()) loadCustomThemes();
                 int idx = saveCustomTheme(app.themeEditorTheme, name, app.themeEditorFont,
                     app.themeEditorCodeFont, app.themeEditorHeadingFont);
                 if (idx >= 0) {
@@ -4819,7 +4822,46 @@ void handleLinkPeekTimer(App& app, HWND hwnd) {
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
+void reloadThemesIniIfChanged(App& app, HWND hwnd) {
+    // The theme editor holds a theme of its own; its save reads the file first
+    if (app.showThemeEditor || !customThemesChangedOnDisk()) return;
+    // Names before the reload: the themes they point into are replaced
+    auto nameOf = [](int index) {
+        return index >= THEME_COUNT && index < themeCount() ? std::wstring(themeAt(index).name) : std::wstring();
+    };
+    const std::wstring current = nameOf(app.currentThemeIndex), light = nameOf(app.lightThemeIndex),
+                       dark = nameOf(app.darkThemeIndex);
+    loadCustomThemes();
+    // A user theme by its name again, wherever it moved; one gone from the
+    // file gives way to Paper
+    auto indexOf = [](const std::wstring& name, int index) {
+        if (name.empty()) return index;
+        for (int i = THEME_COUNT; i < themeCount(); ++i) {
+            if (_wcsicmp(themeAt(i).name, name.c_str()) == 0) return i;
+        }
+        return 0;
+    };
+    const int index = indexOf(current, app.currentThemeIndex);
+    const int lightIndex = indexOf(light, app.lightThemeIndex), darkIndex = indexOf(dark, app.darkThemeIndex);
+    // The chooser's previews follow the themes there are now
+    for (auto& pf : app.themePreviewFormats) {
+        if (pf.name) { pf.name->Release(); pf.name = nullptr; }
+        if (pf.preview) { pf.preview->Release(); pf.preview = nullptr; }
+        if (pf.code) { pf.code->Release(); pf.code = nullptr; }
+    }
+    app.themePreviewFormats.clear();
+    const bool moved = index != app.currentThemeIndex || lightIndex != app.lightThemeIndex ||
+                       darkIndex != app.darkThemeIndex;
+    app.lightThemeIndex = lightIndex;
+    app.darkThemeIndex = darkIndex;
+    if (!current.empty()) applyTheme(app, index);  // its colours and faces as now written
+    if (moved) persistThemeChoice(app);
+    app.layoutDirty = true;
+    if (hwnd) InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 void handleFileWatchTimer(App& app, HWND hwnd) {
+    reloadThemesIniIfChanged(app, hwnd);
     // Refresh the deleted-on-disk flags driving the red-grey tab dots
     // (runs even when the active document is untitled or being edited)
     bool missingChanged = false;

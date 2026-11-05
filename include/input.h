@@ -42,6 +42,9 @@ void navigateForward(App& app, HWND hwnd);
 // First clipboard line as text (shared by the search and path inputs)
 std::wstring clipboardLine(HWND hwnd);
 void handleFileWatchTimer(App& app, HWND hwnd);
+// themes.ini edited while Tinta runs (#310): the themes load again, and the
+// one in use, found by its name, shows the edit at once
+void reloadThemesIniIfChanged(App& app, HWND hwnd);
 void handleSelectScrollTimer(App& app, HWND hwnd);
 // Dwell timer fired over a local .md link: load the peek preview
 void handleLinkPeekTimer(App& app, HWND hwnd);

@@ -219,6 +219,9 @@ inline const wchar_t* themeHeadingFont(const D2DTheme& t) {
                : t.fontFamily;
 }
 void loadCustomThemes();
+// themes.ini was written by something else, a hand edit, since it was last
+// read or written here (#310)
+bool customThemesChangedOnDisk();
 // What a new themes.ini starts with: a commented example naming every
 // key, headingfont= and codefont= included (#256)
 const char* themesIniTemplate();

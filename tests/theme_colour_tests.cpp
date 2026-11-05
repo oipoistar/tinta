@@ -1,13 +1,16 @@
 #include "d2d_init.h"
 #include "export.h"
+#include "input.h"
 #include "render.h"
 #include "utils.h"
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <sstream>
 #include <vector>
 
 namespace {
@@ -236,5 +239,77 @@ int testEmphasisColours(App& app, const std::filesystem::path& dir) {
     loadCustomThemes();
     check(!themeAt(index).boldText && !themeAt(index).selection && !themeAt(index).rule,"#310: cleared keys stay cleared");
     app.contentScale=1.0f; updateTextFormats(app);
+    return failures-before;
+}
+
+// #310 as reported, "I can't colour the bold/italic/hr": the template's
+// examples for them carry notes on their lines, so uncommented they read as
+// a colour with words after it and were dropped, as were lines with spaces
+// around the = or keys in capitals; and a hand edit loaded only at the next
+// launch. Each now reads as meant, and an edit applies while Tinta runs.
+int testHandEditedThemes(App& app, const std::filesystem::path& dir) {
+    const int before=failures;
+    auto fixtures=std::filesystem::path(TINTA_THEME_FIXTURE).parent_path();
+    // A new themes.ini's examples with the "; " in front of them deleted,
+    // notes and all
+    std::string uncommented;
+    std::istringstream lines(themesIniTemplate());
+    for (std::string line; std::getline(lines, line);) {
+        if (line.rfind("; ",0)==0 && (line.find('=')!=std::string::npos || line=="; [theme]")) line=line.substr(2);
+        uncommented += line + "\n";
+    }
+    const std::string hand=read(fixtures/"theme-hand-edited-310.ini");
+    const int first=themeCount();
+    const auto ini=dir/"themes.ini";
+    const std::string before310=read(ini);
+    { std::ofstream f(ini,std::ios::binary); f << before310 << '\n' << uncommented << '\n' << hand; }
+    loadCustomThemes();
+    check(themeCount()==first+2,"#310: the uncommented template and the hand-written theme load");
+    const auto& tmpl=themeAt(first);
+    check(std::wstring(tmpl.name)==L"My theme","#310: the template's example is named");
+    check(same(tmpl.background,hexColor(0xF7FAFC)) && same(tmpl.text,hexColor(0x2D3748)) && same(tmpl.link,hexColor(0x2B6CB0)),
+          "#310: the template's plain lines load as before");
+    check(tmpl.boldText && same(*tmpl.boldText,hexColor(0x1A365D)) && tmpl.selection && same(*tmpl.selection,hexColor(0x2B6CB0)) &&
+          tmpl.rule && same(*tmpl.rule,hexColor(0xA0C4E8)),"#310: bold=, selection= and hr= load with the notes on their lines");
+    check(same(tmpl.heading,hexColor(0x1A365D)) && same(tmpl.code,hexColor(0x285E61)),
+          "#310: heading= and code= load with their notes");
+    check(tmpl.inlineCodeBackground && tmpl.inlineCodeBackground->a==0.0f,"#310: inlinecodebackground=none loads with its note");
+    check(std::wstring(tmpl.headingFontFamily)==L"Georgia" && std::wstring(tmpl.codeFontFamily)==L"Cascadia Mono",
+          "#310: a font's note is not part of its name");
+    const auto& written=themeAt(first+1);
+    check(std::wstring(written.name)==L"Hand (edited)","#310: a theme's name keeps its parentheses");
+    check(written.isDark && same(written.background,hexColor(0x101820)) && same(written.text,hexColor(0xE0E6F0)) &&
+          same(written.heading,hexColor(0xF0F4FA)),"#310: keys in capitals, spaces and notes read as meant");
+    check(written.boldText && same(*written.boldText,hexColor(0xFF0066)) && written.italicText &&
+          same(*written.italicText,hexColor(0x00CC88)) && written.boldItalicText && same(*written.boldItalicText,hexColor(0x7722AA)) &&
+          written.selection && same(*written.selection,hexColor(0xCC0000)) && written.rule && same(*written.rule,hexColor(0xAABBCC)),
+          "#310: bold, italic, bolditalic, selection and hr load as hand-written");
+
+    // An edit saved while Tinta runs shows on the theme in use at once
+    applyTheme(app,first+1);
+    check(!customThemesChangedOnDisk(),"#310: nothing changed since the themes loaded");
+    auto save=[&](const std::string& text) {
+        { std::ofstream f(ini,std::ios::binary); f << text; }
+        // A clock that has not ticked between two writes still reads as a change
+        std::filesystem::last_write_time(ini,std::filesystem::last_write_time(ini)+std::chrono::seconds(2));
+    };
+    std::string edited=read(ini);
+    edited.replace(edited.find("bold = #FF0066"),14,"bold = #3366FF");
+    save(edited);
+    check(customThemesChangedOnDisk(),"#310: a hand edit is seen");
+    reloadThemesIniIfChanged(app,nullptr);
+    check(app.currentThemeIndex==first+1 && app.theme.boldText && same(*app.theme.boldText,hexColor(0x3366FF)) &&
+          std::wstring(app.theme.name)==L"Hand (edited)","#310: the theme in use shows the edit at once");
+    check(!customThemesChangedOnDisk(),"#310: the reload took the edit in");
+    // The same theme moved ahead of another is found by its name
+    save(before310 + '\n' + hand + '\n' + uncommented);
+    reloadThemesIniIfChanged(app,nullptr);
+    check(app.currentThemeIndex==first && std::wstring(app.theme.name)==L"Hand (edited)" &&
+          app.theme.boldText && same(*app.theme.boldText,hexColor(0xFF0066)),"#310: a theme that moved in the file stays in use");
+    // A theme deleted from the file gives way to Paper
+    save(before310);
+    reloadThemesIniIfChanged(app,nullptr);
+    check(themeCount()==first && app.currentThemeIndex==0,"#310: a theme in use deleted from the file gives way to Paper");
+    applyTheme(app,0);
     return failures-before;
 }
