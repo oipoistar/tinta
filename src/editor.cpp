@@ -1656,8 +1656,11 @@ static void enterEditModeWithContent(App& app, const std::string& content,
     app.editMode = true;
     app.escPressedOnce = false;
     app.confirmExitPending = false;
-    // The tool rail slides in fresh with every edit-mode entry
-    app.editRailAnim = 0.0f;
+    // The tool rail slides in when edit mode follows a frame without it.
+    // Opening, closing or switching tabs in the editor parks one buffer and
+    // enters edit mode again for the next: the rail stays where it is, as
+    // it slid in from nothing and was gone for a few frames (#317)
+    if (!app.editRailShown) app.editRailAnim = 0.0f;
     app.editRailHover = 0;
 
     // Resume at the reading position rather than the top (#77)

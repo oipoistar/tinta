@@ -157,10 +157,10 @@ static const RailBtn* railBtnById(int id) {
 
 void renderEditRail(App& app) {
     app.editRailHits.clear();
-    if (!app.editMode || !app.renderTarget || !app.brush ||
-        !app.dwriteFactory) {
-        return;
-    }
+    // Called every frame, so each says whether it shows the rail (#317)
+    app.editRailShown = app.editMode && !app.editorReadingPreview && app.renderTarget && app.brush &&
+                        app.dwriteFactory;
+    if (!app.editRailShown) return;
 
     // Slide-in: advance toward 1 and keep painting until it lands
     if (app.editRailAnim < 1.0f) {

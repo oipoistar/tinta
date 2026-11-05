@@ -1101,9 +1101,10 @@ static void renderChromeAndEnd(App& app) {
     renderTabStrip(app);
 
     // Edit-mode tool rail (design t8): covers the strip's left corner
-    // and the old gutter column, so it draws above both
+    // and the old gutter column, so it draws above both. Every frame
+    // calls it: one without the rail lets edit mode slide it in again.
+    renderEditRail(app);
     if (app.editMode) {
-        if (!app.editorReadingPreview) renderEditRail(app);
         renderEditCtxMenu(app);
         renderEditorReadingButton(app);
         renderEditorWordCount(app);

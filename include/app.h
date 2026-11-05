@@ -1495,6 +1495,9 @@ struct App {
     bool closeKeepsDrafts = false;   // #252
     fm::Settings frontmatter;
     float editRailAnim = 0.0f;       // rail slide-in 0..1
+    // Whether the last frame painted showed the rail: edit mode slides it
+    // in only after a frame without it (#317)
+    bool editRailShown = false;
     int editRailHover = 0;           // hit id under the mouse, 0 = none
     std::vector<std::pair<D2D1_RECT_F, int>> editRailHits;  // rebuilt each paint
 
