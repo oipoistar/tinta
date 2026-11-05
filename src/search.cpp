@@ -1,6 +1,7 @@
 #include "search.h"
 #include "utils.h"
 #include "render.h"
+#include "folding.h"
 
 #include <algorithm>
 #include <cwctype>
@@ -215,6 +216,9 @@ void performSearch(App& app) {
 
     // docText and textRects must cover the whole document before searching
     ensureLayoutComplete(app);
+    // A folded section's text is not laid out: the sections holding the
+    // query open first, so its matches show (#316)
+    unfoldSectionsMatching(app, toLower(app.searchQuery));
 
     // Use layout-built document text when available
     if (app.docText.empty()) {

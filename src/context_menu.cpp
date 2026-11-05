@@ -17,6 +17,7 @@ const std::vector<ContextMenuEntry>& contextMenuEntries(const App& app) {
         {CTX_AS_SHEET, "ctx.as_sheet", L"", false},
         {CTX_EDIT, "ctx.edit", L"", false},
         {CTX_SEARCH, "ctx.search", L"", false},
+        {CTX_FOLD_ALL, "ctx.fold_all", L"", false},
         {CTX_TOC, "ctx.toc", L"", true},
         {CTX_BROWSE, "ctx.browse", L"", false},
         {CTX_COPY_PATH, "tab.menu.copy_path", L"", false},
@@ -95,6 +96,8 @@ bool contextMenuItemEnabled(const App& app, int item) {
         case CTX_SELECT_ALL: case CTX_SEARCH: case CTX_TOC:
             return document;
         case CTX_COPY_PATH: case CTX_REVEAL: return !app.currentFile.empty();
+        // A page read with headings that fold (#316)
+        case CTX_FOLD_ALL: return app.foldSections && !app.editMode && !app.foldArrows.empty();
         // A Markdown document, read here, can become a sheet of its sections
         case CTX_AS_SHEET: {
             if (app.editMode || app.currentFile.empty()) return false;

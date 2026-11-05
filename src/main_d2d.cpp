@@ -34,6 +34,7 @@
 #include "signals.h"
 #include "tableedit.h"
 #include "editrail.h"
+#include "folding.h"
 #include "startpage.h"
 
 #include <appmodel.h>
@@ -559,6 +560,9 @@ render_document:
         }
         app.drawCalls++;
     }
+
+    // Fold arrows in the margin beside headings (#316)
+    renderFoldArrows(app, viewportTop, viewportBottom);
 
     for (const auto& line : app.layoutLines) {
         float minY = std::min(line.p1.y, line.p2.y);
@@ -1614,6 +1618,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // The Read button fades out and the seam hairline dims (#245)
                 editorReadingButtonHover(*app, -1.0f, -1.0f);
                 app->editSeamHover = false;
+                app->hoveredFold = -1;  // the heading's fold arrow (#316)
                 // Off the tab strip too: its hover and hover card (#246)
                 tabHoverCardLeave(*app, hwnd);
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -1934,6 +1939,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
                 settings.headingRules = app->headingRules;
+                settings.foldSections = app->foldSections;
+                settings.foldOnOpen = app->foldOnOpen;
                 settings.tocOnLeft = app->tocOnLeft;
                 settings.tocPinned = app->tocPinned;
                 settings.browserPinned = app->browserPinned;
@@ -2054,6 +2061,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.readingWidthPct = savedSettings.readingWidthPct;
     app.zenWidthPct = savedSettings.zenWidthPct;
     app.headingRules = savedSettings.headingRules;
+    app.foldSections = savedSettings.foldSections;
+    app.foldOnOpen = savedSettings.foldOnOpen;
     app.tocOnLeft = savedSettings.tocOnLeft;
     app.tocPinned = savedSettings.tocPinned;
     app.browserPinned = savedSettings.browserPinned;
@@ -2381,6 +2390,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     // editor at the top instead
     if (!startInEditMode && !app.currentFile.empty()) {
         app.pendingScrollRestore = findReadingPosition(savedSettings, app.currentFile);
+        foldsEnter(app);  // a document opening folded starts at its top (#316)
         // Per-document zoom overrides the global one for known documents
         float docZoom = findReadingZoom(savedSettings, app.currentFile);
         if (docZoom > 0.0f && fabsf(docZoom - app.zoomFactor) > 0.01f) {

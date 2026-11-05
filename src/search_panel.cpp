@@ -351,12 +351,15 @@ std::vector<SearchPanelRow> searchPanelRows(const App& app) {
     }
     // Headings and matches both run in document order: walk them together
     int heading = -1, shown = -1;
+    size_t nextHeading = 0;
     for (size_t i = 0; i < app.searchMatches.size(); i++) {
         const App::SearchMatch& m = app.searchMatches[i];
         if (matchPlaced(m)) {
-            while (heading + 1 < (int)app.headings.size() &&
-                   app.headings[heading + 1].y <= m.highlightRect.top + 0.5f) {
-                heading++;
+            while (nextHeading < app.headings.size() &&
+                   app.headings[nextHeading].y <= m.highlightRect.top + 0.5f) {
+                // One in a folded section shares the folded heading's place (#316)
+                if (app.headings[nextHeading].hiddenUnder < 0) heading = (int)nextHeading;
+                nextHeading++;
             }
         }
         if (heading != shown) {

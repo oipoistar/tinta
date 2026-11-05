@@ -1,6 +1,7 @@
 #include "frontmatter_ui.h"
 #include "render.h"
 #include "file_utils.h"
+#include "folding.h"
 #include "inline_style.h"
 #include "utils.h"
 #include "syntax.h"
@@ -1325,6 +1326,44 @@ static void layoutInlineRun(App& app, std::vector<ElementPtr>& run, float& y, fl
     run.clear();
 }
 
+// Counts a heading for Contents and anchor links: its text, and a
+// GitHub-style slug numbered when the same text came before
+static size_t registerHeading(App& app, const ElementPtr& elem, float y) {
+    std::wstring headingText;
+    std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
+        if (!e) return;
+        if (e->type == ElementType::Text) headingText += toWide(e->text);
+        else for (const auto& c : e->children) extract(c);
+    };
+    for (const auto& child : elem->children) extract(child);
+
+    std::string baseId = slugifyHeading(headingText);
+    int& n = app.headingSlugCounts[baseId];
+    std::string id = (n == 0) ? baseId : (baseId + "-" + std::to_string(n));
+    n++;
+    app.headings.push_back({headingText, elem->level, y, id});
+    return app.headings.size() - 1;
+}
+
+// The headings and anchors of a block a folded section hides (#316),
+// counted as its layout would count them, at the folded heading's place:
+// slugs, Contents and links read as if the section were open
+static void registerHidden(App& app, const ElementPtr& elem, size_t under) {
+    if (!elem) return;
+    if (elem->type == ElementType::Heading) {
+        if (elem->level >= 1 && elem->level <= 6) {
+            const size_t heading = registerHeading(app, elem, app.headings[under].y);
+            app.headings[heading].hiddenUnder = (int)under;
+        }
+    } else if (elem->type == ElementType::Anchor && !elem->title.empty()) {
+        app.htmlAnchors.push_back({elem->title, app.headings[under].y});
+    } else if (elem->type == ElementType::FootnoteReference && !elem->title.empty()) {
+        // A footnote's way back to its reference
+        app.footnoteAnchors.emplace(elem->title, app.headings[under].y);
+    }
+    for (const auto& child : elem->children) registerHidden(app, child, under);
+}
+
 static void layoutHeading(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     float scale = app.contentScale * app.zoomFactor;
     int levelIndex = std::min(elem->level - 1, 5);
@@ -1337,21 +1376,7 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
     }
 
     // All Markdown heading levels participate in Contents and anchor navigation (#210).
-    if (elem->level >= 1 && elem->level <= 6) {
-        std::wstring headingText;
-        std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
-            if (!e) return;
-            if (e->type == ElementType::Text) headingText += toWide(e->text);
-            else for (const auto& c : e->children) extract(c);
-        };
-        for (const auto& child : elem->children) extract(child);
-
-        std::string baseId = slugifyHeading(headingText);
-        int& n = app.headingSlugCounts[baseId];
-        std::string id = (n == 0) ? baseId : (baseId + "-" + std::to_string(n));
-        n++;
-        app.headings.push_back({headingText, elem->level, y, id});
-    }
+    if (elem->level >= 1 && elem->level <= 6) registerHeading(app, elem, y);
 
     layoutInlineContent(app, elem->children, indent, y, maxWidth, format, themeHeadingColor(app.theme, elem->level));
 
@@ -3986,10 +4011,46 @@ bool layoutBegin(App& app) {
     app.scrollAnchors.clear();
     app.layoutTableSeq = 0;
     app.layoutDiagramSeq = 0;
+    app.layoutFoldArrow = -1;
     // The equations' numbers by label, for an \eqref anywhere to read (#314)
     app.mathLabels.clear();
     collectMathLabels(app.root, app.mathLabels);
     return true;
+}
+
+// A top-level block that ends a heading's section (#316): a heading of its
+// level or above, or the footnotes, which no fold hides
+static bool endsSection(const ElementPtr& block, int level) {
+    return block->type == ElementType::Footnotes ||
+           (block->type == ElementType::Heading && block->level <= level);
+}
+
+// The fold arrow of a top-level heading just laid out, when it has a
+// section to fold (#316); folded, the blocks of that section are skipped
+static void addFoldArrow(App& app, const std::vector<ElementPtr>& blocks, size_t block, size_t heading,
+                         size_t firstRun) {
+    const int level = blocks[block]->level;
+    size_t end = block + 1;
+    while (end < blocks.size() && !endsSection(blocks[end], level)) end++;
+    if (end == block + 1) return;  // nothing under it to fold
+    const float scale = app.contentScale * app.zoomFactor;
+    // Beside the heading's first line, in the margin left of the page
+    float top = app.headings[heading].y, bottom = top + 24.0f * scale;
+    if (firstRun < app.layoutTextRuns.size()) {
+        top = app.layoutTextRuns[firstRun].bounds.top;
+        bottom = app.layoutTextRuns[firstRun].bounds.bottom;
+    }
+    const float size = 20.0f * scale, middle = (top + bottom) * 0.5f;
+    const float right = app.layoutIndent - 6.0f * scale;
+    App::FoldArrow fold;
+    fold.arrow = D2D1::RectF(right - size, middle - size * 0.5f, right, middle + size * 0.5f);
+    fold.line = D2D1::RectF(right - size, top, app.layoutIndent + app.layoutMaxWidth, bottom);
+    fold.heading = heading;
+    fold.block = block;
+    fold.endBlock = end;
+    fold.folded = headingFolded(app, app.headings[heading].id);
+    app.foldArrows.push_back(fold);
+    if (fold.folded) app.layoutFoldArrow = (int)app.foldArrows.size() - 1;
 }
 
 // Lay out top-level blocks until targetY is passed (targetY < 0: no limit) or
@@ -4005,6 +4066,17 @@ bool layoutStep(App& app, float targetY, int64_t budgetUs) {
         if (budgetUs > 0 && usElapsed(t0) > budgetUs) break;
 
         const auto& child = children[app.layoutNextBlock];
+        // A folded section's blocks are not laid out; their headings and
+        // anchors still count, where the folded heading is (#316)
+        if (app.layoutFoldArrow >= 0) {
+            const auto& fold = app.foldArrows[app.layoutFoldArrow];
+            if (app.layoutNextBlock < fold.endBlock) {
+                registerHidden(app, child, fold.heading);
+                app.layoutNextBlock++;
+                continue;
+            }
+            app.layoutFoldArrow = -1;
+        }
         // Record scroll anchor from source offset
         size_t offset = findFirstSourceOffset(child);
         // Endnotes can move definitions ahead of their source order. Keep the
@@ -4014,8 +4086,12 @@ bool layoutStep(App& app, float targetY, int64_t budgetUs) {
             app.scrollAnchors.push_back({offset, y});
         }
         float top = y;
+        const size_t headings = app.headings.size(), runs = app.layoutTextRuns.size();
         layoutElement(app, child, y, app.layoutIndent, app.layoutMaxWidth);
         app.blockSpans.push_back({offset, top, y});
+        if (child->type == ElementType::Heading && headings < app.headings.size() && foldingActive(app)) {
+            addFoldArrow(app, children, app.layoutNextBlock, headings, runs);
+        }
         app.layoutNextBlock++;
     }
 

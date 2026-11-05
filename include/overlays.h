@@ -35,6 +35,7 @@ enum SettingsAction {
     SET_OPEN_THEMES, SET_NEW_THEME, SET_EDIT_THEME,
     SET_OPEN_INI, SET_OPEN_THEMES_INI,
     SET_TOC_LEFT, SET_TOC_RIGHT,
+    SET_FOLD_OFF, SET_FOLD_ON, SET_FOLD_FOLDED,  // folding sections (#316)
     SET_LANG_DROPDOWN, SET_OPEN_LANGS_INI,
     SET_KEYS_DROPDOWN, SET_EDIT_KEYS,
     SET_CLOSE,
@@ -128,6 +129,7 @@ enum ContextMenuItem {
     CTX_COPY_PATH,
     CTX_AS_SHEET,
     CTX_END_EDIT,
+    CTX_FOLD_ALL,  // folds every section, or opens them all when any is folded (#316)
     CTX_ITEM_COUNT
 };
 struct ContextMenuEntry {

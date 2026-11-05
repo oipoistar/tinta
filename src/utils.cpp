@@ -2,6 +2,7 @@
 #include "editor.h"
 #include "link_target.h"
 #include "render.h"
+#include "folding.h"
 #include "i18n.h"
 #include "signals.h"
 
@@ -184,9 +185,10 @@ bool documentTargetY(App& app, const std::string& id, float& y) {
         y = note->second;
         return true;
     }
-    for (const auto& h : app.headings) {
-        if (h.id == id) {
-            y = h.y;
+    for (size_t i = 0; i < app.headings.size(); i++) {
+        if (app.headings[i].id == id) {
+            // One in a folded section opens it first (#316)
+            y = app.headings[i].hiddenUnder >= 0 ? headingTargetY(app, i) : app.headings[i].y;
             return true;
         }
     }

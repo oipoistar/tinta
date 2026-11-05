@@ -76,6 +76,8 @@ void saveSettings(const Settings& settings) {
     file << "readingWidthPct=" << settings.readingWidthPct << "\n";
     file << "zenWidthPct=" << settings.zenWidthPct << "\n";
     file << "headingRules=" << (settings.headingRules ? 1 : 0) << "\n";
+    file << "foldSections=" << (settings.foldSections ? 1 : 0) << "\n";
+    file << "foldOnOpen=" << (settings.foldOnOpen ? 1 : 0) << "\n";
     file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
     file << "tocPinned=" << (settings.tocPinned ? 1 : 0) << "\n";
     file << "browserPinned=" << (settings.browserPinned ? 1 : 0) << "\n";
@@ -336,6 +338,10 @@ Settings loadSettings() {
             if (w >= 30 && w <= 100) settings.zenWidthPct = w;
         } else if (key == "headingRules") {
             settings.headingRules = (value == "1");
+        } else if (key == "foldSections") {
+            settings.foldSections = (value == "1");
+        } else if (key == "foldOnOpen") {
+            settings.foldOnOpen = (value == "1");
         } else if (key == "tocOnLeft") {
             settings.tocOnLeft = (value == "1");
         } else if (key == "tocPinned") {

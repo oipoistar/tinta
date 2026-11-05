@@ -293,6 +293,10 @@ struct Settings {
     // Separator line under level 1 and 2 headings (#154): off renders
     // the heading text alone
     bool headingRules = true;
+    // Folding sections in the reading view (#316): the arrows beside
+    // headings, and whether documents open with every section folded
+    bool foldSections = true;
+    bool foldOnOpen = false;
     // Table of contents panel side: false = right (default), true = left
     bool tocOnLeft = false;
     // Pinned side panels (#156): a pinned panel stops dismissing on
@@ -795,6 +799,33 @@ struct App {
     int readingWidthPct = 100;  // mirrors Settings (#82); 100 = full width
     int zenWidthPct = 60;
     bool headingRules = true;   // mirrors Settings (#154)
+    // Folding sections (#316), mirroring Settings: the arrows beside
+    // headings, and documents opening with every section folded
+    bool foldSections = true;
+    bool foldOnOpen = false;
+    // This document's folds (folding.h): every heading folded when foldAll,
+    // but the ones in foldToggled, which flip it. Kept for each file left
+    // this session.
+    bool foldAll = false;
+    std::vector<std::string> foldToggled;
+    struct FoldState {
+        bool all = false;
+        std::vector<std::string> toggled;
+    };
+    std::unordered_map<std::string, FoldState> foldStates;
+    // Laid out with the page: the arrow of each heading that has a section
+    // to fold, and the page's top-level blocks a folded one hides
+    struct FoldArrow {
+        D2D1_RECT_F arrow{};  // the arrow's box, left of the heading
+        D2D1_RECT_F line{};   // the heading's first line, from the arrow on
+        size_t heading = 0;   // into headings
+        size_t block = 0;     // the heading's index among root's children
+        size_t endBlock = 0;  // the first block after its section
+        bool folded = false;
+    };
+    std::vector<FoldArrow> foldArrows;
+    int hoveredFold = -1;     // the heading line under the mouse
+    int layoutFoldArrow = -1; // while laying out: the folded arrow skipping blocks
     int settingsDragSlider = 0;         // SET_SLIDER_* while dragging, else 0
     D2D1_RECT_F settingsSliderTrack[2]{};  // 0 window, 1 fullscreen (set in render)
 
@@ -1015,6 +1046,9 @@ struct App {
         int level;       // 1-6
         float y;         // document Y coordinate
         std::string id;  // GitHub-style slug for anchor links
+        // In a folded section (#316): the folded heading's index, whose y
+        // this one takes; -1 when laid out
+        int hiddenUnder = -1;
     };
     std::vector<HeadingInfo> headings;
     std::unordered_map<std::string, int> headingSlugCounts;
@@ -1680,6 +1714,7 @@ struct App {
         docListItems.clear();
         headings.clear();
         headingSlugCounts.clear();
+        foldArrows.clear();
         footnoteAnchors.clear();
         htmlAnchors.clear();
         fileRefCache.clear();

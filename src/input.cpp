@@ -27,6 +27,7 @@
 #include "plantuml_app.h"
 #include "print.h"
 #include "export.h"
+#include "folding.h"
 #include "i18n.h"
 #include "selection.h"
 
@@ -271,6 +272,7 @@ float readingPlace(const App& app) {
 }
 
 void persistLeavingPosition(App& app) {
+    foldsLeave(app);  // its folds stay for the session (#316)
     if (app.currentFile.empty()) return;
     persistReadingPosition(app.currentFile, readingPlace(app), app.zoomFactor);
     app.pendingScrollRestore = -1.0f;  // it belonged to the document left
@@ -311,6 +313,7 @@ bool openDocumentSourceInViewer(App& app, const std::wstring& fullPath,
     {
         Settings stored = loadSettings();
         app.pendingScrollRestore = findReadingPosition(stored, app.currentFile);
+        foldsEnter(app);  // its folds from earlier, or the setting's (#316)
         // Per-document zoom (#zoom-memory): a document remembered at a
         // different zoom reopens there
         float zoom = findReadingZoom(stored, app.currentFile);
@@ -769,6 +772,15 @@ static void settingsAction(App& app, HWND hwnd, int action) {
         case SET_TOGGLE_CLOSE_DRAFTS:
             app.closeKeepsDrafts = !app.closeKeepsDrafts;
             persistCloseKeepsDrafts(app);
+            break;
+        case SET_FOLD_OFF:
+        case SET_FOLD_ON:
+        case SET_FOLD_FOLDED:
+            // Folding sections (#316); Folded folds the page being read too
+            app.foldSections = action != SET_FOLD_OFF;
+            app.foldOnOpen = action == SET_FOLD_FOLDED;
+            if (action == SET_FOLD_FOLDED) foldAllSections(app, true);
+            app.layoutDirty = true;
             break;
         case SET_TOGGLE_HEADRULES:
             app.headingRules = !app.headingRules;
@@ -1698,6 +1710,10 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         }
     }
 
+    // The heading line under the mouse shows its fold arrow (#316)
+    const int prevHoveredFold = app.hoveredFold;
+    app.hoveredFold = foldLineAt(app, docX, docY);
+
     // Table hover (shows the copy-as-TSV button)
     int prevHoveredTable = app.hoveredTable;
     app.hoveredTable = -1;
@@ -1759,7 +1775,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
                 annotationCopyButtonHit(app, (float)app.mouseX,
                                         (float)app.mouseY))) {
         SetCursor(cursorHand);
-    } else if (taskRectAt(app) != nullptr) {
+    } else if (taskRectAt(app) != nullptr || foldArrowAt(app, docX, docY) >= 0) {
         SetCursor(cursorHand);
     } else if (app.hoveredCodeBlock >= 0) {
         // Show hand cursor only when over the copy button area
@@ -1799,6 +1815,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         wasHHovered != app.hScrollbarHovered ||
         prevHoveredLink != app.hoveredLink ||
         prevHoveredCodeBlock != app.hoveredCodeBlock ||
+        prevHoveredFold != app.hoveredFold ||
         prevHoveredTable != app.hoveredTable ||
         prevHoveredAnnotation != app.hoveredAnnotation) {
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -1880,6 +1897,9 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             break;
         case CTX_SEARCH:
             openSearchInput(app);
+            break;
+        case CTX_FOLD_ALL:
+            foldAllSections(app, !anySectionFolded(app));
             break;
         case CTX_TOC:
             closeSearchIfOpen(app);
@@ -2475,7 +2495,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             std::abs(app.mouseX - app.lastClickX) < 5 &&
             std::abs(app.mouseY - app.lastClickY) < 5);
 
-        if (isRepeatedClick) {
+        if (isRepeatedClick && foldArrowAt(app, docX, docY) < 0) {
             app.clickCount = std::min(app.clickCount + 1, 3);
         } else {
             app.clickCount = 1;
@@ -3352,7 +3372,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return;
                 }
-                scrollToHeadingY(app, app.headings[hit].y);
+                scrollToHeadingY(app, headingTargetY(app, (size_t)hit));
                 // The clicked heading is the active one even when the
                 // scroll cannot physically reach it (short documents);
                 // the next real scroll hands back to the spy
@@ -3636,6 +3656,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             if ((dx > 5 || dy > 5 || app.selShiftExtend) &&
                 app.selFocus != app.selAnchor) {
                 app.hasSelection = true;
+            } else if (int fold = foldArrowAt(app, docX, docY); fold >= 0) {
+                // The arrow beside a heading folds or opens its section (#316)
+                foldArrowClick(app, fold);
+                app.hasSelection = false;
             } else if (const App::TaskRect* task = taskRectAt(app)) {
                 // Click on a task checkbox: flip the mark in the file
                 toggleTaskOnDisk(app, hwnd, task->markOffset, task->checked);
@@ -4266,7 +4290,7 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                         toLower(heading.text).find(needle) !=
                             std::wstring::npos) {
                         ensureLayoutComplete(app);
-                        scrollToHeadingY(app, heading.y);
+                        scrollToHeadingY(app, headingTargetY(app, i));
                         app.tocSpyOverride = (int)i;
                         app.tocSpyOverrideScroll = app.targetScrollY;
                         app.showToc = false;
