@@ -1120,6 +1120,9 @@ struct App {
     std::vector<unsigned> fitBlocks;
     unsigned layoutTableSeq = 0;
     unsigned layoutDiagramSeq = 0;
+    // Above 0 while a table cell is laid out only to be measured and taken
+    // back: its text is not given to the selection's lines (#318)
+    int layoutMeasuring = 0;
 
     // Text bounds - tracked for cursor changes and selection (document coordinates)
     struct TextRect {

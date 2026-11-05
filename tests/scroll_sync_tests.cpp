@@ -4,6 +4,7 @@
 // end; every anchor after it was dropped, so the preview stopped following
 // there and only moved again once the editor scrolled back up.
 #include "d2d_init.h"
+#include "document.h"
 #include "editor.h"
 #include "input.h"
 #include "render.h"
@@ -175,6 +176,51 @@ void editOpensWhereReading(App& app, const char* path, int width, int height) {
     check(worst <= 1.0f, "E opens the editor at the heading being read" + where);
 }
 
+// A diagram fitted to the page is laid out again at a smaller scale. The
+// first, larger pass left its nodes' anchors behind, below the diagram as
+// drawn, and the editor's scroll sync followed those instead.
+void fittedDiagramAnchors(App& app) {
+    // Six branches stacked down the page, each a chain of single-word
+    // labels too long to wrap: wider than the page however its labels fold
+    std::string source = "# A wide diagram\n\n```mermaid\ngraph LR\n";
+    for (int b = 1; b <= 6; ++b) {
+        std::string from = "A";
+        for (int k = 1; k <= 7; ++k) {
+            const std::string id = "N" + std::to_string(b) + std::to_string(k);
+            source += "  " + from + " --> " + id + "[Unbreakablewaypoint" + std::to_string(b) + std::to_string(k) + "]\n";
+            from = id;
+        }
+    }
+    source += "```\n\nA paragraph after the diagram.\n";
+    auto parsed = parseDocument(app.parser, source, std::string());
+    check(parsed.success, "the diagram document parses");
+    app.root = parsed.root;
+    app.width = 650; app.height = 900;
+    app.fitBlocks.clear();
+    layoutDocument(app);
+    check(app.codeBlocks.size() == 1 && app.codeBlocks[0].fitCandidate,
+          "unfitted, the diagram is wider than the page");
+    app.fitBlocks = {0x80000000u};  // the page's first diagram, fitted
+    layoutDocument(app);
+    check(app.codeBlocks.size() == 1 && app.codeBlocks[0].isDiagram && app.codeBlocks[0].fitActive,
+          "the wide diagram is fitted to the page");
+    // A node's anchor is the top of its box: each must be the top of a box
+    // the fitted diagram draws, not of one from the pass before
+    const size_t nodesFrom = source.find("graph LR") + 8, nodesTo = source.find("```\n\nA paragraph");
+    int nodes = 0;
+    bool drawn = true;
+    for (const auto& anchor : app.scrollAnchors) {
+        if (anchor.sourceOffset <= nodesFrom || anchor.sourceOffset >= nodesTo) continue;
+        ++nodes;
+        drawn = drawn && std::any_of(app.layoutShapes.begin(), app.layoutShapes.end(), [&](const App::LayoutShape& shape) {
+            return std::abs(shape.rect.top - anchor.renderedY) < 0.5f;
+        });
+    }
+    check(nodes >= 6 * 7, "every node of the fitted diagram has a scroll anchor");
+    check(drawn, "a fitted diagram's node anchors sit on the nodes as drawn");
+    app.fitBlocks.clear();
+}
+
 int runScrollSyncTests(const char* path) {
     namespace fs = std::filesystem;
     std::ifstream file(path, std::ios::binary);
@@ -191,6 +237,7 @@ int runScrollSyncTests(const char* path) {
     app.width = 1979; app.height = 1251;
     updateTextFormats(app);
     Settings settings; settings.keyProfile = "windows"; applyKeymap(app, settings);
+    fittedDiagramAnchors(app);
     // The document with LF and with CRLF line endings, whichever the
     // checkout produced: the viewer reads files in text mode, the editor
     // raw, and a CRLF file opened the editor too far up (#267). Each copy

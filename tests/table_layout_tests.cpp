@@ -209,6 +209,67 @@ void checkCellWords(App& app) {
     }
 }
 
+// Words select where they are clicked, before and after tables (#318).
+// Measuring a styled or wrapping cell lays it out at y = 0 and takes it
+// back; its rectangles stayed in the buckets of the page's first lines, or
+// pushed the last real bucket off the end of the list, so a double-click
+// in the paragraph above a table took a word from another line.
+void checkWordsAroundTables(App& app) {
+    const auto fixture = std::filesystem::path(TINTA_FRAGMENT_FIXTURE).parent_path().parent_path() /
+                         "table-selection-318.md";
+    std::ifstream file(fixture);
+    check(file.good(), "selection fixture opens");
+    std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    auto doc = app.parser.parse(source);
+    check(doc.success, "selection fixture parses");
+    app.root = doc.root;
+    app.fitBlocks.clear();
+    for (int theme : {0, 5}) {
+        applyTheme(app, theme);
+        for (int width : {1050, 650, 420}) {
+            app.width = width;
+            scenario = "selection-theme" + std::to_string(theme) + "-width" + std::to_string(width);
+            layoutDocument(app);
+            check(app.tableRects.size() == 4, "the four tables render");
+            // Each rectangle is in exactly one bucket, the one of its line,
+            // and the buckets run down the page
+            std::vector<int> seen(app.textRects.size(), 0);
+            bool ordered = true, named = true, onLine = true;
+            for (size_t b = 0; b < app.lineBuckets.size(); ++b) {
+                const auto& bucket = app.lineBuckets[b];
+                if (b && bucket.top < app.lineBuckets[b - 1].top) ordered = false;
+                for (size_t idx : bucket.textRectIndices) {
+                    if (idx >= app.textRects.size()) {
+                        named = false;
+                        continue;
+                    }
+                    ++seen[idx];
+                    if (std::abs(app.textRects[idx].rect.top - bucket.top) > 5.0f) onLine = false;
+                }
+            }
+            check(ordered, "line buckets run down the page");
+            check(named, "line buckets name only rectangles that were laid out");
+            check(onLine, "a line bucket holds only the rectangles of its line");
+            check(std::all_of(seen.begin(), seen.end(), [](int n) { return n == 1; }),
+                  "every rectangle sits in exactly one line bucket");
+            // The double-click path for every word on the page: hit-test the
+            // middle of its rectangle, then take the word there. A triple
+            // click takes the clicked line, so the word's line holds it.
+            for (const auto& r : app.textRects) {
+                if (!r.docLength) continue;
+                const size_t off = selectionOffsetAtPoint(app, (r.rect.left + r.rect.right) / 2,
+                                                          (r.rect.top + r.rect.bottom) / 2);
+                check(off >= r.docStart && off <= r.docStart + r.docLength,
+                      "a click lands in the text under the pointer");
+                size_t start = 0, end = 0;
+                check(selectionLineRange(app, off, start, end) && start <= r.docStart &&
+                          r.docStart + r.docLength <= end,
+                      "a triple-click takes the line under the pointer");
+            }
+        }
+    }
+}
+
 int runTableLayoutTests() {
     {
         auto state = std::make_unique<App>();
@@ -253,6 +314,7 @@ int runTableLayoutTests() {
         app.contentScale = 1.0f;
         updateTextFormats(app);
         checkCellWords(app);
+        checkWordsAroundTables(app);
     }
     CoUninitialize();
     std::cout << "Wide table layout: " << failures << " failures\n";

@@ -100,47 +100,47 @@ static LayoutInfo createLayout(App& app, std::wstring_view text, IDWriteTextForm
     return info;
 }
 
+// A cell laid out only to be measured, then taken back by rollbackTo: its
+// text joins no line of the selection's, so the page's first lines are
+// left alone and nothing has to be taken back out of them (#318)
+struct MeasuringOnly {
+    App& app;
+    explicit MeasuringOnly(App& a) : app(a) { ++app.layoutMeasuring; }
+    ~MeasuringOnly() { --app.layoutMeasuring; }
+};
+
+static bool bucketAbove(const App::LineBucket& bucket, float top) { return bucket.top < top; }
+
 static void addTextRect(App& app, const D2D1_RECT_F& rect, size_t docStart, size_t docLength,
                         size_t runIndex = (size_t)-1) {
+    if (app.layoutMeasuring > 0) return;
     size_t idx = app.textRects.size();
     app.textRects.push_back({rect, docStart, docLength, runIndex});
 
     // Table cells are laid out column by column. A wrapped cell can append a
     // later line before the next column appends its first line, so buckets
-    // cannot be grouped by looking only at the last one.
-    for (auto& bucket : app.lineBuckets) {
-        if (std::abs(rect.top - bucket.top) <= kLineBucketTolerance) {
-            bucket.bottom = std::max(bucket.bottom, rect.bottom);
-            bucket.minX = std::min(bucket.minX, rect.left);
-            bucket.maxX = std::max(bucket.maxX, rect.right);
-            bucket.textRectIndices.push_back(idx);
-            return;
-        }
-    }
-
-    if (app.lineBuckets.empty() || rect.top > app.lineBuckets.back().top) {
-        App::LineBucket bucket;
-        bucket.top = rect.top;
-        bucket.bottom = rect.bottom;
-        bucket.minX = rect.left;
-        bucket.maxX = rect.right;
-        bucket.textRectIndices.push_back(idx);
-        app.lineBuckets.push_back(std::move(bucket));
+    // cannot be grouped by looking only at the last one. The buckets run
+    // down the page, so the first within the tolerance of this top is found
+    // by halving rather than by walking every line laid out so far.
+    auto& buckets = app.lineBuckets;
+    auto at = std::lower_bound(buckets.begin(), buckets.end(), rect.top - kLineBucketTolerance, bucketAbove);
+    if (at != buckets.end() && at->top <= rect.top + kLineBucketTolerance) {
+        at->bottom = std::max(at->bottom, rect.bottom);
+        at->minX = std::min(at->minX, rect.left);
+        at->maxX = std::max(at->maxX, rect.right);
+        at->textRectIndices.push_back(idx);
         return;
     }
 
+    // A line of its own: after the last, or among them when a cell's later
+    // line came before the next column's first
     App::LineBucket bucket;
     bucket.top = rect.top;
     bucket.bottom = rect.bottom;
     bucket.minX = rect.left;
     bucket.maxX = rect.right;
     bucket.textRectIndices.push_back(idx);
-    auto insertAt = std::lower_bound(
-        app.lineBuckets.begin(), app.lineBuckets.end(), rect.top,
-        [](const App::LineBucket& existing, float top) {
-            return existing.top < top;
-        });
-    app.lineBuckets.insert(insertAt, std::move(bucket));
+    buckets.insert(at, std::move(bucket));
 }
 
 static void addTextRun(App& app, LayoutInfo&& info, const D2D1_POINT_2F& pos,
@@ -191,9 +191,12 @@ static void markStyles(App& app, const InlineStyle& style, bool isLink, const st
     }
 }
 
+// Where each list stood before a trial layout, which rollbackTo cuts back
+// to. The line buckets are not cut by count: a trial can add to buckets
+// laid out before it (rollbackLineBuckets).
 struct LayoutSnapshot {
     size_t textRuns, rects, lines, shapes, connectors, bitmaps;
-    size_t links, textRects, lineBuckets, docTextLen, tasks, anchors;
+    size_t links, textRects, docTextLen, tasks, anchors, scrollAnchors;
 };
 
 static LayoutSnapshot takeSnapshot(App& app) {
@@ -206,11 +209,57 @@ static LayoutSnapshot takeSnapshot(App& app) {
         app.layoutBitmaps.size(),
         app.linkRects.size(),
         app.textRects.size(),
-        app.lineBuckets.size(),
         app.docText.size(),
         app.taskRects.size(),
-        app.htmlAnchors.size()
+        app.htmlAnchors.size(),
+        app.scrollAnchors.size()
     };
+}
+
+// Takes a trial's rectangles back out of the line buckets (#318). A trial
+// is laid out wherever it likes: a table cell is measured at y = 0, so its
+// rectangles joined the buckets of the page's first lines, or made buckets
+// of their own among them rather than after the last one, and cutting the
+// list back to its old length took away a real line while the trial's
+// stayed. Buckets run down the page and a rectangle joins only one within
+// kLineBucketTolerance of its top, so only the buckets about the trial's
+// rectangles are looked at.
+static void rollbackLineBuckets(App& app, size_t keptRects) {
+    if (keptRects >= app.textRects.size()) return;
+    float low = std::numeric_limits<float>::max();
+    float high = std::numeric_limits<float>::lowest();
+    for (size_t i = keptRects; i < app.textRects.size(); i++) {
+        low = std::min(low, app.textRects[i].rect.top);
+        high = std::max(high, app.textRects[i].rect.top);
+    }
+    auto& buckets = app.lineBuckets;
+    auto it = std::lower_bound(buckets.begin(), buckets.end(), low - kLineBucketTolerance, bucketAbove);
+    auto out = it;
+    for (; it != buckets.end() && it->top <= high + kLineBucketTolerance; ++it) {
+        // A bucket gains rectangles in the order they are laid out, so the
+        // trial's are its last ones
+        auto& indices = it->textRectIndices;
+        auto trial = std::lower_bound(indices.begin(), indices.end(), keptRects);
+        if (trial != indices.end()) {
+            indices.erase(trial, indices.end());
+            if (indices.empty()) continue;  // the trial made this bucket
+            // Its extents again from the rectangles it keeps, the first of
+            // which made it and gave it its top
+            const D2D1_RECT_F& first = app.textRects[indices.front()].rect;
+            it->bottom = first.bottom;
+            it->minX = first.left;
+            it->maxX = first.right;
+            for (size_t idx : indices) {
+                const D2D1_RECT_F& rect = app.textRects[idx].rect;
+                it->bottom = std::max(it->bottom, rect.bottom);
+                it->minX = std::min(it->minX, rect.left);
+                it->maxX = std::max(it->maxX, rect.right);
+            }
+        }
+        if (out != it) *out = std::move(*it);
+        ++out;
+    }
+    buckets.erase(out, it);
 }
 
 static void rollbackTo(App& app, const LayoutSnapshot& s) {
@@ -231,8 +280,8 @@ static void rollbackTo(App& app, const LayoutSnapshot& s) {
     app.layoutConnectors.resize(s.connectors);
     app.layoutBitmaps.resize(s.bitmaps);
     app.linkRects.resize(s.links);
+    rollbackLineBuckets(app, s.textRects);  // reads the trial's rectangles first
     app.textRects.resize(s.textRects);
-    app.lineBuckets.resize(s.lineBuckets);
     app.docText.resize(s.docTextLen);
     for (auto* ranges : {&app.docBoldRanges, &app.docItalicRanges}) {
         while (!ranges->empty() && ranges->back().first >= s.docTextLen) ranges->pop_back();
@@ -246,6 +295,9 @@ static void rollbackTo(App& app, const LayoutSnapshot& s) {
     for (auto& item : items) item.end = std::min(item.end, s.docTextLen);
     app.taskRects.resize(s.tasks);
     app.htmlAnchors.resize(s.anchors);  // a trial layout's anchors sit at trial positions
+    // A diagram fitted again drops the scroll anchors of the larger pass;
+    // kept, they held its nodes' places in the editor's scroll sync
+    app.scrollAnchors.resize(s.scrollAnchors);
 }
 
 static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
@@ -3471,9 +3523,12 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
                 // right edge (chip rects included), then roll back.
                 LayoutSnapshot snap = takeSnapshot(app);
                 float cy = 0.0f;
-                layoutInlineContent(app, cell->children, 0.0f, cy,
-                                    kHugeWidth, fmt, app.theme.text, {},
-                                    lineHeight);
+                {
+                    MeasuringOnly measuring(app);
+                    layoutInlineContent(app, cell->children, 0.0f, cy,
+                                        kHugeWidth, fmt, app.theme.text, {},
+                                        lineHeight);
+                }
                 float maxRight = 0.0f;
                 for (size_t i = snap.textRuns; i < app.layoutTextRuns.size();
                      i++) {
@@ -3588,8 +3643,11 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
             float cellW = colWidths[c] - cellPadding * 2;
             LayoutSnapshot snap = takeSnapshot(app);
             float cellY = 0.0f;
-            layoutInlineContent(app, cell->children, 0.0f, cellY, cellW,
-                                fmt, textColor, {}, lineHeight);
+            {
+                MeasuringOnly measuring(app);
+                layoutInlineContent(app, cell->children, 0.0f, cellY, cellW,
+                                    fmt, textColor, {}, lineHeight);
+            }
             rollbackTo(app, snap);
 
             float h = cellY + cellPadding * 2;
