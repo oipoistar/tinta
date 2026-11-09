@@ -31,6 +31,18 @@ bool selectionLineRange(const App& app, size_t offset, size_t& start, size_t& en
 void selectionHighlightRects(const App& app, size_t start, size_t end,
                              std::vector<D2D1_RECT_F>& out);
 
+// The same for the lines between two heights of the document. A frame asks
+// for the lines it draws: the others cost a measurement each and are not
+// seen, so a long document selected whole took longer to paint with every
+// page it had.
+void selectionHighlightRects(const App& app, size_t start, size_t end,
+                             float top, float bottom, std::vector<D2D1_RECT_F>& out);
+
+// How many ranges have been measured against their text layouts so far, by
+// the selection's rectangles and by selectionRangeRect. A measurement is
+// what a highlight costs, so tests count them rather than time a frame.
+size_t selectionMeasureCount();
+
 // One of those rectangles on screen at the given scroll. Its top and bottom
 // fall on whole pixels, so the lines of a selection meet without an
 // antialiased seam between their bands.

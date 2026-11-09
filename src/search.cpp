@@ -1,4 +1,5 @@
 #include "search.h"
+#include "selection.h"
 #include "utils.h"
 #include "render.h"
 #include "folding.h"
@@ -312,6 +313,34 @@ void mapSearchMatchesToLayout(App& app) {
         }
 
         matchIndex = mi;
+    }
+}
+
+void searchHighlightRects(const App& app, float top, float bottom,
+                          std::vector<SearchHighlight>& out) {
+    const auto& matches = app.searchMatches;
+    if (matches.empty()) return;
+    for (const App::TextRect& tr : app.textRects) {
+        if (tr.docLength == 0 || tr.rect.bottom < top || tr.rect.top > bottom) continue;
+        const size_t rectStart = tr.docStart, rectEnd = rectStart + tr.docLength;
+        // The matches run through the text in order and do not overlap, so
+        // the first that reaches into this rect is found by halving. A
+        // match that runs on past the rect is met again at the next one.
+        auto match = std::partition_point(matches.begin(), matches.end(),
+            [rectStart](const App::SearchMatch& m) { return m.startPos + m.length <= rectStart; });
+        for (; match != matches.end() && match->startPos < rectEnd; ++match) {
+            const size_t from = std::max(rectStart, match->startPos);
+            const size_t to = std::min(rectEnd, match->startPos + match->length);
+            if (from >= to) continue;
+            // Glyph-precise via the run layout (shared with text
+            // selection); falls back to interpolation for code
+            D2D1_RECT_F rect;
+            if (!selectionRangeRect(app, tr, from, to, rect)) continue;
+            // Extend slightly for better visibility
+            rect.left -= 1;
+            rect.right += 1;
+            out.push_back({rect, (size_t)(match - matches.begin())});
+        }
     }
 }
 

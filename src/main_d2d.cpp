@@ -923,12 +923,14 @@ render_document:
         size_t selA = std::min(app.selAnchor, app.selFocus);
         size_t selB = std::max(app.selAnchor, app.selFocus);
 
-        std::vector<D2D1_RECT_F> bars;
-        selectionHighlightRects(app, selA, selB, bars);
-
-        app.brush->SetColor(themeSelectionColor(app.theme, D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f)));
+        // Only the lines in view are asked for: measuring the whole of a
+        // long selection for every frame made each one slower
         float viewTop = app.scrollY - 50.0f;
         float viewBottom = app.scrollY + app.height + 50.0f;
+        std::vector<D2D1_RECT_F> bars;
+        selectionHighlightRects(app, selA, selB, viewTop, viewBottom, bars);
+
+        app.brush->SetColor(themeSelectionColor(app.theme, D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f)));
         for (const auto& bar : bars) {
             if (bar.bottom < viewTop || bar.top > viewBottom) continue;
             app.renderTarget->FillRectangle(selectionBarOnScreen(bar, app.scrollX, app.scrollY),
@@ -939,64 +941,11 @@ render_document:
 
     // Draw search match highlights (search live through visible textRects)
     if (!livePage && app.showSearch && !app.searchQuery.empty() && !app.textRects.empty() && !app.searchMatches.empty()) {
-        // Collect visible match rects by intersecting search matches with text rects
-        struct VisibleMatch {
-            D2D1_RECT_F rect;
-            size_t matchIndex;
-        };
-        std::vector<VisibleMatch> visibleMatches;
-
-        size_t matchIndex = 0;
-        for (const auto& tr : app.textRects) {
-            size_t textLen = tr.docLength;
-            if (textLen == 0) continue;
-
-            size_t rectStart = tr.docStart;
-            size_t rectEnd = rectStart + textLen;
-
-            // Advance to first match that could overlap this rect
-            while (matchIndex < app.searchMatches.size()) {
-                const auto& m = app.searchMatches[matchIndex];
-                size_t mEnd = m.startPos + m.length;
-                if (mEnd <= rectStart) {
-                    matchIndex++;
-                    continue;
-                }
-                break;
-            }
-
-            size_t mi = matchIndex;
-            while (mi < app.searchMatches.size()) {
-                const auto& m = app.searchMatches[mi];
-                if (m.startPos >= rectEnd) break;
-
-                size_t mStart = m.startPos;
-                size_t mEnd = m.startPos + m.length;
-                size_t overlapStart = std::max(rectStart, mStart);
-                size_t overlapEnd = std::min(rectEnd, mEnd);
-
-                if (overlapStart < overlapEnd) {
-                    // Glyph-precise via the run layout (shared with text
-                    // selection); falls back to interpolation for code
-                    D2D1_RECT_F highlightRect;
-                    if (selectionRangeRect(app, tr, overlapStart, overlapEnd,
-                                           highlightRect)) {
-                        // Extend slightly for better visibility
-                        highlightRect.left -= 1;
-                        highlightRect.right += 1;
-                        visibleMatches.push_back({highlightRect, mi});
-                    }
-                }
-
-                if (mEnd <= rectEnd) {
-                    mi++;
-                } else {
-                    break;  // Match spans beyond this rect; continue on next rect
-                }
-            }
-
-            matchIndex = mi;
-        }
+        // The marks on the lines in view, from the matches and the text
+        // rects they lie on
+        std::vector<SearchHighlight> visibleMatches;
+        searchHighlightRects(app, app.scrollY - 50.0f, app.scrollY + app.height + 50.0f,
+                             visibleMatches);
 
         // Draw all matches - orange if it's the current match, yellow otherwise
         for (const auto& vm : visibleMatches) {
