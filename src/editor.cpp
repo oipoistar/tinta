@@ -1315,27 +1315,33 @@ void performEditorSearch(App& app) {
     app.editorSearchMatches.clear();
     app.editorSearchCurrentIndex = 0;
 
-    if (app.searchQuery.empty() || app.editorText.empty()) return;
+    const std::wstring& text = app.editorText;
+    const size_t length = app.searchQuery.size();
+    if (length == 0 || text.size() < length) return;
 
-    // Build lowercase versions for case-insensitive search
-    std::wstring textLower;
-    textLower.resize(app.editorText.size());
-    for (size_t i = 0; i < app.editorText.size(); i++) {
-        textLower[i] = towlower(app.editorText[i]);
-    }
-
-    std::wstring queryLower;
-    queryLower.resize(app.searchQuery.size());
-    for (size_t i = 0; i < app.searchQuery.size(); i++) {
-        queryLower[i] = towlower(app.searchQuery[i]);
-    }
+    // Letters match in either case. The text is folded a unit at a time as
+    // it is read, so a search does not copy the whole document first
+    const wchar_t* fold = caseFoldTable();
+    const std::wstring query = toLower(app.searchQuery);
+    const wchar_t* units = text.data();
+    const wchar_t first = query[0];
+    const size_t last = text.size() - length;
 
     app.editorSearchMatches.reserve(64);
 
-    size_t pos = 0;
-    while ((pos = textLower.find(queryLower, pos)) != std::wstring::npos) {
-        app.editorSearchMatches.push_back({pos, app.searchQuery.length()});
-        pos += app.searchQuery.length();
+    for (size_t pos = 0; pos <= last;) {
+        if (fold[units[pos]] != first) {
+            ++pos;
+            continue;
+        }
+        size_t same = 1;
+        while (same < length && fold[units[pos + same]] == query[same]) ++same;
+        if (same == length) {
+            app.editorSearchMatches.push_back({pos, length});
+            pos += length;
+        } else {
+            ++pos;
+        }
     }
 }
 

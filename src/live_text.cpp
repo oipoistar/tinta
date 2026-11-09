@@ -92,7 +92,8 @@ std::wstring_view lineView(const std::wstring& t, size_t begin) {
 bool blank(std::wstring_view s) { return s.find_first_not_of(L" \t") == std::wstring_view::npos; }
 
 std::wstring lowered(std::wstring s) {
-    for (auto& c : s) c = (wchar_t)towlower(c);
+    const wchar_t* fold = caseFoldTable();
+    for (auto& c : s) c = fold[c];
     return s;
 }
 

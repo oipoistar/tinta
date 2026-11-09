@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 std::wstring toWide(const std::string& str) {
     if (str.empty()) return L"";
@@ -32,11 +33,35 @@ float measureText(App& app, const std::wstring& text, IDWriteTextFormat* format)
     return metrics.widthIncludingTrailingWhitespace;
 }
 
+const wchar_t* caseFoldTable() {
+    // Zero-filled until the first search asks for it, so it adds nothing to
+    // the executable; 128 KB once built
+    static wchar_t table[65536];
+    static const bool built = [] {
+        for (unsigned c = 0; c < 65536; ++c) table[c] = (wchar_t)c;
+        for (unsigned c = L'A'; c <= L'Z'; ++c) table[c] = (wchar_t)(c + 32);
+        // Windows lowers the rest. A failed call leaves a range as it is,
+        // which still folds A to Z. Surrogates stay: half a pair has no case
+        std::vector<wchar_t> lowered(65536);
+        auto lower = [&](unsigned first, unsigned last) {
+            int count = (int)(last - first + 1);
+            if (LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, table + first, count,
+                              lowered.data(), count, nullptr, nullptr, 0) == count) {
+                std::copy(lowered.begin(), lowered.begin() + count, table + first);
+            }
+        };
+        lower(0x80, 0xD7FF);
+        lower(0xE000, 0xFFFF);
+        return true;
+    }();
+    (void)built;
+    return table;
+}
+
 std::wstring toLower(const std::wstring& str) {
+    const wchar_t* fold = caseFoldTable();
     std::wstring result = str;
-    for (auto& c : result) {
-        c = towlower(c);
-    }
+    for (auto& c : result) c = fold[c];
     return result;
 }
 

@@ -395,8 +395,7 @@ void refreshCard(App& app, SheetDoc& doc, const Node& node, bool force) {
             bool isPath = endsWithNoCase(wideTarget, L".md") || endsWithNoCase(wideTarget, L".markdown");
             std::wstring key = isPath ? (std::filesystem::path(noteDir) / wideTarget).lexically_normal().wstring()
                                       : L"*" + stemOf(wideTarget);
-            for (auto& ch : key) ch = (wchar_t)towlower(ch);
-            c.linkKeys.push_back(key);
+            c.linkKeys.push_back(toLower(key));
         }
     }
 }
@@ -782,8 +781,7 @@ std::vector<std::pair<std::string, std::string>> ghostLinks(App& app, SheetDoc& 
         doc.cardByName.clear();
         for (const Node& n : doc.model.nodes) {
             if (n.type != NodeType::File) continue;
-            std::wstring path = absolutePath(doc, n.file);
-            for (auto& ch : path) ch = (wchar_t)towlower(ch);
+            std::wstring path = toLower(absolutePath(doc, n.file));
             doc.cardByPath.emplace(path, n.id);
             doc.cardByName.emplace(L"*" + stemOf(path), n.id);
         }

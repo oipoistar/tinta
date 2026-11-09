@@ -1,0 +1,24 @@
+---
+folder: .
+---
+
+# Teeplan
+
+## Übersicht
+
+- [Über Tee](<Über Tee.md>)
+- ÜBER Nacht ziehen lassen
+- Mehr dazu steht in [[über tee]].
+
+```json canvas
+{
+	"nodes":[
+		{"id":"overview","type":"group","label":"Übersicht","x":-60,"y":-100,"width":900,"height":600},
+		{"id":"tee","type":"file","file":"Über Tee.md","x":0,"y":0,"width":360,"height":420},
+		{"id":"note","type":"text","text":"ÜBER Nacht ziehen lassen","x":420,"y":0,"width":360,"height":200},
+		{"id":"more","type":"text","text":"Mehr dazu steht in [[über tee]].","x":420,"y":240,"width":360,"height":180}
+	],
+	"edges":[
+	]
+}
+```

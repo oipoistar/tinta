@@ -590,8 +590,10 @@ void followCardLink(App& app, HWND hwnd, SheetDoc& doc) {
     if (url.rfind("wiki:", 0) == 0) {
         std::wstring name = toWide(url.substr(5));
         name.resize(std::min(name.find(L'#'), name.size()));
+        // The name in any case, as the arrows to linked notes match it
+        const std::wstring wanted = toLower(name);
         for (const Node& n : doc.model.nodes) {
-            if (n.type != NodeType::File || _wcsicmp(stemOf(absolutePath(doc, n.file)).c_str(), name.c_str()) != 0) continue;
+            if (n.type != NodeType::File || toLower(stemOf(absolutePath(doc, n.file))) != wanted) continue;
             std::string id = n.id;
             commitEdit(app, doc);
             int i = nodeIndex(doc.model, id);

@@ -16,6 +16,14 @@ struct InlineSpan {
 
 std::wstring toWide(const std::string& str);
 float measureText(App& app, const std::wstring& text, IDWriteTextFormat* format);
+// A letter's lower case for matching without regard to case, one entry per
+// UTF-16 code unit: every capital Windows lowers one to one (accented Latin,
+// Greek, Cyrillic and the rest), where the C library's towlower knows only
+// A to Z in the locale Tinta runs in. A unit in gives a unit out, so an
+// offset in folded text is the same offset in the text. Built on first use,
+// from any thread.
+const wchar_t* caseFoldTable();
+// The text with every letter folded through caseFoldTable
 std::wstring toLower(const std::wstring& str);
 std::wstring_view textViewForRect(const App& app, const App::TextRect& tr);
 

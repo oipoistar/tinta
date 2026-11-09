@@ -186,6 +186,7 @@ int runTableInputTests();
 int runDockedPreviewTests();
 int runTableLayoutTests();
 int runFoldingTests(const char* fixture);
+int runCaseFoldTests(const char* fixtureDir);
 int runHighlightLayoutTests();
 int runWindowDragTests();
 int runSearchInputTests();
@@ -236,6 +237,7 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--window-drag-tests") return runWindowDragTests();
     if (argc == 2 && std::string(argv[1]) == "--table-layout-tests") return runTableLayoutTests();
     if (argc == 3 && std::string(argv[1]) == "--folding-tests") return runFoldingTests(argv[2]);
+    if (argc == 3 && std::string(argv[1]) == "--case-fold-tests") return runCaseFoldTests(argv[2]);
     if (argc == 2 && std::string(argv[1]) == "--highlight-layout-tests") return runHighlightLayoutTests();
     if (argc == 2 && std::string(argv[1]) == "--table-input-tests") return runTableInputTests();
     if (argc == 2 && std::string(argv[1]) == "--docked-preview-tests") return runDockedPreviewTests();

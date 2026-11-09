@@ -51,8 +51,7 @@ struct ScanSource {
 App::FolderFileResult scanText(const std::wstring& content,
                                const std::wstring& queryLower) {
     App::FolderFileResult result;
-    std::wstring lower = content;
-    for (auto& c : lower) c = (wchar_t)std::towlower(c);
+    std::wstring lower = toLower(content);
     size_t pos = 0, counted = 0;
     int line = 1;
     while ((pos = lower.find(queryLower, pos)) != std::wstring::npos) {

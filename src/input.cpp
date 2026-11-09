@@ -2580,15 +2580,11 @@ static std::wstring wikiLinkPath(const App& app, const std::string& target) {
     if (found(dir / (wideTarget + L".md"))) return (dir / (wideTarget + L".md")).wstring();
     if (found(dir / (wideTarget + L".markdown"))) return (dir / (wideTarget + L".markdown")).wstring();
 
-    auto lower = [](std::wstring s) {
-        for (auto& c : s) c = (wchar_t)std::towlower(c);
-        return s;
-    };
-    std::wstring want = lower(wideTarget);
+    std::wstring want = toLower(wideTarget);
     for (const auto& entry : fs::directory_iterator(dir, ec)) {
         if (!entry.is_regular_file(ec)) continue;
-        std::wstring stem = lower(entry.path().stem().wstring());
-        std::wstring name = lower(entry.path().filename().wstring());
+        std::wstring stem = toLower(entry.path().stem().wstring());
+        std::wstring name = toLower(entry.path().filename().wstring());
         if (stem == want || name == want) return entry.path().wstring();
     }
     // Target doesn't exist: leave the document as-is (a viewer doesn't
