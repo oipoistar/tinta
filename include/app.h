@@ -407,15 +407,27 @@ struct App {
         bool blocked = false;  // on another computer's share, left unopened
         size_t bytes = 0;      // estimated decoded bitmap memory
         unsigned long long lastUsed = 0;
+        unsigned pass = 0;     // the layout pass that last asked for it; 0 for none
     };
     std::unordered_map<std::string, ImageEntry> imageCache;
     size_t imageCacheBytes = 0;
     unsigned long long imageCacheUseClock = 0;
+    // The layout pass in progress and the last one finished, by number. An
+    // image either of them asked for is one the page shows: it stays in the
+    // cache whatever the budget. A document with more images than the cache
+    // holds had each one put out by the next, on every pass: its files
+    // decoded again at every resize, its downloads fetched again without end
+    unsigned imagePass = 0, imagePassShown = 0;
+    bool imagePassActive = false;
     static constexpr size_t IMAGE_CACHE_BUDGET = 64ull * 1024ull * 1024ull;
     static constexpr size_t IMAGE_CACHE_MAX_ENTRIES = 256;
 
     void touchImageCacheEntry(ImageEntry& entry) {
         entry.lastUsed = ++imageCacheUseClock;
+        if (imagePassActive) entry.pass = imagePass;
+    }
+    bool imageOnPage(const ImageEntry& entry) const {
+        return entry.pass != 0 && (entry.pass == imagePassShown || (imagePassActive && entry.pass == imagePass));
     }
 
     void storeImageCacheEntry(const std::string& key, ImageEntry entry) {
@@ -440,6 +452,7 @@ struct App {
             auto victim = imageCache.end();
             for (auto candidate = imageCache.begin(); candidate != imageCache.end(); ++candidate) {
                 if (candidate->first == key || candidate->second.pending) continue;
+                if (imageOnPage(candidate->second)) continue;
                 if (victim == imageCache.end() ||
                     candidate->second.lastUsed < victim->second.lastUsed) {
                     victim = candidate;
@@ -1764,6 +1777,7 @@ struct App {
         imageCache.clear();
         imageCacheBytes = 0;
         imageCacheUseClock = 0;
+        imagePassShown = 0;
         if (titleIconBitmap) {
             titleIconBitmap->Release();
             titleIconBitmap = nullptr;

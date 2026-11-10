@@ -3961,11 +3961,16 @@ void collectMathLabels(const ElementPtr& elem, std::map<std::wstring, std::wstri
 bool layoutBegin(App& app) {
     app.clearLayoutCache();
     app.layoutTimeUs = 0;
+    // A new pass: the images it asks for are the page's (app.h, imagePass)
+    if (++app.imagePass == 0) app.imagePass = 1;
+    app.imagePassActive = true;
 
     if (!app.root) {
         app.contentHeight = 0;
         app.contentWidth = static_cast<float>(app.width);
         app.layoutComplete = true;
+        app.imagePassActive = false;
+        app.imagePassShown = app.imagePass;
         return false;
     }
 
@@ -4113,6 +4118,8 @@ void layoutFinish(App& app) {
     app.docTextLower.clear();
     mapSearchMatchesToLayout(app);
     app.layoutComplete = true;
+    app.imagePassActive = false;
+    app.imagePassShown = app.imagePass;
 }
 
 } // namespace

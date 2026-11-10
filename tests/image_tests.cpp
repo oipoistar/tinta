@@ -201,6 +201,56 @@ void mixedLayout(App& app) {
     drawImages(app);
 }
 
+// A page whose images are more than the cache holds keeps them all. Each
+// one put the next out as the page was laid out, on every pass: three large
+// pictures were decoded again at every resize, and three large downloads
+// fetched again without end
+void pageKeepsItsImages(App& app) {
+    for (const wchar_t* path : {L"image-cache-assets/big1.png", L"image-cache-assets/big2.png", L"image-cache-assets/big3.png"}) {
+        check(writeImage(app, path, 3000, 2400), "write a large PNG");
+    }
+    const std::string source = "# Three large pictures\n\nA paragraph with **bold** before them.\n\n"
+                               "![one](image-cache-assets/big1.png)\n\n| A | B |\n| --- | --- |\n| ![two](image-cache-assets/big2.png) | a cell |\n\n"
+                               "- an item\n\n> ![three](image-cache-assets/big3.png)\n\n```text\ncode after them\n```\n\nThe end.\n";
+    std::ofstream("image-cache-big.md", std::ios::binary) << source;
+    app.clearLayoutCache();
+    app.releaseImageCache();
+    app.currentFile = std::filesystem::absolute("image-cache-big.md").u8string();
+    app.root = app.parser.parse(source).root;
+    app.contentScale = 1.0f;
+    app.width = 1050;
+    app.height = 900;
+    applyTheme(app, 0);
+    updateTextFormats(app);
+    app.layoutDirty = true;
+    ensureLayoutComplete(app);
+    check(app.layoutBitmaps.size() == 3 && app.docText.find(L"The end.") != std::wstring::npos, "the page has its three pictures and its text");
+    check(app.imageCacheBytes > App::IMAGE_CACHE_BUDGET, "together the pictures are more than the cache's budget");
+    check(app.imageCache.size() == 3, "the cache keeps every picture the page shows");
+    std::vector<ID2D1Bitmap*> shown;
+    for (const auto& bitmap : app.layoutBitmaps) shown.push_back(bitmap.bitmap.Get());
+    // Another pass, at another width, as a resize makes one
+    app.width = 820;
+    app.layoutDirty = true;
+    ensureLayoutComplete(app);
+    std::vector<ID2D1Bitmap*> again;
+    for (const auto& bitmap : app.layoutBitmaps) again.push_back(bitmap.bitmap.Get());
+    check(again == shown, "a new pass shows the same bitmaps: no picture is decoded again");
+    drawImages(app);
+    // Another page laid out: they are let go when the budget asks
+    const std::string other = "# Another page\n\n![small](image-cache-assets/small.png)\n";
+    app.root = app.parser.parse(other).root;
+    app.layoutDirty = true;
+    ensureLayoutComplete(app);
+    check(app.layoutBitmaps.size() == 1, "another page with one small picture is laid out");
+    app.storeImageCacheEntry("budget", bitmapEntry(app, 4096, 4096));
+    check(app.imageCacheBytes <= App::IMAGE_CACHE_BUDGET + 256 * 128 * 4 && app.imageCache.size() == 2,
+          "the first page's pictures are let go, the page's own stays");
+    drawImages(app);
+    app.clearLayoutCache();
+    app.releaseImageCache();
+}
+
 // #293: decode local image destinations once, including UTF-8 bytes, while
 // preserving literal plus signs, malformed escapes and encoded NULs.
 void encodedImagePaths(App& app) {
@@ -536,6 +586,7 @@ int runImageTests(const char* remoteBase) {
     imagesPerDocument(app);
     networkPaths(app);
     if (remoteBase) remoteImages(app, remoteBase);
+    pageKeepsItsImages(app);
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;
     state.reset();
