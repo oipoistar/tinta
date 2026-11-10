@@ -35,6 +35,7 @@
 #include "signals.h"
 #include "tableedit.h"
 #include "editrail.h"
+#include "folding.h"
 #include "startpage.h"
 
 #include <appmodel.h>
@@ -578,6 +579,9 @@ render_document:
         app.drawCalls++;
     }
 
+    // Fold arrows in the margin beside headings (#316)
+    renderFoldArrows(app, viewportTop, viewportBottom);
+
     for (const auto& line : app.layoutLines) {
         float minY = std::min(line.p1.y, line.p2.y);
         float maxY = std::max(line.p1.y, line.p2.y);
@@ -937,12 +941,14 @@ render_document:
         size_t selA = std::min(app.selAnchor, app.selFocus);
         size_t selB = std::max(app.selAnchor, app.selFocus);
 
-        std::vector<D2D1_RECT_F> bars;
-        selectionHighlightRects(app, selA, selB, bars);
-
-        app.brush->SetColor(themeSelectionColor(app.theme, D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f)));
+        // Only the lines in view are asked for: measuring the whole of a
+        // long selection for every frame made each one slower
         float viewTop = app.scrollY - 50.0f;
         float viewBottom = app.scrollY + app.height + 50.0f;
+        std::vector<D2D1_RECT_F> bars;
+        selectionHighlightRects(app, selA, selB, viewTop, viewBottom, bars);
+
+        app.brush->SetColor(themeSelectionColor(app.theme, D2D1::ColorF(0.2f, 0.4f, 0.9f, 0.35f)));
         for (const auto& bar : bars) {
             if (bar.bottom < viewTop || bar.top > viewBottom) continue;
             app.renderTarget->FillRectangle(selectionBarOnScreen(bar, app.scrollX, app.scrollY),
@@ -953,64 +959,11 @@ render_document:
 
     // Draw search match highlights (search live through visible textRects)
     if (!livePage && app.showSearch && !app.searchQuery.empty() && !app.textRects.empty() && !app.searchMatches.empty()) {
-        // Collect visible match rects by intersecting search matches with text rects
-        struct VisibleMatch {
-            D2D1_RECT_F rect;
-            size_t matchIndex;
-        };
-        std::vector<VisibleMatch> visibleMatches;
-
-        size_t matchIndex = 0;
-        for (const auto& tr : app.textRects) {
-            size_t textLen = tr.docLength;
-            if (textLen == 0) continue;
-
-            size_t rectStart = tr.docStart;
-            size_t rectEnd = rectStart + textLen;
-
-            // Advance to first match that could overlap this rect
-            while (matchIndex < app.searchMatches.size()) {
-                const auto& m = app.searchMatches[matchIndex];
-                size_t mEnd = m.startPos + m.length;
-                if (mEnd <= rectStart) {
-                    matchIndex++;
-                    continue;
-                }
-                break;
-            }
-
-            size_t mi = matchIndex;
-            while (mi < app.searchMatches.size()) {
-                const auto& m = app.searchMatches[mi];
-                if (m.startPos >= rectEnd) break;
-
-                size_t mStart = m.startPos;
-                size_t mEnd = m.startPos + m.length;
-                size_t overlapStart = std::max(rectStart, mStart);
-                size_t overlapEnd = std::min(rectEnd, mEnd);
-
-                if (overlapStart < overlapEnd) {
-                    // Glyph-precise via the run layout (shared with text
-                    // selection); falls back to interpolation for code
-                    D2D1_RECT_F highlightRect;
-                    if (selectionRangeRect(app, tr, overlapStart, overlapEnd,
-                                           highlightRect)) {
-                        // Extend slightly for better visibility
-                        highlightRect.left -= 1;
-                        highlightRect.right += 1;
-                        visibleMatches.push_back({highlightRect, mi});
-                    }
-                }
-
-                if (mEnd <= rectEnd) {
-                    mi++;
-                } else {
-                    break;  // Match spans beyond this rect; continue on next rect
-                }
-            }
-
-            matchIndex = mi;
-        }
+        // The marks on the lines in view, from the matches and the text
+        // rects they lie on
+        std::vector<SearchHighlight> visibleMatches;
+        searchHighlightRects(app, app.scrollY - 50.0f, app.scrollY + app.height + 50.0f,
+                             visibleMatches);
 
         // Draw all matches - orange if it's the current match, yellow otherwise
         for (const auto& vm : visibleMatches) {
@@ -1124,9 +1077,10 @@ static void renderChromeAndEnd(App& app) {
     renderTabStrip(app);
 
     // Edit-mode tool rail (design t8): covers the strip's left corner
-    // and the old gutter column, so it draws above both
+    // and the old gutter column, so it draws above both. Every frame
+    // calls it: one without the rail lets edit mode slide it in again.
+    renderEditRail(app);
     if (app.editMode) {
-        if (!app.editorReadingPreview) renderEditRail(app);
         renderEditCtxMenu(app);
         renderEditorReadingButton(app);
         renderEditorWordCount(app);
@@ -1414,6 +1368,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_CLOSE:
             if (app) tableEditCommit(*app);
             if (app) sheetLeave(*app);
+            // A print preview puts the editor aside: closed first, what
+            // follows sees the edits it was opened over
+            if (app && app->showPrintPreview) closePrintPreview(*app, hwnd);
             // "Close without asking" (#252): unsaved buffers stay behind as
             // drafts, offered back on the next launch, and the window closes
             if (app && app->closeKeepsDrafts) {
@@ -1432,24 +1389,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return 0;
             }
-            if (app) {
-                for (size_t i = 0; i < app->tabs.size(); i++) {
-                    bool dirty = (int)i == app->activeTab
-                                     ? (app->editMode && app->editorDirty)
-                                     : (app->tabs[i].editMode &&
-                                        app->tabs[i].editorDirty);
-                    if (!dirty) continue;
-                    if ((int)i != app->activeTab) {
-                        tabActivate(*app, hwnd, (int)i);
-                    }
-                    app->pendingWindowClose = true;
-                    app->confirmExitPending = true;
-                    app->confirmExitExternal = false;
-                    app->confirmExitOpenedAt = std::chrono::steady_clock::now();
-                    InvalidateRect(hwnd, nullptr, FALSE);
-                    return 0;
-                }
-            }
+            if (app && windowCloseAsks(*app, hwnd)) return 0;
             break;
 
         case WM_COPYDATA:
@@ -1643,6 +1583,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // The Read button fades out and the seam hairline dims (#245)
                 editorReadingButtonHover(*app, -1.0f, -1.0f);
                 app->editSeamHover = false;
+                app->hoveredFold = -1;  // the heading's fold arrow (#316)
                 // Off the tab strip too: its hover and hover card (#246)
                 tabHoverCardLeave(*app, hwnd);
                 InvalidateRect(hwnd, nullptr, FALSE);
@@ -1969,6 +1910,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
                 settings.headingRules = app->headingRules;
+                settings.foldSections = app->foldSections;
+                settings.foldOnOpen = app->foldOnOpen;
                 settings.tocOnLeft = app->tocOnLeft;
                 settings.tocPinned = app->tocPinned;
                 settings.browserPinned = app->browserPinned;
@@ -2090,6 +2033,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.readingWidthPct = savedSettings.readingWidthPct;
     app.zenWidthPct = savedSettings.zenWidthPct;
     app.headingRules = savedSettings.headingRules;
+    app.foldSections = savedSettings.foldSections;
+    app.foldOnOpen = savedSettings.foldOnOpen;
     app.tocOnLeft = savedSettings.tocOnLeft;
     app.tocPinned = savedSettings.tocPinned;
     app.browserPinned = savedSettings.browserPinned;
@@ -2417,6 +2362,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     // editor at the top instead
     if (!startInEditMode && !app.currentFile.empty()) {
         app.pendingScrollRestore = findReadingPosition(savedSettings, app.currentFile);
+        foldsEnter(app);  // a document opening folded starts at its top (#316)
         // Per-document zoom overrides the global one for known documents
         float docZoom = findReadingZoom(savedSettings, app.currentFile);
         if (docZoom > 0.0f && fabsf(docZoom - app.zoomFactor) > 0.01f) {

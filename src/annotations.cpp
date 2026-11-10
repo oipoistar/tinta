@@ -1,4 +1,5 @@
 #include "annotations.h"
+#include <functional>
 
 #include "editor.h"
 #include "i18n.h"
@@ -177,10 +178,38 @@ void sanitizeForComment(std::string& text) {
 
 void writeSourceAndReload(App& app, HWND hwnd, const std::string& src) {
     if (app.currentFile.empty()) return;
+    // The reading view holds the text as it was read, its lines ending in a
+    // line feed whatever the file has. Written as held, a file with Windows
+    // line ends came back with every one of its lines changed for one note.
+    // They are written as the file has them, as the editor's save does
+    bool crlf = false;
+    {
+        std::ifstream was(toWide(app.currentFile), std::ios::binary);
+        char buffer[4096];
+        was.read(buffer, sizeof(buffer));
+        for (std::streamsize i = 0, n = was.gcount(); i < n; ++i) {
+            if (buffer[i] != '\n') continue;
+            crlf = i > 0 && buffer[i - 1] == '\r';
+            break;
+        }
+    }
+    std::string bytes;
+    if (crlf) {
+        bytes.reserve(src.size() + src.size() / 20);
+        for (size_t i = 0; i < src.size(); ++i) {
+            if (src[i] == '\n' && (i == 0 || src[i - 1] != '\r')) bytes += '\r';
+            bytes += src[i];
+        }
+    }
+    const std::string& text = crlf ? bytes : src;
     std::ofstream out(toWide(app.currentFile), std::ios::binary | std::ios::trunc);
     if (!out) return;
-    out.write(src.data(), (std::streamsize)src.size());
+    out.write(text.data(), (std::streamsize)text.size());
     out.close();
+    // Read it again whatever its time says: a write in the same tick of the
+    // clock as the last one leaves the file's time as it was, and the page
+    // then kept the text from before the note
+    app.lastFileWriteTime = FILETIME{};
     handleFileWatchTimer(app, hwnd);  // reload now instead of on the timer
 }
 
@@ -821,6 +850,12 @@ void annotationOpenEditor(App& app, int index) {
     if (index < 0 || index >= (int)app.annotations.size()) return;
     app.annotEditorOpen = true;
     app.annotEditorIndex = index;
+    app.annotEditorQuote = app.annotations[index].quote;
+    app.annotEditorNote = app.annotations[index].note;
+    app.annotEditorOrdinal = 0;
+    for (int i = 0; i < index; ++i) {
+        app.annotEditorOrdinal += app.annotations[i].quote == app.annotEditorQuote && app.annotations[i].note == app.annotEditorNote;
+    }
     app.annotEditorText = toWide(app.annotations[index].note);
     size_t pos = 0;  // note buffer uses \n only
     while ((pos = app.annotEditorText.find(L"\r\n", pos)) != std::wstring::npos) {
@@ -855,6 +890,7 @@ bool annotationBeginCreate(App& app) {
     }
 
     app.annotPendingInsert = insertOffsetAfterBlock(app.sourceText, lineTo);
+    app.annotPendingSource = std::hash<std::string>{}(app.sourceText);
     app.annotPendingQuote = quoteU8;
     app.annotPendingLineFrom = lineFrom;
     app.annotPendingLineTo = lineTo;
@@ -866,8 +902,40 @@ bool annotationBeginCreate(App& app) {
     return true;
 }
 
+// The note the editor is open on, found again in the text as it is now. A
+// note's range is the last reading's, and the text may have been saved from
+// the editor or taken from the disk since: the range written to as it was
+// took whatever stood there by then. False when the text has no such note
+static bool refindNote(App& app) {
+    annotationsParseSource(app);
+    int ahead = app.annotEditorOrdinal;
+    for (int i = 0; i < (int)app.annotations.size(); ++i) {
+        if (app.annotations[i].quote != app.annotEditorQuote || app.annotations[i].note != app.annotEditorNote) continue;
+        if (ahead-- == 0) {
+            app.annotEditorIndex = i;
+            return true;
+        }
+    }
+    return false;
+}
+
 void annotationEditorConfirm(App& app, HWND hwnd) {
     if (!app.annotEditorOpen) return;
+    if (app.annotEditorIndex >= 0 && !refindNote(app)) {
+        // Gone from the text: nothing of it is written
+        closeEditor(app);
+        showToast(app, "annot.nolocate");
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    if (app.annotEditorIndex < 0 && app.annotPendingInsert != kNone &&
+        app.annotPendingSource != std::hash<std::string>{}(app.sourceText)) {
+        // The text changed under the box: the place found for the note is
+        // not its place any more. The box stays, with what was typed
+        showToast(app, "annot.nolocate");
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
     std::string note = toUtf8(app.annotEditorText);
     sanitizeForComment(note);
     std::string eol = usesCrLf(app.sourceText) ? "\r\n" : "\n";
@@ -910,6 +978,12 @@ void annotationEditorDelete(App& app, HWND hwnd) {
     if (!app.annotEditorOpen || app.annotEditorIndex < 0 ||
         app.annotEditorIndex >= (int)app.annotations.size()) {
         closeEditor(app);
+        return;
+    }
+    if (!refindNote(app)) {
+        closeEditor(app);
+        showToast(app, "annot.nolocate");
+        InvalidateRect(hwnd, nullptr, FALSE);
         return;
     }
     const auto& a = app.annotations[app.annotEditorIndex];

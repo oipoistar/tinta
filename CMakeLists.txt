@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(tinta VERSION 4.0.2 LANGUAGES C CXX)
+project(tinta VERSION 4.0.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -152,6 +152,7 @@ set(SOURCES
     src/drafts.cpp
     src/startpage.cpp
     src/editrail.cpp
+    src/folding.cpp
     src/pandoc.cpp
     src/plantuml.cpp
     src/plantuml_queue.cpp
@@ -292,7 +293,7 @@ if(BUILD_TESTING)
     # window, including layout-dependent character sequences (#195).
     set(INPUT_TEST_SOURCES ${SOURCES})
     list(REMOVE_ITEM INPUT_TEST_SOURCES src/main_d2d.cpp)
-    add_executable(input_tests tests/input_tests.cpp tests/deleted_tab_tests.cpp tests/file_change_tests.cpp tests/pinned_tab_tests.cpp tests/reopen_closed_tab_tests.cpp tests/scholar_app_tests.cpp tests/paper_export_tests.cpp tests/citation_completion_tests.cpp tests/table_input_tests.cpp tests/docked_preview_tests.cpp tests/table_layout_tests.cpp tests/highlight_layout_tests.cpp tests/window_drag_tests.cpp tests/tab_drop_tests.cpp tests/tab_hover_card_tests.cpp tests/search_panel_tests.cpp tests/superscript_tests.cpp tests/sidepanel_tests.cpp tests/image_tests.cpp tests/search_input_tests.cpp tests/wrapped_cursor_tests.cpp tests/file_fragment_tests.cpp tests/editor_context_tests.cpp tests/editor_features_tests.cpp tests/ui_font_tests.cpp tests/print_export_tests.cpp tests/scroll_sync_tests.cpp tests/notification_setting_tests.cpp tests/goto_line_tests.cpp tests/reading_position_tests.cpp tests/split_scrollbar_tests.cpp tests/touch_tests.cpp tests/editor_drag_tests.cpp tests/byte_order_mark_tests.cpp tests/sheet_tests.cpp tests/live_tests.cpp tests/source_highlight_tests.cpp tests/math_markdown_tests.cpp ${INPUT_TEST_SOURCES} ${CSL_RC})
+    add_executable(input_tests tests/input_tests.cpp tests/deleted_tab_tests.cpp tests/file_change_tests.cpp tests/pinned_tab_tests.cpp tests/reopen_closed_tab_tests.cpp tests/scholar_app_tests.cpp tests/paper_export_tests.cpp tests/citation_completion_tests.cpp tests/table_input_tests.cpp tests/docked_preview_tests.cpp tests/table_layout_tests.cpp tests/highlight_layout_tests.cpp tests/window_drag_tests.cpp tests/tab_drop_tests.cpp tests/tab_hover_card_tests.cpp tests/search_panel_tests.cpp tests/superscript_tests.cpp tests/sidepanel_tests.cpp tests/image_tests.cpp tests/search_input_tests.cpp tests/wrapped_cursor_tests.cpp tests/file_fragment_tests.cpp tests/editor_context_tests.cpp tests/editor_features_tests.cpp tests/ui_font_tests.cpp tests/print_export_tests.cpp tests/scroll_sync_tests.cpp tests/notification_setting_tests.cpp tests/goto_line_tests.cpp tests/reading_position_tests.cpp tests/split_scrollbar_tests.cpp tests/touch_tests.cpp tests/editor_drag_tests.cpp tests/byte_order_mark_tests.cpp tests/sheet_tests.cpp tests/live_tests.cpp tests/source_highlight_tests.cpp tests/math_markdown_tests.cpp tests/folding_tests.cpp tests/case_fold_tests.cpp tests/live_parts_tests.cpp tests/preview_unsaved_tests.cpp tests/review_note_tests.cpp tests/link_open_tests.cpp ${INPUT_TEST_SOURCES} ${CSL_RC})
     add_dependencies(input_tests csl_bundle)
     target_include_directories(input_tests PRIVATE include ${md4c_SOURCE_DIR}/src)
     target_link_libraries(input_tests PRIVATE $<TARGET_PROPERTY:tinta,LINK_LIBRARIES>)
@@ -384,6 +385,42 @@ if(BUILD_TESTING)
         -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/math-markdown-test-$<CONFIG>
         -DTEST_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/math-tags-314.md
         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_math_markdown_tests.cmake)
+    # Folding sections in the reading view (#316)
+    add_test(NAME folding_sections COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:input_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/folding-test-$<CONFIG>
+        -DTEST_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/folding-sections-316.md
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_folding_tests.cmake)
+    # Text found in any case, beyond A to Z
+    add_test(NAME find_any_case COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:input_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/case-fold-test-$<CONFIG>
+        -DTEST_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/find-any-case
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_case_fold_tests.cmake)
+    # A block of thousands of lines in Live: laid out in parts, a key its part
+    add_test(NAME live_large_block COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:input_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/live-parts-test-$<CONFIG>
+        -DTEST_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/live-large-block.md
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_live_parts_tests.cmake)
+    # Unsaved edits under the print preview: asked about, not lost
+    add_test(NAME print_preview_unsaved COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:input_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/preview-unsaved-test-$<CONFIG>
+        -DTEST_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/print-preview-unsaved.md
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_preview_unsaved_tests.cmake)
+    # A review note deleted or changed after the text changed: its own comment only
+    add_test(NAME review_notes_after_edit COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:input_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/review-notes-test-$<CONFIG>
+        -DTEST_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/review-notes-edited.md
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_review_note_tests.cmake)
+    # What a click on a link hands to the shell, and what it asks about first
+    add_test(NAME link_opening COMMAND ${CMAKE_COMMAND}
+        -DTEST_BINARY=$<TARGET_FILE:input_tests>
+        -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/link-opening-test-$<CONFIG>
+        -DTEST_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/link-opening.md
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_link_open_tests.cmake)
     add_test(NAME window_drag_and_title_space COMMAND ${CMAKE_COMMAND}
         -DTEST_BINARY=$<TARGET_FILE:input_tests>
         -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/window-drag-test-$<CONFIG>

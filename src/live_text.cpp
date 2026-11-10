@@ -92,7 +92,8 @@ std::wstring_view lineView(const std::wstring& t, size_t begin) {
 bool blank(std::wstring_view s) { return s.find_first_not_of(L" \t") == std::wstring_view::npos; }
 
 std::wstring lowered(std::wstring s) {
-    for (auto& c : s) c = (wchar_t)towlower(c);
+    const wchar_t* fold = caseFoldTable();
+    for (auto& c : s) c = fold[c];
     return s;
 }
 
@@ -105,6 +106,10 @@ size_t fenceRun(std::wstring_view line, wchar_t* ch = nullptr) {
     size_t n = 0;
     while (i + n < line.size() && line[i + n] == c) ++n;
     if (n < 3) return 0;
+    // Backticks with another backtick later on the line open no fence: that
+    // is a code span, ```like this```, and a paragraph to the page's parser.
+    // Taken for a fence, it made code of everything under it
+    if (c == L'`' && line.find(L'`', i + n) != std::wstring_view::npos) return 0;
     if (ch) *ch = c;
     return n;
 }

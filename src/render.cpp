@@ -1,6 +1,7 @@
 #include "frontmatter_ui.h"
 #include "render.h"
 #include "file_utils.h"
+#include "folding.h"
 #include "inline_style.h"
 #include "font_faces.h"
 #include "page_style.h"
@@ -116,48 +117,48 @@ static LayoutInfo createLayout(App& app, std::wstring_view text, IDWriteTextForm
 // The run of text being laid out, for the inspector's record (page_style.h)
 static const StyledRun* g_inspectedRun = nullptr;
 
+// A cell laid out only to be measured, then taken back by rollbackTo: its
+// text joins no line of the selection's, so the page's first lines are
+// left alone and nothing has to be taken back out of them (#318)
+struct MeasuringOnly {
+    App& app;
+    explicit MeasuringOnly(App& a) : app(a) { ++app.layoutMeasuring; }
+    ~MeasuringOnly() { --app.layoutMeasuring; }
+};
+
+static bool bucketAbove(const App::LineBucket& bucket, float top) { return bucket.top < top; }
+
 static void addTextRect(App& app, const D2D1_RECT_F& rect, size_t docStart, size_t docLength,
                         size_t runIndex = (size_t)-1) {
+    if (app.layoutMeasuring > 0) return;
     if (g_inspectedRun && page::recording(app)) page::recordRun(app, rect, g_inspectedRun->style.css, g_inspectedRun->elem.get());
     size_t idx = app.textRects.size();
     app.textRects.push_back({rect, docStart, docLength, runIndex});
 
     // Table cells are laid out column by column. A wrapped cell can append a
     // later line before the next column appends its first line, so buckets
-    // cannot be grouped by looking only at the last one.
-    for (auto& bucket : app.lineBuckets) {
-        if (std::abs(rect.top - bucket.top) <= kLineBucketTolerance) {
-            bucket.bottom = std::max(bucket.bottom, rect.bottom);
-            bucket.minX = std::min(bucket.minX, rect.left);
-            bucket.maxX = std::max(bucket.maxX, rect.right);
-            bucket.textRectIndices.push_back(idx);
-            return;
-        }
-    }
-
-    if (app.lineBuckets.empty() || rect.top > app.lineBuckets.back().top) {
-        App::LineBucket bucket;
-        bucket.top = rect.top;
-        bucket.bottom = rect.bottom;
-        bucket.minX = rect.left;
-        bucket.maxX = rect.right;
-        bucket.textRectIndices.push_back(idx);
-        app.lineBuckets.push_back(std::move(bucket));
+    // cannot be grouped by looking only at the last one. The buckets run
+    // down the page, so the first within the tolerance of this top is found
+    // by halving rather than by walking every line laid out so far.
+    auto& buckets = app.lineBuckets;
+    auto at = std::lower_bound(buckets.begin(), buckets.end(), rect.top - kLineBucketTolerance, bucketAbove);
+    if (at != buckets.end() && at->top <= rect.top + kLineBucketTolerance) {
+        at->bottom = std::max(at->bottom, rect.bottom);
+        at->minX = std::min(at->minX, rect.left);
+        at->maxX = std::max(at->maxX, rect.right);
+        at->textRectIndices.push_back(idx);
         return;
     }
 
+    // A line of its own: after the last, or among them when a cell's later
+    // line came before the next column's first
     App::LineBucket bucket;
     bucket.top = rect.top;
     bucket.bottom = rect.bottom;
     bucket.minX = rect.left;
     bucket.maxX = rect.right;
     bucket.textRectIndices.push_back(idx);
-    auto insertAt = std::lower_bound(
-        app.lineBuckets.begin(), app.lineBuckets.end(), rect.top,
-        [](const App::LineBucket& existing, float top) {
-            return existing.top < top;
-        });
-    app.lineBuckets.insert(insertAt, std::move(bucket));
+    buckets.insert(at, std::move(bucket));
 }
 
 static void addTextRun(App& app, LayoutInfo&& info, const D2D1_POINT_2F& pos,
@@ -208,9 +209,12 @@ static void markStyles(App& app, const InlineStyle& style, bool isLink, const st
     }
 }
 
+// Where each list stood before a trial layout, which rollbackTo cuts back
+// to. The line buckets are not cut by count: a trial can add to buckets
+// laid out before it (rollbackLineBuckets).
 struct LayoutSnapshot {
     size_t textRuns, rects, lines, shapes, connectors, bitmaps;
-    size_t links, textRects, lineBuckets, docTextLen, tasks, anchors;
+    size_t links, textRects, docTextLen, tasks, anchors, scrollAnchors;
 };
 
 static LayoutSnapshot takeSnapshot(App& app) {
@@ -223,11 +227,57 @@ static LayoutSnapshot takeSnapshot(App& app) {
         app.layoutBitmaps.size(),
         app.linkRects.size(),
         app.textRects.size(),
-        app.lineBuckets.size(),
         app.docText.size(),
         app.taskRects.size(),
-        app.htmlAnchors.size()
+        app.htmlAnchors.size(),
+        app.scrollAnchors.size()
     };
+}
+
+// Takes a trial's rectangles back out of the line buckets (#318). A trial
+// is laid out wherever it likes: a table cell is measured at y = 0, so its
+// rectangles joined the buckets of the page's first lines, or made buckets
+// of their own among them rather than after the last one, and cutting the
+// list back to its old length took away a real line while the trial's
+// stayed. Buckets run down the page and a rectangle joins only one within
+// kLineBucketTolerance of its top, so only the buckets about the trial's
+// rectangles are looked at.
+static void rollbackLineBuckets(App& app, size_t keptRects) {
+    if (keptRects >= app.textRects.size()) return;
+    float low = std::numeric_limits<float>::max();
+    float high = std::numeric_limits<float>::lowest();
+    for (size_t i = keptRects; i < app.textRects.size(); i++) {
+        low = std::min(low, app.textRects[i].rect.top);
+        high = std::max(high, app.textRects[i].rect.top);
+    }
+    auto& buckets = app.lineBuckets;
+    auto it = std::lower_bound(buckets.begin(), buckets.end(), low - kLineBucketTolerance, bucketAbove);
+    auto out = it;
+    for (; it != buckets.end() && it->top <= high + kLineBucketTolerance; ++it) {
+        // A bucket gains rectangles in the order they are laid out, so the
+        // trial's are its last ones
+        auto& indices = it->textRectIndices;
+        auto trial = std::lower_bound(indices.begin(), indices.end(), keptRects);
+        if (trial != indices.end()) {
+            indices.erase(trial, indices.end());
+            if (indices.empty()) continue;  // the trial made this bucket
+            // Its extents again from the rectangles it keeps, the first of
+            // which made it and gave it its top
+            const D2D1_RECT_F& first = app.textRects[indices.front()].rect;
+            it->bottom = first.bottom;
+            it->minX = first.left;
+            it->maxX = first.right;
+            for (size_t idx : indices) {
+                const D2D1_RECT_F& rect = app.textRects[idx].rect;
+                it->bottom = std::max(it->bottom, rect.bottom);
+                it->minX = std::min(it->minX, rect.left);
+                it->maxX = std::max(it->maxX, rect.right);
+            }
+        }
+        if (out != it) *out = std::move(*it);
+        ++out;
+    }
+    buckets.erase(out, it);
 }
 
 static void rollbackTo(App& app, const LayoutSnapshot& s) {
@@ -248,8 +298,8 @@ static void rollbackTo(App& app, const LayoutSnapshot& s) {
     app.layoutConnectors.resize(s.connectors);
     app.layoutBitmaps.resize(s.bitmaps);
     app.linkRects.resize(s.links);
+    rollbackLineBuckets(app, s.textRects);  // reads the trial's rectangles first
     app.textRects.resize(s.textRects);
-    app.lineBuckets.resize(s.lineBuckets);
     app.docText.resize(s.docTextLen);
     for (auto* ranges : {&app.docBoldRanges, &app.docItalicRanges}) {
         while (!ranges->empty() && ranges->back().first >= s.docTextLen) ranges->pop_back();
@@ -263,6 +313,9 @@ static void rollbackTo(App& app, const LayoutSnapshot& s) {
     for (auto& item : items) item.end = std::min(item.end, s.docTextLen);
     app.taskRects.resize(s.tasks);
     app.htmlAnchors.resize(s.anchors);  // a trial layout's anchors sit at trial positions
+    // A diagram fitted again drops the scroll anchors of the larger pass;
+    // kept, they held its nodes' places in the editor's scroll sync
+    app.scrollAnchors.resize(s.scrollAnchors);
 }
 
 static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
@@ -1625,6 +1678,55 @@ static void layoutInlineRun(App& app, std::vector<ElementPtr>& run, float& y, fl
     run.clear();
 }
 
+// Counts a heading for Contents and anchor links: its text, and a
+// GitHub-style slug numbered when the same text came before
+// A section number (Scholar) shows in Contents but stays out of the slug,
+// and an id given as {#id} is the heading's own. `number` is a CSS theme's
+// generated number, for Contents too
+static size_t registerHeading(App& app, const ElementPtr& elem, float y, const std::wstring& number = {}) {
+    std::wstring headingText, slugText;
+    std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
+        if (!e) return;
+        if (e->type == ElementType::Text) {
+            headingText += toWide(e->text);
+            if (e->language != "section-number") slugText += toWide(e->text);
+        } else {
+            for (const auto& c : e->children) extract(c);
+        }
+    };
+    for (const auto& child : elem->children) extract(child);
+
+    std::string id = elem->title;
+    if (id.empty()) {
+        slugText.erase(0, slugText.find_first_not_of(L' '));  // the space after a number
+        std::string baseId = slugifyHeading(slugText);
+        int& n = app.headingSlugCounts[baseId];
+        id = (n == 0) ? baseId : (baseId + "-" + std::to_string(n));
+        n++;
+    }
+    app.headings.push_back({number + headingText, elem->level, y, id});
+    return app.headings.size() - 1;
+}
+
+// The headings and anchors of a block a folded section hides (#316),
+// counted as its layout would count them, at the folded heading's place:
+// slugs, Contents and links read as if the section were open
+static void registerHidden(App& app, const ElementPtr& elem, size_t under) {
+    if (!elem) return;
+    if (elem->type == ElementType::Heading) {
+        if (elem->level >= 1 && elem->level <= 6) {
+            const size_t heading = registerHeading(app, elem, app.headings[under].y);
+            app.headings[heading].hiddenUnder = (int)under;
+        }
+    } else if (elem->type == ElementType::Anchor && !elem->title.empty()) {
+        app.htmlAnchors.push_back({elem->title, app.headings[under].y});
+    } else if (elem->type == ElementType::FootnoteReference && !elem->title.empty()) {
+        // A footnote's way back to its reference
+        app.footnoteAnchors.emplace(elem->title, app.headings[under].y);
+    }
+    for (const auto& child : elem->children) registerHidden(app, child, under);
+}
+
 static void layoutHeading(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     float scale = app.contentScale * app.zoomFactor;
     int levelIndex = std::min(elem->level - 1, 5);
@@ -1642,31 +1744,7 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
     const std::vector<ElementPtr> children = withGenerated(app, css, elem->children, &number);
 
     // All Markdown heading levels participate in Contents and anchor navigation (#210).
-    // A section number (Scholar) shows in Contents but stays out of the slug,
-    // and an id given as {#id} is the heading's own
-    if (elem->level >= 1 && elem->level <= 6) {
-        std::wstring headingText, slugText;
-        std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
-            if (!e) return;
-            if (e->type == ElementType::Text) {
-                headingText += toWide(e->text);
-                if (e->language != "section-number") slugText += toWide(e->text);
-            } else {
-                for (const auto& c : e->children) extract(c);
-            }
-        };
-        for (const auto& child : elem->children) extract(child);
-
-        std::string id = elem->title;
-        if (id.empty()) {
-            slugText.erase(0, slugText.find_first_not_of(L' '));  // the space after a number
-            std::string baseId = slugifyHeading(slugText);
-            int& n = app.headingSlugCounts[baseId];
-            id = (n == 0) ? baseId : (baseId + "-" + std::to_string(n));
-            n++;
-        }
-        app.headings.push_back({number + headingText, elem->level, y, id});
-    }
+    if (elem->level >= 1 && elem->level <= 6) registerHeading(app, elem, y, number);
 
     const LayoutSnapshot start = takeSnapshot(app);
     layoutInlineContent(app, children, indent, y, maxWidth, format, color, {},
@@ -4061,9 +4139,12 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
                 // right edge (chip rects included), then roll back.
                 LayoutSnapshot snap = takeSnapshot(app);
                 float cy = 0.0f;
-                layoutInlineContent(app, cell->children, 0.0f, cy,
-                                    kHugeWidth, fmt, app.theme.text, {},
-                                    lineHeight, -1.0f, &cellCss[r][c]);
+                {
+                    MeasuringOnly measuring(app);
+                    layoutInlineContent(app, cell->children, 0.0f, cy,
+                                        kHugeWidth, fmt, app.theme.text, {},
+                                        lineHeight, -1.0f, &cellCss[r][c]);
+                }
                 float maxRight = 0.0f;
                 for (size_t i = snap.textRuns; i < app.layoutTextRuns.size();
                      i++) {
@@ -4175,8 +4256,11 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
             float cellW = colWidths[c] - padX * 2;
             LayoutSnapshot snap = takeSnapshot(app);
             float cellY = 0.0f;
-            layoutInlineContent(app, cell->children, 0.0f, cellY, cellW,
-                                cellFormat(r, c), cellColor(r, c), {}, lineHeight, -1.0f, &cellCss[r][c]);
+            {
+                MeasuringOnly measuring(app);
+                layoutInlineContent(app, cell->children, 0.0f, cellY, cellW,
+                                    cellFormat(r, c), cellColor(r, c), {}, lineHeight, -1.0f, &cellCss[r][c]);
+            }
             rollbackTo(app, snap);
 
             float h = cellY + padY * 2;
@@ -4640,11 +4724,16 @@ void collectMathLabels(const ElementPtr& elem, std::map<std::wstring, std::wstri
 bool layoutBegin(App& app) {
     app.clearLayoutCache();
     app.layoutTimeUs = 0;
+    // A new pass: the images it asks for are the page's (app.h, imagePass)
+    if (++app.imagePass == 0) app.imagePass = 1;
+    app.imagePassActive = true;
 
     if (!app.root) {
         app.contentHeight = 0;
         app.contentWidth = static_cast<float>(app.width);
         app.layoutComplete = true;
+        app.imagePassActive = false;
+        app.imagePassShown = app.imagePass;
         return false;
     }
 
@@ -4733,10 +4822,46 @@ bool layoutBegin(App& app) {
     app.scrollAnchors.clear();
     app.layoutTableSeq = 0;
     app.layoutDiagramSeq = 0;
+    app.layoutFoldArrow = -1;
     // The equations' numbers by label, for an \eqref anywhere to read (#314)
     app.mathLabels.clear();
     collectMathLabels(app.root, app.mathLabels);
     return true;
+}
+
+// A top-level block that ends a heading's section (#316): a heading of its
+// level or above, or the footnotes, which no fold hides
+static bool endsSection(const ElementPtr& block, int level) {
+    return block->type == ElementType::Footnotes ||
+           (block->type == ElementType::Heading && block->level <= level);
+}
+
+// The fold arrow of a top-level heading just laid out, when it has a
+// section to fold (#316); folded, the blocks of that section are skipped
+static void addFoldArrow(App& app, const std::vector<ElementPtr>& blocks, size_t block, size_t heading,
+                         size_t firstRun) {
+    const int level = blocks[block]->level;
+    size_t end = block + 1;
+    while (end < blocks.size() && !endsSection(blocks[end], level)) end++;
+    if (end == block + 1) return;  // nothing under it to fold
+    const float scale = app.contentScale * app.zoomFactor;
+    // Beside the heading's first line, in the margin left of the page
+    float top = app.headings[heading].y, bottom = top + 24.0f * scale;
+    if (firstRun < app.layoutTextRuns.size()) {
+        top = app.layoutTextRuns[firstRun].bounds.top;
+        bottom = app.layoutTextRuns[firstRun].bounds.bottom;
+    }
+    const float size = 20.0f * scale, middle = (top + bottom) * 0.5f;
+    const float right = app.layoutIndent - 6.0f * scale;
+    App::FoldArrow fold;
+    fold.arrow = D2D1::RectF(right - size, middle - size * 0.5f, right, middle + size * 0.5f);
+    fold.line = D2D1::RectF(right - size, top, app.layoutIndent + app.layoutMaxWidth, bottom);
+    fold.heading = heading;
+    fold.block = block;
+    fold.endBlock = end;
+    fold.folded = headingFolded(app, app.headings[heading].id);
+    app.foldArrows.push_back(fold);
+    if (fold.folded) app.layoutFoldArrow = (int)app.foldArrows.size() - 1;
 }
 
 // Lay out top-level blocks until targetY is passed (targetY < 0: no limit) or
@@ -4752,6 +4877,17 @@ bool layoutStep(App& app, float targetY, int64_t budgetUs) {
         if (budgetUs > 0 && usElapsed(t0) > budgetUs) break;
 
         const auto& child = children[app.layoutNextBlock];
+        // A folded section's blocks are not laid out; their headings and
+        // anchors still count, where the folded heading is (#316)
+        if (app.layoutFoldArrow >= 0) {
+            const auto& fold = app.foldArrows[app.layoutFoldArrow];
+            if (app.layoutNextBlock < fold.endBlock) {
+                registerHidden(app, child, fold.heading);
+                app.layoutNextBlock++;
+                continue;
+            }
+            app.layoutFoldArrow = -1;
+        }
         // Record scroll anchor from source offset
         size_t offset = findFirstSourceOffset(child);
         // Endnotes can move definitions ahead of their source order. Keep the
@@ -4761,8 +4897,12 @@ bool layoutStep(App& app, float targetY, int64_t budgetUs) {
             app.scrollAnchors.push_back({offset, y});
         }
         float top = y;
+        const size_t headings = app.headings.size(), runs = app.layoutTextRuns.size();
         layoutElement(app, child, y, app.layoutIndent, app.layoutMaxWidth);
         app.blockSpans.push_back({offset, top, y});
+        if (child->type == ElementType::Heading && headings < app.headings.size() && foldingActive(app)) {
+            addFoldArrow(app, children, app.layoutNextBlock, headings, runs);
+        }
         app.layoutNextBlock++;
     }
 
@@ -4784,6 +4924,8 @@ void layoutFinish(App& app) {
     app.docTextLower.clear();
     mapSearchMatchesToLayout(app);
     app.layoutComplete = true;
+    app.imagePassActive = false;
+    app.imagePassShown = app.imagePass;
 }
 
 } // namespace

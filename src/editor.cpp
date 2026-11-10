@@ -1,5 +1,6 @@
 #include "frontmatter_ui.h"
 #include "editor.h"
+#include "annotations.h"
 #include "live_editor.h"
 #include "live_text.h"
 #include "document.h"
@@ -1315,28 +1316,57 @@ static void editorEnsureCursorVisible(App& app) {
 void performEditorSearch(App& app) {
     app.editorSearchMatches.clear();
     app.editorSearchCurrentIndex = 0;
+    app.editorSearchRevision = app.editorTextRevision;
 
-    if (app.searchQuery.empty() || app.editorText.empty()) return;
+    const std::wstring& text = app.editorText;
+    const size_t length = app.searchQuery.size();
+    if (length == 0 || text.size() < length) return;
 
-    // Build lowercase versions for case-insensitive search
-    std::wstring textLower;
-    textLower.resize(app.editorText.size());
-    for (size_t i = 0; i < app.editorText.size(); i++) {
-        textLower[i] = towlower(app.editorText[i]);
-    }
-
-    std::wstring queryLower;
-    queryLower.resize(app.searchQuery.size());
-    for (size_t i = 0; i < app.searchQuery.size(); i++) {
-        queryLower[i] = towlower(app.searchQuery[i]);
-    }
+    // Letters match in either case. The text is folded a unit at a time as
+    // it is read, so a search does not copy the whole document first
+    const wchar_t* fold = caseFoldTable();
+    const std::wstring query = toLower(app.searchQuery);
+    const wchar_t* units = text.data();
+    const wchar_t first = query[0];
+    const size_t last = text.size() - length;
 
     app.editorSearchMatches.reserve(64);
 
-    size_t pos = 0;
-    while ((pos = textLower.find(queryLower, pos)) != std::wstring::npos) {
-        app.editorSearchMatches.push_back({pos, app.searchQuery.length()});
-        pos += app.searchQuery.length();
+    for (size_t pos = 0; pos <= last;) {
+        if (fold[units[pos]] != first) {
+            ++pos;
+            continue;
+        }
+        size_t same = 1;
+        while (same < length && fold[units[pos + same]] == query[same]) ++same;
+        if (same == length) {
+            app.editorSearchMatches.push_back({pos, length});
+            pos += length;
+        } else {
+            ++pos;
+        }
+    }
+}
+
+// The matches are places in the text as it was when it was searched. With
+// the bar open the text still changes: typed into, a button of the rail
+// pressed, a change taken from the disk. A match used then was a place past
+// the text's end, which ended the program, or other words, which were
+// replaced. So whatever uses the matches asks for this first: the text is
+// searched again when it has changed, and the match that was current stays
+// so, or the next one after where it was
+void editorSearchRefresh(App& app) {
+    if (app.editorSearchRevision == app.editorTextRevision) return;
+    size_t was = 0;
+    if (app.editorSearchCurrentIndex >= 0 && app.editorSearchCurrentIndex < (int)app.editorSearchMatches.size()) {
+        was = app.editorSearchMatches[app.editorSearchCurrentIndex].startPos;
+    }
+    performEditorSearch(app);
+    for (size_t i = 0; i < app.editorSearchMatches.size(); ++i) {
+        if (app.editorSearchMatches[i].startPos >= was) {
+            app.editorSearchCurrentIndex = (int)i;
+            break;
+        }
     }
 }
 
@@ -1346,6 +1376,7 @@ static void scheduleReparse(App& app);  // defined below with the debounce
 
 void editorReplaceCurrent(App& app, HWND hwnd) {
     if (!app.editMode || app.searchQuery.empty()) return;
+    editorSearchRefresh(app);
     if (app.editorSearchMatches.empty()) return;
     app.editorExtraCarets.clear();  // find and replace work at one caret
     int idx = app.editorSearchCurrentIndex;
@@ -1412,6 +1443,7 @@ void editorReplaceAll(App& app, HWND hwnd) {
 }
 
 void scrollEditorToMatch(App& app) {
+    editorSearchRefresh(app);
     if (app.editorSearchMatches.empty() || app.editorSearchCurrentIndex < 0 ||
         app.editorSearchCurrentIndex >= (int)app.editorSearchMatches.size()) return;
     app.editorExtraCarets.clear();
@@ -1657,8 +1689,11 @@ static void enterEditModeWithContent(App& app, const std::string& content,
     app.editMode = true;
     app.escPressedOnce = false;
     app.confirmExitPending = false;
-    // The tool rail slides in fresh with every edit-mode entry
-    app.editRailAnim = 0.0f;
+    // The tool rail slides in when edit mode follows a frame without it.
+    // Opening, closing or switching tabs in the editor parks one buffer and
+    // enters edit mode again for the next: the rail stays where it is, as
+    // it slid in from nothing and was gone for a few frames (#317)
+    if (!app.editRailShown) app.editRailAnim = 0.0f;
     app.editRailHover = 0;
 
     // Resume at the reading position rather than the top (#77)
@@ -1788,7 +1823,7 @@ void enterRecoveredDraft(App& app, HWND hwnd, const std::string& content,
         for (size_t i = 0; i < app.tabs.size(); i++) {
             const bool active = (int)i == app.activeTab;
             const std::string& path = active ? app.currentFile : app.tabs[i].path;
-            const bool dirty = active ? (app.editMode && app.editorDirty)
+            const bool dirty = active ? app.unsavedNow()
                                       : (app.tabs[i].editMode && app.tabs[i].editorDirty);
             if (dirty || _stricmp(path.c_str(), origPath.c_str()) != 0) continue;
             tabActivate(app, hwnd, (int)i);
@@ -1871,6 +1906,7 @@ void exitEditMode(App& app) {
         auto result = parseDocument(app.parser, buf.str(), app.currentFile);
         if (result.success) {
             app.sourceText = buf.str();
+            annotationsParseSource(app);  // the notes are where the saved text has them
             app.root = result.root;
             app.parseTimeUs = result.parseTimeUs;
         }
@@ -2343,6 +2379,7 @@ static void writeEditorFile(App& app, HWND hwnd) {
         editorReparse(app);
 
         app.sourceText = utf8;
+        annotationsParseSource(app);
         if (app.keepDeletedTabs) app.tabs[app.activeTab].viewerSource = app.sourceText;
 
         // Show "Saved!" notification
@@ -2492,6 +2529,7 @@ bool editorReloadFromDisk(App& app, HWND hwnd) {
     app.editorDirty = false;
     updateFileWriteTime(app);
     app.sourceText = content;
+    annotationsParseSource(app);
     editorReparse(app, true);
     updateWindowTitle(app);
     InvalidateRect(hwnd, nullptr, FALSE);
@@ -4826,6 +4864,8 @@ static void renderEditorWrapped(App& app, float editorWidth) {
         selMin = editorSelMin(app);
         selMax = editorSelMax(app);
     }
+    // The marks are drawn where the words are now
+    if (app.showSearch) editorSearchRefresh(app);
     bool hasSearchMatches = app.showSearch && !app.searchQuery.empty() &&
                             !app.editorSearchMatches.empty();
     size_t searchScanIdx = 0;
@@ -4976,10 +5016,11 @@ void renderEditor(App& app, float editorWidth) {
 
     // Search match scanning index (both sorted by position, so we advance together)
     size_t searchScanIdx = 0;
+    if (app.showSearch) editorSearchRefresh(app);
     bool hasSearchMatches = app.showSearch && !app.searchQuery.empty() && !app.editorSearchMatches.empty();
 
     // Advance search scan index to first match that could overlap visible lines
-    if (hasSearchMatches && firstVisible > 0) {
+    if (hasSearchMatches && firstVisible > 0 && firstVisible < (int)app.editorLineStarts.size()) {
         size_t firstVisiblePos = app.editorLineStarts[firstVisible];
         while (searchScanIdx < app.editorSearchMatches.size() &&
                app.editorSearchMatches[searchScanIdx].startPos + app.editorSearchMatches[searchScanIdx].length <= firstVisiblePos) {

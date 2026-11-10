@@ -1,5 +1,30 @@
 # Changelog
 
+## [v4.0.3] - 2026-11-10
+
+### Added
+- Sections fold. In the reading view an arrow beside a heading folds everything under it up to the next heading of its level or above; a right click on it folds or unfolds all. Contents, links and Find open the folds around what they go to. Settings > Appearance > Fold sections turns it off, or opens every document folded. Requested by @Ra0EL (#316)
+
+### Changed
+- A click on a link asks before it opens a program, a script, a shortcut, a file on another server than the document's, or another app's own address such as `ms-settings:` or `obsidian://`, and shows the target in full. Web addresses, mail and documents open at once, as before. A name alone is a file beside the document, never a program found along PATH. The same holds in Live and for a sheet's link and file cards. Relative links to PDFs and other documents, and links with letters outside the system's code page, now open.
+
+### Fixed
+- The tool rail stays in place while tabs open, close and switch in the editor; it used to slide out and back in, and the tab strip and the page jumped beside it. Reported by @Fallgrim (#317)
+- A double- or triple-click above a table with styled or wrapping cells selects the word or line clicked; it took one from another line, or from the table's header. Reported by @shinfd (#318)
+- `themes.ini` reads `bold=`, `italic=`, `bolditalic=`, `selection=` and `hr=` with a note after the colour, with spaces around the `=` and in any case, and applies a saved change while Tinta runs. Reported by @Fallgrim (#310)
+- Live answers at once in a table, a list or a code block of thousands of lines. Every key laid the whole block out again: a letter typed in a table of 5,000 rows took over four seconds, and takes three milliseconds.
+- Scrolling stays smooth in a long document with Find open on a common letter, or with everything selected; every frame measured every match and every selected line of the document.
+- Find, the Contents filter, the results panel, `[[wiki links]]` and Live's menus match letters in either case in every alphabet, so `über` finds `Über` and `привет` finds `Привет`; only A to Z did.
+- Closing the window while the print preview shows over unsaved edits asks about them. It closed without a word, and took the recovery draft with it. A change on disk, a closed tab and a file opened from outside are asked about under the preview too.
+- "Create this file?" from a missing file's link opens a file that is there after all instead of emptying it: one saved since the page was drawn, or one on another server.
+- Deleting or changing a review note after an edit was saved changes that note and nothing else; it wrote over whatever stood where the note's comment had been. A note written into a file with Windows line endings keeps them; every line of the file was rewritten with Unix ones.
+- In the Source editor, Find's marks and Replace follow the text when it changes with the bar open. A button of the tool rail or a change on disk left them behind, and Replace then changed the wrong words or ended Tinta.
+- An equation with accents or brackets nested deep opens at once; thirty `\bar` in a row, or 25 pairs of `\left(` and `\right)`, stopped the window.
+- A file with thousands of tags written as closing themselves (`<b/>`) opens; it ended Tinta.
+- Sheets: a `.smd` cut short inside its canvas opens read-only instead of being saved over as an empty sheet; Tidy and Compile no longer hang on two groups with the same box; a pasted flowchart's link from a card to itself leaves the other arrows their heads; and a sheet larger than its window no longer redraws itself sixty times a second while it stands still.
+- A page with more or larger pictures than the image cache holds keeps them: they were decoded again at every step of a window resize, and pictures from the web were fetched again without end.
+- In Live, a paragraph that begins with a code span written with three backticks is a paragraph; everything under it turned into one code block that showed twice and could not be clicked into.
+
 ## [v4.0.2] - 2026-11-03
 
 ### Added

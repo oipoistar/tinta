@@ -689,6 +689,76 @@ void draftRecovery() {
         app->hwnd = nullptr;
     }
 }
+
+// The rail stays put while tabs open, close and switch in the editor
+// (#317). Each of those parked the leaving tab's buffer and entered edit
+// mode again for the next, which slid the rail in from nothing: it was
+// gone for a few frames and the tab strip jumped beside it. Edit mode
+// still slides it in after a frame without it.
+void railAcrossTabs() {
+    namespace fs = std::filesystem;
+    const std::string a = fs::absolute("rail-a.md").u8string();
+    const std::string b = fs::absolute("rail-b.md").u8string();
+    std::ofstream(a, std::ios::binary) << "# Rail A\n\nA paragraph with **bold** and a [link](#rail-a).\n";
+    std::ofstream(b, std::ios::binary) << "# Rail B\n\n- a list\n- of two\n";
+    auto state = std::make_unique<App>();
+    App& app = *state;
+    app.hwnd = CreateWindowExW(0, L"STATIC", L"Rail tab tests", WS_POPUP, 0, 0, 1050, 900,
+                               nullptr, nullptr, nullptr, nullptr);
+    check(app.hwnd && initD2D(app) && createRenderTarget(app), "the rail tab test window starts");
+    app.width = 1050;
+    app.height = 900;
+    updateTextFormats(app);
+    // One frame as the window paints it: the rail is called every time
+    auto frame = [&] {
+        app.renderTarget->BeginDraw();
+        renderEditRail(app);
+        app.renderTarget->EndDraw();
+    };
+    const float full = dpi(app, 48.0f);
+    app.currentFile = a;
+    tabsInit(app);
+    frame();
+    enterEditMode(app);
+    check(app.editMode && editRailWidth(app) == 0.0f, "edit mode begins with the rail out of sight");
+    frame();
+    check(editRailWidth(app) > 0.0f && editRailWidth(app) < full, "the rail slides in with edit mode");
+    for (int i = 0; i < 6; ++i) frame();
+    check(editRailWidth(app) == full, "the rail lands at its full width");
+
+    // The strip's + opens a quick note, which goes straight into the editor
+    tabOpenQuickNote(app, app.hwnd);
+    check(app.tabs.size() == 2 && app.editMode && editRailWidth(app) == full,
+          "a note opened from the editor keeps the rail");
+    frame();
+    check(editRailWidth(app) == full, "the note's first frame shows the whole rail");
+    tabCycle(app, app.hwnd, -1);
+    check(app.activeTab == 0 && app.editMode && editRailWidth(app) == full,
+          "switching to another tab in the editor keeps the rail");
+    frame();
+    tabCloseIndex(app, app.hwnd, 0);
+    check(app.tabs.size() == 1 && app.editMode && editRailWidth(app) == full,
+          "closing a tab onto one in the editor keeps the rail");
+    frame();
+    check(editRailWidth(app) == full, "the next frame shows the whole rail");
+
+    // A reading tab between: its frame has no rail, so returning to the
+    // editor slides it in again
+    tabOpenPath(app, app.hwnd, b, true);
+    check(app.tabs.size() == 2 && !app.editMode && editRailWidth(app) == 0.0f, "a file opened in a tab reads");
+    frame();
+    tabCycle(app, app.hwnd, -1);
+    check(app.editMode && editRailWidth(app) == 0.0f, "back from a reading tab, the rail starts out of sight");
+    frame();
+    check(editRailWidth(app) > 0.0f && editRailWidth(app) < full, "...and slides in again");
+
+    draftsDeleteAll(app);
+    DestroyWindow(app.hwnd);
+    app.hwnd = nullptr;
+    std::error_code ignored;
+    fs::remove(a, ignored);
+    fs::remove(b, ignored);
+}
 }  // namespace
 
 int runEditorFeatureTests() {
@@ -727,6 +797,7 @@ int runEditorFeatureTests() {
     app.hwnd = nullptr;
     state.reset();
     draftRecovery();
+    railAcrossTabs();
     CoUninitialize();
     std::cout << "Editor features: " << checks << " checks, " << failures << " failures\n";
     return failures ? 1 : 0;

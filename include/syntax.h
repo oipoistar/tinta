@@ -41,6 +41,15 @@ struct SyntaxState {
     size_t explicitIndent = 0;
 };
 
+// Whether two states read the lines after them alike: every field above
+inline bool sameState(const SyntaxState& a, const SyntaxState& b) {
+    return a.mode == b.mode && a.inBlockComment == b.inBlockComment && a.delimiter == b.delimiter &&
+           a.commentOpen == b.commentOpen && a.commentDepth == b.commentDepth && a.escape == b.escape &&
+           a.doubledQuote == b.doubledQuote && a.inTag == b.inTag && a.tagName == b.tagName &&
+           a.closingTag == b.closingTag && a.tag == b.tag && a.rawTag == b.rawTag && a.braceDepth == b.braceDepth &&
+           a.cssValue == b.cssValue && a.blockIndent == b.blockIndent && a.explicitIndent == b.explicitIndent;
+}
+
 // Language keyword sets
 extern const std::unordered_set<std::wstring> CPP_KEYWORDS;
 extern const std::unordered_set<std::wstring> CPP_TYPES;

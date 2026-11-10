@@ -130,6 +130,8 @@ const wchar_t* diagramTemplate(int kind);
 
 // Editor search
 void performEditorSearch(App& app);
+// The same when the text has changed since the matches were found
+void editorSearchRefresh(App& app);
 void scrollEditorToMatch(App& app);
 // Find & replace (#121): replace the current match / every match with
 // App::replaceText; each hunk is one undo entry

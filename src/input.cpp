@@ -28,6 +28,7 @@
 #include "plantuml_app.h"
 #include "print.h"
 #include "export.h"
+#include "folding.h"
 #include "i18n.h"
 #include "selection.h"
 #include "css.h"
@@ -36,6 +37,7 @@
 
 #include <windowsx.h>
 #include <shellapi.h>
+#include <shlwapi.h>
 #include <commdlg.h>
 #include <cwctype>
 #include <filesystem>
@@ -281,6 +283,7 @@ float readingPlace(const App& app) {
 }
 
 void persistLeavingPosition(App& app) {
+    foldsLeave(app);  // its folds stay for the session (#316)
     if (app.currentFile.empty()) return;
     persistReadingPosition(app.currentFile, readingPlace(app), app.zoomFactor);
     app.pendingScrollRestore = -1.0f;  // it belonged to the document left
@@ -321,6 +324,7 @@ bool openDocumentSourceInViewer(App& app, const std::wstring& fullPath,
     {
         Settings stored = loadSettings();
         app.pendingScrollRestore = findReadingPosition(stored, app.currentFile);
+        foldsEnter(app);  // its folds from earlier, or the setting's (#316)
         // Per-document zoom (#zoom-memory): a document remembered at a
         // different zoom reopens there
         float zoom = findReadingZoom(stored, app.currentFile);
@@ -898,6 +902,15 @@ static void settingsAction(App& app, HWND hwnd, int action) {
         case SET_TOGGLE_CLOSE_DRAFTS:
             app.closeKeepsDrafts = !app.closeKeepsDrafts;
             persistCloseKeepsDrafts(app);
+            break;
+        case SET_FOLD_OFF:
+        case SET_FOLD_ON:
+        case SET_FOLD_FOLDED:
+            // Folding sections (#316); Folded folds the page being read too
+            app.foldSections = action != SET_FOLD_OFF;
+            app.foldOnOpen = action == SET_FOLD_FOLDED;
+            if (action == SET_FOLD_FOLDED) foldAllSections(app, true);
+            app.layoutDirty = true;
             break;
         case SET_TOGGLE_HEADRULES:
             app.headingRules = !app.headingRules;
@@ -1835,6 +1848,10 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         }
     }
 
+    // The heading line under the mouse shows its fold arrow (#316)
+    const int prevHoveredFold = app.hoveredFold;
+    app.hoveredFold = foldLineAt(app, docX, docY);
+
     // Table hover (shows the copy-as-TSV button)
     int prevHoveredTable = app.hoveredTable;
     app.hoveredTable = -1;
@@ -1896,7 +1913,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
                 annotationCopyButtonHit(app, (float)app.mouseX,
                                         (float)app.mouseY))) {
         SetCursor(cursorHand);
-    } else if (taskRectAt(app) != nullptr) {
+    } else if (taskRectAt(app) != nullptr || foldArrowAt(app, docX, docY) >= 0) {
         SetCursor(cursorHand);
     } else if (app.hoveredCodeBlock >= 0) {
         // Show hand cursor only when over the copy button area
@@ -1936,6 +1953,7 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         wasHHovered != app.hScrollbarHovered ||
         prevHoveredLink != app.hoveredLink ||
         prevHoveredCodeBlock != app.hoveredCodeBlock ||
+        prevHoveredFold != app.hoveredFold ||
         prevHoveredTable != app.hoveredTable ||
         prevHoveredAnnotation != app.hoveredAnnotation) {
         InvalidateRect(hwnd, nullptr, FALSE);
@@ -2017,6 +2035,9 @@ static void invokeContextMenuAction(App& app, HWND hwnd, int item) {
             break;
         case CTX_SEARCH:
             openSearchInput(app);
+            break;
+        case CTX_FOLD_ALL:
+            foldAllSections(app, !anySectionFolded(app));
             break;
         case CTX_TOC:
             closeSearchIfOpen(app);
@@ -2630,7 +2651,7 @@ void handleMouseDown(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             std::abs(app.mouseX - app.lastClickX) < 5 &&
             std::abs(app.mouseY - app.lastClickY) < 5);
 
-        if (isRepeatedClick) {
+        if (isRepeatedClick && foldArrowAt(app, docX, docY) < 0) {
             app.clickCount = std::min(app.clickCount + 1, 3);
         } else {
             app.clickCount = 1;
@@ -2715,15 +2736,11 @@ static std::wstring wikiLinkPath(const App& app, const std::string& target) {
     if (found(dir / (wideTarget + L".md"))) return (dir / (wideTarget + L".md")).wstring();
     if (found(dir / (wideTarget + L".markdown"))) return (dir / (wideTarget + L".markdown")).wstring();
 
-    auto lower = [](std::wstring s) {
-        for (auto& c : s) c = (wchar_t)std::towlower(c);
-        return s;
-    };
-    std::wstring want = lower(wideTarget);
+    std::wstring want = toLower(wideTarget);
     for (const auto& entry : fs::directory_iterator(dir, ec)) {
         if (!entry.is_regular_file(ec)) continue;
-        std::wstring stem = lower(entry.path().stem().wstring());
-        std::wstring name = lower(entry.path().filename().wstring());
+        std::wstring stem = toLower(entry.path().stem().wstring());
+        std::wstring name = toLower(entry.path().filename().wstring());
         if (stem == want || name == want) return entry.path().wstring();
     }
     // Target doesn't exist: leave the document as-is (a viewer doesn't
@@ -2741,6 +2758,145 @@ static void navRecordJump(App& app, const std::string& fromPath,
     app.navForward.clear();
 }
 
+// --- What a document may have the shell open --------------------------------
+
+std::function<void(const std::wstring&)>& shellOpenHook() {
+    static std::function<void(const std::wstring&)> hook;
+    return hook;
+}
+
+LinkOpening pathOpening(const std::wstring& fullPath, const std::wstring& documentFolder) {
+    LinkOpening opening;
+    opening.kind = LinkKind::Path;
+    opening.target = fullPath;
+    opening.remote = !qmd::mayOpenFromDocument(fullPath, documentFolder);
+    // A program, a script, a shortcut: what Windows itself warns about
+    const std::wstring extension = std::filesystem::path(fullPath).extension().wstring();
+    opening.ask = opening.remote || (!extension.empty() && AssocIsDangerous(extension.c_str()));
+    return opening;
+}
+
+LinkOpening linkOpening(const std::string& written, const std::wstring& documentFolder) {
+    size_t from = 0, to = written.size();
+    while (from < to && (unsigned char)written[from] <= ' ') ++from;
+    while (to > from && (unsigned char)written[to - 1] <= ' ') --to;
+    const std::string address = written.substr(from, to - from);
+    LinkOpening opening;
+    if (address.empty()) return opening;
+    // A scheme is two letters or more before a colon; one letter is a drive
+    size_t colon = 0;
+    while (colon < address.size() && (isalnum((unsigned char)address[colon]) || address[colon] == '+' ||
+                                      address[colon] == '.' || address[colon] == '-')) {
+        ++colon;
+    }
+    const char back = (char)92;
+    std::string path;
+    if (colon >= 2 && colon < address.size() && address[colon] == ':' && isalpha((unsigned char)address[0])) {
+        std::string scheme = address.substr(0, colon);
+        for (char& c : scheme) c = (char)tolower((unsigned char)c);
+        if (scheme == "http" || scheme == "https" || scheme == "mailto") {
+            opening.kind = LinkKind::Web;
+            opening.target = toWide(address);
+            return opening;
+        }
+        if (scheme != "file") {
+            // Some program's own address: ms-settings:, vscode://, zotero://
+            // and whatever else is registered. The document picks the
+            // program and what it is told, so the user is shown it first
+            opening.kind = LinkKind::Address;
+            opening.target = toWide(address);
+            opening.ask = true;
+            return opening;
+        }
+        // file:///C:/a%20b is a path here, file://server/share one on a server
+        const std::string rest = address.substr(colon + 1, address.find('#', colon) == std::string::npos
+                                                                 ? std::string::npos
+                                                                 : address.find('#', colon) - colon - 1);
+        size_t slashes = 0;
+        while (slashes < rest.size() && (rest[slashes] == '/' || rest[slashes] == back)) ++slashes;
+        const std::string tail = qmd::decodeLinkComponent(rest.substr(slashes));
+        const bool drive = tail.size() >= 2 && isalpha((unsigned char)tail[0]) && tail[1] == ':';
+        if (drive) path = tail;
+        else if (slashes == 2 || slashes >= 4) path = std::string(2, back) + tail;
+        else path = std::string(1, back) + tail;
+    } else {
+        path = qmd::splitLinkTarget(address).path;
+    }
+    if (path.empty()) return opening;
+    std::filesystem::path target(toWide(path));
+    if (!target.is_absolute()) {
+        // A name alone is a file beside the document. The shell would look
+        // for it in its own folder and along PATH, and find notepad.exe
+        if (documentFolder.empty()) return opening;
+        target = std::filesystem::path(documentFolder) / target;
+    }
+    return pathOpening(target.lexically_normal().wstring(), documentFolder);
+}
+
+static void shellOpen(App& app, HWND hwnd, const std::wstring& what) {
+    if (shellOpenHook()) {
+        shellOpenHook()(what);
+        return;
+    }
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+    info.hwnd = hwnd;
+    info.lpVerb = L"open";
+    info.lpFile = what.c_str();
+    info.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&info)) {
+        DWORD error = GetLastError();
+        const char* message = (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+            ? "toast.file_missing" : error == ERROR_NO_ASSOCIATION
+            ? "toast.file_no_app" : "toast.file_open_failed";
+        signalPushKey(app, SIG_ERROR, SIGI_FILE, message, std::filesystem::path(what).filename().wstring(), what);
+    }
+}
+
+// Opens it, or asks first with the target in full
+static void openOrAsk(App& app, HWND hwnd, LinkOpening opening) {
+    if (opening.kind == LinkKind::None) return;
+    if (opening.kind == LinkKind::Path && !opening.remote) {
+        // A file on another server is not looked for before the user agrees:
+        // looking signs in to the server
+        const DWORD attributes = GetFileAttributesW(opening.target.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES) {
+            signalPushKey(app, SIG_ERROR, SIGI_FILE, "toast.file_missing",
+                          std::filesystem::path(opening.target).filename().wstring(), opening.target);
+            return;
+        }
+        if (attributes & FILE_ATTRIBUTE_DIRECTORY) opening.ask = false;  // a folder opens in Explorer
+    }
+    if (opening.ask) {
+        app.createRefPath = toUtf8(opening.target);
+        app.createRefOpens = true;
+        app.createRefPending = true;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    shellOpen(app, hwnd, opening.target);
+}
+
+static bool openFileRefTarget(App& app, HWND hwnd, const std::string& url);
+
+void openFileFromDocument(App& app, HWND hwnd, const std::wstring& fullPath, const std::wstring& documentFolder) {
+    openOrAsk(app, hwnd, pathOpening(fullPath, documentFolder));
+}
+
+void openFromDocument(App& app, HWND hwnd, const std::string& address, const std::wstring& documentFolder) {
+    const LinkOpening opening = linkOpening(address, documentFolder);
+    std::error_code ignored;
+    // Markdown on this computer joins the window as a tab, as its links do
+    if (opening.kind == LinkKind::Path && !opening.remote && !sheetActive(app) &&
+        qmd::fileRefIsMarkdown(toUtf8(opening.target)) && std::filesystem::is_regular_file(opening.target, ignored)) {
+        const qmd::LinkTarget written = qmd::splitLinkTarget(address);
+        openFileRefTarget(app, hwnd, qmd::encodeLinkTarget({toUtf8(opening.target), written.fragment, written.hasFragment}));
+        return;
+    }
+    openOrAsk(app, hwnd, opening);
+}
+
 // A ghost reference: text files can be created on the spot; binary
 // documents need an existing file from their own application.
 static void offerCreateFileRef(App& app, const std::string& url) {
@@ -2752,6 +2908,7 @@ static void offerCreateFileRef(App& app, const std::string& url) {
         return;
     }
     app.createRefPath = std::move(path);
+    app.createRefOpens = false;
     app.createRefPending = true;
 }
 
@@ -2762,22 +2919,8 @@ static bool openFileRefTarget(App& app, HWND hwnd, const std::string& url) {
     const auto target = qmd::splitLinkTarget(url);
     const auto& path = target.path;
     if (!qmd::fileRefIsMarkdown(path)) {
-        const auto wide = toWide(path);
-        SHELLEXECUTEINFOW info{};
-        info.cbSize = sizeof(info);
-        info.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
-        info.hwnd = hwnd;
-        info.lpVerb = L"open";
-        info.lpFile = wide.c_str();
-        info.nShow = SW_SHOWNORMAL;
-        if (!ShellExecuteExW(&info)) {
-            DWORD error = GetLastError();
-            const char* message = (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
-                ? "toast.file_missing" : error == ERROR_NO_ASSOCIATION
-                ? "toast.file_no_app" : "toast.file_open_failed";
-            signalPushKey(app, SIG_ERROR, SIGI_FILE, message,
-                          std::filesystem::path(wide).filename().wstring(), wide);
-        }
+        // Its own application opens it; a program or a script asks first
+        openFileFromDocument(app, hwnd, toWide(path), std::filesystem::path(toWide(app.currentFile)).parent_path().wstring());
         return false;
     }
     const auto fromPath = app.currentFile;
@@ -2879,25 +3022,43 @@ static void startPageInvoke(App& app, HWND hwnd, int id) {
 // typing in a fresh tab, 2 = cancel
 static void createRefAction(App& app, HWND hwnd, int action) {
     app.createRefPending = false;
+    if (app.createRefOpens) {
+        // The same dialog asked whether to open a link's target
+        const std::wstring target = toWide(app.createRefPath);
+        app.createRefOpens = false;
+        app.createRefPath.clear();
+        if (action == 1 && !target.empty()) shellOpen(app, hwnd, target);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
     if (action == 1 && !app.createRefPath.empty()) {
         std::filesystem::path target(toWide(app.createRefPath));
         std::error_code ec;
         if (target.has_parent_path()) {
             std::filesystem::create_directories(target.parent_path(), ec);
         }
-        std::ofstream out(target, std::ios::binary);
-        if (out) {
-            out.close();
+        // The link read as missing when its page was laid out, and a path on
+        // another server is never looked for and always reads so. A file
+        // that is there by now is opened as it is: only CREATE_NEW makes a
+        // file without emptying one
+        HANDLE made = CreateFileW(target.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        const bool created = made != INVALID_HANDLE_VALUE;
+        const bool there = created || GetLastError() == ERROR_FILE_EXISTS;
+        if (created) CloseHandle(made);
+        if (there) {
             // The layout cached this path as missing; the ghost turns live
             app.fileRefCache.erase(app.createRefPath);
-            // A markdown target opens in a tab ready to type; other text
-            // files hand off to their registered application (#162)
-            if (openFileRefTarget(app, hwnd, qmd::encodeLinkTarget({app.createRefPath, {}, false}))) {
+            // A markdown target opens in a tab, a new one ready to type;
+            // other text files hand off to their registered application (#162)
+            // (the opening may ask in this dialog: its path is no longer this one's)
+            const std::string file = app.createRefPath;
+            app.createRefPath.clear();
+            if (openFileRefTarget(app, hwnd, qmd::encodeLinkTarget({file, {}, false})) && created) {
                 enterEditMode(app);
             }
         }
     }
-    app.createRefPath.clear();
+    if (!app.createRefPending) app.createRefPath.clear();
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
@@ -3167,7 +3328,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     }
     // The release of a press the sheet took, before anything lets go of the
     // mouse: a lost capture puts a moved card back and drops a new arrow
-    if (sheetActive(app) && sheetMouseUp(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return;
+    if (sheetActive(app) && !app.createRefPending && sheetMouseUp(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return;
     // A tab drag ends on release (its press already consumed the click)
     // A dragged editor selection lands, or a click on it places the caret,
     // while the press still holds the mouse: losing it cancels the drag
@@ -3308,7 +3469,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
                 std::wstring name = app.themeEditorName.empty()
                     ? tr(app, "theme.editor.default_name") : app.themeEditorName;
                 // The heading and code faces start from the base theme's,
-                // so deriving from Abyss keeps its pinned heading face
+                // so deriving from Abyss keeps its pinned heading face. A
+                // hand edit made since the themes loaded is read first, so
+                // the rewrite keeps it (#310)
+                if (customThemesChangedOnDisk()) loadCustomThemes();
                 int idx = saveCustomTheme(app.themeEditorTheme, name, app.themeEditorFont,
                     app.themeEditorCodeFont, app.themeEditorHeadingFont);
                 if (idx >= 0) {
@@ -3514,7 +3678,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return;
                 }
-                scrollToHeadingY(app, app.headings[hit].y);
+                scrollToHeadingY(app, headingTargetY(app, (size_t)hit));
                 // The clicked heading is the active one even when the
                 // scroll cannot physically reach it (short documents);
                 // the next real scroll hands back to the spy
@@ -3798,6 +3962,10 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
             if ((dx > 5 || dy > 5 || app.selShiftExtend) &&
                 app.selFocus != app.selAnchor) {
                 app.hasSelection = true;
+            } else if (int fold = foldArrowAt(app, docX, docY); fold >= 0) {
+                // The arrow beside a heading folds or opens its section (#316)
+                foldArrowClick(app, fold);
+                app.hasSelection = false;
             } else if (const App::TaskRect* task = taskRectAt(app)) {
                 // Click on a task checkbox: flip the mark in the file
                 toggleTaskOnDisk(app, hwnd, task->markOffset, task->checked);
@@ -3898,9 +4066,11 @@ void followDocumentLink(App& app, HWND hwnd, const std::string& url) {
     if (url.find("://") == std::string::npos && url[0] != '#' && url.rfind("mailto:", 0) != 0 && !app.currentFile.empty()) {
         namespace fs = std::filesystem;
         std::error_code ec;
-        fs::path target = fs::path(toWide(app.currentFile)).parent_path() /
-                          toWide(qmd::decodeLinkComponent(qmd::splitLinkTarget(url).path));
-        if (fs::exists(target, ec) && !fs::is_directory(target, ec)) {
+        const fs::path folder = fs::path(toWide(app.currentFile)).parent_path();
+        fs::path target = folder / toWide(qmd::decodeLinkComponent(qmd::splitLinkTarget(url).path));
+        // (a file on another server is not looked for here: the click's own
+        // route asks before it does)
+        if (qmd::mayOpenFromDocument(target.wstring(), folder.wstring()) && fs::exists(target, ec) && !fs::is_directory(target, ec)) {
             openFileRefTarget(app, hwnd, toUtf8(target.wstring()));
             return;
         }
@@ -4445,7 +4615,7 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                         toLower(heading.text).find(needle) !=
                             std::wstring::npos) {
                         ensureLayoutComplete(app);
-                        scrollToHeadingY(app, heading.y);
+                        scrollToHeadingY(app, headingTargetY(app, i));
                         app.tocSpyOverride = (int)i;
                         app.tocSpyOverrideScroll = app.targetScrollY;
                         app.showToc = false;
@@ -5009,7 +5179,46 @@ static bool scholarFilesChanged(App& app) {
     return changed;
 }
 
+void reloadThemesIniIfChanged(App& app, HWND hwnd) {
+    // The theme editor holds a theme of its own; its save reads the file first
+    if (app.showThemeEditor || !customThemesChangedOnDisk()) return;
+    // Names before the reload: the themes they point into are replaced
+    auto nameOf = [](int index) {
+        return index >= THEME_COUNT && index < themeCount() ? std::wstring(themeAt(index).name) : std::wstring();
+    };
+    const std::wstring current = nameOf(app.currentThemeIndex), light = nameOf(app.lightThemeIndex),
+                       dark = nameOf(app.darkThemeIndex);
+    loadCustomThemes();
+    // A user theme by its name again, wherever it moved; one gone from the
+    // file gives way to Paper
+    auto indexOf = [](const std::wstring& name, int index) {
+        if (name.empty()) return index;
+        for (int i = THEME_COUNT; i < themeCount(); ++i) {
+            if (_wcsicmp(themeAt(i).name, name.c_str()) == 0) return i;
+        }
+        return 0;
+    };
+    const int index = indexOf(current, app.currentThemeIndex);
+    const int lightIndex = indexOf(light, app.lightThemeIndex), darkIndex = indexOf(dark, app.darkThemeIndex);
+    // The chooser's previews follow the themes there are now
+    for (auto& pf : app.themePreviewFormats) {
+        if (pf.name) { pf.name->Release(); pf.name = nullptr; }
+        if (pf.preview) { pf.preview->Release(); pf.preview = nullptr; }
+        if (pf.code) { pf.code->Release(); pf.code = nullptr; }
+    }
+    app.themePreviewFormats.clear();
+    const bool moved = index != app.currentThemeIndex || lightIndex != app.lightThemeIndex ||
+                       darkIndex != app.darkThemeIndex;
+    app.lightThemeIndex = lightIndex;
+    app.darkThemeIndex = darkIndex;
+    if (!current.empty()) applyTheme(app, index);  // its colours and faces as now written
+    if (moved) persistThemeChoice(app);
+    app.layoutDirty = true;
+    if (hwnd) InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 void handleFileWatchTimer(App& app, HWND hwnd) {
+    reloadThemesIniIfChanged(app, hwnd);
     // A library saved by Zotero's auto-export, or an edited style, formats
     // the citations again: the editor parses its buffer anew, the reader
     // reads the document again below, keeping its place
@@ -5061,7 +5270,7 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
         for (size_t i = 0; i < app.tabs.size(); i++) {
             bool isActive = (int)i == app.activeTab;
             bool dirty = isActive
-                             ? (app.editMode && app.editorDirty)
+                             ? app.unsavedNow()
                              : (app.tabs[i].editMode && app.tabs[i].editorDirty);
             const std::string& path =
                 isActive ? app.currentFile : app.tabs[i].path;
@@ -5078,6 +5287,8 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
                 isActive ? app.lastFileWriteTime : app.tabs[i].lastWrite;
             if (CompareFileTime(&current, &stored) != 0) {
                 stored = current;  // one prompt per external change
+                // The prompt asks over the document, not over a print preview of it
+                if (app.showPrintPreview) closePrintPreview(app, hwnd);
                 if (!isActive) {
                     tabActivate(app, hwnd, (int)i);
                     app.lastFileWriteTime = current;

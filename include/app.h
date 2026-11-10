@@ -297,6 +297,9 @@ inline const wchar_t* themeHeadingFont(const D2DTheme& t) {
                : t.fontFamily;
 }
 void loadCustomThemes();
+// themes.ini was written by something else, a hand edit, since it was last
+// read or written here (#310)
+bool customThemesChangedOnDisk();
 // What a new themes.ini starts with: a commented example naming every
 // key, headingfont= and codefont= included (#256)
 const char* themesIniTemplate();
@@ -393,6 +396,10 @@ struct Settings {
     // Separator line under level 1 and 2 headings (#154): off renders
     // the heading text alone
     bool headingRules = true;
+    // Folding sections in the reading view (#316): the arrows beside
+    // headings, and whether documents open with every section folded
+    bool foldSections = true;
+    bool foldOnOpen = false;
     // Table of contents panel side: false = right (default), true = left
     bool tocOnLeft = false;
     // Pinned side panels (#156): a pinned panel stops dismissing on
@@ -500,15 +507,27 @@ struct App {
         bool blocked = false;  // on another computer's share, left unopened
         size_t bytes = 0;      // estimated decoded bitmap memory
         unsigned long long lastUsed = 0;
+        unsigned pass = 0;     // the layout pass that last asked for it; 0 for none
     };
     std::unordered_map<std::string, ImageEntry> imageCache;
     size_t imageCacheBytes = 0;
     unsigned long long imageCacheUseClock = 0;
+    // The layout pass in progress and the last one finished, by number. An
+    // image either of them asked for is one the page shows: it stays in the
+    // cache whatever the budget. A document with more images than the cache
+    // holds had each one put out by the next, on every pass: its files
+    // decoded again at every resize, its downloads fetched again without end
+    unsigned imagePass = 0, imagePassShown = 0;
+    bool imagePassActive = false;
     static constexpr size_t IMAGE_CACHE_BUDGET = 64ull * 1024ull * 1024ull;
     static constexpr size_t IMAGE_CACHE_MAX_ENTRIES = 256;
 
     void touchImageCacheEntry(ImageEntry& entry) {
         entry.lastUsed = ++imageCacheUseClock;
+        if (imagePassActive) entry.pass = imagePass;
+    }
+    bool imageOnPage(const ImageEntry& entry) const {
+        return entry.pass != 0 && (entry.pass == imagePassShown || (imagePassActive && entry.pass == imagePass));
     }
 
     void storeImageCacheEntry(const std::string& key, ImageEntry entry) {
@@ -533,6 +552,7 @@ struct App {
             auto victim = imageCache.end();
             for (auto candidate = imageCache.begin(); candidate != imageCache.end(); ++candidate) {
                 if (candidate->first == key || candidate->second.pending) continue;
+                if (imageOnPage(candidate->second)) continue;
                 if (victim == imageCache.end() ||
                     candidate->second.lastUsed < victim->second.lastUsed) {
                     victim = candidate;
@@ -946,6 +966,33 @@ struct App {
     int readingWidthPct = 100;  // mirrors Settings (#82); 100 = full width
     int zenWidthPct = 60;
     bool headingRules = true;   // mirrors Settings (#154)
+    // Folding sections (#316), mirroring Settings: the arrows beside
+    // headings, and documents opening with every section folded
+    bool foldSections = true;
+    bool foldOnOpen = false;
+    // This document's folds (folding.h): every heading folded when foldAll,
+    // but the ones in foldToggled, which flip it. Kept for each file left
+    // this session.
+    bool foldAll = false;
+    std::vector<std::string> foldToggled;
+    struct FoldState {
+        bool all = false;
+        std::vector<std::string> toggled;
+    };
+    std::unordered_map<std::string, FoldState> foldStates;
+    // Laid out with the page: the arrow of each heading that has a section
+    // to fold, and the page's top-level blocks a folded one hides
+    struct FoldArrow {
+        D2D1_RECT_F arrow{};  // the arrow's box, left of the heading
+        D2D1_RECT_F line{};   // the heading's first line, from the arrow on
+        size_t heading = 0;   // into headings
+        size_t block = 0;     // the heading's index among root's children
+        size_t endBlock = 0;  // the first block after its section
+        bool folded = false;
+    };
+    std::vector<FoldArrow> foldArrows;
+    int hoveredFold = -1;     // the heading line under the mouse
+    int layoutFoldArrow = -1; // while laying out: the folded arrow skipping blocks
     int settingsDragSlider = 0;         // SET_SLIDER_* while dragging, else 0
     D2D1_RECT_F settingsSliderTrack[2]{};  // 0 window, 1 fullscreen (set in render)
 
@@ -1042,6 +1089,11 @@ struct App {
     D2D1_RECT_F linkPeekAnchorDoc{};        // hovered link rect (doc coords)
     D2D1_RECT_F linkPeekPanel{};            // placed panel (screen coords)
     int annotEditorIndex = -1;    // -1 = creating a new annotation
+    // The note the editor is open on, by what it says: its place in the
+    // text is found again when it is written, as the text may have changed
+    std::string annotEditorQuote, annotEditorNote;
+    int annotEditorOrdinal = 0;   // which of the notes that say the same, in the text's order
+    size_t annotPendingSource = 0;  // the text a new note's place was found in, hashed
     std::wstring annotEditorText;
     size_t annotEditorCaret = 0;
     size_t annotPendingInsert = (size_t)-1;  // source offset for the new comment line
@@ -1074,6 +1126,13 @@ struct App {
     };
     bool showPrintPreview = false;
     PrintSavedView printSaved;
+    // Whether the active document is in the editor, and whether it holds
+    // edits not saved. The print preview lays the page out with the editor
+    // put aside, editMode off until it closes: asked by editMode alone, a
+    // document being previewed has nothing to lose, and closing the window
+    // over it lost the edits without a word
+    bool editingNow() const { return showPrintPreview ? printSaved.editMode : editMode; }
+    bool unsavedNow() const { return editingNow() && editorDirty; }
     // Laying out for paper: the page margins frame the text, so the screen's
     // side padding, title-strip offset and reading column stay out (#257)
     bool printLayout = false;
@@ -1198,6 +1257,9 @@ struct App {
         int level;       // 1-6
         float y;         // document Y coordinate
         std::string id;  // GitHub-style slug for anchor links
+        // In a folded section (#316): the folded heading's index, whose y
+        // this one takes; -1 when laid out
+        int hiddenUnder = -1;
     };
     std::vector<HeadingInfo> headings;
     std::unordered_map<std::string, int> headingSlugCounts;
@@ -1309,6 +1371,9 @@ struct App {
     std::vector<unsigned> fitBlocks;
     unsigned layoutTableSeq = 0;
     unsigned layoutDiagramSeq = 0;
+    // Above 0 while a table cell is laid out only to be measured and taken
+    // back: its text is not given to the selection's lines (#318)
+    int layoutMeasuring = 0;
 
     // Text bounds - tracked for cursor changes and selection (document coordinates)
     struct TextRect {
@@ -1638,6 +1703,7 @@ struct App {
     // create its target and start typing
     bool createRefPending = false;
     std::string createRefPath;  // resolved absolute target
+    bool createRefOpens = false;  // the dialog asks whether to open createRefPath, a link's target
     std::vector<std::pair<D2D1_RECT_F, int>> createRefHits;  // rebuilt each paint
     // WM_CHARs arriving in this window are dropped so the keystroke that
     // resolved the dialog cannot type into the editor it just opened
@@ -1685,6 +1751,9 @@ struct App {
     bool closeKeepsDrafts = false;   // #252
     fm::Settings frontmatter;
     float editRailAnim = 0.0f;       // rail slide-in 0..1
+    // Whether the last frame painted showed the rail: edit mode slides it
+    // in only after a frame without it (#317)
+    bool editRailShown = false;
     int editRailHover = 0;           // hit id under the mouse, 0 = none
     std::vector<std::pair<D2D1_RECT_F, int>> editRailHits;  // rebuilt each paint
 
@@ -1786,6 +1855,7 @@ struct App {
     };
     std::vector<EditorSearchMatch> editorSearchMatches;
     int editorSearchCurrentIndex = 0;
+    unsigned long long editorSearchRevision = 0;  // the editorTextRevision the matches were found in
 
     // Editor find & replace (#121): Ctrl+H adds a replace row to search
     bool searchReplaceMode = false;
@@ -1867,6 +1937,7 @@ struct App {
         docListItems.clear();
         headings.clear();
         headingSlugCounts.clear();
+        foldArrows.clear();
         footnoteAnchors.clear();
         referenceCards.clear();
         citationKeys.clear();
@@ -1901,6 +1972,7 @@ struct App {
         imageCache.clear();
         imageCacheBytes = 0;
         imageCacheUseClock = 0;
+        imagePassShown = 0;
         if (titleIconBitmap) {
             titleIconBitmap->Release();
             titleIconBitmap = nullptr;

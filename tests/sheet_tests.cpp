@@ -497,6 +497,22 @@ void commands(App& app, SheetDoc& doc, const fs::path& dir, const fs::path& out)
         check(doc.model.nodes.size() == nodes + 3 && doc.model.edges.size() == edges + 2,
               "a pasted flowchart arrives as three cards and two arrows");
         check(fs::exists(dir / "Launch plan" / "Plan.md"), "each pasted card is a note in the folder");
+        // A link from a card to itself, and a second link between two cards, add
+        // no arrow. Their "no arrowhead" went to whatever arrow was last: another
+        // link's, or the sheet's own, or none at all, which ended the program
+        size_t heads = 0;
+        for (const Edge& e : doc.model.edges) heads += e.toArrow;
+        edges = doc.model.edges.size();
+        copyToClipboard(app.hwnd, L"flowchart TD\n  A --- A\n");
+        keystroke(app, 'V', {true, false, false});
+        size_t after = 0;
+        for (const Edge& e : doc.model.edges) after += e.toArrow;
+        check(doc.model.edges.size() == edges && after == heads, "a pasted link from a card to itself adds no arrow and leaves the others their heads");
+        copyToClipboard(app.hwnd, L"flowchart TD\n  P --> Q\n  R --> S\n  P --- Q\n");
+        keystroke(app, 'V', {true, false, false});
+        after = 0;
+        for (const Edge& e : doc.model.edges) after += e.toArrow;
+        check(doc.model.edges.size() == edges + 2 && after == heads + 2, "a link written twice is one arrow, and the arrow before it keeps its head");
     }
 
     // Tidy leaves no card on another
@@ -628,6 +644,27 @@ void unreadable(App& app, const fs::path& dir) {
     keystroke(app, 'N');
     sheetLeave(app);
     check(readBytes(broken) == text, "and is never written over");
+
+    // Cut short inside its canvas block, as a sync or a partial copy leaves
+    // it: what is left of the cards is not replaced by an empty sheet
+    fs::path cut = dir / "Cut short.smd";
+    std::string rest = "# Cut short\n\n```json canvas\n{\n\t\"nodes\":[\n\t\t{\"id\":\"t1\",\"type\":\"text\",\"text\":\"kept\",\"x\":0,\"y\":0,"
+                       "\"width\":220,\"height\":90},\n\t\t{\"id\":\"t2\",\"type\":\"te";
+    writeBytes(cut, rest);
+    Sheet model;
+    SmdInfo info;
+    std::string why;
+    check(!parseSmd(rest, model, info, &why) && !why.empty(), "a sheet whose canvas block never closes does not read as an empty sheet");
+    tabOpenPath(app, app.hwnd, toUtf8(cut.wstring()));
+    doc = activeSheet(app);
+    check(doc && doc->readOnly, "it opens read-only");
+    if (!doc) return;
+    keystroke(app, 'N');
+    sheetLeave(app);
+    check(readBytes(cut) == rest, "and what is left of it is never written over");
+    // A fence of another kind left open under a whole canvas is still that canvas
+    std::string whole = "# Whole\n\n```json canvas\n{\"nodes\":[],\"edges\":[]}\n```\n\n```text\nnotes, never closed\n";
+    check(parseSmd(whole, model, info, &why), "an open code block after a closed canvas leaves the sheet readable");
 }
 
 // A big sheet stays quick: 400 notes, each linking to the next, drawn
@@ -674,6 +711,29 @@ void performance(App& app, const fs::path& dir) {
     double close = ms(clock::now() - start) / 5;
     std::cout << "Big sheet: open " << open << " ms, ghosts " << ghostTime << " ms, whole frame " << whole
               << " ms, close frames while drawing notes " << firstClose << " ms, then " << close << " ms\n";
+    // Close up, most of the notes are out of view and have never been drawn, and
+    // need not be. The timer asked for a frame every 16 ms while one such card
+    // was on the sheet: for good, on any sheet larger than its window
+    {
+        size_t undrawn = 0;
+        for (const Node& node : doc->model.nodes) {
+            auto it = doc->cards.find(node.id);
+            undrawn += it != doc->cards.end() && it->second.kind == SheetCard::Kind::Note && it->second.bmKey == 0;
+        }
+        check(undrawn > 100, "most of the big sheet's notes are out of view and not drawn: " + std::to_string(undrawn));
+        doc->zoomChangedMs = 0;
+        sheetTimer(app, app.hwnd);
+        check(doc->timerMs > 16, "with the cards in view drawn, the timer rests: " + std::to_string(doc->timerMs) + " ms");
+        // And zoomed out to titles, where no card is drawn at all
+        fitBox(app, *doc, bounds(doc->model), false);
+        doc->zoomChangedMs = 0;
+        paint(app);
+        sheetTimer(app, app.hwnd);
+        check(doc->timerMs > 16, "zoomed out to titles the timer rests too: " + std::to_string(doc->timerMs) + " ms");
+        flyTo(*doc, n.x + n.width * 0.5f, n.y + n.height * 0.5f, 1.0f, 0);
+        doc->zoomChangedMs = 0;
+        paint(app);
+    }
     {
         fitBox(app, *doc, bounds(doc->model), false);
         doc->showGhosts = false;
@@ -910,7 +970,8 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
     float sc = 1;
     editRect(app, doc, rect, sc);
     auto xAt = [&](size_t at) {
-        IDWriteTextLayout* layout = editLayout(app, doc, (rect.right - rect.left) / sc);
+        const live::Laid* laid = editLayout(app, doc, (rect.right - rect.left) / sc);
+        IDWriteTextLayout* layout = laid && laid->parts.size() == 1 ? laid->parts[0].layout.Get() : nullptr;
         float px = 0, py = 0;
         DWRITE_HIT_TEST_METRICS m{};
         if (layout) layout->HitTestTextPosition((UINT32)at, FALSE, &px, &py, &m);
@@ -1016,7 +1077,8 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
         float hs = 1;
         check(editRect(app, doc, hb, hs), "the card's text box is placed for a finger");
         auto textPoint = [&](size_t at) {
-            IDWriteTextLayout* layout = editLayout(app, doc, (hb.right - hb.left) / hs);
+            const live::Laid* laid = editLayout(app, doc, (hb.right - hb.left) / hs);
+            IDWriteTextLayout* layout = laid && laid->parts.size() == 1 ? laid->parts[0].layout.Get() : nullptr;
             float px = 0, py = 0;
             DWRITE_HIT_TEST_METRICS m{};
             if (layout) layout->HitTestTextPosition((UINT32)at, FALSE, &px, &py, &m);

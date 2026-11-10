@@ -1,0 +1,3 @@
+Šuma
+
+A plain-text file that a note links by its name, [[šuma]], in small letters.

@@ -1,5 +1,6 @@
 #include "d2d_init.h"
 #include "editor.h"
+#include "editrail.h"
 #include "input.h"
 #include "keystroke.h"
 #include "overlays.h"
@@ -202,6 +203,87 @@ void focusTransfers(App& app) {
     key(app,VK_ESCAPE);
 }
 }
+// The matches are places in the text as it was searched. With the bar open
+// the text still changes: a button of the rail, typing in the text, a change
+// taken from the disk. A match used after that was a place past the text's
+// end, which ended the program, or other words, which were replaced
+void staleMatches(App& app) {
+    enterEditMode(app);  // the checks before this one end in the reading view
+    check(app.editMode, "the editor opens");
+    auto text = [&](const std::wstring& value) {
+        closeSearchInput(app);
+        app.editorText = value;
+        rebuildLineStarts(app);
+        app.editorCursorPos = 0;
+        app.editorHasSelection = false;
+    };
+    auto inPlace = [&] {
+        const std::wstring wanted = toLower(app.searchQuery);
+        for (const auto& match : app.editorSearchMatches) {
+            if (match.startPos + match.length > app.editorText.size()) return false;
+            if (toLower(app.editorText.substr(match.startPos, match.length)) != wanted) return false;
+        }
+        return true;
+    };
+
+    // A button of the rail, pressed while the bar has the keyboard
+    text(L"**bold** ab");
+    app.editorSelStart = 2;
+    app.editorSelEnd = app.editorCursorPos = 6;
+    app.editorHasSelection = true;
+    key(app, 'H', 8, true);
+    query(app, L"ab");
+    key(app, VK_TAB, 9);
+    key(app, 'A', 1, true);  // over what the field held
+    type(app, L"x");
+    check(app.editorSearchMatches.size() == 1 && app.editorSearchMatches[0].startPos == 9, "the word is found at the text's end");
+    editRailInvoke(app, app.hwnd, 1);
+    check(app.editorText == L"bold ab", "Bold on the rail takes the selection's marks off: the text is shorter");
+    key(app, VK_RETURN, 13);
+    check(app.editorText == L"bold x", "Enter in Replace then replaces the word where it is now");
+
+    // Lines put in above the match, as typing in the text does
+    text(L"alpha\nbeta target gamma\n");
+    key(app, 'H', 8, true);
+    query(app, L"target");
+    key(app, VK_TAB, 9);
+    key(app, 'A', 1, true);  // over what the field held
+    type(app, L"goal");
+    app.editorText.insert(0, L"two more\nlines\n");
+    rebuildLineStarts(app);
+    paint(app);
+    check(app.editorSearchMatches.size() == 1 && inPlace(), "a frame marks the word where it is after lines came in above it");
+    app.editorText.insert(0, L"and one more\n");
+    rebuildLineStarts(app);
+    editorReplaceCurrent(app, app.hwnd);
+    check(app.editorText == L"and one more\ntwo more\nlines\nalpha\nbeta goal gamma\n", "Replace changes the word, not what stands where it was");
+
+    // The text cut short under the matches, as a change taken from the disk does
+    text(L"one\ntwo\nthree\nfour\nfive\nsix tail\n");
+    key(app, 'H', 8, true);
+    query(app, L"tail");
+    key(app, VK_TAB, 9);
+    key(app, 'A', 1, true);  // over what the field held
+    type(app, L"end");
+    check(app.editorSearchMatches.size() == 1, "the word is found in the last line");
+    app.editorText = L"one\n";
+    rebuildLineStarts(app);
+    key(app, VK_RETURN, 13);
+    check(app.editorText == L"one\n" && app.editorSearchMatches.empty(), "Enter in Replace finds no word left and changes nothing");
+    text(L"one\ntwo\nthree\nfour\nfive\nsix tail\n");
+    key(app, 'F', 6, true);
+    query(app, L"tail");
+    app.editorScrollY = 400.0f;
+    app.editorText = L"one\n";
+    rebuildLineStarts(app);
+    app.editorCursorPos = std::min(app.editorCursorPos, app.editorText.size());  // as a reload moves the caret
+    key(app, VK_RETURN, 13);
+    paint(app);
+    check(app.editorCursorPos <= app.editorText.size() && app.editorSearchMatches.empty(), "Enter in Find leaves the caret in the text");
+    closeSearchInput(app);
+    app.editorDirty = false;
+}
+
 int runSearchInputTests() {
     HRESULT ole = OleInitialize(nullptr);
     if (FAILED(ole)) return 2;
@@ -213,7 +295,7 @@ int runSearchInputTests() {
     Settings settings; settings.keyProfile="windows"; applyKeymap(app,settings);
     enterEditMode(app); editorReparse(app); ensureLayoutComplete(app);
     check(app.tableCellRects.size()==6 && app.codeBlocks.size()==1, "mixed fixture lays out its table and code");
-    fieldEditing(app); focusTransfers(app);
+    fieldEditing(app); focusTransfers(app); staleMatches(app);
     DestroyWindow(app.hwnd); app.hwnd=nullptr; state.reset(); CoUninitialize();
     OleUninitialize();
     std::cout << "Search input: " << failures << " failures\n";

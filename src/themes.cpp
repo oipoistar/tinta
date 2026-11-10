@@ -261,6 +261,11 @@ bool themeUiDark(const D2DTheme& theme) {
 //   dark=1
 //   font=Segoe UI
 //   headingfont=Segoe UI    ; optional, headings inherit font= when absent
+//
+// Lines read as a person means them (#310): spaces around keys and values,
+// keys in any case, and a note after a value, from a ';' or in parentheses
+// as the template's examples carry, are all fine. A change to the file
+// applies while Tinta runs (customThemesChangedOnDisk).
 //   codefont=Cascadia Mono
 //   background=2E3440
 //   text=D8DEE9
@@ -271,6 +276,7 @@ bool themeUiDark(const D2DTheme& theme) {
 
 #include <shlobj.h>
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -285,6 +291,45 @@ std::wstring themesIniPath() {
     std::wstring dir = tintaConfigDir();
     if (dir.empty()) return L"";
     return dir + L"\\themes.ini";
+}
+
+// themes.ini's time when it was last read or written here; zero while the
+// file is missing
+FILETIME g_themesIniTime{};
+
+FILETIME themesIniTimeNow() {
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    const std::wstring path = themesIniPath();
+    if (path.empty() || !GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return FILETIME{};
+    return data.ftLastWriteTime;
+}
+
+std::string trimmed(const std::string& s) {
+    size_t a = 0, b = s.size();
+    while (a < b && isspace((unsigned char)s[a])) ++a;
+    while (b > a && isspace((unsigned char)s[b - 1])) --b;
+    return s.substr(a, b - a);
+}
+
+// A line as a person means it (#310): key and value without the spaces
+// around them, the key in any case, and a note after the value dropped,
+// from a ';' or in parentheses, as the template's examples carry their
+// notes: an example uncommented loads. A theme's name keeps all but the
+// spaces at its ends.
+void readThemeLine(const std::string& line, size_t eq, std::string& key, std::string& value) {
+    key = trimmed(line.substr(0, eq));
+    for (char& c : key) c = (char)tolower((unsigned char)c);
+    value = trimmed(line.substr(eq + 1));
+    if (key == "name") return;
+    for (size_t i = 1; i < value.size(); ++i) {
+        if (value[i] == '(' && isspace((unsigned char)value[i - 1])) {
+            value.erase(i);
+            break;
+        }
+    }
+    const size_t note = value.find(';');
+    if (note != std::string::npos) value.erase(note);
+    value = trimmed(value);
 }
 
 bool parseHexColor(const std::string& value, D2D1_COLOR_F& out) {
@@ -394,8 +439,8 @@ void writeThemesIni() {
     if (path.empty()) return;
     std::ofstream file(path);
     if (!file) return;
-    file << "; User themes. Colors are RRGGBB hex. Restart not required for\n";
-    file << "; themes saved from the editor; hand edits load at next launch.\n";
+    file << "; User themes. Colors are RRGGBB hex. Saved edits apply at once,\n";
+    file << "; whether from the theme editor or by hand.\n";
     file << "; Optional inlinecode overrides code for inline spans only.\n";
     file << "; Optional inlinecodebackground (a colour, or none) overrides\n";
     file << "; codebackground for inline spans only.\n";
@@ -444,9 +489,17 @@ void writeThemesIni() {
         file << "syntaxtype=" << colorToHex(t.syntaxType) << "\n";
         file << "syntaxcontrolflow=" << colorToHex(t.syntaxControlFlow) << "\n";
     }
+    file.close();
+    // Written here: no change to read back
+    g_themesIniTime = themesIniTimeNow();
 }
 
 } // namespace
+
+bool customThemesChangedOnDisk() {
+    const FILETIME now = themesIniTimeNow();
+    return CompareFileTime(&now, &g_themesIniTime) != 0;
+}
 
 const char* themesIniTemplate() {
     return "; Custom themes: [theme] sections, RRGGBB colors. For example:\n"
@@ -676,6 +729,7 @@ void loadCustomThemes() {
 
 static void loadCustomThemesIni() {
     g_customThemes.clear();
+    g_themesIniTime = themesIniTimeNow();
     std::wstring path = themesIniPath();
     if (path.empty()) return;
     std::ifstream file(path);
@@ -693,7 +747,8 @@ static void loadCustomThemesIni() {
     std::string line;
     while (std::getline(file, line)) {
         while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
-        if (line.empty() || line[0] == ';') continue;
+        line = trimmed(line);
+        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
         if (line[0] == '[') {
             finalize();
             current = std::make_unique<CustomTheme>();
@@ -705,7 +760,9 @@ static void loadCustomThemesIni() {
         if (!current) continue;
         size_t eq = line.find('=');
         if (eq == std::string::npos) continue;
-        applyThemeKey(*current, line.substr(0, eq), line.substr(eq + 1));
+        std::string key, value;
+        readThemeLine(line, eq, key, value);
+        applyThemeKey(*current, key, value);
     }
     finalize();
 }

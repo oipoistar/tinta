@@ -10,6 +10,10 @@
 
 [Missing file](not-created.md#destination-heading) · [Same document](#destination-heading)
 
+*Missing file* is drawn dimmed, and a click offers to create `not-created.md`. With the prompt open, save a
+`not-created.md` with some words in it beside this file from another program, then choose Create: it opens with
+its words, to be read. With no such file, Create makes an empty one and opens it to be typed in.
+
 ## Destination heading
 
 This heading deliberately has the same ID as the destination, at a different position.

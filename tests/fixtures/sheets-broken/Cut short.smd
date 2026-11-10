@@ -1,0 +1,8 @@
+# Cut short
+
+```json canvas
+{
+	"nodes":[
+		{"id":"t1","type":"text","text":"The first card, still in the file","x":0,"y":0,"width":260,"height":100},
+		{"id":"t2","type":"text","text":"The second","x":320,"y":0,"width":220,"height":100},
+		{"id":"t3","type":"te

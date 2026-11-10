@@ -7,6 +7,19 @@ void performSearch(App& app);
 void mapSearchMatchesToLayout(App& app);
 void scrollToCurrentMatch(App& app);
 
+// A piece of a match as it is marked on the page: the part of the match
+// that lies on one text rect, in document coordinates
+struct SearchHighlight {
+    D2D1_RECT_F rect;
+    size_t matchIndex;
+};
+
+// The marks of the matches on the lines between two heights of the
+// document. A frame asks for the lines it draws: a letter found two hundred
+// thousand times was measured two hundred thousand times for every frame.
+void searchHighlightRects(const App& app, float top, float bottom,
+                          std::vector<SearchHighlight>& out);
+
 // Find/Replace share real single-line editing and exclusive typing focus (#223).
 void openSearchInput(App& app, bool replace = false);
 void focusSearchInput(App& app, bool replace);

@@ -2,10 +2,14 @@
 #include "utils.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace {
+
+std::atomic<size_t> g_measured{0};
 
 // The layout run backing a text rect, when one exists. Word-level rects
 // (wrapped text) point at their covering segment run; syntax-highlighted
@@ -59,6 +63,7 @@ bool runPiece(const App::LayoutTextRun& run, size_t start, size_t end, D2D1_RECT
     size_t hi = std::min(end, run.docStart + run.docLength);
     if (lo >= hi) return false;
 
+    g_measured.fetch_add(1, std::memory_order_relaxed);
     DWRITE_HIT_TEST_METRICS metrics{};
     UINT32 metricCount = 0;
     HRESULT hr = run.layout->HitTestTextRange(
@@ -209,8 +214,18 @@ bool selectionLineRange(const App& app, size_t offset, size_t& start, size_t& en
     return false;
 }
 
+size_t selectionMeasureCount() {
+    return g_measured.load(std::memory_order_relaxed);
+}
+
 void selectionHighlightRects(const App& app, size_t start, size_t end,
                              std::vector<D2D1_RECT_F>& out) {
+    selectionHighlightRects(app, start, end, std::numeric_limits<float>::lowest(),
+                            std::numeric_limits<float>::max(), out);
+}
+
+void selectionHighlightRects(const App& app, size_t start, size_t end,
+                             float top, float bottom, std::vector<D2D1_RECT_F>& out) {
     if (start >= end) return;
     const size_t first = out.size();
 
@@ -240,6 +255,13 @@ void selectionHighlightRects(const App& app, size_t start, size_t end,
     D2D1_RECT_F piece{};
     for (const App::TextRect& tr : app.textRects) {
         if (tr.docLength == 0) continue;
+        // Outside the heights asked for: it is not measured. It stays the
+        // rect before the next one, whose gap is found as it always was,
+        // and its run is still measured if a later word of it is wanted.
+        if (tr.rect.bottom < top || tr.rect.top > bottom) {
+            prev = &tr;
+            continue;
+        }
         if (prev && gapPiece(app, *prev, tr, start, end, piece)) add(piece);
         prev = &tr;
         if (const App::LayoutTextRun* run = runFor(app, tr)) {
@@ -263,6 +285,7 @@ bool selectionRangeRect(const App& app, const App::TextRect& tr,
     size_t hi = std::min(end, tr.docStart + tr.docLength);
     if (lo >= hi) return false;
     if (const App::LayoutTextRun* run = runFor(app, tr)) {
+        g_measured.fetch_add(1, std::memory_order_relaxed);
         DWRITE_HIT_TEST_METRICS m{};
         UINT32 count = 0;
         if (SUCCEEDED(run->layout->HitTestTextRange(

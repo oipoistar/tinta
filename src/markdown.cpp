@@ -2280,9 +2280,12 @@ void parseHtmlIntoElements(const std::string& html, Element* parent) {
                 pos = tagEnd + 1;
                 continue;
             }
-        } else if (tag.name != "li" && !tag.isSelfClosing && htmlTagNests(tag.name, block) &&
+        } else if (tag.name != "li" && htmlTagNests(tag.name, block) &&
                    openDepth() >= (block ? kMaxBlockNesting : kMaxNesting)) {
-            flattened[tag.name]++;
+            // A tag written as closing itself (<b/>) opens its element like
+            // any other and no close tag follows it: it counts against the
+            // depth too, and leaves no close tag to skip
+            if (!tag.isSelfClosing) flattened[tag.name]++;
             pos = tagEnd + 1;
             continue;
         }

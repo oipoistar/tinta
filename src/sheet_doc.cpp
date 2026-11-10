@@ -395,8 +395,7 @@ void refreshCard(App& app, SheetDoc& doc, const Node& node, bool force) {
             bool isPath = endsWithNoCase(wideTarget, L".md") || endsWithNoCase(wideTarget, L".markdown");
             std::wstring key = isPath ? (std::filesystem::path(noteDir) / wideTarget).lexically_normal().wstring()
                                       : L"*" + stemOf(wideTarget);
-            for (auto& ch : key) ch = (wchar_t)towlower(ch);
-            c.linkKeys.push_back(key);
+            c.linkKeys.push_back(toLower(key));
         }
     }
 }
@@ -782,8 +781,7 @@ std::vector<std::pair<std::string, std::string>> ghostLinks(App& app, SheetDoc& 
         doc.cardByName.clear();
         for (const Node& n : doc.model.nodes) {
             if (n.type != NodeType::File) continue;
-            std::wstring path = absolutePath(doc, n.file);
-            for (auto& ch : path) ch = (wchar_t)towlower(ch);
+            std::wstring path = toLower(absolutePath(doc, n.file));
             doc.cardByPath.emplace(path, n.id);
             doc.cardByName.emplace(L"*" + stemOf(path), n.id);
         }
@@ -1239,14 +1237,10 @@ void sheetTimer(App& app, HWND hwnd) {
     }
     if (doc->dirty && !animating && doc->gesture == SheetDoc::Gesture::None) saveNow(app, *doc);
     pollFolder(app, *doc, false);
-    bool cardsWaiting = false;
-    for (const Node& n : doc->model.nodes) {
-        auto it = doc->cards.find(n.id);
-        if (it != doc->cards.end() && it->second.kind == SheetCard::Kind::Note && it->second.bmKey == 0) {
-            cardsWaiting = true;
-            break;
-        }
-    }
+    // Cards the last frame ran out of time for. (Asked by "a note card never
+    // drawn", this was true for good on any sheet with a note out of view,
+    // and with the sheet zoomed out to titles: a frame every 16 ms, for ever)
+    bool cardsWaiting = doc->cardsPending;
     if (animating || cardsWaiting || now - doc->zoomChangedMs < 400) InvalidateRect(hwnd, nullptr, FALSE);
     // A card rested on long enough opens in the peek lens
     bool peekWaiting = !doc->peekCandidate.empty() && doc->peekId.empty();
@@ -1258,11 +1252,8 @@ void sheetTimer(App& app, HWND hwnd) {
         InvalidateRect(hwnd, nullptr, FALSE);
     }
     // Fast while something moves, slow while it only watches the folder
-    SetTimer(hwnd, SHEET_TIMER_ID,
-             (animating || cardsWaiting) ? 16
-             : (doc->editing != SheetDoc::Edit::None || peekWaiting) ? 120
-                                                                     : 500,
-             nullptr);
+    doc->timerMs = (animating || cardsWaiting) ? 16 : (doc->editing != SheetDoc::Edit::None || peekWaiting) ? 120 : 500;
+    SetTimer(hwnd, SHEET_TIMER_ID, doc->timerMs, nullptr);
     static unsigned long long lastViewSave = 0;
     if (now - lastViewSave > 3000) {
         lastViewSave = now;

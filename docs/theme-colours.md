@@ -68,3 +68,18 @@ editor keep them, though the editor has no controls for them yet; edit them in
 
 Try `tests/fixtures/theme-emphasis-310.md` with
 `tests/fixtures/theme-emphasis-310.ini`.
+
+## Editing themes.ini by hand
+
+A saved edit to `themes.ini` applies at once, to the theme in use too; there
+is no need to restart Tinta. Lines read as you would mean them:
+
+- spaces around the `=` and around the value are fine (`bold = AA2200`);
+- keys can be in any case (`BoldItalic=7722AA`);
+- a note after a value is dropped, after a `;` or in parentheses, so the
+  examples in a new `themes.ini` work once you delete the `; ` in front of
+  them (`bold=1A365D   (italic=, and bolditalic= for both)`);
+- a line starting with `;` or `#` is a comment.
+
+A theme's `name=` keeps everything but the spaces at its ends, parentheses
+included. Try `tests/fixtures/theme-hand-edited-310.ini`, written this way.

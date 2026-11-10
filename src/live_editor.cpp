@@ -73,7 +73,7 @@ struct LiveEditor {
     int first = -1, last = -1;     // -1: a line between blocks
     float top = 0, bottom = 0;
     float textX = 0, textY = 0, width = 0, height = 0, liveBottom = 0, shift = 0;
-    IDWriteTextLayout* layout = nullptr;  // owned by `region`
+    const live::Laid* layout = nullptr;   // owned by `region`
     // A diagram, a formula or a picture: what the page drew for it, under its Markdown
     bool preview = false;
     float previewTop = 0, previewBottom = 0, previewY = 0;
@@ -362,20 +362,10 @@ void refreshBlocks(App& app, LiveEditor& L) {
 
 // --- The live stretch ------------------------------------------------------------
 
-float firstBaseline(IDWriteTextLayout* layout) {
-    if (!layout) return 0;
-    UINT32 count = 0;
-    layout->GetLineMetrics(nullptr, 0, &count);
-    if (!count) return 0;
-    std::vector<DWRITE_LINE_METRICS> lines(count);
-    if (FAILED(layout->GetLineMetrics(lines.data(), count, &count))) return 0;
-    return lines[0].baseline;
-}
-
 // Where a block's text goes on the page: its first line on the page's
 // first baseline, a fenced block from its background's top
-float blockTextY(const Block& b, IDWriteTextLayout* layout) {
-    if (b.baseline >= 0 && !b.code) return std::max(b.top, b.baseline - firstBaseline(layout));
+float blockTextY(const Block& b, const live::Laid* layout) {
+    if (b.baseline >= 0 && !b.code) return std::max(b.top, b.baseline - live::firstBaseline(layout));
     return b.inkTop;
 }
 
@@ -462,7 +452,7 @@ void place(App& app, LiveEditor& L) {
     L.first = first;
     L.last = last;
     L.layout = live::layoutOf(app, L.e, L.from, L.to, L.width, look, L.region, live::caretLineOf(L.e, L.from, L.to));
-    L.height = L.layout ? paint::metrics(L.layout).height : 0;
+    L.height = L.layout ? L.layout->height : 0;
     L.preview = false;
     if (first >= 0) {
         const Block& fb = L.blocks[first];
@@ -522,7 +512,7 @@ size_t positionAtShown(App& app, LiveEditor& L, float x, float y, int direction)
     live::Look look = live::pageLook(app);
     float bx = 0, width = 0;
     columnOf(app, look, block.code, bx, width);
-    IDWriteTextLayout* layout = live::layoutOf(app, L.e, f, t, width, look, L.probe, (size_t)-1);
+    const live::Laid* layout = live::layoutOf(app, L.e, f, t, width, look, L.probe, (size_t)-1);
     if (!layout) return f;
     py = std::clamp(py, block.inkTop, std::max(block.inkTop, block.inkBottom - 1.0f));
     return live::positionAt(layout, f, t, x - bx, py - blockTextY(block, layout));
@@ -808,7 +798,12 @@ void renderLivePage(App& app) {
     D2D1_MATRIX_3X2_F saved;
     app.renderTarget->GetTransform(&saved);
     app.renderTarget->SetTransform(D2D1::Matrix3x2F::Translation(L.textX - sx, L.textY - sy) * saved);
-    live::draw(app, L.e, L.layout, L.region, L.from, look, app.cursorBlinkOn, 1.0f);
+    // What of the stretch the window shows: a block of thousands of lines
+    // draws the lines in view
+    const float drawnAt = L.textY - sy, scale = saved._22 > 0 ? saved._22 : 1.0f;
+    const float viewTop = (0.0f - saved._32) / scale - drawnAt;
+    const float viewBottom = (app.renderTarget->GetSize().height - saved._32) / scale - drawnAt;
+    live::draw(app, L.e, L.layout, L.from, look, app.cursorBlinkOn, 1.0f, viewTop, viewBottom);
     app.renderTarget->SetTransform(saved);
     // Under a diagram's, a formula's or a picture's Markdown, what the page
     // drew for it, caught up after each pause in the typing

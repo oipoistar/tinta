@@ -1,5 +1,6 @@
 #include "d2d_init.h"
 #include "render.h"
+#include "search.h"
 #include "selection.h"
 #include "utils.h"
 
@@ -9,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <vector>
@@ -393,6 +395,151 @@ std::string read(const std::filesystem::path& path) {
 }
 }
 
+// Every kind of block, over and over, so the document is many windows long
+std::string longDocument(int sections) {
+    std::string source;
+    for (int i = 0; i < sections; ++i) {
+        const std::string n = std::to_string(i);
+        source += "## Section " + n + " of the long document\n\n";
+        source += "The **bold " + n + "** words, the *italic ones*, `code`, [a link](#section-" + n +
+                  ") and ==marked text== run over the edge of a narrow window, so the paragraph "
+                  "wraps onto several lines of words and each line has runs of its own.\n\n";
+        source += "- item one of " + n + "\n- item two with **weight**\n  - a nested item\n\n";
+        source += "| Left " + n + " | Right |\n| --- | --- |\n| alpha | beta **bold** |\n| gamma | delta |\n\n";
+        source += "```cpp\nint value" + n + " = " + n + "; // the letters of a fence\n```\n\n";
+        source += "> A quote with x^2^ and H~2~O in the text of it.\n\n";
+    }
+    return source;
+}
+
+bool reaches(const D2D1_RECT_F& rect, float top, float bottom) {
+    return rect.bottom >= top && rect.top <= bottom;
+}
+
+// The rects that reach into the lines between two heights, in a fixed order
+std::vector<D2D1_RECT_F> between(std::vector<D2D1_RECT_F> rects, float top, float bottom) {
+    rects.erase(std::remove_if(rects.begin(), rects.end(),
+                               [&](const D2D1_RECT_F& rect) { return !reaches(rect, top, bottom); }),
+                rects.end());
+    std::sort(rects.begin(), rects.end(), [](const D2D1_RECT_F& a, const D2D1_RECT_F& b) {
+        return a.top != b.top ? a.top < b.top : a.left < b.left;
+    });
+    return rects;
+}
+
+bool sameRects(const std::vector<D2D1_RECT_F>& a, const std::vector<D2D1_RECT_F>& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::abs(a[i].left - b[i].left) > 0.01f || std::abs(a[i].right - b[i].right) > 0.01f ||
+            std::abs(a[i].top - b[i].top) > 0.01f || std::abs(a[i].bottom - b[i].bottom) > 0.01f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// A frame asks for the selection bars and the search marks of the lines it
+// draws. They must be the ones the whole document gives for those lines, and
+// what they cost must follow the window, not the document: every one is
+// measured against a DirectWrite layout, and a long document selected whole,
+// or searched for a common letter, was measured from end to end for every
+// frame. The cost is counted, not timed.
+void checkViewRanges(App& app) {
+    const float margin = 50.0f;  // what render() adds above and below the window
+    const float lowest = std::numeric_limits<float>::lowest(), highest = std::numeric_limits<float>::max();
+    if (!layout(app, longDocument(150))) return;
+    const size_t all = app.docText.size();
+    check(app.contentHeight > app.height * 20.0f, "the long document is many windows long");
+
+    app.searchQuery = L"e";
+    performSearch(app);
+    check(app.searchMatches.size() > 5000, "the letter is found all through the document");
+    std::vector<SearchHighlight> everyMark;
+    size_t before = selectionMeasureCount();
+    searchHighlightRects(app, lowest, highest, everyMark);
+    const size_t everyMarkCost = selectionMeasureCount() - before;
+    check(everyMark.size() >= app.searchMatches.size(), "every match is marked somewhere in the document");
+    std::vector<bool> marked(app.searchMatches.size(), false);
+    for (const auto& mark : everyMark) {
+        if (mark.matchIndex < marked.size()) marked[mark.matchIndex] = true;
+    }
+    check(std::find(marked.begin(), marked.end(), false) == marked.end(), "no match goes unmarked");
+
+    before = selectionMeasureCount();
+    const std::vector<D2D1_RECT_F> everyBar = selectionBands(app, 0, all);
+    const size_t everyBarCost = selectionMeasureCount() - before;
+
+    for (float at : {0.0f, 0.31f, 0.5f, 1.0f}) {
+        const float viewTop = at * (app.contentHeight - app.height);
+        const float viewBottom = viewTop + app.height;
+        const float top = viewTop - margin, bottom = viewBottom + margin;
+
+        size_t rectsInWindow = 0;
+        const App::TextRect* middle = nullptr;
+        for (const auto& rect : app.textRects) {
+            if (rect.docLength == 0 || !reaches(rect.rect, top, bottom)) continue;
+            ++rectsInWindow;
+            if (!middle && rect.docLength > 3 && rect.rect.top > (viewTop + viewBottom) / 2) middle = &rect;
+        }
+        check(rectsInWindow > 0 && middle, "the window holds text");
+        if (!middle) continue;
+
+        // The whole document selected; a selection that starts in the
+        // window; one that ends in it
+        const size_t cut = middle->docStart + 2;
+        const std::pair<size_t, size_t> ranges[] = {{size_t{0}, all}, {cut, all}, {size_t{0}, cut}};
+        for (const auto& range : ranges) {
+            std::vector<D2D1_RECT_F> bars;
+            before = selectionMeasureCount();
+            selectionHighlightRects(app, range.first, range.second, top, bottom, bars);
+            const size_t cost = selectionMeasureCount() - before;
+            check(!bars.empty(), "the window's lines are selected");
+            check(cost <= rectsInWindow, "a frame measures no more of a selection than the lines it draws");
+            for (const auto& bar : bars) {
+                check(reaches(bar, top - margin, bottom + margin), "a frame gets no bar from outside its lines");
+            }
+            const std::vector<D2D1_RECT_F> whole =
+                range.second - range.first == all ? everyBar : selectionBands(app, range.first, range.second);
+            check(sameRects(between(bars, viewTop, viewBottom), between(whole, viewTop, viewBottom)),
+                  "the lines in view are selected as the whole document selects them");
+            if (range.second - range.first == all) {
+                check(cost * 10 < everyBarCost, "the lines in view cost a fraction of the whole selection");
+            }
+        }
+
+        std::vector<SearchHighlight> marks;
+        before = selectionMeasureCount();
+        searchHighlightRects(app, top, bottom, marks);
+        const size_t cost = selectionMeasureCount() - before;
+        check(!marks.empty(), "the window's lines have marks");
+        check(cost <= marks.size(), "a frame measures a match once for each mark it draws");
+        check(cost * 10 < everyMarkCost, "the marks in view cost a fraction of the whole document's");
+        std::vector<D2D1_RECT_F> inView, expected;
+        for (const auto& mark : marks) {
+            check(reaches(mark.rect, top - margin, bottom + margin), "a frame gets no mark from outside its lines");
+            inView.push_back(mark.rect);
+        }
+        for (const auto& mark : everyMark) expected.push_back(mark.rect);
+        check(sameRects(between(inView, viewTop, viewBottom), between(expected, viewTop, viewBottom)),
+              "the lines in view are marked as the whole document marks them");
+        // Each mark belongs to the match whose letters it covers
+        for (const auto& mark : marks) {
+            bool found = false;
+            for (const auto& other : everyMark) {
+                if (other.matchIndex == mark.matchIndex && std::abs(other.rect.left - mark.rect.left) < 0.01f &&
+                    std::abs(other.rect.top - mark.rect.top) < 0.01f) {
+                    found = true;
+                    break;
+                }
+            }
+            check(found, "a mark in view names the match it names in the whole document");
+        }
+    }
+
+    app.searchQuery.clear();
+    app.searchMatches.clear();
+}
+
 int runHighlightLayoutTests() {
     namespace fs = std::filesystem;
     {
@@ -472,6 +619,18 @@ int runHighlightLayoutTests() {
             "| Head |\n| --- |\n| alpha **bold** *italic* omega |\n",
             longSelection.c_str(),
         };
+
+        // What a frame asks for in a long document, in a narrow and a wide window
+        applyTheme(app, 0);
+        app.contentScale = 1.0f;
+        app.zoomFactor = 1.0f;
+        updateTextFormats(app);
+        app.height = 900;
+        for (int width : {420, 1050}) {
+            app.width = width;
+            scenario = "long document at width " + std::to_string(width);
+            checkViewRanges(app);
+        }
 
         for (int theme : {0, 5}) {  // Paper, Midnight
             applyTheme(app, theme);

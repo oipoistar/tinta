@@ -104,3 +104,98 @@ An isolated portable copy (`out/theme-310/`, ignored) with the fixture's
   settings, kept when a theme is saved from the editor.
 - Seen in the fixture and left alone: `==**words**==` and `~~**words**~~`
   keep their `==` and `~~` as text; `**==words==**` works.
+
+## Follow-up: hand edits that did nothing (reported 2026-11-04)
+
+Validated on Windows with the Release build on 2026-11-05.
+
+### What was reported
+
+On #310, after v4.0.2: "Commit 07a35ac doesn't work. I can't colour the
+bold/italic/hr etc."
+
+### Cause
+
+- **The examples' own notes.** A new `themes.ini` lists every key as a
+  commented example. The examples for `bold`, `selection` and `hr` carry a
+  note on the same line, as do `heading`, `code`, `headingfont` and
+  `inlinecodebackground`.
+  - With the `; ` deleted, the value read as
+    `1A365D              (italic=, and bolditalic= for both)`. That is not a
+    colour, so it was dropped without a word.
+  - The plain lines (`background`, `text`, `link`) loaded, so the theme
+    half worked.
+- **Spaces and capitals did the same.** `bold = AA2200` was the key `bold `
+  with the value ` AA2200`, and `Bold=` was no key at all. `name = My theme`
+  lost the whole theme.
+- **Edits waited for a restart.** A hand edit loaded only at the next
+  launch, and with "Open files in tabs" one window can stay open for days.
+  A save from the theme editor rewrote `themes.ini` from what had loaded,
+  so it threw away any hand edit made since.
+
+### Change
+
+- **Lines read as meant.** Keys and values lose the spaces around them, and
+  keys match in any case. A note after a value is dropped, after a `;` or
+  in parentheses after a space. Lines starting with `;` or `#` are comments.
+  A theme's `name=` keeps everything but its outer spaces, parentheses
+  included.
+- **A saved change applies while Tinta runs.** The file watcher's half-second
+  tick reloads the themes and reapplies the one in use, found by its name:
+  - moved in the file, it stays in use;
+  - deleted, Paper takes over;
+  - the light and dark picks for following Windows move with their themes;
+  - the chooser's previews are rebuilt.
+- **The theme editor reads the file first.** Its save reloads `themes.ini`
+  if it changed, so the rewrite keeps hand edits.
+- **The docs.** The header Tinta writes into `themes.ini` says edits apply at
+  once, and `docs/theme-colours.md` has a section on editing by hand.
+
+### Fixture
+
+`fixtures/theme-hand-edited-310.ini` holds:
+
+- spaces around `=`;
+- keys in capitals;
+- `;` and parenthesised notes;
+- a name with parentheses.
+
+Open `fixtures/theme-emphasis-310.md` with it.
+
+### Automated checks
+
+`inline_code_theme` (`testHandEditedThemes`):
+
+- A new file's examples with the `; ` deleted load every key, notes and all:
+  - `bold`, `selection` and `hr`;
+  - `heading` and `code`;
+  - `inlinecodebackground=none`;
+  - the Georgia and Cascadia Mono faces.
+- The hand-written fixture loads every key.
+- An edit saved while its theme is in use shows on it at once.
+- A theme moved in the file stays in use.
+- A theme deleted from the file gives way to Paper.
+
+With the old line reading, 11 checks fail.
+
+### In the built app
+
+A portable copy ran at 1000 x 820 (`out/theme-310/`), with `themes.ini` as a
+user would leave it: the examples uncommented, then the hand-written theme.
+
+- **Hand (edited):** bold is pink, italic green, both purple, and rules light
+  blue. Editing its `bold=` to `3366FF` while the page was open turned every
+  bold word blue within 1.5 s, with no restart.
+- **My theme**, the uncommented examples:
+  - headings are in Georgia and navy, and bold is navy;
+  - rules are light blue, and inline code has no box.
+
+### Size
+
+`tinta.exe` grows by 3,072 bytes (4,000,768 to 4,003,840).
+
+### Limitations
+
+- A value that still isn't a colour (`bold=red`) is dropped without a
+  message, as before.
+- The theme editor has no controls for these keys yet.

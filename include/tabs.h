@@ -36,6 +36,10 @@ bool tabReopenClosed(App& app, HWND hwnd, int entry = -1);
 // "Don't save" in the unsaved-changes dialog keeps the buffer it throws
 // away for the tab close it answers
 void tabKeepDiscardedEdit(App& app);
+// The window is asked to close. An unsaved buffer, the active one or one
+// parked in a tab, gets the unsaved-changes dialog first: true when it
+// asks, and the window stays
+bool windowCloseAsks(App& app, HWND hwnd);
 void tabCycle(App& app, HWND hwnd, int direction);
 
 // Title-bar geometry shared by rendering and non-client hit testing

@@ -55,24 +55,29 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown, Mermaid and PlantUML files
 
-            A fix release for 4.0.1. For what is new in 4.0 (Live and Sheets), see the [v4.0.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.0.0).
+            A fix release for 4.0.2. For what is new in 4.0 (Live and Sheets), see the [v4.0.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.0.0).
 
             ### Added
-            - Pinned tabs, from a tab's menu: a pinned tab keeps to the start of the row as its first letter and stays in view. The title bar's pin is remembered for the next start. Requested by @Fallgrim (#312)
-            - Equation numbers with `\tag`, and `\eqref` and `\ref` to an equation's `\label`, in the reader and the HTML and Word exports. Requested by @TiegenFang (#314)
-            - With wrapping off, a scrollbar along the source editor's foot for lines that run past it, and the horizontal wheel pans them. Requested by @TiegenFang (#314)
-            - `mathFont=` and `cjkFont=` in `settings.ini` name the faces for equations and for Chinese, Japanese and Korean letters. Requested by @TiegenFang (#314)
+            - Sections fold: an arrow beside a heading in the reading view folds what is under it, and Settings > Appearance > Fold sections turns it off or opens documents folded. Requested by @Ra0EL (#316)
 
             ### Changed
-            - Source and Live follow a file another program changes, as the reader does, and ask Reload or Keep mine when there are unsaved edits. Requested by @QuamerX (#311)
-            - Each level of a bullet list has its own bullet, closer to its text. In Live, Tab takes an item one level in and Shift+Tab undoes it, and only the line being typed in is highlighted. Requested by @Fallgrim (#315)
+            - A click on a link asks before it opens a program, a script, a file on another server or another app's address such as `ms-settings:` or `obsidian://`, with the target in full. Web addresses, mail and documents open at once. Relative links to PDFs and other documents now open.
 
             ### Fixed
-            - A double-click in Source selects whole words in every script, Turkish, Greek and Cyrillic included. Reported by @Fallgrim (#313)
-            - Selections over bold, italic, links and code are one even band, without seams in the reader or brighter strips in Live. Reported by @Fallgrim (#313)
-            - Two `$$` equations in a row are set as two, and Word exports include `$$` equations. Reported by @TiegenFang (#314)
-            - An inline `$` equation can close before a letter, as in pandoc, so `$R=50\,\mu$m` no longer runs on; prices stay text. Reported by @TiegenFang (#314)
-            - Signs after brackets, brackets beside slanted letters and accents such as the tilde are set as TeX sets them. Reported by @TiegenFang (#314)
+            - The tool rail stays in place while tabs open, close and switch in the editor. Reported by @Fallgrim (#317)
+            - A double- or triple-click above a table with styled or wrapping cells selects what was clicked. Reported by @shinfd (#318)
+            - `themes.ini` reads `bold=`, `italic=`, `selection=` and `hr=` with notes and spaces around them, and applies a saved change while Tinta runs. Reported by @Fallgrim (#310)
+            - Live answers at once in a table, list or code block of thousands of lines; a letter in a 5,000-row table took over four seconds.
+            - Scrolling stays smooth in a long document with Find open or everything selected.
+            - Find, Contents, wiki links and Live's menus match letters in either case in every alphabet, not only A to Z.
+            - Closing the window over the print preview asks about unsaved edits instead of losing them.
+            - "Create this file?" opens a file that is there after all instead of emptying it.
+            - Deleting or changing a review note after a saved edit no longer writes over other text, and a note keeps a file's Windows line endings.
+            - In the Source editor, Find and Replace follow the text when it changes with the bar open; Replace could change the wrong words or end Tinta.
+            - Equations nested deep, and files with thousands of self-closing tags, open instead of hanging or ending Tinta.
+            - Sheets: a cut-short `.smd` is not saved over, Tidy does not hang on two groups in one place, and a sheet at rest stops redrawing.
+            - A page with more pictures than the image cache holds no longer decodes them again at every resize.
+            - In Live, a paragraph that begins with a triple-backtick code span is a paragraph.
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats

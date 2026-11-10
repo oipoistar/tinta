@@ -193,6 +193,7 @@ void closeSearchInput(App& app) {
 }
 
 bool searchInputKeyDown(App& app, HWND hwnd, WPARAM key) {
+    if (app.editMode) editorSearchRefresh(app);
     if (!shortcutModifiersAllowed(static_cast<unsigned>(key))) return false;
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -255,6 +256,7 @@ void searchInputChar(App& app, HWND hwnd, wchar_t ch) {
     }
 }
 bool searchInputMouseDown(App& app, HWND hwnd, float x, float y) {
+    if (app.editMode) editorSearchRefresh(app);
     if (!app.showSearch) return false;
     if (app.editMode && app.searchReplaceMode) {
         for (const auto& hit : app.searchReplaceHits) {

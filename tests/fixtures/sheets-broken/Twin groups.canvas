@@ -1,0 +1,11 @@
+{
+	"nodes":[
+		{"id":"a","type":"group","label":"One","x":0,"y":0,"width":480,"height":320},
+		{"id":"b","type":"group","label":"Two","x":0,"y":0,"width":480,"height":320},
+		{"id":"t1","type":"text","text":"A card in both","x":60,"y":80,"width":240,"height":100},
+		{"id":"t2","type":"text","text":"A card outside","x":620,"y":80,"width":240,"height":100}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"t1","toNode":"t2"}
+	]
+}

@@ -5,6 +5,7 @@
 #include "utils.h"
 #include "d2d_init.h"
 #include "editor.h"
+#include "folding.h"
 #include "markdown.h"
 #include "pandoc.h"
 #include "plantuml_app.h"
@@ -1088,7 +1089,8 @@ void renderToc(App& app) {
                 app.tocSpyOverride = -1;
                 float spyLine = app.scrollY + (float)app.height * 0.25f;
                 for (size_t i = 0; i < app.headings.size(); i++) {
-                    if (app.headings[i].y <= spyLine) currentIdx = (int)i;
+                    // One in a folded section shares the folded heading's place (#316)
+                    if (app.headings[i].hiddenUnder < 0 && app.headings[i].y <= spyLine) currentIdx = (int)i;
                 }
                 if (currentIdx < 0 && !app.headings.empty()) currentIdx = 0;
             }
@@ -1197,6 +1199,8 @@ void renderToc(App& app) {
                     textColor = themeUiText(app.theme);
                     textColor.a = 0.82f * anim;
                 }
+                // In a folded section: fainter, and a click opens it (#316)
+                if (heading.hiddenUnder >= 0) textColor.a *= 0.55f;
                 app.brush->SetColor(textColor);
                 app.renderTarget->DrawText(heading.text.c_str(),
                     (UINT32)heading.text.length(), fmt,
@@ -2251,7 +2255,9 @@ void renderContextMenu(App& app) {
         textColor.a = (enabled ? 1.0f : 0.35f) * anim;
         app.brush->SetColor(textColor);
         float textY = top + (itemH - dpi(app, 18.0f)) / 2;
-        const wchar_t* itemLabel = tr(app, entry.key);
+        // Fold all reads Unfold all while a section is folded (#316)
+        const wchar_t* itemLabel =
+            tr(app, entry.action == CTX_FOLD_ALL && anySectionFolded(app) ? "ctx.unfold_all" : entry.key);
         app.renderTarget->DrawText(
             itemLabel, (UINT32)wcslen(itemLabel), format,
             D2D1::RectF(x + inset, textY, x + w - inset, top + itemH), app.brush);
@@ -2658,9 +2664,11 @@ void settingsChip(App& app, float& x, float y, const wchar_t* label, bool active
 D2D1_RECT_F settingsPanelRect(const App& app) {
     float w = std::min(dpi(app, app.settingsSection == 3 ? 980.0f : 760.0f), app.width - dpi(app, app.settingsSection == 3 ? 32.0f : 80.0f));
     // Leave room for the last row and localized footer in every section.
-    // Appearance holds a sixth row since notifications joined (#273), the
-    // editor an eighth since Markdown in colour did (#268)
-    const float tall = app.settingsSection == 3 || app.settingsSection == 1 ? 650.0f : app.settingsSection == 2 ? 660.0f : 590.0f;
+    // Appearance holds a sixth row since notifications joined (#273) and a
+    // seventh since folding sections did (#316), the editor an eighth
+    // since Markdown in colour did (#268)
+    const float tall = app.settingsSection == 1 ? 718.0f
+                       : app.settingsSection == 3 ? 650.0f : app.settingsSection == 2 ? 660.0f : 590.0f;
     float h = std::min(dpi(app, tall), app.height - dpi(app, 64.0f));
     float x = (app.width - w) / 2;
     float y = (app.height - h) / 2 + (1 - app.settingsAnimation) * dpi(app, 30.0f);
@@ -3013,6 +3021,60 @@ void renderSettingsOverlay(App& app) {
         settingsToggle(app, cx + cw - cardPad - dpi(app, 40.0f),
                        cy + (rowCardH - dpi(app, 20.0f)) * 0.5f,
                        app.headingRules, SET_TOGGLE_HEADRULES, anim);
+        cy += rowCardH + cardGap;
+        card(rowCardH);
+        {
+            // Folding sections (#316): Off, On (arrows beside headings), or
+            // Folded (documents open with every section folded), segmented
+            // as the Contents side is. Each segment as wide as its own word,
+            // so a long one (Eingeklappt) leaves the label its room.
+            const wchar_t* labels[3] = {tr(app, "settings.fold.off"), tr(app, "settings.fold.on"),
+                                        tr(app, "settings.fold.folded")};
+            const int actions[3] = {SET_FOLD_OFF, SET_FOLD_ON, SET_FOLD_FOLDED};
+            const int current = !app.foldSections ? 0 : app.foldOnOpen ? 2 : 1;
+            float segH = dpi(app, 26.0f);
+            float segWs[3], segsW = 0.0f;
+            for (int s = 0; s < 3; s++) {
+                segWs[s] = measureText(app, labels[s], fmt) + dpi(app, 22.0f);
+                segsW += segWs[s];
+            }
+            float inset = dpi(app, 3.0f);
+            float segRight = cx + cw - cardPad - inset;
+            float segY = cy + (rowCardH - segH) * 0.5f;
+            cardLabel(tr(app, "settings.fold_sections"), tr(app, "settings.fold_sections.hint"),
+                      segsW + inset * 4 + dpi(app, 10.0f));
+            D2D1_RECT_F container = D2D1::RectF(
+                segRight - segsW - inset * 3, segY - inset,
+                segRight + inset, segY + segH + inset);
+            D2D1_COLOR_F well = app.theme.isDark
+                ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.22f * anim)
+                : D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.07f * anim);
+            app.brush->SetColor(well);
+            app.renderTarget->FillRoundedRectangle(
+                D2D1::RoundedRect(container, dpi(app, 8.0f), dpi(app, 8.0f)),
+                app.brush);
+            float sx = container.left + inset;
+            for (int s = 0; s < 3; s++) {
+                const float segW = segWs[s];
+                D2D1_RECT_F sr = D2D1::RectF(sx, segY, sx + segW, segY + segH);
+                bool active = s == current;
+                if (active) {
+                    app.brush->SetColor(settingsLift(app, 0.22f, 1.0f, anim));
+                    app.renderTarget->FillRoundedRectangle(
+                        D2D1::RoundedRect(sr, dpi(app, 6.0f), dpi(app, 6.0f)),
+                        app.brush);
+                }
+                D2D1_COLOR_F tc = app.theme.text;
+                tc.a = (active ? 0.95f : 0.55f) * anim;
+                app.brush->SetColor(tc);
+                float tw = measureText(app, labels[s], fmt);
+                app.renderTarget->DrawText(labels[s], (UINT32)wcslen(labels[s]), fmt,
+                    D2D1::RectF(sx + (segW - tw) * 0.5f, segY + dpi(app, 4.0f),
+                                sx + segW, segY + segH), app.brush);
+                app.settingsHits.push_back({sr, actions[s]});
+                sx += segW + inset;
+            }
+        }
         cy += rowCardH + cardGap;
         card(rowCardH);
         cardLabel(tr(app, "settings.follow_windows"), tr(app, "settings.follow_windows.hint"), dpi(app, 60.0f));
@@ -3530,8 +3592,9 @@ void renderCreateRefDialog(App& app) {
     const D2DTheme& base = app.theme;
     D2D1_COLOR_F hue = themeUiAccent(base);
 
-    std::wstring title = tr(app, "createref.title");
-    std::wstring createLbl = tr(app, "createref.create");
+    // The same dialog asks before a link's target is opened
+    std::wstring title = tr(app, app.createRefOpens ? "openlink.title" : "createref.title");
+    std::wstring createLbl = tr(app, app.createRefOpens ? "openlink.open" : "createref.create");
     std::wstring cancelLbl = tr(app, "createref.cancel");
     std::wstring path = toWide(app.createRefPath);
 
@@ -3629,12 +3692,24 @@ void renderCreateRefDialog(App& app) {
         }
     }
 
-    // Row 2: the resolved target path, quiet and end-trimmed
+    // Row 2: the resolved target path, quiet. A long one keeps its end, the
+    // file's name: that is what the question is about
     if (app.signalSmallFormat) {
+        const float room = r.right - pad - (ib.right + dpi(app, 9.0f));
+        if (measureText(app, path, app.signalSmallFormat) > room) {
+            const std::wstring dots(1, (wchar_t)0x2026);
+            size_t low = 1, high = path.size();  // the letters left off its start
+            while (low < high) {
+                const size_t middle = (low + high) / 2;
+                if (measureText(app, dots + path.substr(middle), app.signalSmallFormat) > room) low = middle + 1;
+                else high = middle;
+            }
+            path = dots + path.substr(low);
+        }
         IDWriteTextLayout* pl = nullptr;
         app.dwriteFactory->CreateTextLayout(
             path.c_str(), (UINT32)path.size(), app.signalSmallFormat,
-            r.right - pad - (ib.right + dpi(app, 9.0f)), dpi(app, 14.0f), &pl);
+            room, dpi(app, 14.0f), &pl);
         if (pl) {
             pl->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
             DWRITE_TRIMMING trimOpt{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};

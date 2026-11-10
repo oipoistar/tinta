@@ -605,6 +605,13 @@ bool parseSmd(std::string_view source, Sheet& out, SmdInfo& info, std::string* e
             canvasFence = false;
         }
     }
+    if (inFence && canvasFence) {
+        // The file ends inside its canvas block: cut short by a sync, a copy
+        // or an edit. Read as a sheet with nothing on it, the first change
+        // saved an empty canvas over what was left of this one
+        if (error) *error = "the canvas block is not closed";
+        return false;
+    }
     if (!found) return true;  // a sheet with nothing on it yet
     return parseCanvas(lastBlock, out, error);
 }
@@ -792,6 +799,14 @@ int groupOf(const Sheet& sheet, int node) {
         if (i == node || sheet.nodes[i].type != NodeType::Group) continue;
         if (!insideGroup(sheet.nodes[i], sheet.nodes[node])) continue;
         float area = sheet.nodes[i].width * sheet.nodes[i].height;
+        if (sheet.nodes[node].type == NodeType::Group) {
+            // Two groups with the same box, or boxes a unit apart, are each
+            // inside the other. One is the outer: the larger, or of two as
+            // large the one made first. Without that a walk up from either
+            // went round the two for ever
+            const float own = sheet.nodes[node].width * sheet.nodes[node].height;
+            if (area < own || (area == own && i > node)) continue;
+        }
         if (best < 0 || area < bestArea) {
             best = i;
             bestArea = area;
@@ -1101,7 +1116,7 @@ void tidy(Sheet& sheet, const std::vector<int>& subset, bool leftToRight) {
         if (!moving[i]) continue;
         int g = groupOf(sheet, i);
         int top = -1;
-        while (g >= 0) {
+        for (int steps = 0; g >= 0 && steps < count; ++steps) {
             top = g;
             g = groupOf(sheet, g);
         }
