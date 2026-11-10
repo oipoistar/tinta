@@ -288,10 +288,15 @@ int testHandEditedThemes(App& app, const std::filesystem::path& dir) {
     // An edit saved while Tinta runs shows on the theme in use at once
     applyTheme(app,first+1);
     check(!customThemesChangedOnDisk(),"#310: nothing changed since the themes loaded");
+    int saves=0;
+    const auto loadedAt=std::filesystem::last_write_time(ini);
     auto save=[&](const std::string& text) {
         { std::ofstream f(ini,std::ios::binary); f << text; }
-        // A clock that has not ticked between two writes still reads as a change
-        std::filesystem::last_write_time(ini,std::filesystem::last_write_time(ini)+std::chrono::seconds(2));
+        // A clock that has not ticked between two writes still reads as a
+        // change: each save is two seconds after the one before it. (Two
+        // seconds after its own write was the same time for two saves in one
+        // tick of a fast machine's clock, and the second went unseen.)
+        std::filesystem::last_write_time(ini,loadedAt+std::chrono::seconds(2*++saves));
     };
     std::string edited=read(ini);
     edited.replace(edited.find("bold = #FF0066"),14,"bold = #3366FF");
