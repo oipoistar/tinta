@@ -1497,6 +1497,7 @@ struct App {
     // create its target and start typing
     bool createRefPending = false;
     std::string createRefPath;  // resolved absolute target
+    bool createRefOpens = false;  // the dialog asks whether to open createRefPath, a link's target
     std::vector<std::pair<D2D1_RECT_F, int>> createRefHits;  // rebuilt each paint
     // WM_CHARs arriving in this window are dropped so the keystroke that
     // resolved the dialog cannot type into the editor it just opened

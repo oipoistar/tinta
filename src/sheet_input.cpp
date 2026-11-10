@@ -6,6 +6,7 @@
 #pragma optimize("s", on)
 
 #include "sheet_ui.h"
+#include "input.h"
 #include "d2d_init.h"
 #include "document.h"
 #include "editor.h"
@@ -608,7 +609,7 @@ void followCardLink(App& app, HWND hwnd, SheetDoc& doc) {
         }
         return;
     }
-    if (url.find("://") != std::string::npos || url.rfind("mailto:", 0) == 0) openUrl(url);
+    if (url.find("://") != std::string::npos || url.rfind("mailto:", 0) == 0) openFromDocument(app, hwnd, url, doc.dir);
 }
 
 // The card's text menu at a click, or from the keys under the caret
@@ -1784,7 +1785,7 @@ void runAction(App& app, HWND hwnd, SheetDoc& doc, int action) {
             if (i < 0) break;
             const Node& n = doc.model.nodes[i];
             if (n.type == NodeType::Link) {
-                openUrl(n.url);
+                openFromDocument(app, hwnd, n.url, doc.dir);
             } else if (n.type == NodeType::File) {
                 SheetCard& c = card(app, doc, n);
                 if (c.kind == SheetCard::Kind::Note || isSupportedDocumentPath(std::wstring_view(c.path))) {
@@ -1794,7 +1795,7 @@ void runAction(App& app, HWND hwnd, SheetDoc& doc, int action) {
                     return;
                 }
                 if (c.kind != SheetCard::Kind::Missing && c.kind != SheetCard::Kind::Blocked)
-                    ShellExecuteW(hwnd, L"open", c.path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    openFileFromDocument(app, hwnd, c.path, doc.dir);
             }
             break;
         }
@@ -2861,7 +2862,7 @@ bool sheetMouseDown(App& app, HWND hwnd, int x, int y) {
         }
         // Ctrl+click opens a link or a note, as in Obsidian
         if (doc.pressCtrl && !doc.pressShift && (n.type == NodeType::Link)) {
-            openUrl(n.url);
+            openFromDocument(app, hwnd, n.url, doc.dir);
             doc.gesture = SheetDoc::Gesture::None;
             return true;
         }

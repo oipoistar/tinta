@@ -3,6 +3,8 @@
 
 #include "app.h"
 #include <windows.h>
+#include <functional>
+#include <string>
 
 void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam);
 void handleMouseHWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM lParam);
@@ -42,6 +44,25 @@ void navigateForward(App& app, HWND hwnd);
 // First clipboard line as text (shared by the search and path inputs)
 std::wstring clipboardLine(HWND hwnd);
 void handleFileWatchTimer(App& app, HWND hwnd);
+
+// What opening an address written in a document means. A web address opens.
+// A file opens with its own application, a program, a script or a file on a
+// server the document chose only after the user is asked, and a name alone
+// is a file beside the document. Any other program's address is asked about.
+enum class LinkKind { None, Web, Path, Address };
+struct LinkOpening {
+    LinkKind kind = LinkKind::None;
+    std::wstring target;   // what the shell is given: the address, or the file's full path
+    bool ask = false;      // opened only after the user says so
+    bool remote = false;   // a path on a server the document may not pick: not looked for
+};
+LinkOpening linkOpening(const std::string& written, const std::wstring& documentFolder);
+LinkOpening pathOpening(const std::wstring& fullPath, const std::wstring& documentFolder);
+// Opens it, or asks first in the dialog a missing file's link asks in
+void openFromDocument(App& app, HWND hwnd, const std::string& address, const std::wstring& documentFolder);
+void openFileFromDocument(App& app, HWND hwnd, const std::wstring& fullPath, const std::wstring& documentFolder);
+// Tests take what would go to the shell
+std::function<void(const std::wstring&)>& shellOpenHook();
 // themes.ini edited while Tinta runs (#310): the themes load again, and the
 // one in use, found by its name, shows the edit at once
 void reloadThemesIniIfChanged(App& app, HWND hwnd);

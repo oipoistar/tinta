@@ -190,6 +190,7 @@ int runCaseFoldTests(const char* fixtureDir);
 int runLivePartsTests(const char* fixture);
 int runPreviewUnsavedTests(const char* fixture);
 int runReviewNoteTests(const char* fixture);
+int runLinkOpenTests(const char* fixture);
 int runHighlightLayoutTests();
 int runWindowDragTests();
 int runSearchInputTests();
@@ -244,6 +245,7 @@ int main(int argc, char** argv) {
     if (argc == 3 && std::string(argv[1]) == "--live-parts-tests") return runLivePartsTests(argv[2]);
     if (argc == 3 && std::string(argv[1]) == "--preview-unsaved-tests") return runPreviewUnsavedTests(argv[2]);
     if (argc == 3 && std::string(argv[1]) == "--review-note-tests") return runReviewNoteTests(argv[2]);
+    if (argc == 3 && std::string(argv[1]) == "--link-open-tests") return runLinkOpenTests(argv[2]);
     if (argc == 2 && std::string(argv[1]) == "--highlight-layout-tests") return runHighlightLayoutTests();
     if (argc == 2 && std::string(argv[1]) == "--table-input-tests") return runTableInputTests();
     if (argc == 2 && std::string(argv[1]) == "--docked-preview-tests") return runDockedPreviewTests();

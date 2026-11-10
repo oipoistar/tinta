@@ -1,4 +1,6 @@
 #include "utils.h"
+#include <filesystem>
+#include "input.h"
 #include "editor.h"
 #include "link_target.h"
 #include "render.h"
@@ -249,7 +251,9 @@ void handleLinkClick(App& app) {
             editorFollowPreview(app);
         }
     } else {
-        openUrl(app.hoveredLink);
+        // Not as written: a document does not get to pick a program
+        openFromDocument(app, app.hwnd, app.hoveredLink,
+                         std::filesystem::path(toWide(app.currentFile)).parent_path().wstring());
     }
 }
 

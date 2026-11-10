@@ -33,6 +33,7 @@
 
 #include <windowsx.h>
 #include <shellapi.h>
+#include <shlwapi.h>
 #include <commdlg.h>
 #include <cwctype>
 #include <filesystem>
@@ -2602,6 +2603,145 @@ static void navRecordJump(App& app, const std::string& fromPath,
     app.navForward.clear();
 }
 
+// --- What a document may have the shell open --------------------------------
+
+std::function<void(const std::wstring&)>& shellOpenHook() {
+    static std::function<void(const std::wstring&)> hook;
+    return hook;
+}
+
+LinkOpening pathOpening(const std::wstring& fullPath, const std::wstring& documentFolder) {
+    LinkOpening opening;
+    opening.kind = LinkKind::Path;
+    opening.target = fullPath;
+    opening.remote = !qmd::mayOpenFromDocument(fullPath, documentFolder);
+    // A program, a script, a shortcut: what Windows itself warns about
+    const std::wstring extension = std::filesystem::path(fullPath).extension().wstring();
+    opening.ask = opening.remote || (!extension.empty() && AssocIsDangerous(extension.c_str()));
+    return opening;
+}
+
+LinkOpening linkOpening(const std::string& written, const std::wstring& documentFolder) {
+    size_t from = 0, to = written.size();
+    while (from < to && (unsigned char)written[from] <= ' ') ++from;
+    while (to > from && (unsigned char)written[to - 1] <= ' ') --to;
+    const std::string address = written.substr(from, to - from);
+    LinkOpening opening;
+    if (address.empty()) return opening;
+    // A scheme is two letters or more before a colon; one letter is a drive
+    size_t colon = 0;
+    while (colon < address.size() && (isalnum((unsigned char)address[colon]) || address[colon] == '+' ||
+                                      address[colon] == '.' || address[colon] == '-')) {
+        ++colon;
+    }
+    const char back = (char)92;
+    std::string path;
+    if (colon >= 2 && colon < address.size() && address[colon] == ':' && isalpha((unsigned char)address[0])) {
+        std::string scheme = address.substr(0, colon);
+        for (char& c : scheme) c = (char)tolower((unsigned char)c);
+        if (scheme == "http" || scheme == "https" || scheme == "mailto") {
+            opening.kind = LinkKind::Web;
+            opening.target = toWide(address);
+            return opening;
+        }
+        if (scheme != "file") {
+            // Some program's own address: ms-settings:, vscode://, zotero://
+            // and whatever else is registered. The document picks the
+            // program and what it is told, so the user is shown it first
+            opening.kind = LinkKind::Address;
+            opening.target = toWide(address);
+            opening.ask = true;
+            return opening;
+        }
+        // file:///C:/a%20b is a path here, file://server/share one on a server
+        const std::string rest = address.substr(colon + 1, address.find('#', colon) == std::string::npos
+                                                                 ? std::string::npos
+                                                                 : address.find('#', colon) - colon - 1);
+        size_t slashes = 0;
+        while (slashes < rest.size() && (rest[slashes] == '/' || rest[slashes] == back)) ++slashes;
+        const std::string tail = qmd::decodeLinkComponent(rest.substr(slashes));
+        const bool drive = tail.size() >= 2 && isalpha((unsigned char)tail[0]) && tail[1] == ':';
+        if (drive) path = tail;
+        else if (slashes == 2 || slashes >= 4) path = std::string(2, back) + tail;
+        else path = std::string(1, back) + tail;
+    } else {
+        path = qmd::splitLinkTarget(address).path;
+    }
+    if (path.empty()) return opening;
+    std::filesystem::path target(toWide(path));
+    if (!target.is_absolute()) {
+        // A name alone is a file beside the document. The shell would look
+        // for it in its own folder and along PATH, and find notepad.exe
+        if (documentFolder.empty()) return opening;
+        target = std::filesystem::path(documentFolder) / target;
+    }
+    return pathOpening(target.lexically_normal().wstring(), documentFolder);
+}
+
+static void shellOpen(App& app, HWND hwnd, const std::wstring& what) {
+    if (shellOpenHook()) {
+        shellOpenHook()(what);
+        return;
+    }
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+    info.hwnd = hwnd;
+    info.lpVerb = L"open";
+    info.lpFile = what.c_str();
+    info.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&info)) {
+        DWORD error = GetLastError();
+        const char* message = (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+            ? "toast.file_missing" : error == ERROR_NO_ASSOCIATION
+            ? "toast.file_no_app" : "toast.file_open_failed";
+        signalPushKey(app, SIG_ERROR, SIGI_FILE, message, std::filesystem::path(what).filename().wstring(), what);
+    }
+}
+
+// Opens it, or asks first with the target in full
+static void openOrAsk(App& app, HWND hwnd, LinkOpening opening) {
+    if (opening.kind == LinkKind::None) return;
+    if (opening.kind == LinkKind::Path && !opening.remote) {
+        // A file on another server is not looked for before the user agrees:
+        // looking signs in to the server
+        const DWORD attributes = GetFileAttributesW(opening.target.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES) {
+            signalPushKey(app, SIG_ERROR, SIGI_FILE, "toast.file_missing",
+                          std::filesystem::path(opening.target).filename().wstring(), opening.target);
+            return;
+        }
+        if (attributes & FILE_ATTRIBUTE_DIRECTORY) opening.ask = false;  // a folder opens in Explorer
+    }
+    if (opening.ask) {
+        app.createRefPath = toUtf8(opening.target);
+        app.createRefOpens = true;
+        app.createRefPending = true;
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    shellOpen(app, hwnd, opening.target);
+}
+
+static bool openFileRefTarget(App& app, HWND hwnd, const std::string& url);
+
+void openFileFromDocument(App& app, HWND hwnd, const std::wstring& fullPath, const std::wstring& documentFolder) {
+    openOrAsk(app, hwnd, pathOpening(fullPath, documentFolder));
+}
+
+void openFromDocument(App& app, HWND hwnd, const std::string& address, const std::wstring& documentFolder) {
+    const LinkOpening opening = linkOpening(address, documentFolder);
+    std::error_code ignored;
+    // Markdown on this computer joins the window as a tab, as its links do
+    if (opening.kind == LinkKind::Path && !opening.remote && !sheetActive(app) &&
+        qmd::fileRefIsMarkdown(toUtf8(opening.target)) && std::filesystem::is_regular_file(opening.target, ignored)) {
+        const qmd::LinkTarget written = qmd::splitLinkTarget(address);
+        openFileRefTarget(app, hwnd, qmd::encodeLinkTarget({toUtf8(opening.target), written.fragment, written.hasFragment}));
+        return;
+    }
+    openOrAsk(app, hwnd, opening);
+}
+
 // A ghost reference: text files can be created on the spot; binary
 // documents need an existing file from their own application.
 static void offerCreateFileRef(App& app, const std::string& url) {
@@ -2613,6 +2753,7 @@ static void offerCreateFileRef(App& app, const std::string& url) {
         return;
     }
     app.createRefPath = std::move(path);
+    app.createRefOpens = false;
     app.createRefPending = true;
 }
 
@@ -2623,22 +2764,8 @@ static bool openFileRefTarget(App& app, HWND hwnd, const std::string& url) {
     const auto target = qmd::splitLinkTarget(url);
     const auto& path = target.path;
     if (!qmd::fileRefIsMarkdown(path)) {
-        const auto wide = toWide(path);
-        SHELLEXECUTEINFOW info{};
-        info.cbSize = sizeof(info);
-        info.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
-        info.hwnd = hwnd;
-        info.lpVerb = L"open";
-        info.lpFile = wide.c_str();
-        info.nShow = SW_SHOWNORMAL;
-        if (!ShellExecuteExW(&info)) {
-            DWORD error = GetLastError();
-            const char* message = (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
-                ? "toast.file_missing" : error == ERROR_NO_ASSOCIATION
-                ? "toast.file_no_app" : "toast.file_open_failed";
-            signalPushKey(app, SIG_ERROR, SIGI_FILE, message,
-                          std::filesystem::path(wide).filename().wstring(), wide);
-        }
+        // Its own application opens it; a program or a script asks first
+        openFileFromDocument(app, hwnd, toWide(path), std::filesystem::path(toWide(app.currentFile)).parent_path().wstring());
         return false;
     }
     const auto fromPath = app.currentFile;
@@ -2740,6 +2867,15 @@ static void startPageInvoke(App& app, HWND hwnd, int id) {
 // typing in a fresh tab, 2 = cancel
 static void createRefAction(App& app, HWND hwnd, int action) {
     app.createRefPending = false;
+    if (app.createRefOpens) {
+        // The same dialog asked whether to open a link's target
+        const std::wstring target = toWide(app.createRefPath);
+        app.createRefOpens = false;
+        app.createRefPath.clear();
+        if (action == 1 && !target.empty()) shellOpen(app, hwnd, target);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
     if (action == 1 && !app.createRefPath.empty()) {
         std::filesystem::path target(toWide(app.createRefPath));
         std::error_code ec;
@@ -2759,12 +2895,15 @@ static void createRefAction(App& app, HWND hwnd, int action) {
             app.fileRefCache.erase(app.createRefPath);
             // A markdown target opens in a tab, a new one ready to type;
             // other text files hand off to their registered application (#162)
-            if (openFileRefTarget(app, hwnd, qmd::encodeLinkTarget({app.createRefPath, {}, false})) && created) {
+            // (the opening may ask in this dialog: its path is no longer this one's)
+            const std::string file = app.createRefPath;
+            app.createRefPath.clear();
+            if (openFileRefTarget(app, hwnd, qmd::encodeLinkTarget({file, {}, false})) && created) {
                 enterEditMode(app);
             }
         }
     }
-    app.createRefPath.clear();
+    if (!app.createRefPending) app.createRefPath.clear();
     InvalidateRect(hwnd, nullptr, FALSE);
 }
 
@@ -3034,7 +3173,7 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
     }
     // The release of a press the sheet took, before anything lets go of the
     // mouse: a lost capture puts a moved card back and drops a new arrow
-    if (sheetActive(app) && sheetMouseUp(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return;
+    if (sheetActive(app) && !app.createRefPending && sheetMouseUp(app, hwnd, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return;
     // A tab drag ends on release (its press already consumed the click)
     // A dragged editor selection lands, or a click on it places the caret,
     // while the press still holds the mouse: losing it cancels the drag
@@ -3759,9 +3898,11 @@ void followDocumentLink(App& app, HWND hwnd, const std::string& url) {
     if (url.find("://") == std::string::npos && url[0] != '#' && url.rfind("mailto:", 0) != 0 && !app.currentFile.empty()) {
         namespace fs = std::filesystem;
         std::error_code ec;
-        fs::path target = fs::path(toWide(app.currentFile)).parent_path() /
-                          toWide(qmd::decodeLinkComponent(qmd::splitLinkTarget(url).path));
-        if (fs::exists(target, ec) && !fs::is_directory(target, ec)) {
+        const fs::path folder = fs::path(toWide(app.currentFile)).parent_path();
+        fs::path target = folder / toWide(qmd::decodeLinkComponent(qmd::splitLinkTarget(url).path));
+        // (a file on another server is not looked for here: the click's own
+        // route asks before it does)
+        if (qmd::mayOpenFromDocument(target.wstring(), folder.wstring()) && fs::exists(target, ec) && !fs::is_directory(target, ec)) {
             openFileRefTarget(app, hwnd, toUtf8(target.wstring()));
             return;
         }

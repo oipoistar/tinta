@@ -3548,8 +3548,9 @@ void renderCreateRefDialog(App& app) {
     const D2DTheme& base = app.theme;
     D2D1_COLOR_F hue = base.accent;
 
-    std::wstring title = tr(app, "createref.title");
-    std::wstring createLbl = tr(app, "createref.create");
+    // The same dialog asks before a link's target is opened
+    std::wstring title = tr(app, app.createRefOpens ? "openlink.title" : "createref.title");
+    std::wstring createLbl = tr(app, app.createRefOpens ? "openlink.open" : "createref.create");
     std::wstring cancelLbl = tr(app, "createref.cancel");
     std::wstring path = toWide(app.createRefPath);
 
@@ -3647,12 +3648,24 @@ void renderCreateRefDialog(App& app) {
         }
     }
 
-    // Row 2: the resolved target path, quiet and end-trimmed
+    // Row 2: the resolved target path, quiet. A long one keeps its end, the
+    // file's name: that is what the question is about
     if (app.signalSmallFormat) {
+        const float room = r.right - pad - (ib.right + dpi(app, 9.0f));
+        if (measureText(app, path, app.signalSmallFormat) > room) {
+            const std::wstring dots(1, (wchar_t)0x2026);
+            size_t low = 1, high = path.size();  // the letters left off its start
+            while (low < high) {
+                const size_t middle = (low + high) / 2;
+                if (measureText(app, dots + path.substr(middle), app.signalSmallFormat) > room) low = middle + 1;
+                else high = middle;
+            }
+            path = dots + path.substr(low);
+        }
         IDWriteTextLayout* pl = nullptr;
         app.dwriteFactory->CreateTextLayout(
             path.c_str(), (UINT32)path.size(), app.signalSmallFormat,
-            r.right - pad - (ib.right + dpi(app, 9.0f)), dpi(app, 14.0f), &pl);
+            room, dpi(app, 14.0f), &pl);
         if (pl) {
             pl->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
             DWRITE_TRIMMING trimOpt{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
