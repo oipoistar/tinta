@@ -4,6 +4,7 @@
 #include "inline_style.h"
 #include "i18n.h"
 #include "input.h"
+#include "keystroke.h"
 #include "link_target.h"
 #include "render.h"
 #include "settings.h"
@@ -14,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <windowsx.h>
 
@@ -321,6 +323,37 @@ int runFileFragmentTests() {
     click(app,"not-created.md#destination-heading");
     check(app.createRefPending && fs::path(toWide(app.createRefPath)).filename() == L"not-created.md",
           "missing-file prompt receives only the filename");
+    // The link was drawn as missing when its page was laid out. A file that
+    // has come since, from another window or a sync, opens as it is: making
+    // it would empty it. Then the file gone again, and made
+    {
+        const fs::path late = toWide(app.createRefPath);
+        auto held = [&] {
+            std::ifstream in(late, std::ios::binary);
+            return std::string{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        };
+        auto leave = [&] {
+            exitEditMode(app);
+            check(fs::path(toWide(app.currentFile)) == late, "the prompt's file is the document shown");
+            if (fs::path(toWide(app.currentFile)) == late) tabCloseIndex(app, app.hwnd, app.activeTab);
+            std::error_code gone;
+            fs::remove(late, gone);
+            tabOpenPath(app, app.hwnd, target, true);
+            check(app.currentFile == target && !fs::exists(late), "back at the page with the link, the file gone");
+        };
+        const std::string words = "# Came since\n\nWritten by another program.\n";
+        std::ofstream(late, std::ios::binary) << words;
+        keystroke(app, VK_RETURN);
+        check(!app.createRefPending && held() == words, "a file that came after the page was laid out keeps what it holds");
+        check(!app.editMode, "and opens to be read");
+        leave();
+        click(app,"not-created.md#destination-heading");
+        check(app.createRefPending, "the prompt comes again for the file gone");
+        keystroke(app, VK_RETURN);
+        check(!app.createRefPending && fs::exists(late) && held().empty(), "a file that is not there is made, empty");
+        check(app.editMode, "and opens to be typed in");
+        leave();
+    }
     app.createRefPending = false;
 
     click(app,"target%20notes.md#destination-heading");

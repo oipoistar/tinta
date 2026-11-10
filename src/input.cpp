@@ -2746,14 +2746,20 @@ static void createRefAction(App& app, HWND hwnd, int action) {
         if (target.has_parent_path()) {
             std::filesystem::create_directories(target.parent_path(), ec);
         }
-        std::ofstream out(target, std::ios::binary);
-        if (out) {
-            out.close();
+        // The link read as missing when its page was laid out, and a path on
+        // another server is never looked for and always reads so. A file
+        // that is there by now is opened as it is: only CREATE_NEW makes a
+        // file without emptying one
+        HANDLE made = CreateFileW(target.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        const bool created = made != INVALID_HANDLE_VALUE;
+        const bool there = created || GetLastError() == ERROR_FILE_EXISTS;
+        if (created) CloseHandle(made);
+        if (there) {
             // The layout cached this path as missing; the ghost turns live
             app.fileRefCache.erase(app.createRefPath);
-            // A markdown target opens in a tab ready to type; other text
-            // files hand off to their registered application (#162)
-            if (openFileRefTarget(app, hwnd, qmd::encodeLinkTarget({app.createRefPath, {}, false}))) {
+            // A markdown target opens in a tab, a new one ready to type;
+            // other text files hand off to their registered application (#162)
+            if (openFileRefTarget(app, hwnd, qmd::encodeLinkTarget({app.createRefPath, {}, false})) && created) {
                 enterEditMode(app);
             }
         }
