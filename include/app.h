@@ -925,6 +925,11 @@ struct App {
     D2D1_RECT_F linkPeekAnchorDoc{};        // hovered link rect (doc coords)
     D2D1_RECT_F linkPeekPanel{};            // placed panel (screen coords)
     int annotEditorIndex = -1;    // -1 = creating a new annotation
+    // The note the editor is open on, by what it says: its place in the
+    // text is found again when it is written, as the text may have changed
+    std::string annotEditorQuote, annotEditorNote;
+    int annotEditorOrdinal = 0;   // which of the notes that say the same, in the text's order
+    size_t annotPendingSource = 0;  // the text a new note's place was found in, hashed
     std::wstring annotEditorText;
     size_t annotEditorCaret = 0;
     size_t annotPendingInsert = (size_t)-1;  // source offset for the new comment line

@@ -1,5 +1,6 @@
 #include "frontmatter_ui.h"
 #include "editor.h"
+#include "annotations.h"
 #include "live_editor.h"
 #include "live_text.h"
 #include "document.h"
@@ -1879,6 +1880,7 @@ void exitEditMode(App& app) {
         auto result = parseDocument(app.parser, buf.str(), app.currentFile);
         if (result.success) {
             app.sourceText = buf.str();
+            annotationsParseSource(app);  // the notes are where the saved text has them
             app.root = result.root;
             app.parseTimeUs = result.parseTimeUs;
         }
@@ -2351,6 +2353,7 @@ static void writeEditorFile(App& app, HWND hwnd) {
         editorReparse(app);
 
         app.sourceText = utf8;
+        annotationsParseSource(app);
         if (app.keepDeletedTabs) app.tabs[app.activeTab].viewerSource = app.sourceText;
 
         // Show "Saved!" notification
@@ -2500,6 +2503,7 @@ bool editorReloadFromDisk(App& app, HWND hwnd) {
     app.editorDirty = false;
     updateFileWriteTime(app);
     app.sourceText = content;
+    annotationsParseSource(app);
     editorReparse(app, true);
     updateWindowTitle(app);
     InvalidateRect(hwnd, nullptr, FALSE);

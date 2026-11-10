@@ -282,6 +282,7 @@ void tabActivate(App& app, HWND hwnd, int index) {
         persistLeavingPosition(app);
         app.currentFile.clear();
         app.sourceText.clear();
+        app.annotations.clear();
         auto result = parseDocument(app.parser, std::string(), app.currentFile);
         if (result.success) {
             app.root = result.root;
@@ -451,6 +452,7 @@ void tabBecomeStartPage(App& app, HWND hwnd) {
     tab.viewerSource.reset();
     tab.fileMissing = false;
     app.sourceText.clear();
+    app.annotations.clear();
     app.currentFile.clear();
     auto result = parseDocument(app.parser, std::string(), app.currentFile);
     if (result.success) {
