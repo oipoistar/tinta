@@ -391,6 +391,8 @@ bool buildPart(App& app, const Look& look, LayoutCache& cache, IDWriteTextFormat
         size_t lead = lineText.find_first_not_of(L' ');
         std::wstring_view rest = lead == std::wstring_view::npos ? std::wstring_view() : lineText.substr(lead);
         bool fence = rest.size() >= 3 && (rest.compare(0, 3, L"```") == 0 || rest.compare(0, 3, L"~~~") == 0);
+        // (backticks with another backtick after them are a code span and open nothing)
+        if (fence && !open.inFence && rest[0] == L'`' && rest.find(L'`', rest.find_first_not_of(L'`')) != std::wstring_view::npos) fence = false;
         bool mathFence = rest.size() >= 2 && rest.compare(0, 2, L"$$") == 0 && !open.inFence;
         if (open.inFront) {
             // Front matter: the properties as typed, in the code face

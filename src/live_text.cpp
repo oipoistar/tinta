@@ -106,6 +106,10 @@ size_t fenceRun(std::wstring_view line, wchar_t* ch = nullptr) {
     size_t n = 0;
     while (i + n < line.size() && line[i + n] == c) ++n;
     if (n < 3) return 0;
+    // Backticks with another backtick later on the line open no fence: that
+    // is a code span, ```like this```, and a paragraph to the page's parser.
+    // Taken for a fence, it made code of everything under it
+    if (c == L'`' && line.find(L'`', i + n) != std::wstring_view::npos) return 0;
     if (ch) *ch = c;
     return n;
 }

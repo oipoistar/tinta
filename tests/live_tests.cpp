@@ -1114,6 +1114,54 @@ void performance(App& app, const fs::path& dir) {
     app.editorDirty = false;
 }
 
+// A paragraph that starts with a code span written with three backticks,
+// ```like this``` and on, is a paragraph to the page. Live took it for an
+// open fence: everything under it was one code block that showed twice, a
+// click on a later paragraph went to the document's end, and Enter in a
+// list under it made no next item
+void codeSpanLine(App& app, const fs::path& dir) {
+    const fs::path path = dir / "Code span line.md";
+    std::ofstream(path, std::ios::binary) << "Intro\n\n```npm install``` installs it.\n\nSecond paragraph.\n\nThird paragraph.\n\n- an item\n";
+    openInEditor(app, path);
+    check(editorLiveOn(app), "the note opens in Live");
+    paint(app);
+    auto lineOf = [&](const wchar_t* words) {
+        const size_t at = find(app, words);
+        return std::make_pair(at, at + wcslen(words));
+    };
+    D2D1_POINT_2F p{};
+    check(renderedWord(app, L"Second", p), "the paragraph under the code span is on the page");
+    click(app, p);
+    auto second = lineOf(L"Second paragraph.");
+    check(app.editorCursorPos >= second.first && app.editorCursorPos <= second.second,
+          "a click on the paragraph under it puts the caret there: " + std::to_string(app.editorCursorPos));
+    pauseClicks();
+    paint(app);
+    check(renderedWord(app, L"Third", p), "the paragraph after that is on the page");
+    click(app, p);
+    auto third = lineOf(L"Third paragraph.");
+    check(app.editorCursorPos >= third.first && app.editorCursorPos <= third.second, "and a click on the next one there");
+    // Down from the code span's line goes a paragraph at a time
+    placeCaret(app, find(app, L"installs"));
+    keystroke(app, VK_DOWN);
+    paint(app);
+    check(app.editorCursorPos >= second.first && app.editorCursorPos <= second.second, "Down from its line comes to the next paragraph");
+    // A list under it is a list: Enter makes the next item
+    placeCaret(app, find(app, L"- an item") + 9);
+    keystroke(app, VK_RETURN);
+    typeText(app, L"next");
+    check(find(app, L"- an item\n- next") != std::wstring::npos, "Enter in a list under it makes the next item");
+    // And a real fence is one still
+    placeCaret(app, app.editorText.size());
+    typeText(app, L"\n\n```\nint x;\n");
+    keystroke(app, VK_RETURN);
+    typeText(app, L"- not an item");
+    keystroke(app, VK_RETURN);
+    typeText(app, L"y");
+    check(find(app, L"- not an item\ny") != std::wstring::npos, "in a fenced block Enter makes no list item");
+    app.editorDirty = false;
+}
+
 // A short document of lists, opened in Live
 void openLists(App& app, const fs::path& dir) {
     const fs::path path = dir / "Lists.md";
@@ -1822,6 +1870,7 @@ int runLiveTests(const char* fixtureDir) {
     themeColours(app);
     selectingLines(app, dir);
     nestedLists(app, dir, out);
+    codeSpanLine(app, dir);
 
     // Two themes at two widths, on the tour
     openInEditor(app, doc);
