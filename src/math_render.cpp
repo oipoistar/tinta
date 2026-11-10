@@ -87,7 +87,12 @@ struct LayoutCtx {
     // sizes so they fit the surrounding line
     int style = 1; // display, text, script, scriptscript
     float delimiterHeight = 0;
+    // What each piece measured, for the box being laid out (layoutNodeImpl)
+    std::map<std::tuple<const void*, float, int, float>, struct Metrics>* measured = nullptr;
 };
+
+bool measuresKept = true;         // off in a test that compares with the measures made anew
+unsigned long long runsMade = 0;  // the text layouts made for runs, counted for tests
 
 float styleScale(int style) {
     return style < 2 ? 1.0f : style == 2 ? 0.7f : 0.5f;
@@ -117,6 +122,7 @@ const wchar_t* mathFontFamily(App& app) {
 IDWriteTextLayout* makeRunLayout(App& app, const std::wstring& text,
                                  float size, bool italic, bool bold,
                                  float& outBaseline, Metrics& m) {
+    ++runsMade;
     IDWriteTextFormat* fmt = nullptr;
     app.dwriteFactory->CreateTextFormat(
         mathFontFamily(app), nullptr,
@@ -243,10 +249,31 @@ bool slanted(const MNodePtr& node) {
                                                              isMathVariableChar(node->text[0])));
 }
 
+Metrics layoutNodeBody(LayoutCtx ctx, const MNodePtr& node, float size, float x, float baselineY, bool record);
+
+// A piece is measured before it is laid out, and what holds it is measured
+// before that: an accent, a pair of delimiters, a fraction each measure
+// what they hold and then lay it out, which measures what that holds again.
+// That was twice the work at every level. Thirty \bar in a row, 124 letters,
+// made two thousand million text layouts and the window stood still. What a
+// piece measures depends on the piece, the size, the style and the height
+// its \middle takes, and on nothing else: measured once for those, it is
+// kept while its box is laid out
+Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
+                       float x, float baselineY, bool record) {
+    if (record || !ctx.measured || !measuresKept || !node) return layoutNodeBody(ctx, node, size, x, baselineY, record);
+    const auto key = std::make_tuple((const void*)node.get(), size, ctx.style, ctx.delimiterHeight);
+    const auto found = ctx.measured->find(key);
+    if (found != ctx.measured->end()) return found->second;
+    const Metrics m = layoutNodeBody(ctx, node, size, x, baselineY, false);
+    ctx.measured->emplace(key, m);
+    return m;
+}
+
 // The workhorse: recursively lay out `node` with the baseline at
 // `baselineY`, starting at `x`. Returns the node's metrics. When
 // record=false (measure pass), nothing is emitted.
-Metrics layoutNodeImpl(LayoutCtx ctx, const MNodePtr& node, float size,
+Metrics layoutNodeBody(LayoutCtx ctx, const MNodePtr& node, float size,
                        float x, float baselineY, bool record) {
     Metrics m;
     if (!node) return m;
@@ -838,6 +865,8 @@ MNodePtr uprightRow(const std::wstring& text) {
 void layoutBox(App& app, MathBox& box, const MNodePtr& root, float fontSize, bool display) {
     box.fontFamily = mathFontFamily(app);
     LayoutCtx ctx{app, box, display ? 0 : 1};
+    std::map<std::tuple<const void*, float, int, float>, Metrics> measured;
+    ctx.measured = &measured;
     Metrics probe = measureNode(ctx, root, fontSize);
     float pad = fontSize * (display ? 0.15f : 0.08f);
     float baseline = probe.ascent + pad;
@@ -863,6 +892,9 @@ bool commandValue(const std::wstring& tex, size_t at, const wchar_t* command, st
 }
 
 } // namespace
+
+bool& mathMeasuresKept() { return measuresKept; }
+unsigned long long& mathRunsMade() { return runsMade; }
 
 void mathCollectLabels(const std::wstring& tex, std::map<std::wstring, std::wstring>& labels) {
     std::wstring number, value;

@@ -35,6 +35,11 @@ void mathCollectLabels(const std::wstring& latex, std::map<std::wstring, std::ws
 // an unknown one reads (??), as in LaTeX
 std::wstring mathResolveRefs(const std::wstring& latex, const std::map<std::wstring, std::wstring>& labels);
 
+// For tests: whether a piece's measure is kept while its box is laid out,
+// and the text layouts made for runs since the program began
+bool& mathMeasuresKept();
+unsigned long long& mathRunsMade();
+
 float mathBoxWidth(const MathBoxPtr& box);
 float mathBoxHeight(const MathBoxPtr& box);
 // Distance from the box top to the text baseline (for inline alignment)

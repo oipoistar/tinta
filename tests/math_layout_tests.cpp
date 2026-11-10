@@ -274,6 +274,68 @@ bool rasterize(const std::vector<MathBoxPtr>& boxes, const wchar_t* path = nullp
 }
 }
 
+// A piece's measure is kept while its box is laid out. An accent, a pair of
+// delimiters, a fraction measure what they hold and then lay it out, which
+// measured what that holds again: twice the work at every level, and thirty
+// accents in a row stopped the window. Counted here, not timed: the text
+// layouts each equation of the fixture makes; and the same drawing with the
+// measures kept as with each made anew
+void deepNesting(App& app) {
+    const float em = 20;
+    const auto path = std::filesystem::path(TINTA_MATH_FIXTURE).parent_path() / "math-deep-nesting.md";
+    std::ifstream file(path, std::ios::binary);
+    const std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    auto doc = app.parser.parse(source);
+    check(file.good() && doc.success, "the deep nesting fixture parses");
+    size_t equations = 0;
+    unsigned long long most = 0;
+    std::function<void(const qmd::ElementPtr&)> visit = [&](const qmd::ElementPtr& element) {
+        if (!element) return;
+        if (element->type == qmd::ElementType::MathInline || element->type == qmd::ElementType::MathDisplay) {
+            ++equations;
+            const std::wstring tex(element->text.begin(), element->text.end());  // the fixture's TeX is ASCII
+            mathClearCache();
+            const unsigned long long before = mathRunsMade();
+            const MathBoxPtr box = mathParse(app, tex, em, element->type == qmd::ElementType::MathDisplay);
+            const unsigned long long made = mathRunsMade() - before;
+            most = std::max(most, made);
+            check(box != nullptr && mathBoxWidth(box) > em * 0.5f && mathBoxHeight(box) > em, "a deeply nested equation is laid out");
+            // A few layouts for each letter, bracket and bar, whatever the depth
+            if (made > tex.size() * 8) {
+                std::cerr << "FAIL: " << made << " text layouts for an equation of " << tex.size() << " letters\n";
+                ++failures;
+            }
+        }
+        for (const auto& child : element->children) visit(child);
+    };
+    if (doc.success) visit(doc.root);
+    check(equations == 8, "the fixture's eight equations are found: its table, list, quote and code leave them whole");
+    std::cout << "Math: the deepest of " << equations << " nested equations made " << most << " text layouts\n";
+
+    // The same boxes with the measures kept as with each made anew
+    for (const wchar_t* tex : {LR"(\bar\bar\bar x)", LR"(\left(\frac{a}{b} \middle| \left[ c \middle/ d \right] \right))",
+                               LR"(\sqrt{\frac{\hat{x}^2}{\vec{y}_i}})", LR"(\overline{\left(a+b\right)}^{n})",
+                               LR"(\sum_{i=1}^{n}\left(x_i-\bar{x}\right)^2)", LR"(\widehat{ABC}+\overrightarrow{AB})",
+                               LR"(\left\{\frac{1}{1+\frac{1}{1+x}}\right\}_{k}^{2})", LR"(\left(\left(\left(x\right)\right)\right))",
+                               LR"(x^{x^{x^{x}}}+\tilde\phi_{\bar a})"}) {
+        for (bool display : {false, true}) {
+            mathMeasuresKept() = false;
+            mathClearCache();
+            const MathBoxPtr anew = mathParse(app, tex, em, display);
+            const Drawn a = drawnOf(anew);
+            const float aw = mathBoxWidth(anew), ah = mathBoxHeight(anew), ab = mathBoxBaseline(anew);
+            mathMeasuresKept() = true;
+            mathClearCache();
+            const MathBoxPtr kept = mathParse(app, tex, em, display);
+            const Drawn b = drawnOf(kept);
+            check(anew && kept && !a.runs.empty(), "the equation is drawn both ways");
+            check(a.runs == b.runs && a.strokes == b.strokes, "kept measures draw every letter and stroke where measures made anew do");
+            check(aw == mathBoxWidth(kept) && ah == mathBoxHeight(kept) && ab == mathBoxBaseline(kept), "and the box is the same size, on the same baseline");
+        }
+    }
+    mathClearCache();
+}
+
 int main(int argc, char** argv) {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     {
@@ -303,6 +365,7 @@ int main(int argc, char** argv) {
         checkMarkdownFixture(app, "application-menu.md", 5, false, 3);
         checkMarkdownFixture(app, "application-menu-companion.md", 1, false, 2);
         closingDollars(app);
+        deepNesting(app);
         auto markdown = app.parser.parse("$$\n\\begin{bmatrix}1&2\\\\5&6\\end{bmatrix}\\longrightarrow 6\n$$");
         check(markdown.success && !markdown.root->children.empty(), "display math Markdown parses");
         if (markdown.success && !markdown.root->children.empty()) {
