@@ -16,7 +16,12 @@ code, pre { font-family: "Consolas", monospace; }
 pre {
   background-color: #21222c;    /* darker */
   color: #50fa7b;               /* green */
+  border: 1px solid #3f4048;    /* a hairline, a shade off the block */
+  border-radius: 8px;
 }
+code { border-radius: 4px; }
+th { background-color: #21222c; }                /* the header row, as code's ground */
+mark { background-color: rgba(241, 250, 140, 0.22); color: #f1fa8c; }    /* Dracula's yellow */
 blockquote { border-left-color: #6272a4; }
 
 /* Code, by token */

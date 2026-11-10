@@ -16,7 +16,11 @@ code, pre { font-family: "Consolas", monospace; }
 pre {
   background-color: #e6ffed;    /* mint */
   color: #4a5568;               /* slate */
+  border: 1px solid #d2ead8;    /* a hairline, a shade off the block */
+  border-radius: 8px;
 }
+code { border-radius: 4px; }
+th { background-color: #e6ffed; }                /* the header row, as code's ground */
 blockquote { border-left-color: #9ae6b4; }
 
 /* Code, by token */

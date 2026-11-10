@@ -16,7 +16,12 @@ code, pre { font-family: "Consolas", monospace; }
 pre {
   background-color: #252019;    /* dark warm */
   color: #fc8181;               /* coral */
+  border: 1px solid #3e372f;    /* a hairline, a shade off the block */
+  border-radius: 8px;
 }
+code { border-radius: 4px; }
+th { background-color: #252019; }                /* the header row, as code's ground */
+mark { background-color: rgba(246, 173, 85, 0.26); color: #fbd38d; }    /* amber */
 blockquote { border-left-color: #5c4a3a; }
 
 /* Code, by token */

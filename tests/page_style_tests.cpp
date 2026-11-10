@@ -213,7 +213,12 @@ void unstyled(App& app) {
     check(discs == 2, "a built-in theme keeps its round bullets");
     const auto* second = runStarting(app, L"Second paragraph");
     check(second && closeTo(second->bounds.left, app.layoutIndent), "and starts every paragraph at the edge");
-    for (const auto& rect : app.layoutRects) check(rect.radius == 0 && rect.strokeWidth == 0, "and square boxes");
+    // Its boxes are Paper's own: corners of 4 for inline code and of 8 with a hairline for a code block
+    for (const auto& rect : app.layoutRects) {
+        check((rect.radius == 0 && rect.strokeWidth == 0) || (rect.radius == 4 && rect.strokeWidth == 0) ||
+                  (rect.radius == 8 && rect.strokeWidth == 1),
+              "and Paper's own boxes");
+    }
 }
 // A sheet's own faces (@font-face): a file this PC has, under a family name
 // of the sheet's own, draws the body; a missing file is reported on its line
@@ -678,10 +683,9 @@ std::vector<std::string> drawnOf(const App& app) {
         out.push_back("run '" + words + "' at " + hundredths(run.pos.x) + "," + hundredths(run.pos.y) + " in " +
                       boxOf(run.bounds) + " " + colourOf(run.color));
     }
-    for (const auto& rect : app.layoutRects) {
-        out.push_back("box " + boxOf(rect.rect) + " " + colourOf(rect.color) + " r" + hundredths(rect.radius) + " edge " +
-                      hundredths(rect.strokeWidth));
-    }
+    // A box by its place and hue: its corners, its edge and how strong its
+    // ground is are the theme's look, checked on their own
+    for (const auto& rect : app.layoutRects) out.push_back("box " + boxOf(rect.rect) + " " + colourOf(rect.color).substr(0, 6));
     for (const auto& line : app.layoutLines) {
         out.push_back("line " + hundredths(line.p1.x) + "," + hundredths(line.p1.y) + " to " + hundredths(line.p2.x) + "," +
                       hundredths(line.p2.y) + " " + colourOf(line.color) + " w" + hundredths(line.stroke));
@@ -712,11 +716,13 @@ bool struckThroughTheMiddle(const App& app, const App::LayoutTextRun& run) {
 
 // The built-in themes are CSS files (resources/themes) and hand the page
 // their sheets, so the page draws them as it draws a theme of one's own.
-// It has to draw what it drew without a sheet. Each built-in is set against
-// a themes.ini theme with its colours and faces, which has no sheet: every
-// run, box, line and shape in the same place and colour, at two widths. And
-// what the sheets once took away, looked at one by one: a callout's own
-// colours, a footnote number's, the dimming of a link to a missing file.
+// Nothing may move for it. Each built-in is set against a themes.ini theme
+// with its colours and faces, which has no sheet: every run, box, line and
+// shape in the same place and colour, at two widths. What the sheets once
+// took away is looked at one by one: a callout's own colours, a footnote
+// number's, the dimming of a link to a missing file. And what the sheets
+// add on purpose, the themes' look: code blocks with round corners and a
+// hairline, round chips for inline code, a table's header on code's ground.
 void builtInsStyled(App& app, const fs::path& dir) {
     const fs::path fixture = fs::path(TINTA_THEME_FIXTURE).parent_path() / "builtin-themes-styled.md";
     std::ifstream in(fixture, std::ios::binary);
@@ -754,6 +760,28 @@ void builtInsStyled(App& app, const fs::path& dir) {
             const std::vector<std::string> styled = drawnOf(app);
             const float tall = app.contentHeight;
             check(!app.pageBackground, where + ": the theme's own background is no second one for the page");
+            // The look: by its sheet alone, on boxes that stand where they stood
+            int chips = 0, blocks = 0, headers = 0, others = 0;
+            const std::string ground = colourOf(own.codeBackground);
+            for (const auto& rect : app.layoutRects) {
+                const bool onGround = colourOf(rect.color) == ground;
+                if (rect.radius == 4 && rect.strokeWidth == 0 && onGround) chips++;
+                else if (rect.radius == 8 && rect.strokeWidth == 1 && onGround && rect.stroke.a == 1 &&
+                         colourOf(rect.stroke) != ground) blocks++;
+                else if (rect.radius == 0 && rect.strokeWidth == 0 && onGround) headers++;
+                else if (rect.radius != 0 || rect.strokeWidth != 0) others++;
+            }
+            check(chips == 4, where + ": inline code sits in chips with corners of 4: " + std::to_string(chips));
+            check(blocks == 1, where + ": the code block has corners of 8 and a hairline: " + std::to_string(blocks));
+            check(headers >= 1, where + ": the table's header stands on code's ground: " + std::to_string(headers));
+            check(others == 0, where + ": no other box is rounded or edged: " + std::to_string(others));
+            if (own.isDark) {
+                const auto* marked = runOf(app, L"marked words");
+                check(own.highlightBackground && own.highlightText && marked && colourOf(marked->color) == colourOf(*own.highlightText),
+                      where + ": a dark theme marks words in its own gold");
+            } else {
+                check(!own.highlightBackground && !own.highlightText, where + ": a light theme keeps Tinta's yellow marker");
+            }
 
             // A callout's bar and title are the callout's, a plain quote's bar the theme's
             const uint32_t note = own.isDark ? 0x4493F8 : 0x0969DA;
@@ -785,10 +813,10 @@ void builtInsStyled(App& app, const fs::path& dir) {
             std::string first;
             for (size_t i = 0; i < styled.size() && i < plain.size(); ++i) {
                 if (styled[i] == plain[i]) continue;
-                if (!differing++) first = styled[i] + "  |  without: " + plain[i];
+                if (differing++ < 8) first += " ;; " + styled[i] + "  |  without: " + plain[i];
             }
             check(styled.size() == plain.size() && differing == 0,
-                  where + ": drawn as without a sheet (" + std::to_string(styled.size()) + " against " +
+                  where + ": everything stands as without a sheet (" + std::to_string(styled.size()) + " against " +
                       std::to_string(plain.size()) + " parts, " + std::to_string(differing) + " differ; first: " + first + ")");
         }
     }

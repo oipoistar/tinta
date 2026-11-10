@@ -31,30 +31,30 @@
 5 Midnight font=Segoe UI heading= code=Cascadia Code dark=1
   0D1B2A/1.000 E0E1DD/1.000 F0F4F8/1.000 38C6E4/1.000 90E0EF/1.000 1B263B/1.000 415A77/1.000 38C6E4/1.000
   38C6E4/1.000 9ADBA4/1.000 6C7A89/1.000 F2CE6B/1.000 90E0EF/1.000 C9A6DE/1.000 D793CF/1.000
-  inline - - mark - - bold - - - sel - rule - caret -
+  inline - - mark F2CE6B/0.300 F7DC8C/1.000 bold - - - sel - rule - caret -
   h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
   sizes 0 0 0 ui - - - - - src -
 6 Dracula font=Segoe UI heading= code=Consolas dark=1
   282A36/1.000 F8F8F2/1.000 FF79C6/1.000 8BE9FD/1.000 50FA7B/1.000 21222C/1.000 6272A4/1.000 BD93F9/1.000
   FF79C6/1.000 F1FA8C/1.000 6272A4/1.000 BD93F9/1.000 50FA7B/1.000 8BE9FD/1.000 BD93F9/1.000
-  inline - - mark - - bold - - - sel - rule - caret -
+  inline - - mark F1FA8C/0.220 F1FA8C/1.000 bold - - - sel - rule - caret -
   h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
   sizes 0 0 0 ui - - - - - src -
 7 Forest font=Segoe UI heading= code=Consolas dark=1
   0D1512/1.000 B8C5B2/1.000 9AE6B4/1.000 68D391/1.000 81E6D9/1.000 1A2A23/1.000 4A6E5A/1.000 68D391/1.000
   9AE6B4/1.000 D9CB7E/1.000 5F7A6A/1.000 E8A85C/1.000 68D391/1.000 81E6D9/1.000 C99BE8/1.000
-  inline - - mark - - bold - - - sel - rule - caret -
+  inline - - mark D9CB7E/0.240 E6DA98/1.000 bold - - - sel - rule - caret -
   h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
   sizes 0 0 0 ui - - - - - src -
 8 Ember font=Segoe UI heading= code=Consolas dark=1
   1A1614/1.000 D4C5B9/1.000 F6AD55/1.000 F1975A/1.000 FC8181/1.000 252019/1.000 5C4A3A/1.000 F1975A/1.000
   F6AD55/1.000 A8C98A/1.000 6B5B4F/1.000 D9A662/1.000 ED8936/1.000 C9A0C9/1.000 E08BB0/1.000
-  inline - - mark - - bold - - - sel - rule - caret -
+  inline - - mark F6AD55/0.260 FBD38D/1.000 bold - - - sel - rule - caret -
   h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
   sizes 0 0 0 ui - - - - - src -
 9 Abyss font=Segoe UI Light heading=Segoe UI code=Cascadia Mono dark=1
   000000/1.000 EDEDED/1.000 2EE6CF/1.000 FF4DD8/1.000 B8F53C/1.000 0F0F0F/1.000 333333/1.000 2EE6CF/1.000
   FF4DD8/1.000 B8F53C/1.000 5C6660/1.000 FF8A3D/1.000 2EE6CF/1.000 F5E663/1.000 C77DFF/1.000
-  inline - - mark - - bold - - - sel - rule - caret -
+  inline - - mark F5E663/0.240 F5E663/1.000 bold - - - sel - rule - caret -
   h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
   sizes 0 0 0 ui - - - - - src -

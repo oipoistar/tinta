@@ -16,7 +16,11 @@ code, pre { font-family: "Cascadia Code", "Cascadia Mono", "Consolas", monospace
 pre {
   background-color: #ebf8ff;    /* light blue */
   color: #285e61;               /* teal */
+  border: 1px solid #d8e5ed;    /* a hairline, a shade off the block */
+  border-radius: 8px;
 }
+code { border-radius: 4px; }
+th { background-color: #ebf8ff; }                /* the header row, as code's ground */
 blockquote { border-left-color: #a0c4e8; }
 
 /* Code, by token */
