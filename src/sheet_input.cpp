@@ -155,7 +155,7 @@ live::Look editLook(App& app, const SheetDoc& doc) {
     return look;
 }
 
-IDWriteTextLayout* editLayout(App& app, SheetDoc& doc, float width) {
+const live::Laid* editLayout(App& app, SheetDoc& doc, float width) {
     // The caret's line shows its Markdown as typed, the others show it drawn
     size_t caretLine = doc.editing == SheetDoc::Edit::Card ? live::caretLineOf(doc.edit, 0, doc.edit.text.size()) : (size_t)-1;
     return live::layoutOf(app, doc.edit, 0, doc.edit.text.size(), width, editLook(app, doc), doc.editCache, caretLine);
@@ -177,7 +177,7 @@ size_t positionAt(App& app, SheetDoc& doc, float lx, float ly) {
     D2D1_RECT_F rect{};
     float scale = 1;
     if (!editRect(app, doc, rect, scale)) return doc.edit.caret;
-    IDWriteTextLayout* layout = editLayout(app, doc, (rect.right - rect.left) / scale);
+    const live::Laid* layout = editLayout(app, doc, (rect.right - rect.left) / scale);
     if (!layout) return doc.edit.caret;
     return live::positionAt(layout, 0, doc.edit.text.size(), lx, ly);
 }
@@ -190,12 +190,10 @@ void fitEditor(App& app, SheetDoc& doc) {
     D2D1_RECT_F rect{};
     float scale = 1;
     if (!editRect(app, doc, rect, scale)) return;
-    IDWriteTextLayout* layout = editLayout(app, doc, (rect.right - rect.left) / scale);
+    const live::Laid* layout = editLayout(app, doc, (rect.right - rect.left) / scale);
     if (!layout) return;
-    DWRITE_TEXT_METRICS m{};
-    layout->GetMetrics(&m);
     Node& n = doc.model.nodes[i];
-    float want = m.height + cardPadding() * 1.6f + 24.0f;
+    float want = layout->height + cardPadding() * 1.6f + 24.0f;
     if (want > n.height && n.height < 1600.0f) n.height = std::min(1600.0f, snap(want + kGrid * 0.5f));
     float x = 0, y = 0, h = 0;
     if (caretPoint(app, doc, x, y, h)) {

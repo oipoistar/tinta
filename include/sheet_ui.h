@@ -372,7 +372,7 @@ int nodeAt(const SheetDoc& doc, float x, float y, bool groupsToo = true);
 // A group's label box, in sheet units
 sheet::Box groupLabelBox(App& app, const SheetDoc& doc, const sheet::Node& group);
 // The text box's layout while editing (owned by the edit state; do not release)
-IDWriteTextLayout* editLayout(App& app, SheetDoc& doc, float width);
+const live::Laid* editLayout(App& app, SheetDoc& doc, float width);
 live::Look editLook(App& app, const SheetDoc& doc);
 float editFontSize(const SheetDoc& doc);
 float cardPadding();

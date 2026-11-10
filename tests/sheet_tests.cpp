@@ -910,7 +910,8 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
     float sc = 1;
     editRect(app, doc, rect, sc);
     auto xAt = [&](size_t at) {
-        IDWriteTextLayout* layout = editLayout(app, doc, (rect.right - rect.left) / sc);
+        const live::Laid* laid = editLayout(app, doc, (rect.right - rect.left) / sc);
+        IDWriteTextLayout* layout = laid && laid->parts.size() == 1 ? laid->parts[0].layout.Get() : nullptr;
         float px = 0, py = 0;
         DWRITE_HIT_TEST_METRICS m{};
         if (layout) layout->HitTestTextPosition((UINT32)at, FALSE, &px, &py, &m);
@@ -1016,7 +1017,8 @@ void tenMore(App& app, const fs::path& dir, const fs::path& out) {
         float hs = 1;
         check(editRect(app, doc, hb, hs), "the card's text box is placed for a finger");
         auto textPoint = [&](size_t at) {
-            IDWriteTextLayout* layout = editLayout(app, doc, (hb.right - hb.left) / hs);
+            const live::Laid* laid = editLayout(app, doc, (hb.right - hb.left) / hs);
+            IDWriteTextLayout* layout = laid && laid->parts.size() == 1 ? laid->parts[0].layout.Get() : nullptr;
             float px = 0, py = 0;
             DWRITE_HIT_TEST_METRICS m{};
             if (layout) layout->HitTestTextPosition((UINT32)at, FALSE, &px, &py, &m);

@@ -1516,7 +1516,9 @@ void themeColours(App& app) {
     e.caret = e.anchor + 10;
     const live::Look look = live::pageLook(app);
     live::LayoutCache cache;
-    IDWriteTextLayout* layout = live::layoutOf(app, e, 0, e.text.size(), 900.0f, look, cache, (size_t)-1);
+    // A text this short is one part: its layout is the whole text's
+    const live::Laid* laid = live::layoutOf(app, e, 0, e.text.size(), 900.0f, look, cache, (size_t)-1);
+    IDWriteTextLayout* layout = laid && laid->parts.size() == 1 ? laid->parts[0].layout.Get() : nullptr;
     check(layout != nullptr, "#310: Live lays the text out");
     if (!layout) return;
     auto colorOf = [&](const wchar_t* word) {
@@ -1535,7 +1537,7 @@ void themeColours(App& app) {
 
     const std::vector<D2D1_COLOR_F> pixels = pixelsAfter(app, [&] {
         app.renderTarget->Clear(t.background);
-        live::draw(app, e, layout, cache, 0, look, false, 1.0f);
+        live::draw(app, e, laid, 0, look, false, 1.0f);
     });
     // The selection: the top of its line, above the letters
     DWRITE_HIT_TEST_METRICS hit{};
@@ -1610,12 +1612,13 @@ void selectingLines(App& app, const fs::path& dir) {
     // hidden: one even band
     e.anchor = e.text.find(L"2. bla");
     e.caret = 0;
-    IDWriteTextLayout* drawn = live::layoutOf(app, e, 0, e.text.size(), 900.0f, look, cache, (size_t)-1);
+    const live::Laid* laid = live::layoutOf(app, e, 0, e.text.size(), 900.0f, look, cache, (size_t)-1);
+    IDWriteTextLayout* drawn = laid && laid->parts.size() == 1 ? laid->parts[0].layout.Get() : nullptr;
     check(drawn != nullptr, "#313: Live lays the lines out");
     if (!drawn) return;
     const std::vector<D2D1_COLOR_F> pixels = pixelsAfter(app, [&] {
         app.renderTarget->Clear(app.theme.background);
-        live::draw(app, e, drawn, cache, 0, look, false, 1.0f);
+        live::draw(app, e, laid, 0, look, false, 1.0f);
     });
     UINT32 count = 0;
     drawn->HitTestTextRange(0, (UINT32)e.text.find(L'\n'), 0, 0, nullptr, 0, &count);
@@ -1726,12 +1729,12 @@ void nestedLists(App& app, const fs::path& dir, const fs::path& out) {
     app.zoomFactor = zoom;
     const float size = look.size;
     live::LayoutCache cache;
-    IDWriteTextLayout* layout = live::layoutOf(app, e, 0, e.text.size(), 600.0f, look, cache, live::caretLineOf(e, 0, e.text.size()));
+    const live::Laid* layout = live::layoutOf(app, e, 0, e.text.size(), 600.0f, look, cache, live::caretLineOf(e, 0, e.text.size()));
     check(layout != nullptr, "#315: Live lays the list out");
     if (!layout) return;
     const std::vector<D2D1_COLOR_F> pixels = pixelsAfter(app, [&] {
         app.renderTarget->Clear(app.theme.background);
-        live::draw(app, e, layout, cache, 0, look, false, 1.0f);
+        live::draw(app, e, layout, 0, look, false, 1.0f);
     });
     auto inked = [&](int x, int y) {
         const D2D1_COLOR_F& p = pixels[(size_t)y * app.width + x];

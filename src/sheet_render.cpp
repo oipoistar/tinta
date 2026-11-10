@@ -963,7 +963,7 @@ void drawEditBox(App& app, SheetDoc& doc, const Palette& p) {
     float textScale = 1.0f;
     if (!editRect(app, doc, rect, textScale)) return;
     float width = (rect.right - rect.left) / textScale;
-    IDWriteTextLayout* layout = editLayout(app, doc, width);
+    const live::Laid* layout = editLayout(app, doc, width);
     if (!layout) return;
     bool card = doc.editing == SheetDoc::Edit::Card;
     if (!card) {
@@ -979,7 +979,7 @@ void drawEditBox(App& app, SheetDoc& doc, const Palette& p) {
     app.renderTarget->GetTransform(&saved);
     app.renderTarget->SetTransform(D2D1::Matrix3x2F::Scale(textScale, textScale) *
                                    D2D1::Matrix3x2F::Translation(rect.left, rect.top - doc.edit.scrollY * textScale) * saved);
-    live::draw(app, doc.edit, layout, doc.editCache, 0, editLook(app, doc), app.cursorBlinkOn, dpi(app, 1.0f) / textScale);
+    live::draw(app, doc.edit, layout, 0, editLook(app, doc), app.cursorBlinkOn, dpi(app, 1.0f) / textScale);
     app.renderTarget->SetTransform(saved);
     app.renderTarget->PopAxisAlignedClip();
     if (!card && doc.edit.text.empty()) {
@@ -1663,7 +1663,7 @@ void drawEditPopups(App& app, SheetDoc& doc) {
     D2D1_RECT_F rect{};
     float sc = 1;
     if (!editRect(app, doc, rect, sc)) return;
-    IDWriteTextLayout* layout = editLayout(app, doc, (rect.right - rect.left) / sc);
+    const live::Laid* layout = editLayout(app, doc, (rect.right - rect.left) / sc);
     if (!layout) return;
     auto place = [&](size_t at, float& x, float& top, float& bottom) {
         float cx = 0, cy = 0, h = 0;

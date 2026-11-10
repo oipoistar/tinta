@@ -181,6 +181,17 @@ std::wstring lookKey(const Look& look) {
     swprintf_s(buf, L"|%.2f|%.2f|%.2f|%.2f|%d|%.3f%.3f%.3f", look.size, look.codeSize, look.headingSize[0], look.lineHeight,
                look.markdown ? 1 : 0, look.text.r, look.accent.g, look.code.b);
     std::wstring key = look.face + L"|" + look.headingFace + L"|" + look.codeFace + buf;
+    // And what a part keeps from the look it was made with: parts outlive a
+    // key, so all of it is told apart here
+    for (float value : {look.headingSize[1], look.headingSize[2], look.headingSize[3], look.headingSize[4], look.headingSize[5],
+                        look.listIndent}) {
+        swprintf_s(buf, L"|%.2f", value);
+        key += buf;
+    }
+    for (const D2D1_COLOR_F* color : {&look.text, &look.accent, &look.codeBack, &look.inlineCodeBack, &look.mark}) {
+        swprintf_s(buf, L"|%.3f%.3f%.3f%.3f", color->r, color->g, color->b, color->a);
+        key += buf;
+    }
     // The theme's emphasis and rule colours are drawn into the layout too
     for (const auto* color : {&look.bold, &look.italic, &look.rule}) {
         wchar_t part[40] = L"|-";
@@ -250,74 +261,87 @@ size_t caretLineOf(const LiveText& e, size_t from, size_t to) {
     return (size_t)std::count(e.text.begin() + (std::ptrdiff_t)from, e.text.begin() + (std::ptrdiff_t)at, L'\n');
 }
 
-IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to, float width, const Look& look,
-                            LayoutCache& cache, size_t caretLine) {
-    from = std::min(from, e.text.size());
-    to = std::clamp(to, from, e.text.size());
-    const std::wstring key = lookKey(look);
-    if (cache.layout && cache.from == from && cache.text.size() == to - from &&
-        e.text.compare(from, to - from, cache.text) == 0 && std::fabs(cache.width - width) < 0.01f && cache.key == key &&
-        cache.caretLine == caretLine && cache.generation == app.renderTargetGeneration) {
-        return cache.layout.Get();
+namespace {
+
+// The lines a part holds. A range costs time with the ranges its layout
+// holds, so parts are small; a layout has a cost of its own, so not tiny
+size_t partLineLimit = 32;
+LayoutWork work;
+
+bool sameCarry(const Laid::Carry& a, const Laid::Carry& b) {
+    return a.inFence == b.inFence && a.inMath == b.inMath && a.inFront == b.inFront && a.frontCloses == b.frontCloses &&
+           a.language == b.language && a.items == b.items && sameState(a.syntax, b.syntax);
+}
+
+// Whether front matter opened by the text's first line closes in the text
+bool frontMatterCloses(const std::wstring& t) {
+    size_t start = t.find(L'\n');
+    while (start != std::wstring::npos) {
+        ++start;
+        size_t end = t.find(L'\n', start);
+        const size_t stop = end == std::wstring::npos ? t.size() : end;
+        size_t lead = start;
+        while (lead < stop && t[lead] == L' ') ++lead;
+        if (stop - lead == 3 && t.compare(lead, 3, L"---") == 0) return true;
+        start = end;
     }
-    cache.layout.Reset();
-    cache.backs.clear();
-    cache.text.assign(e.text, from, to - from);
-    cache.from = from;
-    cache.width = width;
-    cache.key = key;
-    cache.caretLine = caretLine;
-    const std::wstring& t = cache.text;
-    IDWriteTextFormat* fmt = baseFormat(app, look.face, look.size, look.markdown);
-    if (!fmt) return nullptr;
+    return false;
+}
+
+// One part laid out and dressed: its lines as Markdown has them, after what
+// the lines before it left open (part.in). Everything of the part but its
+// place in the text and on the page is made here
+bool buildPart(App& app, const Look& look, LayoutCache& cache, IDWriteTextFormat* fmt, const std::wstring& t, float width,
+               Laid::Part& part) {
+    part.layout.Reset();
+    part.backs.clear();
+    part.out = part.in;
+    part.height = 0;
     IDWriteTextLayout* layout = nullptr;
-    app.dwriteFactory->CreateTextLayout(t.c_str(), (UINT32)t.size(), fmt, std::max(1.0f, width), 1.0e6f, &layout);
-    if (!layout) return nullptr;
-    cache.layout.Attach(layout);
-    if (cache.generation != app.renderTargetGeneration || !cache.markBrush) {
-        cache.markBrush.Reset();
-        cache.linkBrush.Reset();
-        cache.glyphBrush.Reset();
-        cache.codeBrush.Reset();
-        cache.tokenBrushes.clear();
-        for (auto& b : cache.headingBrush) b.Reset();
-        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &cache.markBrush);
-        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &cache.linkBrush);
-        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &cache.glyphBrush);
-        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &cache.codeBrush);
-        for (auto& b : cache.headingBrush) app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &b);
-    }
-    cache.generation = app.renderTargetGeneration;
-    // Lines as tall as the page's: a share of each line's own height
-    cache.factor = 1.0f;
+    app.dwriteFactory->CreateTextLayout(t.data() + part.at, (UINT32)part.length, fmt, std::max(1.0f, width), 1.0e6f, &layout);
+    if (!layout) return false;
+    part.layout.Attach(layout);
+    ++work.parts;
     if (look.lineHeight > 0) {
         ComPtr<IDWriteTextLayout3> spaced;
         if (SUCCEEDED(layout->QueryInterface(IID_PPV_ARGS(&spaced)))) {
-            cache.factor = look.lineHeight / naturalHeight(app, fmt);
+            cache.laid.factor = look.lineHeight / naturalHeight(app, fmt);
             DWRITE_LINE_SPACING spacing{};
             spacing.method = DWRITE_LINE_SPACING_METHOD_PROPORTIONAL;
-            spacing.height = cache.factor;
-            spacing.baseline = cache.factor;
+            spacing.height = cache.laid.factor;
+            spacing.baseline = cache.laid.factor;
             spacing.leadingBefore = 0.0f;
             spacing.fontLineGapUsage = DWRITE_FONT_LINE_GAP_USAGE_DEFAULT;
             spaced->SetLineSpacing(&spacing);
         }
     }
-    if (!look.markdown || !cache.markBrush) return layout;
-    D2D1_COLOR_F muted = look.text;
-    muted.a = 0.45f;
-    cache.markBrush->SetColor(muted);
-    cache.linkBrush->SetColor(look.link);
-    cache.codeBrush->SetColor(look.code);
-    for (int i = 0; i < 6; ++i) {
-        if (cache.headingBrush[i]) cache.headingBrush[i]->SetColor(look.heading[i]);
+    // Its lines: the break that ends the part is its last line's own
+    const std::wstring_view body(t.data() + part.at, part.length - (part.broken ? 1 : 0));
+    // How far down the page the part reaches: its lines' heights, without
+    // the empty line a layout has after that break. (A position's place in a
+    // layout is its letters' top, under what the line's spacing adds.)
+    auto measure = [&] {
+        part.tall = part.height = paint::metrics(layout).height;
+        UINT32 count = 0;
+        layout->GetLineMetrics(nullptr, 0, &count);
+        std::vector<DWRITE_LINE_METRICS> lines(count);
+        if (!count || FAILED(layout->GetLineMetrics(lines.data(), count, &count)) || !count) return;
+        part.tall = 0;
+        for (UINT32 i = 0; i + (part.broken ? 1 : 0) < count; ++i) part.tall += lines[i].height;
+        part.height = (float)part.tall;
+    };
+    if (!look.markdown || !cache.markBrush) {
+        work.lines += part.lines;
+        measure();
+        return true;
     }
+    Laid::Carry& open = part.out;
 
-    // On the caret's line the marks are muted; on the others they go, or
-    // turn into bullets, task boxes, bars and rules
     bool here = false;
     float lineSize = look.size;
     auto range = [](size_t at, size_t length) { return DWRITE_TEXT_RANGE{(UINT32)at, (UINT32)length}; };
+    // A mark: muted on the caret's line, where it shows as typed, and
+    // replaced by `kind` away from it
     auto mark = [&](size_t at, size_t length, MarkObject::Kind kind, float objectWidth = 0, int depth = 0) {
         if (!length) return;
         if (here) {
@@ -346,68 +370,71 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
         cache.tokenBrushes.push_back({key, brush});
         return brush.Get();
     };
-    int language = 0;
-    SyntaxState syntax;
     std::vector<InlineSpan> spans;
-    // The marks' indents of the items a line's item sits in: how deep it is
-    std::vector<size_t> items;
+    // How deep a line's item is, among the items it sits in
     auto depthOf = [&](size_t indent) {
+        std::vector<size_t>& items = open.items;
         while (!items.empty() && items.back() >= indent) items.pop_back();
         items.push_back(indent);
         return (int)items.size() - 1;
     };
     size_t start = 0, lineIndex = 0;
-    bool inFence = false, inMath = false, inFront = from == 0 && t.compare(0, 3, L"---") == 0;
-    size_t fenceStart = 0, frontEnd = 0;
-    while (start <= t.size()) {
-        size_t end = t.find(L'\n', start);
-        if (end == std::wstring::npos) end = t.size();
-        here = lineIndex == caretLine;
+    // Where the lines of a fenced block or of front matter begin in this
+    // part: a block's background is drawn a part at a time
+    size_t blockStart = 0;
+    while (start <= body.size()) {
+        size_t end = body.find(L'\n', start);
+        if (end == std::wstring_view::npos) end = body.size();
+        here = lineIndex == part.caretLine;
         lineSize = look.size;
-        std::wstring_view lineText(t.data() + start, end - start);
+        std::wstring_view lineText = body.substr(start, end - start);
         size_t lead = lineText.find_first_not_of(L' ');
         std::wstring_view rest = lead == std::wstring_view::npos ? std::wstring_view() : lineText.substr(lead);
         bool fence = rest.size() >= 3 && (rest.compare(0, 3, L"```") == 0 || rest.compare(0, 3, L"~~~") == 0);
-        bool mathFence = rest.size() >= 2 && rest.compare(0, 2, L"$$") == 0 && !inFence;
-        if (inFront) {
+        bool mathFence = rest.size() >= 2 && rest.compare(0, 2, L"$$") == 0 && !open.inFence;
+        if (open.inFront) {
             // Front matter: the properties as typed, in the code face
             code(start, end - start);
-            if (lineIndex > 0 && rest == L"---") {
-                inFront = false;
-                frontEnd = end;
-                cache.backs.push_back({0, frontEnd, look.codeBack, true});
+            if ((lineIndex > 0 || !part.first) && rest == L"---") {
+                // Only front matter that closes has a background: a rule on
+                // a document's first line opens none
+                if (open.frontCloses) part.backs.push_back({blockStart, end - blockStart, look.codeBack, true, false});
+                open.inFront = open.frontCloses = false;
             }
-        } else if (fence || inFence) {
+        } else if (fence || open.inFence) {
             code(start, end - start);
             if (fence) {
                 layout->SetDrawingEffect(cache.markBrush.Get(), range(start, end - start));
-                if (!inFence) {
+                if (!open.inFence) {
                     // Its language, after the fence's marks
-                    fenceStart = start;
+                    blockStart = start;
                     size_t marks = rest.find_first_not_of(rest[0]);
                     std::wstring_view info = marks == std::wstring_view::npos ? std::wstring_view() : rest.substr(marks);
                     size_t word = info.find_first_of(L" {");
-                    language = detectLanguage(std::wstring(info.substr(0, word)));
-                    syntax = SyntaxState();
+                    open.language = detectLanguage(std::wstring(info.substr(0, word)));
+                    open.syntax = SyntaxState();
                 } else {
-                    cache.backs.push_back({fenceStart, end - fenceStart, look.codeBack, true});
+                    part.backs.push_back({blockStart, end - blockStart, look.codeBack, true, false});
+                    // Closed: it leaves nothing for the lines after it
+                    open.language = 0;
+                    open.syntax = SyntaxState();
                 }
-                inFence = !inFence;
-            } else if (language && end > start) {
+                open.inFence = !open.inFence;
+            } else if (open.language && end > start) {
                 // Its tokens in the page's colours
                 std::wstring line(lineText);
-                for (const SyntaxToken& token : tokenizeLine(line, language, syntax)) {
+                for (const SyntaxToken& token : tokenizeLine(line, open.language, open.syntax)) {
                     if (token.text.empty()) continue;
                     size_t at = (size_t)(token.text.data() - line.data());
                     layout->SetDrawingEffect(tokenBrush(getTokenColor(app.theme, token.tokenType)), range(start + at, token.text.size()));
                 }
             }
-        } else if (mathFence || inMath) {
+        } else if (mathFence || open.inMath) {
             code(start, end - start);
             if (mathFence) {
                 layout->SetDrawingEffect(cache.markBrush.Get(), range(start, 2 + lead));
                 // $$x$$ on one line closes where it opens
-                if (!(rest.size() > 4 && rest.substr(rest.size() - 2) == L"$$")) inMath = !inMath;
+                if (!(rest.size() > 4 && rest.substr(rest.size() - 2) == L"$$")) open.inMath = !open.inMath;
             }
         } else if (lead != std::wstring_view::npos && rest[0] == L'|') {
             // A table row: its pipes line up in the code face, muted with the
@@ -489,7 +516,7 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
             // Inline spans, past the line's mark: a task's box is no link. On
             // the page their marks go; links, notes and footnotes take the
             // link colour, code its face, a picture's words go faint
-            LineMark lineMarks = lineMark(t, start);
+            LineMark lineMarks = lineMark(t, part.at + start);
             spans.clear();
             inlineSpans(lineText, lineMarks.kind == LineMark::None ? 0 : lineMarks.indent + lineMarks.length, spans);
             for (const InlineSpan& span : spans) {
@@ -501,7 +528,7 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
                         break;
                     case INL_CODE:
                         code(at, n);
-                        cache.backs.push_back({at, n, look.inlineCodeBack, false});
+                        part.backs.push_back({at, n, look.inlineCodeBack, false, false});
                         break;
                     case INL_MATH_MARK:
                         code(at, n);
@@ -544,7 +571,7 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
                         layout->SetStrikethrough(TRUE, range(at, n));
                         break;
                     case INL_HIGHLIGHT:
-                        cache.backs.push_back({at, n, look.mark, false});
+                        part.backs.push_back({at, n, look.mark, false, false});
                         break;
                     default:
                         break;
@@ -552,38 +579,241 @@ IDWriteTextLayout* layoutOf(App& app, const LiveText& e, size_t from, size_t to,
             }
         }
         ++lineIndex;
-        if (end == t.size()) break;
+        if (end == body.size()) break;
         start = end + 1;
     }
-    // A fence still open at the end runs to it
-    if (inFence) cache.backs.push_back({fenceStart, t.size() - fenceStart, look.codeBack, true});
-    return layout;
+    // A fence still open at the part's end runs to it, and so does front
+    // matter that closes further down: on into the next part, when one follows
+    if ((open.inFence || (open.inFront && open.frontCloses)) && part.length > blockStart) {
+        part.backs.push_back({blockStart, part.length - blockStart, look.codeBack, true, part.broken});
+    }
+    work.lines += lineIndex;
+    measure();
+    return true;
 }
 
-bool caretPoint(IDWriteTextLayout* layout, size_t from, size_t at, float& x, float& y, float& height) {
-    if (!layout || at < from) return false;
+}  // namespace
+
+const Laid* layoutOf(App& app, const LiveText& e, size_t from, size_t to, float width, const Look& look, LayoutCache& cache,
+                     size_t caretLine) {
+    from = std::min(from, e.text.size());
+    to = std::clamp(to, from, e.text.size());
+    const size_t size = to - from;
+    const std::wstring key = lookKey(look);
+    const bool sameTarget = cache.generation == app.renderTargetGeneration;
+    const bool same = cache.made && sameTarget && std::fabs(cache.width - width) < 0.01f && cache.key == key;
+    if (same && cache.from == from && cache.caretLine == caretLine && cache.text.size() == size &&
+        e.text.compare(from, size, cache.text) == 0) {
+        return &cache.laid;
+    }
+    Laid& laid = cache.laid;
+    std::vector<Laid::Part>& parts = laid.parts;
+    cache.made = false;
+    IDWriteTextFormat* fmt = baseFormat(app, look.face, look.size, look.markdown);
+    if (!fmt) {
+        parts.clear();
+        return nullptr;
+    }
+    if (!sameTarget || !cache.markBrush) {
+        cache.markBrush.Reset();
+        cache.linkBrush.Reset();
+        cache.glyphBrush.Reset();
+        cache.codeBrush.Reset();
+        cache.tokenBrushes.clear();
+        for (auto& b : cache.headingBrush) b.Reset();
+        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &cache.markBrush);
+        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &cache.linkBrush);
+        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &cache.glyphBrush);
+        app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &cache.codeBrush);
+        for (auto& b : cache.headingBrush) app.renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &b);
+    }
+    cache.generation = app.renderTargetGeneration;
+    const bool dressed = look.markdown && cache.markBrush;
+    if (dressed) {
+        D2D1_COLOR_F muted = look.text;
+        muted.a = 0.45f;
+        cache.markBrush->SetColor(muted);
+        cache.linkBrush->SetColor(look.link);
+        cache.codeBrush->SetColor(look.code);
+        for (int i = 0; i < 6; ++i) {
+            if (cache.headingBrush[i]) cache.headingBrush[i]->SetColor(look.heading[i]);
+        }
+    }
+
+    // What the text shares with the one the parts were made from: its start
+    // and its end, around what a key changed
+    const wchar_t* now = e.text.data() + from;
+    const size_t oldSize = cache.text.size();
+    size_t shared = 0, sharedEnd = 0;
+    if (same && cache.dressed == dressed) {
+        const size_t most = std::min(oldSize, size);
+        shared = (size_t)(std::mismatch(cache.text.data(), cache.text.data() + most, now).first - cache.text.data());
+        while (sharedEnd < most - shared && cache.text[oldSize - 1 - sharedEnd] == now[size - 1 - sharedEnd]) ++sharedEnd;
+    } else {
+        parts.clear();
+        laid.factor = 1.0f;
+    }
+    // The parts before the change stay as they are. The text's last part has
+    // no break after it: it stays only while it ends the text
+    size_t head = 0;
+    while (head < parts.size()) {
+        const Laid::Part& part = parts[head];
+        const size_t end = part.at + part.length;
+        if (end > shared || (!part.broken && end != size)) break;
+        ++head;
+    }
+    // The parts after it move with the text, while they still start a line
+    size_t tail = parts.size();
+    while (tail > head) {
+        const Laid::Part& part = parts[tail - 1];
+        if (part.at < oldSize - sharedEnd) break;
+        const size_t at = part.at + size - oldSize;
+        if (at && now[at - 1] != L'\n') break;
+        --tail;
+    }
+    const bool whole = head && !parts[head - 1].broken;      // the kept parts reach the text's end
+    const bool toEnd = tail == parts.size();
+    const size_t gapStart = head ? parts[head - 1].at + parts[head - 1].length : 0;
+    const size_t gapEnd = toEnd ? size : parts[tail].at + size - oldSize;
+    // The lines between them, in parts of a like size
+    std::vector<Laid::Part> made;
+    size_t lines = whole ? 0 : (size_t)std::count(now + gapStart, now + gapEnd, L'\n') + (toEnd ? 1 : 0);
+    const size_t limit = std::max<size_t>(1, partLineLimit);
+    const size_t count = lines / limit + (lines % limit ? 1 : 0);
+    made.reserve(count);
+    for (size_t k = 0, at = gapStart, line = 0; k < count; ++k) {
+        Laid::Part part;
+        part.at = at;
+        if (toEnd && k + 1 == count) {
+            part.length = size - at;
+            part.lines = lines - line;
+        } else {
+            // The lines before the next part: an even share of them, taken
+            // in two steps so that lines of any number multiply safely
+            const size_t upTo = lines / count * (k + 1) + lines % count * (k + 1) / count;
+            size_t end = at;
+            for (size_t i = line; i < upTo; ++i) end = (size_t)(std::find(now + end, now + gapEnd, L'\n') - now) + 1;
+            part.length = end - at;
+            part.lines = upTo - line;
+            part.broken = true;
+            line = upTo;
+        }
+        at += part.length;
+        made.push_back(std::move(part));
+    }
+    for (size_t i = tail; i < parts.size(); ++i) parts[i].at += size - oldSize;
+    parts.erase(parts.begin() + (std::ptrdiff_t)head, parts.begin() + (std::ptrdiff_t)tail);
+    parts.insert(parts.begin() + (std::ptrdiff_t)head, std::make_move_iterator(made.begin()),
+                 std::make_move_iterator(made.end()));
+
+    cache.text.assign(e.text, from, size);
+    cache.from = from;
+    cache.width = width;
+    cache.key = key;
+    cache.caretLine = caretLine;
+    cache.dressed = dressed;
+    const std::wstring& t = cache.text;
+    // Down the parts, each after what the one before it left open. A part is
+    // made again when that changed, or the line shown as typed came to it or
+    // left it: a key lays out the part it is in, and the parts after it only
+    // as far as it changed how their lines read
+    Laid::Carry entry;
+    entry.inFront = dressed && from == 0 && t.compare(0, 3, L"---") == 0;
+    entry.frontCloses = entry.inFront && frontMatterCloses(t);
+    const Laid::Carry* carry = &entry;
+    // Thousands of line heights added up as floats drift by a share of a
+    // pixel, and by another with every other way of adding them: summed
+    // exactly, a line stays where it is whatever parts the lines above are in
+    double top = 0;
+    size_t line = 0;
+    for (size_t i = 0; i < parts.size(); ++i) {
+        Laid::Part& part = parts[i];
+        const size_t own = caretLine != (size_t)-1 && caretLine >= line && caretLine - line < part.lines ? caretLine - line
+                                                                                                         : (size_t)-1;
+        if (!part.layout || part.first != (i == 0) || part.caretLine != own || !sameCarry(part.in, *carry)) {
+            part.first = i == 0;
+            part.caretLine = own;
+            part.in = *carry;
+            if (!buildPart(app, look, cache, fmt, t, width, part)) {
+                parts.clear();
+                return nullptr;
+            }
+        }
+        part.top = (float)top;
+        top += part.tall;
+        line += part.lines;
+        carry = &part.out;
+    }
+    laid.length = size;
+    laid.width = std::max(1.0f, width);
+    laid.height = (float)top;
+    cache.made = true;
+    return &laid;
+}
+
+namespace {
+
+// The part a position of the layout's text is in. A part's end is the next
+// part's start, and belongs to that one: its line begins there
+const Laid::Part* partOf(const Laid* laid, size_t at) {
+    if (!laid || laid->parts.empty()) return nullptr;
+    auto it = std::upper_bound(laid->parts.begin(), laid->parts.end(), at,
+                               [](size_t value, const Laid::Part& part) { return value < part.at; });
+    return it == laid->parts.begin() ? &laid->parts.front() : &*(it - 1);
+}
+
+// The part at a height of the layout, and that height in the part
+const Laid::Part* partAt(const Laid* laid, float& y) {
+    if (!laid || laid->parts.empty()) return nullptr;
+    auto it = std::upper_bound(laid->parts.begin(), laid->parts.end(), y,
+                               [](float value, const Laid::Part& part) { return value < part.top; });
+    const Laid::Part* part = it == laid->parts.begin() ? &laid->parts.front() : &*(it - 1);
+    y -= part->top;
+    // Under a part's last line its layout has an empty one, after the break:
+    // the next part's first line is there
+    if (part->broken) y = std::min(y, std::nextafter(part->height, 0.0f));
+    return part;
+}
+
+// Where a position of the layout's text is, from the layout's top
+bool pointOf(const Laid* laid, size_t at, float& x, float& y, DWRITE_HIT_TEST_METRICS& m) {
+    if (laid) at = std::min(at, laid->length);
+    const Laid::Part* part = partOf(laid, at);
+    if (!part || FAILED(part->layout->HitTestTextPosition((UINT32)(at - part->at), FALSE, &x, &y, &m))) return false;
+    y += part->top;
+    m.top += part->top;
+    return true;
+}
+
+}  // namespace
+
+bool caretPoint(const Laid* laid, size_t from, size_t at, float& x, float& y, float& height) {
+    if (!laid || at < from) return false;
     DWRITE_HIT_TEST_METRICS m{};
-    if (FAILED(layout->HitTestTextPosition((UINT32)(at - from), FALSE, &x, &y, &m))) return false;
+    if (!pointOf(laid, at - from, x, y, m)) return false;
     height = m.height;
     return true;
 }
 
-size_t positionAt(IDWriteTextLayout* layout, size_t from, size_t to, float x, float y) {
-    if (!layout) return from;
+size_t positionAt(const Laid* laid, size_t from, size_t to, float x, float y) {
+    const Laid::Part* part = partAt(laid, y);
+    if (!part) return from;
     BOOL trailing = FALSE, inside = FALSE;
     DWRITE_HIT_TEST_METRICS m{};
-    layout->HitTestPoint(x, y, &trailing, &inside, &m);
-    size_t at = from + m.textPosition + (trailing ? m.length : 0);
-    return std::min(at, to);
+    part->layout->HitTestPoint(x, y, &trailing, &inside, &m);
+    size_t at = m.textPosition + (trailing ? m.length : 0);
+    if (part->broken) at = std::min(at, part->length - 1);
+    return std::min(from + part->at + at, to);
 }
 
-size_t taskBoxAt(IDWriteTextLayout* layout, const LiveText& e, size_t from, size_t to, float x, float y) {
-    if (!layout) return (size_t)-1;
+size_t taskBoxAt(const Laid* laid, const LiveText& e, size_t from, size_t to, float x, float y) {
+    const Laid::Part* part = partAt(laid, y);
+    if (!part) return (size_t)-1;
     BOOL trailing = FALSE, inside = FALSE;
     DWRITE_HIT_TEST_METRICS m{};
-    layout->HitTestPoint(x, y, &trailing, &inside, &m);
+    part->layout->HitTestPoint(x, y, &trailing, &inside, &m);
     if (!inside) return (size_t)-1;
-    size_t at = from + m.textPosition;
+    size_t at = from + part->at + m.textPosition;
     if (at > to) return (size_t)-1;
     size_t ls = lineStart(e.text, at);
     LineMark mark = lineMark(e.text, ls);
@@ -594,35 +824,91 @@ size_t taskBoxAt(IDWriteTextLayout* layout, const LiveText& e, size_t from, size
     return ls;
 }
 
-void draw(App& app, const LiveText& e, IDWriteTextLayout* layout, const LayoutCache& cache, size_t from, const Look& look,
-          bool caretOn, float pixel) {
-    if (!layout) return;
+float firstBaseline(const Laid* laid) {
+    if (!laid || laid->parts.empty()) return 0;
+    IDWriteTextLayout* layout = laid->parts.front().layout.Get();
+    UINT32 count = 0;
+    layout->GetLineMetrics(nullptr, 0, &count);
+    if (!count) return 0;
+    std::vector<DWRITE_LINE_METRICS> lines(count);
+    if (FAILED(layout->GetLineMetrics(lines.data(), count, &count))) return 0;
+    return lines[0].baseline;
+}
+
+size_t& partLines() { return partLineLimit; }
+
+LayoutWork& layoutWork() { return work; }
+
+void draw(App& app, const LiveText& e, const Laid* laid, size_t from, const Look& look, bool caretOn, float pixel,
+          float viewTop, float viewBottom) {
+    if (!laid || laid->parts.empty()) return;
     ID2D1RenderTarget* rt = app.renderTarget;
-    const float width = layout->GetMaxWidth();
-    const size_t length = cache.text.size();
-    auto rects = [&](size_t at, size_t count, std::vector<DWRITE_HIT_TEST_METRICS>& out) {
+    const float width = laid->width;
+    const size_t length = laid->length;
+    // The parts in view, and a few lines past it: a glyph may reach out of
+    // its line. Parts away from it cost nothing
+    const float slack = look.size * 4;
+    const std::vector<Laid::Part>& parts = laid->parts;
+    size_t first = (size_t)(std::upper_bound(parts.begin(), parts.end(), viewTop - slack,
+                                             [](float value, const Laid::Part& part) { return value < part.top; }) -
+                            parts.begin());
+    if (first) --first;
+    size_t last = first;
+    while (last < parts.size() && parts[last].top <= viewBottom + slack) ++last;
+    auto rects = [](const Laid::Part& part, size_t at, size_t count, std::vector<DWRITE_HIT_TEST_METRICS>& out) {
         out.clear();
         UINT32 n = 0;
-        layout->HitTestTextRange((UINT32)at, (UINT32)count, 0, 0, nullptr, 0, &n);
+        part.layout->HitTestTextRange((UINT32)at, (UINT32)count, 0, part.top, nullptr, 0, &n);
         out.resize(n);
-        if (n && FAILED(layout->HitTestTextRange((UINT32)at, (UINT32)count, 0, 0, out.data(), n, &n))) out.clear();
+        if (n && FAILED(part.layout->HitTestTextRange((UINT32)at, (UINT32)count, 0, part.top, out.data(), n, &n))) out.clear();
         out.resize(n);
     };
-    std::vector<DWRITE_HIT_TEST_METRICS> hits;
-    // Backgrounds: fenced blocks across the box, spans behind their text
-    for (const auto& back : cache.backs) {
-        if (back.at >= length && length) continue;
-        if (back.block) {
+    std::vector<DWRITE_HIT_TEST_METRICS> hits, row;
+    // Backgrounds: fenced blocks across the box. A block that runs through
+    // several parts is one band, from its first line's letters to its last's
+    bool band = false, runsOn = false;
+    float bandTop = 0, bandBottom = 0;
+    D2D1_COLOR_F bandColor{};
+    auto fillBand = [&] {
+        if (!band) return;
+        app.brush->SetColor(bandColor);
+        rt->FillRectangle(D2D1::RectF(-look.codeInset, bandTop, width + look.codeInset, bandBottom), app.brush);
+        band = false;
+    };
+    for (size_t i = first; i < last; ++i) {
+        const Laid::Part& part = parts[i];
+        // What the part before left running goes on with this one's first line
+        bool joins = runsOn;
+        runsOn = false;
+        for (const auto& back : part.backs) {
+            if (!back.block || (back.at >= part.length && part.length)) continue;
             float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-            DWRITE_HIT_TEST_METRICS first{}, last{};
-            layout->HitTestTextPosition((UINT32)back.at, FALSE, &x0, &y0, &first);
+            DWRITE_HIT_TEST_METRICS start{}, end{};
+            part.layout->HitTestTextPosition((UINT32)back.at, FALSE, &x0, &y0, &start);
             size_t lastAt = back.length ? back.at + back.length - 1 : back.at;
-            layout->HitTestTextPosition((UINT32)std::min(lastAt, length), FALSE, &x1, &y1, &last);
-            app.brush->SetColor(back.color);
-            rt->FillRectangle(D2D1::RectF(-look.codeInset, first.top, width + look.codeInset, last.top + last.height), app.brush);
-        } else if (back.length) {
-            rects(back.at, back.length, hits);
-            for (const auto& h : hits) {
+            part.layout->HitTestTextPosition((UINT32)std::min(lastAt, part.length), FALSE, &x1, &y1, &end);
+            const float top = part.top + start.top, bottom = part.top + end.top + end.height;
+            if (band && joins && back.at == 0) {
+                bandBottom = bottom;
+            } else {
+                fillBand();
+                band = true;
+                bandTop = top;
+                bandBottom = bottom;
+                bandColor = back.color;
+            }
+            joins = false;
+            runsOn = back.on;
+        }
+    }
+    fillBand();
+    // And spans behind their text
+    for (size_t i = first; i < last; ++i) {
+        const Laid::Part& part = parts[i];
+        for (const auto& back : part.backs) {
+            if (back.block || !back.length || (back.at >= part.length && part.length)) continue;
+            rects(part, back.at, back.length, row);
+            for (const auto& h : row) {
                 paint::fillRound(app, D2D1::RectF(h.left - 2 * pixel, h.top + h.height * 0.12f, h.left + h.width + 2 * pixel,
                                                   h.top + h.height * 0.92f),
                                  3 * pixel, back.color);
@@ -635,7 +921,24 @@ void draw(App& app, const LiveText& e, IDWriteTextLayout* layout, const LayoutCa
     if (e.hasSelection()) {
         size_t a = std::max(e.selStart(), from), b = std::min(e.selEnd(), from + length);
         if (b > a) {
-            rects(a - from, b - a, hits);
+            a -= from;
+            b -= from;
+            for (size_t i = first; i < last; ++i) {
+                const Laid::Part& part = parts[i];
+                const size_t pa = std::max(a, part.at), pb = std::min(b, part.at + part.length);
+                if (pb <= pa) continue;
+                rects(part, pa - part.at, pb - pa, row);
+                // A range that takes in no whole letter, some of a task box's
+                // marks, comes back as a place of no length. As the end of
+                // a longer selection it is no part of it
+                const bool some = pa > a || pb < b;
+                for (const auto& h : row) {
+                    // The line after a part's break is the next part's
+                    if (part.broken && h.top >= part.top + part.height - 0.5f * pixel) continue;
+                    if (some && !h.length) continue;
+                    hits.push_back(h);
+                }
+            }
             std::sort(hits.begin(), hits.end(), [](const DWRITE_HIT_TEST_METRICS& p, const DWRITE_HIT_TEST_METRICS& q) {
                 return p.top != q.top ? p.top < q.top : p.left < q.left;
             });
@@ -655,7 +958,9 @@ void draw(App& app, const LiveText& e, IDWriteTextLayout* layout, const LayoutCa
         }
     }
     app.brush->SetColor(look.text);
-    rt->DrawTextLayout(D2D1::Point2F(0, 0), layout, app.brush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    for (size_t i = first; i < last; ++i) {
+        rt->DrawTextLayout(D2D1::Point2F(0, parts[i].top), parts[i].layout.Get(), app.brush, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    }
     if (e.caret < from || e.caret > from + length) return;
     if (look.markdown) {
         // The caret's line starts #word: a mark where the heading's space belongs
@@ -666,8 +971,8 @@ void draw(App& app, const LiveText& e, IDWriteTextLayout* layout, const LayoutCa
             e.text[ls + hashes] != L'\n' && e.text[ls + hashes] != L'#') {
             float gx = 0, gy = 0;
             DWRITE_HIT_TEST_METRICS gm{};
-            layout->HitTestTextPosition((UINT32)(ls + hashes - from), FALSE, &gx, &gy, &gm);
-            float base = gm.top + gm.height - gm.height * (1.0f - 1.0f / cache.factor) * 0.1f;
+            pointOf(laid, ls + hashes - from, gx, gy, gm);
+            float base = gm.top + gm.height - gm.height * (1.0f - 1.0f / laid->factor) * 0.1f;
             app.brush->SetColor(paint::alpha(look.accent, 0.9f));
             rt->FillRectangle(D2D1::RectF(gx - 3.5f * pixel, base - 1.5f * pixel, gx + 3.5f * pixel, base), app.brush);
             rt->FillRectangle(D2D1::RectF(gx - 0.75f * pixel, base - 5.0f * pixel, gx + 0.75f * pixel, base), app.brush);
@@ -676,9 +981,9 @@ void draw(App& app, const LiveText& e, IDWriteTextLayout* layout, const LayoutCa
     if (caretOn) {
         float cx = 0, cy = 0;
         DWRITE_HIT_TEST_METRICS hm{};
-        layout->HitTestTextPosition((UINT32)(e.caret - from), FALSE, &cx, &cy, &hm);
+        pointOf(laid, e.caret - from, cx, cy, hm);
         // As tall as the line's letters, not its spacing
-        float h = hm.height / cache.factor;
+        float h = hm.height / laid->factor;
         float top = hm.top + (hm.height - h) * 0.72f;
         app.brush->SetColor(look.accent);
         rt->FillRectangle(D2D1::RectF(cx - 0.75f * pixel, top, cx + 1.25f * pixel, top + h), app.brush);

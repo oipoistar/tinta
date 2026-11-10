@@ -25,9 +25,11 @@ same way on a sheet and in its own tab.
    task boxes as boxes, links in the link colour, and `**bold**` as bold.
    List items stand where the page has them, so text does not jump when a
    block opens.
-4. **Fast.** A key lays out one block, not the page. When the caret leaves
-   a block you changed, the page is laid out again. The page is also laid
-   out again after a pause in typing, as Source's preview is.
+4. **Fast.** A key lays out the lines around it, not the page, and not
+   the whole of its block either: a table, a list or a code block of
+   thousands of lines is typed in as fast as a short one. When the caret
+   leaves a block you changed, the page is laid out again. The page is
+   also laid out again after a pause in typing, as Source's preview is.
 
 ## Typing
 
