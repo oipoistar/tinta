@@ -155,6 +155,11 @@ void deepCases(App& app) {
         {"HTML quotes", repeat("<blockquote>", 5000) + "deep" + repeat("</blockquote>", 5000) + "\n\nAfter.\n", "", 0},
         {"HTML spans in a block", "<div>" + repeat("<b>", 20000) + "deep" + repeat("</b>", 20000) + "</div>\n\nAfter.\n",
          "", 0},
+        // Written as closing themselves, which opens them all the same and
+        // closes none: <b/> is <b> to a browser
+        {"HTML spans that close themselves", "<div>" + repeat("<b/>", 100000) + "deep" + "</div>\n\nAfter.\n", "", 0},
+        {"HTML blocks that close themselves",
+         "<div>" + repeat("<blockquote/><p/><i/>", 30000) + "deep" + "</div>\n\nAfter.\n", "", 0},
     };
     for (const auto& item : cases) {
         scenario = item.name;
