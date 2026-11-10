@@ -1,0 +1,29 @@
+/* Dracula: classic dark, purples and pinks.
+   One of Tinta's ten built-in themes. A theme of your own can start from
+   it with @import "Dracula"; and change what it likes. */
+:root {
+  color-scheme: dark;
+  accent-color: #bd93f9;        /* purple */
+}
+body {
+  background-color: #282a36;    /* deep purple-gray */
+  color: #f8f8f2;               /* light gray */
+  font-family: "Segoe UI";
+}
+h1, h2, h3, h4, h5, h6 { color: #ff79c6; }    /* pink */
+a { color: #8be9fd; }                         /* cyan */
+code, pre { font-family: "Consolas"; }
+pre {
+  background-color: #21222c;    /* darker */
+  color: #50fa7b;               /* green */
+}
+blockquote { border-left-color: #6272a4; }
+
+/* Code, by token */
+.token.keyword { color: #ff79c6; }            /* pink */
+.token.string { color: #f1fa8c; }             /* yellow */
+.token.comment { color: #6272a4; }            /* gray */
+.token.number { color: #bd93f9; }             /* purple */
+.token.function { color: #50fa7b; }           /* green */
+.token.class-name { color: #8be9fd; }         /* cyan */
+.token.control { color: #bd93f9; }            /* purple */

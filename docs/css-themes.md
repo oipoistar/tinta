@@ -44,6 +44,10 @@ tbody tr:nth-child(even) td { background: #f6f3ec }
 .token.keyword { color: #a626a4 }
 ```
 
+The ten built-in themes are written the same way: each is a CSS file in
+Tinta's source, under `resources/themes`, and `@import "Paper"` starts from
+Paper's file as it is written.
+
 ## What it draws
 
 Every element of the page takes its own rules, as in a browser: the second

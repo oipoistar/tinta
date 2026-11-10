@@ -24,5 +24,7 @@ struct CssTheme {
     std::vector<css::Diagnostic> diagnostics;
     bool lightDark = false;
 };
+// `base` is what the sheet starts from in place of Paper or Midnight: the
+// built-in themes are read from nothing
 CssTheme compileCssTheme(const std::string& text, const std::string& file, bool dark,
-                         const css::ImportSource& imports, CustomTheme& out);
+                         const css::ImportSource& imports, CustomTheme& out, const D2DTheme* base = nullptr);

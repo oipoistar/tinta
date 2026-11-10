@@ -1,0 +1,29 @@
+/* Forest: deep mystical greens.
+   One of Tinta's ten built-in themes. A theme of your own can start from
+   it with @import "Forest"; and change what it likes. */
+:root {
+  color-scheme: dark;
+  accent-color: #68d391;
+}
+body {
+  background-color: #0d1512;    /* deep green-black */
+  color: #b8c5b2;               /* sage */
+  font-family: "Segoe UI";
+}
+h1, h2, h3, h4, h5, h6 { color: #9ae6b4; }    /* bright green */
+a { color: #68d391; }                         /* lime */
+code, pre { font-family: "Consolas"; }
+pre {
+  background-color: #1a2a23;    /* dark green */
+  color: #81e6d9;               /* mint */
+}
+blockquote { border-left-color: #4a6e5a; }
+
+/* Code, by token */
+.token.keyword { color: #9ae6b4; }            /* bright green */
+.token.string { color: #d9cb7e; }             /* moss straw */
+.token.comment { color: #5f7a6a; }            /* muted green */
+.token.number { color: #e8a85c; }             /* ember orange */
+.token.function { color: #68d391; }           /* lime */
+.token.class-name { color: #81e6d9; }         /* mint */
+.token.control { color: #c99be8; }            /* softened lavender */

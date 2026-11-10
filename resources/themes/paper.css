@@ -1,0 +1,29 @@
+/* Paper: warm sepia, literary manuscript feel.
+   One of Tinta's ten built-in themes. A theme of your own can start from
+   it with @import "Paper"; and change what it likes. */
+:root {
+  color-scheme: light;
+  accent-color: #b85a3c;
+}
+body {
+  background-color: #f5f1e8;    /* warm cream */
+  color: #3d3329;               /* deep brown */
+  font-family: "Segoe UI";
+}
+h1, h2, h3, h4, h5, h6 { color: #2a1f16; }    /* dark brown */
+a { color: #b85a3c; }                         /* terracotta */
+code, pre { font-family: "Consolas"; }
+pre {
+  background-color: #ede6da;    /* parchment */
+  color: #6b5344;               /* brown */
+}
+blockquote { border-left-color: #c4b8a8; }
+
+/* Code, by token */
+.token.keyword { color: #8b4513; }            /* saddle brown */
+.token.string { color: #3e7d5a; }             /* warm forest */
+.token.comment { color: #9a8f80; }            /* warm gray */
+.token.number { color: #b8860b; }             /* dark goldenrod */
+.token.function { color: #3b5ba5; }           /* softened indigo */
+.token.class-name { color: #8a63a8; }         /* muted plum */
+.token.control { color: #7d4ca0; }            /* grape */

@@ -1,0 +1,29 @@
+/* Abyss: true black, neon accents (OLED-friendly).
+   One of Tinta's ten built-in themes. A theme of your own can start from
+   it with @import "Abyss"; and change what it likes. */
+:root {
+  color-scheme: dark;
+  accent-color: #2ee6cf;        /* cyan, off the RGB rail */
+}
+body {
+  background-color: #000000;    /* pure black */
+  color: #ededed;               /* off-white (OLED halation) */
+  font-family: "Segoe UI Light";
+}
+h1, h2, h3, h4, h5, h6 { color: #2ee6cf; font-family: "Segoe UI"; }/* cyan, off the RGB rail */
+a { color: #ff4dd8; }                         /* softened magenta */
+code, pre { font-family: "Cascadia Mono"; }
+pre {
+  background-color: #0f0f0f;    /* visible on black */
+  color: #b8f53c;               /* lime, off the RGB rail */
+}
+blockquote { border-left-color: #333333; }
+
+/* Code, by token */
+.token.keyword { color: #ff4dd8; }            /* softened magenta */
+.token.string { color: #b8f53c; }             /* lime */
+.token.comment { color: #5c6660; }            /* green-tinted gray */
+.token.number { color: #ff8a3d; }             /* softened orange */
+.token.function { color: #2ee6cf; }           /* cyan */
+.token.class-name { color: #f5e663; }         /* softened yellow */
+.token.control { color: #c77dff; }            /* violet (no longer keyword) */

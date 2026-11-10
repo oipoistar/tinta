@@ -12,12 +12,16 @@
 #include "themes_css.h"
 #include "utils.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <optional>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -53,6 +57,60 @@ const css::ImportSource kBuiltins = [](std::string_view name, std::string_view, 
     }
     return false;
 };
+
+// What a built-in theme is, as text: its faces, its colours and what it
+// leaves to Tinta
+std::string hexOf(const D2D1_COLOR_F& c) {
+    char buf[40];
+    std::snprintf(buf, sizeof(buf), "%02X%02X%02X/%.3f", (int)(c.r * 255 + 0.5f), (int)(c.g * 255 + 0.5f), (int)(c.b * 255 + 0.5f), c.a);
+    return buf;
+}
+std::string hexOf(const std::optional<D2D1_COLOR_F>& c) { return c ? hexOf(*c) : "-"; }
+std::string fieldsOf(int index) {
+    const D2DTheme& t = THEMES[index];
+    auto face = [](const wchar_t* s) { return s ? toUtf8(s) : std::string(); };
+    std::ostringstream out;
+    out << index << " " << face(t.name) << " font=" << face(t.fontFamily) << " heading=" << face(t.headingFontFamily) << " code="
+        << face(t.codeFontFamily) << " dark=" << t.isDark << "\n  " << hexOf(t.background) << " " << hexOf(t.text) << " " << hexOf(t.heading)
+        << " " << hexOf(t.link) << " " << hexOf(t.code) << " " << hexOf(t.codeBackground) << " " << hexOf(t.blockquoteBorder) << " "
+        << hexOf(t.accent) << "\n  " << hexOf(t.syntaxKeyword) << " " << hexOf(t.syntaxString) << " " << hexOf(t.syntaxComment) << " "
+        << hexOf(t.syntaxNumber) << " " << hexOf(t.syntaxFunction) << " " << hexOf(t.syntaxType) << " " << hexOf(t.syntaxControlFlow)
+        << "\n  inline " << hexOf(t.inlineCode) << " " << hexOf(t.inlineCodeBackground) << " mark " << hexOf(t.highlightBackground) << " "
+        << hexOf(t.highlightText) << " bold " << hexOf(t.boldText) << " " << hexOf(t.italicText) << " " << hexOf(t.boldItalicText) << " sel "
+        << hexOf(t.selection) << " rule " << hexOf(t.rule) << " caret " << hexOf(t.caret) << "\n  h";
+    for (int k = 0; k < 6; ++k) {
+        out << " " << hexOf(t.headingColors[k]) << ":" << t.headingSize[k] << ":" << t.headingWeight[k] << ":" << t.headingItalic[k];
+    }
+    out << "\n  sizes " << t.bodySize << " " << t.codeSize << " " << t.lineHeight << " ui " << hexOf(t.uiBackground) << " " << hexOf(t.uiText)
+        << " " << hexOf(t.uiAccent) << " " << hexOf(t.uiPanel) << " " << hexOf(t.uiBorder) << " src "
+        << (t.sourcePath ? toUtf8(t.sourcePath) : std::string("-")) << "\n";
+    return out.str();
+}
+
+// The built-in themes are CSS files (resources/themes), read into the theme
+// Tinta draws with. What each one comes to is kept as text beside this
+// test, from the table they were written in before: a theme changed shows
+// as a line changed there, and is changed there on purpose
+void builtIns() {
+    check(THEME_COUNT == 10, "there are ten built-in themes");
+    std::ifstream file(fs::path(TINTA_THEME_CSS_FIXTURES) / "builtin-themes.txt", std::ios::binary);
+    std::string kept((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    kept.erase(std::remove(kept.begin(), kept.end(), '\r'), kept.end());
+    check(!kept.empty(), "the kept description of the built-in themes is read");
+    std::string now;
+    for (int i = 0; i < THEME_COUNT; i++) {
+        const std::string one = fieldsOf(i);
+        now += one;
+        const std::string name = toUtf8(THEMES[i].name);
+        if (kept.find(one) == std::string::npos) {
+            check(false, name + " is what its kept description says. It is now:\n" + one);
+        }
+        check(THEMES[i].isDark == (i >= 5), name + ": the first five are light, the last five dark");
+        check(THEMES[i].fontFamily && *THEMES[i].fontFamily && THEMES[i].codeFontFamily && *THEMES[i].codeFontFamily, name + " names its faces");
+        check(&THEMES[i] == &THEMES[i] && &themeAt(i) == &THEMES[i], name + " is read once and stays where it is");
+    }
+    check(now == kept, "the ten themes, in their order, are all the kept description holds");
+}
 
 void roundTrips() {
     for (int i = 0; i < THEME_COUNT; i++) {
@@ -243,6 +301,7 @@ void previews(const fs::path& dir) {
 
 int testCssThemes(App& app, const fs::path& dir) {
     failures = 0;
+    builtIns();
     roundTrips();
     sheets();
     installed(app, dir);

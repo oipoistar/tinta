@@ -292,7 +292,7 @@ void checkVariables(const css::Sheet& sheet, bool dark, std::vector<css::Diagnos
 }  // namespace
 
 CssTheme compileCssTheme(const std::string& text, const std::string& file, bool dark,
-                         const css::ImportSource& imports, CustomTheme& out) {
+                         const css::ImportSource& imports, CustomTheme& out, const D2DTheme* base) {
     using css::Prop;
     CssTheme result;
     result.sheet = css::parse(text, file, css::Origin::Theme, imports, result.diagnostics);
@@ -314,7 +314,7 @@ CssTheme compileCssTheme(const std::string& text, const std::string& file, bool 
 
     // From Paper, or Midnight when dark: what the sheet leaves alone stays theirs
     D2DTheme& t = out.theme;
-    t = isDark ? THEMES[5] : THEMES[0];
+    t = base ? *base : isDark ? THEMES[5] : THEMES[0];
     t.isDark = isDark;
     out.fontFamily = t.fontFamily ? t.fontFamily : L"Segoe UI";
     out.headingFontFamily.clear();

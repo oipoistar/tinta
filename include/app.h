@@ -273,8 +273,14 @@ struct SheetDoc;
 // Scales by contentScale only (not zoomFactor) so UI chrome tracks monitor DPI.
 inline float dpi(const App& app, float value);
 
-// Themes array (defined in themes.cpp)
-extern const D2DTheme THEMES[];
+// The built-in themes (themes.cpp). Each is a CSS file under
+// resources/themes, read into the theme Tinta draws with when it is first
+// asked for. THEMES[i] reads as the table they were once written in did
+const D2DTheme& builtinTheme(int index);
+struct BuiltinThemes {
+    const D2DTheme& operator[](int index) const { return builtinTheme(index); }
+};
+inline constexpr BuiltinThemes THEMES{};
 extern const int THEME_COUNT;
 
 // Dynamic theme registry (#82): the built-ins plus user themes loaded from

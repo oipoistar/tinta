@@ -1,0 +1,29 @@
+/* Midnight: deep space, cosmic tranquility.
+   One of Tinta's ten built-in themes. A theme of your own can start from
+   it with @import "Midnight"; and change what it likes. */
+:root {
+  color-scheme: dark;
+  accent-color: #38c6e4;        /* lifted off the ink boundary */
+}
+body {
+  background-color: #0d1b2a;    /* deep navy */
+  color: #e0e1dd;               /* soft blue-white */
+  font-family: "Segoe UI";
+}
+h1, h2, h3, h4, h5, h6 { color: #f0f4f8; }    /* moonlight */
+a { color: #38c6e4; }                         /* lifted electric blue */
+code, pre { font-family: "Cascadia Code"; }
+pre {
+  background-color: #1b263b;    /* deep blue */
+  color: #90e0ef;               /* cyan */
+}
+blockquote { border-left-color: #415a77; }
+
+/* Code, by token */
+.token.keyword { color: #38c6e4; }            /* follows accent */
+.token.string { color: #9adba4; }             /* softened green */
+.token.comment { color: #6c7a89; }            /* gray-blue */
+.token.number { color: #f2ce6b; }             /* softened gold */
+.token.function { color: #90e0ef; }           /* cyan */
+.token.class-name { color: #c9a6de; }         /* softened plum */
+.token.control { color: #d793cf; }            /* softened orchid */

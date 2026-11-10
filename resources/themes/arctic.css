@@ -1,0 +1,29 @@
+/* Arctic: nordic ice blues, crisp and clean.
+   One of Tinta's ten built-in themes. A theme of your own can start from
+   it with @import "Arctic"; and change what it likes. */
+:root {
+  color-scheme: light;
+  accent-color: #2b6cb0;        /* deepened blue */
+}
+body {
+  background-color: #f7fafc;    /* ice white */
+  color: #2d3748;               /* deep slate */
+  font-family: "Segoe UI";
+}
+h1, h2, h3, h4, h5, h6 { color: #1a365d; }    /* navy */
+a { color: #2b6cb0; }                         /* deepened blue */
+code, pre { font-family: "Cascadia Code"; }
+pre {
+  background-color: #ebf8ff;    /* light blue */
+  color: #285e61;               /* teal */
+}
+blockquote { border-left-color: #a0c4e8; }
+
+/* Code, by token */
+.token.keyword { color: #2b6cb0; }            /* aligned with accent */
+.token.string { color: #38795b; }             /* cool pine */
+.token.comment { color: #8295a8; }            /* ice gray */
+.token.number { color: #c05621; }             /* burnt */
+.token.function { color: #2c7a7b; }           /* teal, echoes code */
+.token.class-name { color: #6b5b95; }         /* purple */
+.token.control { color: #805ad5; }            /* violet */

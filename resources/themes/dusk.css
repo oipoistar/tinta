@@ -1,0 +1,29 @@
+/* Dusk: golden hour warmth, sunset tones.
+   One of Tinta's ten built-in themes. A theme of your own can start from
+   it with @import "Dusk"; and change what it likes. */
+:root {
+  color-scheme: light;
+  accent-color: #a66a12;        /* deepened gold (chip-ink fix) */
+}
+body {
+  background-color: #fffbf5;    /* warm white */
+  color: #553c10;               /* deep amber */
+  font-family: "Segoe UI";
+}
+h1, h2, h3, h4, h5, h6 { color: #9c4221; }    /* burnt orange */
+a { color: #a66a12; }                         /* deepened gold */
+code, pre { font-family: "Consolas"; }
+pre {
+  background-color: #fef5e7;    /* cream */
+  color: #5f5030;               /* olive */
+}
+blockquote { border-left-color: #e8c48d; }
+
+/* Code, by token */
+.token.keyword { color: #9c4221; }            /* burnt orange */
+.token.string { color: #4e8a5a; }             /* evening leaf */
+.token.comment { color: #9c8d77; }            /* sand gray */
+.token.number { color: #a66a12; }             /* gold, follows accent */
+.token.function { color: #5b5ea6; }           /* dusk-sky indigo */
+.token.class-name { color: #8b4513; }         /* saddle brown */
+.token.control { color: #8a4e9e; }            /* twilight purple */

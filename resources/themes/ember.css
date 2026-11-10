@@ -1,0 +1,29 @@
+/* Ember: warm charcoal with fire accents.
+   One of Tinta's ten built-in themes. A theme of your own can start from
+   it with @import "Ember"; and change what it likes. */
+:root {
+  color-scheme: dark;
+  accent-color: #f1975a;        /* lifted off the ink boundary */
+}
+body {
+  background-color: #1a1614;    /* warm black */
+  color: #d4c5b9;               /* warm gray */
+  font-family: "Segoe UI";
+}
+h1, h2, h3, h4, h5, h6 { color: #f6ad55; }    /* amber */
+a { color: #f1975a; }                         /* lifted orange */
+code, pre { font-family: "Consolas"; }
+pre {
+  background-color: #252019;    /* dark warm */
+  color: #fc8181;               /* coral */
+}
+blockquote { border-left-color: #5c4a3a; }
+
+/* Code, by token */
+.token.keyword { color: #f6ad55; }            /* amber */
+.token.string { color: #a8c98a; }             /* warm olive */
+.token.comment { color: #6b5b4f; }            /* warm gray */
+.token.number { color: #d9a662; }             /* brass */
+.token.function { color: #ed8936; }           /* the old accent orange */
+.token.class-name { color: #c9a0c9; }         /* softened plum */
+.token.control { color: #e08bb0; }            /* warm rose */

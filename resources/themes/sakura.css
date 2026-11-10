@@ -1,0 +1,29 @@
+/* Sakura: japanese cherry blossom, soft pink elegance.
+   One of Tinta's ten built-in themes. A theme of your own can start from
+   it with @import "Sakura"; and change what it likes. */
+:root {
+  color-scheme: light;
+  accent-color: #c44569;
+}
+body {
+  background-color: #fdf8f8;    /* soft blush white */
+  color: #404040;               /* soft charcoal */
+  font-family: "Segoe UI";
+}
+h1, h2, h3, h4, h5, h6 { color: #c44569; }    /* deep rose */
+a { color: #d25980; }                         /* rose (contrast-fixed) */
+code, pre { font-family: "Consolas"; }
+pre {
+  background-color: #f8ecf0;    /* blush */
+  color: #8b5570;               /* plum */
+}
+blockquote { border-left-color: #e8b4c0; }
+
+/* Code, by token */
+.token.keyword { color: #c44569; }            /* rose */
+.token.string { color: #4e9b6f; }             /* soft leaf */
+.token.comment { color: #a8969c; }            /* pink-tinted gray */
+.token.number { color: #d25980; }             /* rose */
+.token.function { color: #6455b8; }           /* deepened slate blue */
+.token.class-name { color: #8b5570; }         /* plum */
+.token.control { color: #9d5bc8; }            /* orchid */
