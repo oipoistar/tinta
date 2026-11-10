@@ -293,6 +293,28 @@ void tidyLayout() {
     g.nodes.push_back(card("in2", 1100, 1100));
     g.nodes.push_back(card("out", 0, 0));
     g.edges = {arrow("in2", "in1"), arrow("out", "in2")};
+    // Two groups with the same box are each inside the other. One is the outer:
+    // a walk up from either ends, where it went round the two for ever
+    {
+        Sheet twins;
+        Node first = group, second = group;
+        first.id = "a";
+        second.id = "b";
+        twins.nodes = {first, second, card("in", 1200, 1200)};
+        check(groupOf(twins, 1) == 0 && groupOf(twins, 0) == -1, "of two groups with one box the first is the outer");
+        check(groupOf(twins, 2) >= 0, "a card in them is in a group");
+        tidy(twins, {}, true);
+        tidy(twins, {}, false);
+        check(twins.nodes.size() == 3, "Tidy comes back from a sheet with two groups in one place");
+        Node third = group;
+        third.id = "c";
+        third.x += 1;  // a unit apart: within what counts as inside, both ways
+        twins.nodes.push_back(third);
+        int steps = 0;
+        for (int at = 3; at >= 0 && steps < 10; ++steps) at = groupOf(twins, at);
+        check(steps < 4, "a walk up from a group a unit off the two ends");
+        tidy(twins, {}, true);
+    }
     tidy(g, {}, true);
     const Node& gg = g.nodes[nodeIndex(g, "g")];
     for (const char* id : {"in1", "in2"}) {

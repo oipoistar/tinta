@@ -486,7 +486,7 @@ void cancelEdit(App& app, SheetDoc& doc) {
 
 namespace {
 
-void addEdge(App& app, SheetDoc& doc, const std::string& from, const std::string& to, const std::string& label, bool write);
+bool addEdge(App& app, SheetDoc& doc, const std::string& from, const std::string& to, const std::string& label, bool write);
 
 // [[ names: the sheet's notes first, then the folder's waiting in the tray;
 // names starting with what was typed before names holding it
@@ -700,11 +700,12 @@ D2D1_POINT_2F freeSpot(const SheetDoc& doc, float x, float y, float w, float h) 
 
 // A new arrow, once; a sheet that writes links writes it into the note it
 // leaves (not one promoted from a link the note already has)
-void addEdge(App& app, SheetDoc& doc, const std::string& from, const std::string& to, const std::string& label = {},
+// True when it added one: none for a card to itself, or a second time
+bool addEdge(App& app, SheetDoc& doc, const std::string& from, const std::string& to, const std::string& label = {},
              bool write = true) {
-    if (from == to || from.empty() || to.empty()) return;
+    if (from == to || from.empty() || to.empty()) return false;
     for (const Edge& e : doc.model.edges) {
-        if (e.fromNode == from && e.toNode == to) return;
+        if (e.fromNode == from && e.toNode == to) return false;
     }
     Edge e;
     e.id = newId();
@@ -713,6 +714,7 @@ void addEdge(App& app, SheetDoc& doc, const std::string& from, const std::string
     e.label = label;
     doc.model.edges.push_back(e);
     if (write) linkArrow(app, doc, from, to, true);
+    return true;
 }
 
 void newCardAndEdit(App& app, SheetDoc& doc, float x, float y, const std::string& connectFrom = {}) {
@@ -897,7 +899,7 @@ std::string compileMarkdown(App& app, SheetDoc& doc, const std::vector<int>& sub
     int currentGroup = -2;
     auto topGroup = [&](int i) {
         int g = groupOf(doc.model, i), top = -1;
-        while (g >= 0) {
+        for (size_t steps = 0; g >= 0 && steps < doc.model.nodes.size(); ++steps) {
             top = g;
             g = groupOf(doc.model, g);
         }
@@ -1156,8 +1158,9 @@ bool pasteFromClipboard(App& app, HWND hwnd, SheetDoc& doc, float x, float y) {
         }
         for (auto& l : flow.links) {
             if (ids[l.from].empty() || ids[l.to].empty()) continue;
-            addEdge(app, doc, ids[l.from], ids[l.to], l.label);
-            if (!l.arrow) doc.model.edges.back().toArrow = false;
+            // (a link from a card to itself, or a second one between two
+            // cards, adds no arrow: the last arrow there is is another one's)
+            if (addEdge(app, doc, ids[l.from], ids[l.to], l.label) && !l.arrow) doc.model.edges.back().toArrow = false;
         }
         for (auto& g : flow.groups) {
             std::vector<int> members;

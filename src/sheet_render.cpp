@@ -375,6 +375,9 @@ float sheetui::sheetDetailThreshold() { return 0.33f; }
 namespace sheetui {
 
 void renderCardBitmaps(App& app, SheetDoc& doc, unsigned long long budgetMs) {
+    // Whether this frame leaves cards in view still to draw: the timer asks
+    // for the next frame at once only then
+    doc.cardsPending = false;
     if (!app.deviceContext || !app.renderTarget) return;
     float s = scale(app, doc);
     if (s < sheetDetailThreshold()) return;  // cards show their titles only
@@ -414,7 +417,10 @@ void renderCardBitmaps(App& app, SheetDoc& doc, unsigned long long budgetMs) {
     if (!session.ready()) return;
 
     for (const Job& job : jobs) {
-        if (nowMs() - now > budgetMs) break;
+        if (nowMs() - now > budgetMs) {
+            doc.cardsPending = true;
+            break;
+        }
         const Node& n = doc.model.nodes[job.index];
         SheetCard& c = doc.cards[n.id];
         float inner = std::max(40.0f, n.width - cardPadding() * 2);

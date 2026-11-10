@@ -1237,14 +1237,10 @@ void sheetTimer(App& app, HWND hwnd) {
     }
     if (doc->dirty && !animating && doc->gesture == SheetDoc::Gesture::None) saveNow(app, *doc);
     pollFolder(app, *doc, false);
-    bool cardsWaiting = false;
-    for (const Node& n : doc->model.nodes) {
-        auto it = doc->cards.find(n.id);
-        if (it != doc->cards.end() && it->second.kind == SheetCard::Kind::Note && it->second.bmKey == 0) {
-            cardsWaiting = true;
-            break;
-        }
-    }
+    // Cards the last frame ran out of time for. (Asked by "a note card never
+    // drawn", this was true for good on any sheet with a note out of view,
+    // and with the sheet zoomed out to titles: a frame every 16 ms, for ever)
+    bool cardsWaiting = doc->cardsPending;
     if (animating || cardsWaiting || now - doc->zoomChangedMs < 400) InvalidateRect(hwnd, nullptr, FALSE);
     // A card rested on long enough opens in the peek lens
     bool peekWaiting = !doc->peekCandidate.empty() && doc->peekId.empty();
@@ -1256,11 +1252,8 @@ void sheetTimer(App& app, HWND hwnd) {
         InvalidateRect(hwnd, nullptr, FALSE);
     }
     // Fast while something moves, slow while it only watches the folder
-    SetTimer(hwnd, SHEET_TIMER_ID,
-             (animating || cardsWaiting) ? 16
-             : (doc->editing != SheetDoc::Edit::None || peekWaiting) ? 120
-                                                                     : 500,
-             nullptr);
+    doc->timerMs = (animating || cardsWaiting) ? 16 : (doc->editing != SheetDoc::Edit::None || peekWaiting) ? 120 : 500;
+    SetTimer(hwnd, SHEET_TIMER_ID, doc->timerMs, nullptr);
     static unsigned long long lastViewSave = 0;
     if (now - lastViewSave > 3000) {
         lastViewSave = now;

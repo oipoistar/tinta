@@ -87,6 +87,8 @@ struct SheetDoc {
         std::unordered_map<std::string, sheet::Box> from;
     } glide;
     unsigned long long zoomChangedMs = 0;  // card content waits for the zoom to settle
+    bool cardsPending = false;             // the last frame left cards in view to draw
+    unsigned timerMs = 0;                  // what the timer last set itself to
 
     // Selection and hover
     std::vector<std::string> selected;  // node ids
