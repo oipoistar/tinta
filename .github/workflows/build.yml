@@ -72,7 +72,7 @@ jobs:
             - Find, Contents, wiki links and Live's menus match letters in either case in every alphabet, not only A to Z.
             - Closing the window over the print preview asks about unsaved edits instead of losing them.
             - "Create this file?" opens a file that is there after all instead of emptying it.
-            - Deleting or changing a review note after a saved edit no longer writes over other text.
+            - Deleting or changing a review note after a saved edit no longer writes over other text, and a note keeps a file's Windows line endings.
             - In the Source editor, Find and Replace follow the text when it changes with the bar open; Replace could change the wrong words or end Tinta.
             - Equations nested deep, and files with thousands of self-closing tags, open instead of hanging or ending Tinta.
             - Sheets: a cut-short `.smd` is not saved over, Tidy does not hang on two groups in one place, and a sheet at rest stops redrawing.

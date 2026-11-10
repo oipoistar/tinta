@@ -17,7 +17,7 @@
 - Find, the Contents filter, the results panel, `[[wiki links]]` and Live's menus match letters in either case in every alphabet, so `über` finds `Über` and `привет` finds `Привет`; only A to Z did.
 - Closing the window while the print preview shows over unsaved edits asks about them. It closed without a word, and took the recovery draft with it. A change on disk, a closed tab and a file opened from outside are asked about under the preview too.
 - "Create this file?" from a missing file's link opens a file that is there after all instead of emptying it: one saved since the page was drawn, or one on another server.
-- Deleting or changing a review note after an edit was saved changes that note and nothing else; it wrote over whatever stood where the note's comment had been.
+- Deleting or changing a review note after an edit was saved changes that note and nothing else; it wrote over whatever stood where the note's comment had been. A note written into a file with Windows line endings keeps them; every line of the file was rewritten with Unix ones.
 - In the Source editor, Find's marks and Replace follow the text when it changes with the bar open. A button of the tool rail or a change on disk left them behind, and Replace then changed the wrong words or ended Tinta.
 - An equation with accents or brackets nested deep opens at once; thirty `\bar` in a row, or 25 pairs of `\left(` and `\right)`, stopped the window.
 - A file with thousands of tags written as closing themselves (`<b/>`) opens; it ended Tinta.
