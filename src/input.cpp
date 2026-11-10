@@ -4887,7 +4887,7 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
         for (size_t i = 0; i < app.tabs.size(); i++) {
             bool isActive = (int)i == app.activeTab;
             bool dirty = isActive
-                             ? (app.editMode && app.editorDirty)
+                             ? app.unsavedNow()
                              : (app.tabs[i].editMode && app.tabs[i].editorDirty);
             const std::string& path =
                 isActive ? app.currentFile : app.tabs[i].path;
@@ -4904,6 +4904,8 @@ void handleFileWatchTimer(App& app, HWND hwnd) {
                 isActive ? app.lastFileWriteTime : app.tabs[i].lastWrite;
             if (CompareFileTime(&current, &stored) != 0) {
                 stored = current;  // one prompt per external change
+                // The prompt asks over the document, not over a print preview of it
+                if (app.showPrintPreview) closePrintPreview(app, hwnd);
                 if (!isActive) {
                     tabActivate(app, hwnd, (int)i);
                     app.lastFileWriteTime = current;

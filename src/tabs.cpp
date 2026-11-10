@@ -11,6 +11,7 @@
 
 #include "document.h"
 #include "drafts.h"
+#include "print.h"
 #include "signals.h"
 #include "tableedit.h"
 #include "editor.h"
@@ -76,14 +77,17 @@ void syncActiveTab(App& app) {
     if (!app.currentFile.empty() || tab.title.empty() || app.editMode) {
         tab.title = titleForPath(app, app.currentFile);
     }
-    tab.editMode = app.editMode;
-    tab.editorDirty = app.editMode && app.editorDirty;
+    tab.editMode = app.editingNow();
+    tab.editorDirty = app.unsavedNow();
 }
 
 // Park the active editor buffer into its tab so the switch away loses
 // nothing: the teardown mirrors exitEditMode minus the dialog and reload
 // (another document loads immediately after).
 void parkActiveEditBuffer(App& app) {
+    // A print preview is of the document being left: closed, the editor
+    // it put aside is here to be parked
+    if (app.showPrintPreview) closePrintPreview(app, app.hwnd);
     // A sheet being left commits its text box and saves
     sheetLeave(app);
     if (!app.editMode || app.tabs.empty()) return;
@@ -222,6 +226,26 @@ void tabsPinPaths(App& app, const std::vector<std::string>& paths) {
     keepPinnedFirst(app);
 }
 
+bool windowCloseAsks(App& app, HWND hwnd) {
+    // A print preview is of the document as edited. Closed, the editor it
+    // put aside is whole again and the dialog has its page to ask over
+    if (app.showPrintPreview) closePrintPreview(app, hwnd);
+    for (size_t i = 0; i < app.tabs.size(); i++) {
+        bool dirty = (int)i == app.activeTab ? app.unsavedNow() : (app.tabs[i].editMode && app.tabs[i].editorDirty);
+        if (!dirty) continue;
+        if ((int)i != app.activeTab) {
+            tabActivate(app, hwnd, (int)i);
+        }
+        app.pendingWindowClose = true;
+        app.confirmExitPending = true;
+        app.confirmExitExternal = false;
+        app.confirmExitOpenedAt = std::chrono::steady_clock::now();
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return true;
+    }
+    return false;
+}
+
 void tabActivate(App& app, HWND hwnd, int index) {
     tabsInit(app);
     if (index < 0 || index >= (int)app.tabs.size()) return;
@@ -331,12 +355,14 @@ void tabCloseIndex(App& app, HWND hwnd, int index) {
     tabsInit(app);
     if (index < 0 || index >= (int)app.tabs.size()) return;
     if (index==app.activeTab) tableEditCommit(app);
+    // The dialog asks over the document, not over a print preview of it
+    if (app.showPrintPreview) closePrintPreview(app, hwnd);
 
     // A dirty buffer routes through the unsaved-changes dialog (#106):
     // activate the tab, open the dialog, and finish the close from
     // confirmExitAction once the user decides
     bool dirty = (index == app.activeTab)
-                     ? (app.editMode && app.editorDirty)
+                     ? app.unsavedNow()
                      : (app.tabs[index].editMode && app.tabs[index].editorDirty);
     if (dirty) {
         if (index != app.activeTab) tabActivate(app, hwnd, index);
@@ -816,7 +842,7 @@ void renderTabStrip(App& app) {
         if (!app.tabs.empty() && !app.tabs[0].title.empty() &&
             !startPageActive(app)) {
             title = app.tabs[0].title;
-            if (app.editMode && app.editorDirty) title = L"* " + title;
+            if (app.unsavedNow()) title = L"* " + title;
         }
         float textLeft = std::max(iconCell + dpi(app, 4.0f),
                                   editRailWidth(app) + dpi(app, 8.0f));
@@ -938,7 +964,7 @@ void renderTabStrip(App& app) {
                 fillTabBody(app, r, radius, faint);
             }
 
-            bool dirty = active ? (app.editMode && app.editorDirty)
+            bool dirty = active ? app.unsavedNow()
                                 : (app.tabs[i].editMode &&
                                    app.tabs[i].editorDirty);
             bool missing = app.tabs[i].fileMissing && !app.tabs[i].path.empty();
@@ -1260,7 +1286,7 @@ void renderTabSwitcher(App& app) {
                 dpi(app, 2.0f), dpi(app, 2.0f)),
             app.brush, 1.0f);
 
-        bool dirty = active ? (app.editMode && app.editorDirty)
+        bool dirty = active ? app.unsavedNow()
                             : (app.tabs[i].editMode && app.tabs[i].editorDirty);
         bool missing = app.tabs[i].fileMissing && !app.tabs[i].path.empty();
         bool showDot = dirty || missing;
@@ -1409,7 +1435,7 @@ TabHoverCardText tabHoverCardText(const App& app, int tab) {
         }
     }
     bool active = tab == app.activeTab;
-    card.dirty = active ? (app.editMode && app.editorDirty)
+    card.dirty = active ? app.unsavedNow()
                         : (doc.editMode && doc.editorDirty);
     if (card.dirty) {
         card.status = tr(app, "tabs.card.unsaved");
@@ -2137,7 +2163,7 @@ void tabDragMove(App& app, HWND hwnd, int x, int y) {
 
     int index = app.tabDragIndex;
     bool active = index == app.activeTab;
-    bool dirty = active ? (app.editMode && app.editorDirty)
+    bool dirty = active ? app.unsavedNow()
                         : (app.tabs[index].editMode &&
                            app.tabs[index].editorDirty);
     const std::string& path = active ? app.currentFile : app.tabs[index].path;
@@ -2251,7 +2277,7 @@ void tabWindowDropMerge(App& app, HWND hwnd) {
     // window's tab strip donates its document there (Notepad-style);
     // multi-tab windows hand tabs over through per-tab drags instead
     if (app.tabs.size() != 1) return;
-    if (app.editMode && app.editorDirty) return;
+    if (app.unsavedNow()) return;
     const std::string& path = app.currentFile;
     if (path.empty()) return;
 

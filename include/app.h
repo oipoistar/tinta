@@ -957,6 +957,13 @@ struct App {
     };
     bool showPrintPreview = false;
     PrintSavedView printSaved;
+    // Whether the active document is in the editor, and whether it holds
+    // edits not saved. The print preview lays the page out with the editor
+    // put aside, editMode off until it closes: asked by editMode alone, a
+    // document being previewed has nothing to lose, and closing the window
+    // over it lost the edits without a word
+    bool editingNow() const { return showPrintPreview ? printSaved.editMode : editMode; }
+    bool unsavedNow() const { return editingNow() && editorDirty; }
     // Laying out for paper: the page margins frame the text, so the screen's
     // side padding, title-strip offset and reading column stay out (#257)
     bool printLayout = false;

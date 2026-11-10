@@ -56,7 +56,7 @@ void draftsSweep(App& app) {
     for (int i = 0; i < (int)app.tabs.size(); i++) {
         const App::DocTab& tab = app.tabs[i];
         bool active = (i == app.activeTab);
-        bool dirty = active ? (app.editMode && app.editorDirty)
+        bool dirty = active ? app.unsavedNow()
                             : (tab.editMode && tab.editorDirty);
         std::wstring draftPath = draftFileFor(app, tab.id);
         if (draftPath.empty()) continue;

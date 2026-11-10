@@ -1796,7 +1796,7 @@ void enterRecoveredDraft(App& app, HWND hwnd, const std::string& content,
         for (size_t i = 0; i < app.tabs.size(); i++) {
             const bool active = (int)i == app.activeTab;
             const std::string& path = active ? app.currentFile : app.tabs[i].path;
-            const bool dirty = active ? (app.editMode && app.editorDirty)
+            const bool dirty = active ? app.unsavedNow()
                                       : (app.tabs[i].editMode && app.tabs[i].editorDirty);
             if (dirty || _stricmp(path.c_str(), origPath.c_str()) != 0) continue;
             tabActivate(app, hwnd, (int)i);

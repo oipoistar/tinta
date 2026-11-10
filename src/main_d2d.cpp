@@ -1345,6 +1345,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_CLOSE:
             if (app) tableEditCommit(*app);
             if (app) sheetLeave(*app);
+            // A print preview puts the editor aside: closed first, what
+            // follows sees the edits it was opened over
+            if (app && app->showPrintPreview) closePrintPreview(*app, hwnd);
             // "Close without asking" (#252): unsaved buffers stay behind as
             // drafts, offered back on the next launch, and the window closes
             if (app && app->closeKeepsDrafts) {
@@ -1363,24 +1366,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 InvalidateRect(hwnd, nullptr, FALSE);
                 return 0;
             }
-            if (app) {
-                for (size_t i = 0; i < app->tabs.size(); i++) {
-                    bool dirty = (int)i == app->activeTab
-                                     ? (app->editMode && app->editorDirty)
-                                     : (app->tabs[i].editMode &&
-                                        app->tabs[i].editorDirty);
-                    if (!dirty) continue;
-                    if ((int)i != app->activeTab) {
-                        tabActivate(*app, hwnd, (int)i);
-                    }
-                    app->pendingWindowClose = true;
-                    app->confirmExitPending = true;
-                    app->confirmExitExternal = false;
-                    app->confirmExitOpenedAt = std::chrono::steady_clock::now();
-                    InvalidateRect(hwnd, nullptr, FALSE);
-                    return 0;
-                }
-            }
+            if (app && windowCloseAsks(*app, hwnd)) return 0;
             break;
 
         case WM_COPYDATA:
