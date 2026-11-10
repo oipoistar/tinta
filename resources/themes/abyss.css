@@ -8,11 +8,11 @@
 body {
   background-color: #000000;    /* pure black */
   color: #ededed;               /* off-white (OLED halation) */
-  font-family: "Segoe UI Light";
+  font-family: "Segoe UI Light", "Segoe UI", sans-serif;
 }
-h1, h2, h3, h4, h5, h6 { color: #2ee6cf; font-family: "Segoe UI"; }/* cyan, off the RGB rail */
+h1, h2, h3, h4, h5, h6 { color: #2ee6cf; font-family: "Segoe UI", sans-serif; }/* cyan, off the RGB rail */
 a { color: #ff4dd8; }                         /* softened magenta */
-code, pre { font-family: "Cascadia Mono"; }
+code, pre { font-family: "Cascadia Mono", "Cascadia Code", "Consolas", monospace; }
 pre {
   background-color: #0f0f0f;    /* visible on black */
   color: #b8f53c;               /* lime, off the RGB rail */

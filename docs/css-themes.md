@@ -46,7 +46,8 @@ tbody tr:nth-child(even) td { background: #f6f3ec }
 
 The ten built-in themes are written the same way: each is a CSS file in
 Tinta's source, under `resources/themes`, and `@import "Paper"` starts from
-Paper's file as it is written.
+Paper's file as it is written. Their rules style the page as yours do, and
+Ctrl+Alt+click shows them under the theme's name.
 
 ## What it draws
 

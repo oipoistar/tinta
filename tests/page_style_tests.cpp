@@ -20,7 +20,9 @@
 #include "render.h"
 #include "utils.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -424,8 +426,15 @@ void inspecting(App& app, const fs::path& dir) {
     std::error_code ignored;
     fs::remove(themes / "Inspect.css", ignored);
     loadCustomThemes();
+    // A built-in theme is a sheet too: its rules are named by the theme,
+    // and are no file to open
     applyTheme(app, 0);
-    check(!inspectorOpen(app, x, y), "without a CSS theme there is nothing to inspect");
+    layoutDocument(app);
+    check(inspectorOpen(app, x, y), "a built-in theme's rules can be looked at too");
+    const std::wstring own = inspectorText(app);
+    check(own.find(L"color: #3d3329   body   Paper") != std::wstring::npos && own.find(L".css") == std::wstring::npos,
+          "they are named by the theme, with no file");
+    inspectorClose(app);
 }
 
 // A folder's own tinta.css styles the documents under it, under a built-in
@@ -643,6 +652,159 @@ void caretShadowOpacity(App& app, const fs::path& dir) {
     applyTheme(app, 0);
     check(!app.theme.caret, "a built-in theme keeps the caret in the text's colour");
 }
+// What a layout draws, a line of text per run, box, line and shape: its
+// place to a hundredth of a pixel and its colour
+std::string hundredths(float v) {
+    char text[32];
+    std::snprintf(text, sizeof(text), "%.2f", v);
+    return text;
+}
+std::string colourOf(const D2D1_COLOR_F& c) {
+    char text[48];
+    std::snprintf(text, sizeof(text), "%02X%02X%02X/%.3f", (int)std::lround(c.r * 255), (int)std::lround(c.g * 255),
+                  (int)std::lround(c.b * 255), c.a);
+    return text;
+}
+std::string boxOf(const D2D1_RECT_F& r) {
+    return hundredths(r.left) + "," + hundredths(r.top) + "," + hundredths(r.right) + "," + hundredths(r.bottom);
+}
+std::vector<std::string> drawnOf(const App& app) {
+    std::vector<std::string> out;
+    for (const auto& run : app.layoutTextRuns) {
+        std::string words;
+        if (run.docLength && run.docStart + run.docLength <= app.docText.size()) {
+            words = toUtf8(app.docText.substr(run.docStart, std::min<size_t>(run.docLength, 24)));
+        }
+        out.push_back("run '" + words + "' at " + hundredths(run.pos.x) + "," + hundredths(run.pos.y) + " in " +
+                      boxOf(run.bounds) + " " + colourOf(run.color));
+    }
+    for (const auto& rect : app.layoutRects) {
+        out.push_back("box " + boxOf(rect.rect) + " " + colourOf(rect.color) + " r" + hundredths(rect.radius) + " edge " +
+                      hundredths(rect.strokeWidth));
+    }
+    for (const auto& line : app.layoutLines) {
+        out.push_back("line " + hundredths(line.p1.x) + "," + hundredths(line.p1.y) + " to " + hundredths(line.p2.x) + "," +
+                      hundredths(line.p2.y) + " " + colourOf(line.color) + " w" + hundredths(line.stroke));
+    }
+    for (const auto& shape : app.layoutShapes) {
+        out.push_back("shape " + std::to_string((int)shape.type) + " " + boxOf(shape.rect) + " " + colourOf(shape.fill) + " " +
+                      colourOf(shape.stroke));
+    }
+    return out;
+}
+
+// The line that strikes a run: through the middle of a lowercase letter,
+// 0.28 of the size above the baseline
+bool struckThroughTheMiddle(const App& app, const App::LayoutTextRun& run) {
+    UINT32 count = 0;
+    run.layout->GetLineMetrics(nullptr, 0, &count);
+    std::vector<DWRITE_LINE_METRICS> lines(count);
+    if (!count || FAILED(run.layout->GetLineMetrics(lines.data(), count, &count))) return false;
+    const float middle = run.pos.y + lines[0].baseline - run.layout->GetFontSize() * 0.28f;
+    for (const auto& line : app.layoutLines) {
+        if (closeTo(line.p1.y, line.p2.y, 0.01f) && closeTo(line.p1.y, middle, 0.75f) && line.p1.x <= run.bounds.left + 1 &&
+            line.p2.x >= run.bounds.right - 1) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The built-in themes are CSS files (resources/themes) and hand the page
+// their sheets, so the page draws them as it draws a theme of one's own.
+// It has to draw what it drew without a sheet. Each built-in is set against
+// a themes.ini theme with its colours and faces, which has no sheet: every
+// run, box, line and shape in the same place and colour, at two widths. And
+// what the sheets once took away, looked at one by one: a callout's own
+// colours, a footnote number's, the dimming of a link to a missing file.
+void builtInsStyled(App& app, const fs::path& dir) {
+    const fs::path fixture = fs::path(TINTA_THEME_FIXTURE).parent_path() / "builtin-themes-styled.md";
+    std::ifstream in(fixture, std::ios::binary);
+    const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    check(source.size() > 1000, "the fixture is read");
+    // themes.ini as it stood, to put back
+    const fs::path ini = dir / "themes.ini";
+    std::error_code ignored;
+    const bool hadIni = fs::exists(ini, ignored);
+    std::string iniBefore;
+    if (hadIni) {
+        std::ifstream was(ini, std::ios::binary);
+        iniBefore.assign((std::istreambuf_iterator<char>(was)), std::istreambuf_iterator<char>());
+    }
+    const std::string fileBefore = app.currentFile;
+    const int widthBefore = app.width;
+    const fs::path doc = dir / "builtin-themes-styled.md";
+    app.currentFile = toUtf8(doc.wstring());
+    app.root = parseDocument(app.parser, source, doc.wstring()).root;
+    app.scrollY = app.targetScrollY = 0;
+
+    for (int theme = 0; theme < THEME_COUNT; ++theme) {
+        const D2DTheme& own = THEMES[theme];
+        const std::string name = toUtf8(own.name);
+        check(themeSheet(theme) != nullptr, name + " hands the page its sheet");
+        const int twin = saveCustomTheme(own, std::wstring(L"Twin of ") + own.name, own.fontFamily, own.codeFontFamily,
+                                         own.headingFontFamily ? own.headingFontFamily : L"");
+        check(twin >= THEME_COUNT && !themeSheet(twin), name + "'s twin in themes.ini has no sheet");
+        if (twin < THEME_COUNT) continue;
+        for (int width : {1000, 600}) {
+            const std::string where = name + " at " + std::to_string(width);
+            app.width = width;
+            applyTheme(app, theme);
+            layoutDocument(app);
+            const std::vector<std::string> styled = drawnOf(app);
+            const float tall = app.contentHeight;
+            check(!app.pageBackground, where + ": the theme's own background is no second one for the page");
+
+            // A callout's bar and title are the callout's, a plain quote's bar the theme's
+            const uint32_t note = own.isDark ? 0x4493F8 : 0x0969DA;
+            bool title = false, bar = false, quoteBar = false;
+            for (const auto& run : app.layoutTextRuns) title = title || sameColor(run.color, note);
+            for (const auto& rect : app.layoutRects) {
+                bar = bar || (sameColor(rect.color, note) && rect.rect.right - rect.rect.left < 8);
+                quoteBar = quoteBar || (colourOf(rect.color) == colourOf(own.blockquoteBorder) && rect.rect.right - rect.rect.left < 8);
+            }
+            check(title, where + ": a note's title is the note's colour");
+            check(bar, where + ": and so is its bar");
+            check(quoteBar, where + ": a plain quote's bar is the theme's");
+            // A link to a file that is not there is dimmed, one to the web is not
+            const auto* missing = runOf(app, L"missing");
+            const auto* found = runOf(app, L"found");
+            check(missing && found && closeTo(missing->color.a, found->color.a * 0.45f, 0.01f),
+                  where + ": a link to a missing file is dimmed");
+            // Struck through the letters' middle
+            const auto* struck = runOf(app, L"struck words");
+            check(struck && struckThroughTheMiddle(app, *struck), where + ": a strike goes through the letters' middle");
+
+            applyTheme(app, twin);
+            layoutDocument(app);
+            const std::vector<std::string> plain = drawnOf(app);
+            const auto* struckPlain = runOf(app, L"struck words");
+            check(struckPlain && struckThroughTheMiddle(app, *struckPlain), where + ": and under a theme without a sheet too");
+            check(closeTo(app.contentHeight, tall, 0.01f), where + ": the page is as tall as without a sheet");
+            size_t differing = 0;
+            std::string first;
+            for (size_t i = 0; i < styled.size() && i < plain.size(); ++i) {
+                if (styled[i] == plain[i]) continue;
+                if (!differing++) first = styled[i] + "  |  without: " + plain[i];
+            }
+            check(styled.size() == plain.size() && differing == 0,
+                  where + ": drawn as without a sheet (" + std::to_string(styled.size()) + " against " +
+                      std::to_string(plain.size()) + " parts, " + std::to_string(differing) + " differ; first: " + first + ")");
+        }
+    }
+
+    // themes.ini and the theme list as they were
+    if (hadIni) {
+        std::ofstream back(ini, std::ios::binary | std::ios::trunc);
+        back << iniBefore;
+    } else {
+        fs::remove(ini, ignored);
+    }
+    loadCustomThemes();
+    app.currentFile = fileBefore;
+    app.width = widthBefore;
+    applyTheme(app, 0);
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -670,6 +832,7 @@ int testPageStyles(App&, const fs::path& dir) {
     liveLook(app, dir);
     wordStyles(app, dir);
     caretShadowOpacity(app, dir);
+    builtInsStyled(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;

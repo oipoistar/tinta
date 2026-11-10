@@ -8,11 +8,11 @@
 body {
   background-color: #0d1b2a;    /* deep navy */
   color: #e0e1dd;               /* soft blue-white */
-  font-family: "Segoe UI";
+  font-family: "Segoe UI", sans-serif;
 }
 h1, h2, h3, h4, h5, h6 { color: #f0f4f8; }    /* moonlight */
 a { color: #38c6e4; }                         /* lifted electric blue */
-code, pre { font-family: "Cascadia Code"; }
+code, pre { font-family: "Cascadia Code", "Cascadia Mono", "Consolas", monospace; }
 pre {
   background-color: #1b263b;    /* deep blue */
   color: #90e0ef;               /* cyan */

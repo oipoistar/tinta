@@ -132,8 +132,11 @@ bool inspectorOpen(App& app, float x, float y) {
         if (a.origin == css::Origin::Base) {
             row.where = toWide(a.selector) + L"   Tinta";
         } else {
-            row.where = toWide(a.selector) + (a.file.empty() ? std::wstring()
-                                                              : L"   " + baseName(a.file) + L":" + std::to_wstring(a.line));
+            // A built-in theme's sheet is no file to open: its name stands for it
+            const bool builtin = a.file.empty() && app.currentThemeIndex >= 0 && app.currentThemeIndex < THEME_COUNT;
+            row.where = toWide(a.selector) + (builtin          ? L"   " + std::wstring(THEMES[app.currentThemeIndex].name)
+                                              : a.file.empty() ? std::wstring()
+                                                               : L"   " + baseName(a.file) + L":" + std::to_wstring(a.line));
             row.file = a.file;
             row.line = a.line;
         }

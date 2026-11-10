@@ -36,6 +36,11 @@ struct Style {
     css::Engine::Context context = 0;
 
     bool has(css::Prop prop) const { return computed && set.test((size_t)prop); }
+    // Decided by a rule for this very element, not taken over from what is
+    // around it. Where Tinta gives an element a colour of its own (a link,
+    // a footnote's number, a callout's title), the page's colour reaching
+    // it by inheritance is not the theme's word on it
+    bool own(css::Prop prop) const { return has(prop) && computed->authored.test((size_t)prop); }
     explicit operator bool() const { return computed != nullptr; }
     const css::ComputedStyle* operator->() const { return computed; }
     const css::ComputedStyle& operator*() const { return *computed; }

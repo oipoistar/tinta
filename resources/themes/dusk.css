@@ -8,11 +8,11 @@
 body {
   background-color: #fffbf5;    /* warm white */
   color: #553c10;               /* deep amber */
-  font-family: "Segoe UI";
+  font-family: "Segoe UI", sans-serif;
 }
 h1, h2, h3, h4, h5, h6 { color: #9c4221; }    /* burnt orange */
 a { color: #a66a12; }                         /* deepened gold */
-code, pre { font-family: "Consolas"; }
+code, pre { font-family: "Consolas", monospace; }
 pre {
   background-color: #fef5e7;    /* cream */
   color: #5f5030;               /* olive */

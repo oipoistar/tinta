@@ -127,7 +127,9 @@ void applyCss(App& app, const Element& elem, const page::Style& css, const Inlin
               InlineStyle& st) {
     using css::Prop;
     st.css = css;
-    if (css.has(Prop::Color)) st.color = page::color(css->color);
+    // Its own colour: one from around it has come down with the style
+    // already, and would take a link's or a footnote number's away
+    if (css.own(Prop::Color)) st.color = page::color(css->color);
     st.format = page::format(app, css, st.format);
     if (css.has(Prop::BackgroundColor)) {
         st.bgColor = page::color(css->backgroundColor);
@@ -179,6 +181,7 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                    std::vector<StyledRun>& out) {
     for (const auto& elem : elements) {
         InlineStyle st = inherited;
+        bool ghost = false;  // a link to a file that is not there: drawn fainter
         // A CSS theme's word on this span (page_style.h)
         page::Style css;
         if (inherited.css && elem->type != ElementType::Text && elem->type != ElementType::SoftBreak &&
@@ -194,7 +197,7 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
             case ElementType::Image:
             case ElementType::MathInline:
             case ElementType::MathDisplay:
-                if (css && css.has(css::Prop::Color)) st.color = page::color(css->color);
+                if (css && css.own(css::Prop::Color)) st.color = page::color(css->color);
                 out.push_back({elem, st});
                 continue;
 
@@ -298,7 +301,8 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                     target.path = std::move(resolved);
                     st.linkUrl = (exists ? "fileref-ok:" : "fileref-missing:") +
                                  qmd::encodeLinkTarget(target);
-                    if (!exists) st.color.a *= 0.45f;
+                    ghost = !exists;
+                    if (ghost) st.color.a *= 0.45f;
                 }
                 break;
             }
@@ -307,7 +311,10 @@ void flattenInline(App& app, const std::vector<ElementPtr>& elements,
                 break;  // unknown wrapper: keep the style and descend
         }
         if (css) {
+            const bool recoloured = css.own(css::Prop::Color);
             applyCss(app, *elem, css, inherited, st);
+            // A theme's colour for links is fainter too on one that leads nowhere
+            if (ghost && recoloured) st.color.a *= 0.45f;
             // A key or figure that is not there stays in the warning colour
             if ((elem->type == ElementType::Citation || elem->type == ElementType::CrossReference) && elem->level) {
                 st.color = app.theme.isDark ? hexColor(0xF0C27A) : hexColor(0xA66A12);

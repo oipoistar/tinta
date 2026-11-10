@@ -140,8 +140,9 @@ bool installed(const std::wstring& family) {
 
 // The face a family list draws with: the first one this PC has, the
 // generic names as Windows sets them. When it has none, the first named,
-// which Tinta stands in for as it does for any theme's missing face (#264)
-std::wstring faceOf(const css::ComputedStyle& style, const std::wstring& fallback) {
+// which Tinta stands in for as it does for any theme's missing face (#264).
+// A built-in theme is the first it names on every PC (named).
+std::wstring faceOf(const css::ComputedStyle& style, const std::wstring& fallback, bool named = false) {
     std::wstring first;
     for (const auto& name : style.fontFamily) {
         std::wstring family = wide(name);
@@ -149,7 +150,7 @@ std::wstring faceOf(const css::ComputedStyle& style, const std::wstring& fallbac
         else if (name == "sans-serif" || name == "system-ui" || name == "ui-sans-serif") family = L"Segoe UI";
         else if (name == "monospace" || name == "ui-monospace") family = L"Consolas";
         else if (name == "cursive") family = L"Segoe Script";
-        if (fontfaces::has(family) || installed(family)) return family;
+        if (named || fontfaces::has(family) || installed(family)) return family;
         if (first.empty()) first = family;
     }
     return first.empty() ? fallback : first;
@@ -324,7 +325,7 @@ CssTheme compileCssTheme(const std::string& text, const std::string& file, bool 
     if (declared(bs, Prop::Color)) t.text = t.heading = d2d(bs.color);
     if (bs.accentColor) t.accent = d2d(*bs.accentColor);
     if (bs.caretColor) t.caret = d2d(*bs.caretColor);
-    if (declared(bs, Prop::FontFamily)) out.fontFamily = faceOf(bs, out.fontFamily);
+    if (declared(bs, Prop::FontFamily)) out.fontFamily = faceOf(bs, out.fontFamily, base != nullptr);
     if (declared(bs, Prop::FontSize)) t.bodySize = bs.fontSize;
     if (declared(bs, Prop::LineHeight) && bs.fontSize > 0) {
         if (bs.lineHeightFactor > 0) t.lineHeight = bs.lineHeightFactor;
@@ -336,7 +337,7 @@ CssTheme compileCssTheme(const std::string& text, const std::string& file, bool 
     for (int i = 0; i < 6; i++) {
         const css::ComputedStyle h = engine.style(engine.child(body, tag(headings[i])));
         if (h.has(Prop::Color)) t.headingColors[i] = d2d(h.color);
-        if (h.has(Prop::FontFamily) && out.headingFontFamily.empty()) out.headingFontFamily = faceOf(h, out.fontFamily);
+        if (h.has(Prop::FontFamily) && out.headingFontFamily.empty()) out.headingFontFamily = faceOf(h, out.fontFamily, base != nullptr);
         if (h.has(Prop::FontSize)) t.headingSize[i] = h.fontSize;
         if (h.has(Prop::FontWeight)) t.headingWeight[i] = h.fontWeight;
         if (h.has(Prop::FontStyle)) t.headingItalic[i] = h.fontStyle != css::FontStyle::Normal;
@@ -361,8 +362,8 @@ CssTheme compileCssTheme(const std::string& text, const std::string& file, bool 
     const css::ComputedStyle pcs = engine.style(preCode);
     if (ps.has(Prop::BackgroundColor)) t.codeBackground = d2d(ps.backgroundColor);
     if (ps.has(Prop::Color) || pcs.has(Prop::Color)) t.code = d2d(pcs.color);
-    if (ps.has(Prop::FontFamily) || pcs.has(Prop::FontFamily)) out.codeFontFamily = faceOf(pcs, out.codeFontFamily);
-    else if (code.has(Prop::FontFamily)) out.codeFontFamily = faceOf(code, out.codeFontFamily);
+    if (ps.has(Prop::FontFamily) || pcs.has(Prop::FontFamily)) out.codeFontFamily = faceOf(pcs, out.codeFontFamily, base != nullptr);
+    else if (code.has(Prop::FontFamily)) out.codeFontFamily = faceOf(code, out.codeFontFamily, base != nullptr);
     if (ps.has(Prop::FontSize) || pcs.has(Prop::FontSize)) t.codeSize = pcs.fontSize;
     else if (code.has(Prop::FontSize)) t.codeSize = code.fontSize;
     struct Token {

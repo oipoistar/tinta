@@ -110,6 +110,25 @@ std::wstring familyOf(const App::LayoutTextRun& run) {
     run.layout->GetFontFamilyName(0, name, 128, nullptr);
     return name;
 }
+// A theme of its own with the built-in's colours and another pair of faces:
+// how a body and a code face are chosen. Its place in the theme list.
+int themeWithFaces(int builtin, const wchar_t* body, const wchar_t* code) {
+    static int made = 0;
+    const std::filesystem::path themes = std::filesystem::current_path() / "themes";
+    std::filesystem::create_directories(themes);
+    const std::wstring name = L"Faces" + std::to_wstring(++made);
+    {
+        std::ofstream(themes / (name + L".css"), std::ios::binary)
+            << "@import " << '"' << toUtf8(THEMES[builtin].name) << '"' << ";\n"
+            << "body { font-family: " << '"' << toUtf8(body) << '"' << "; }\n"
+            << "code, pre { font-family: " << '"' << toUtf8(code) << '"' << "; }\n";
+    }
+    loadCustomThemes();
+    for (int i = THEME_COUNT; i < themeCount(); i++) {
+        if (name == themeAt(i).name) return i;
+    }
+    return -1;
+}
 void codeBaselines(App& app, const std::string& fixture) {
     struct Fonts { const wchar_t* body; const wchar_t* code; };
     const Fonts pairs[] = {{nullptr, nullptr}, {L"Segoe UI", L"Courier New"},
@@ -118,11 +137,12 @@ void codeBaselines(App& app, const std::string& fixture) {
     for (int theme : {0, 5}) {
         for (const auto& fonts : pairs) {
             for (float scale : {1.0f, 2.0f}) {
-                applyTheme(app, theme);
-                if (fonts.body) {
-                    app.theme.fontFamily = fonts.body;
-                    app.theme.codeFontFamily = fonts.code;
-                }
+                const int chosen = fonts.body ? themeWithFaces(theme, fonts.body, fonts.code) : theme;
+                check(chosen >= 0, "the theme with the pair of faces is listed");
+                check(!fonts.body || chosen < 0 || (_wcsicmp(themeAt(chosen).fontFamily, fonts.body) == 0 &&
+                                                    _wcsicmp(themeAt(chosen).codeFontFamily, fonts.code) == 0),
+                      "and names them");
+                applyTheme(app, chosen < 0 ? theme : chosen);
                 app.contentScale = scale;
                 app.zoomFactor = 1;
                 updateTextFormats(app);

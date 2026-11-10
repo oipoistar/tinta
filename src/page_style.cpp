@@ -578,13 +578,19 @@ void begin(App& app, float width) {
     Frame& page = s.push(app.root.get());
     page.style = s.styleOf(s.engine.child(rootStyle.context, bodyElement), &rootStyle);
     page.self = bodyElement;
-    // The page's background, when a sheet sets the body's or the root's
+    // The page's background, when a sheet sets the body's or the root's to
+    // another than the theme's own (a theme's sheet restates the theme's)
     app.pageBackground.reset();
     if (!app.printLayout) {
         if (page.style.has(Prop::BackgroundColor) && page.style->backgroundColor.a > 0) {
             app.pageBackground = color(page.style->backgroundColor);
         } else if (rootStyle.has(Prop::BackgroundColor) && rootStyle->backgroundColor.a > 0) {
             app.pageBackground = color(rootStyle->backgroundColor);
+        }
+        const D2D1_COLOR_F& own = app.theme.background;
+        if (app.pageBackground && app.pageBackground->r == own.r && app.pageBackground->g == own.g &&
+            app.pageBackground->b == own.b && app.pageBackground->a == own.a) {
+            app.pageBackground.reset();
         }
     }
 }

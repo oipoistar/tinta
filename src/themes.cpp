@@ -21,18 +21,25 @@ const BuiltinSheet kBuiltinSheets[] = {
 
 const int THEME_COUNT = (int)(sizeof(kBuiltinSheets) / sizeof(kBuiltinSheets[0]));
 
+namespace {
+struct BuiltinMade {
+    std::once_flag once;
+    CustomTheme theme;
+    std::shared_ptr<const css::Sheet> sheet;  // its rules for single elements, for the page (page_style.h)
+};
+BuiltinMade& builtinMade(int index) {
+    static BuiltinMade made[sizeof(kBuiltinSheets) / sizeof(kBuiltinSheets[0])];
+    return made[index < 0 || index >= THEME_COUNT ? 0 : index];
+}
+}  // namespace
+
 const D2DTheme& builtinTheme(int index) {
-    struct Made {
-        std::once_flag once;
-        CustomTheme theme;
-    };
-    static Made made[sizeof(kBuiltinSheets) / sizeof(kBuiltinSheets[0])];
+    BuiltinMade& m = builtinMade(index);
     if (index < 0 || index >= THEME_COUNT) index = 0;
-    Made& m = made[index];
     std::call_once(m.once, [&] {
         const D2DTheme blank{};
         const css::ImportSource none = [](std::string_view, std::string_view, std::string&, std::string&) { return false; };
-        compileCssTheme(kBuiltinSheets[index].css, std::string(), false, none, m.theme, &blank);
+        m.sheet = compileCssTheme(kBuiltinSheets[index].css, std::string(), false, none, m.theme, &blank).sheet;
         m.theme.name = kBuiltinSheets[index].name;
         D2DTheme& t = m.theme.theme;
         t.name = m.theme.name.c_str();
@@ -522,14 +529,19 @@ std::vector<std::wstring> themeProblems(int index) {
     return problems;
 }
 
-std::string themeSheetCss(int index) {
-    const CssEntry* entry = cssEntryAt(index);
-    return entry && entry->sheet ? css::serialize(*entry->sheet) : std::string();
-}
-
 std::shared_ptr<const css::Sheet> themeSheet(int index) {
+    // A built-in theme's rules reach the page as a sheet of one's own does
+    if (index >= 0 && index < THEME_COUNT) {
+        builtinTheme(index);
+        return builtinMade(index).sheet;
+    }
     const CssEntry* entry = cssEntryAt(index);
     return entry ? entry->sheet : nullptr;
+}
+
+std::string themeSheetCss(int index) {
+    const std::shared_ptr<const css::Sheet> sheet = themeSheet(index);
+    return sheet ? css::serialize(*sheet) : std::string();
 }
 
 int themeCount() {

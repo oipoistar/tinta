@@ -1105,8 +1105,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                 }
                 // ~~`code`~~ and <del>`code`</del>: struck like the text around it
                 if (hasStrike) {
-                    float strikeY = run.style.css ? y + mathTextOffset + baselineOf(textFormat) - textFormat->GetFontSize() * 0.28f
-                                               : y + mathTextOffset + normalLineHeight * 0.55f;
+                    float strikeY = y + mathTextOffset + baselineOf(textFormat) - textFormat->GetFontSize() * 0.28f;
                     app.layoutLines.push_back({D2D1::Point2F(textX, strikeY),
                                                D2D1::Point2F(textX + textWidth, strikeY), color, 1.0f});
                 }
@@ -1148,8 +1147,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                         bgColor, bgSpan);
                 }
                 if (hasStrike) {
-                    float strikeY = run.style.css ? y + mathTextOffset + baselineOf(textFormat) - textFormat->GetFontSize() * 0.28f
-                                               : y + mathTextOffset + normalLineHeight * 0.55f;
+                    float strikeY = y + mathTextOffset + baselineOf(textFormat) - textFormat->GetFontSize() * 0.28f;
                     app.layoutLines.push_back({D2D1::Point2F(x, strikeY),
                                                D2D1::Point2F(x + w, strikeY), color, 1.0f});
                 }
@@ -1379,8 +1377,7 @@ static void layoutInlineContent(App& app, const std::vector<ElementPtr>& element
                              bgColor, bgSpan);
             }
             if (hasStrike) {
-                float strikeY = run.style.css ? y + mathTextOffset + baselineOf(textFormat) - textFormat->GetFontSize() * 0.28f
-                                               : y + mathTextOffset + normalLineHeight * 0.55f;
+                float strikeY = y + mathTextOffset + baselineOf(textFormat) - textFormat->GetFontSize() * 0.28f;
                 app.layoutLines.push_back({D2D1::Point2F(segX, strikeY),
                                            D2D1::Point2F(segX + segWidth, strikeY),
                                            color, 1.0f});
@@ -3347,14 +3344,24 @@ static void layoutBlockquote(App& app, const ElementPtr& elem, float& y, float i
     if (elem->alertKind >= 1 && elem->alertKind <= 5) {
         const auto& style = ALERT_STYLES[elem->alertKind - 1];
         barColor = hexColor(app.theme.isDark ? style.dark : style.light);
-        if (css.has(Prop::BorderLeftColor)) barColor = page::color(css->border[3].color);
+        // A callout keeps its own colour unless the theme has a word for
+        // callouts: a rule for every quote's bar (blockquote { border-left-color })
+        // reaches it too, and is not that word
+        if (css.has(Prop::BorderLeftColor)) {
+            const page::Style plain = page::lookup(app, {"blockquote"});
+            const css::Color& bar = css->border[3].color;
+            const bool quotes = plain.has(Prop::BorderLeftColor) && plain->border[3].color.r == bar.r && plain->border[3].color.g == bar.g &&
+                                plain->border[3].color.b == bar.b && plain->border[3].color.a == bar.a;
+            if (!quotes) barColor = page::color(bar);
+        }
         css::Element titleElement;
         titleElement.tag = "p";
         titleElement.classes = {"alert-title"};
         titleElement.index = titleElement.typeIndex = 1;
         titleElement.count = titleElement.typeCount = 1;
         page::Block titleBlock(app, titleElement);
-        const D2D1_COLOR_F titleColor = page::textColor(titleBlock.style(), barColor);
+        // Its title in the bar's colour, unless a rule names the title itself
+        const D2D1_COLOR_F titleColor = titleBlock.style().own(Prop::Color) ? page::color(titleBlock.style()->color) : barColor;
 
         std::wstring title = style.title;
         LayoutInfo info = createLayout(app, title, app.textFormat, 24.0f, app.bodyTypography);
