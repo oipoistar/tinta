@@ -13,6 +13,12 @@ pieces of the comment stayed behind, and the reading view has no undo.
 The test reproduces it: a line typed at the top and saved, then the first
 note deleted, and the file is no longer the saved text without that note.
 
+A second thing came out when the test first ran on the build server,
+where files are checked out with Windows line ends: a note added, changed
+or deleted in a file with Windows line ends wrote the whole file back with
+Unix ones. That was so before this change and without an edit, for every
+note written.
+
 ## Cause
 
 `annotationsParseSource` reads the notes and their places from
@@ -24,8 +30,14 @@ checked only against the length of the text. A new note's place, found
 when its box opened, was used the same way when the text changed under
 the box.
 
+The reading view reads its text through the C runtime's text mode, which
+gives every line end as a line feed, and `writeSourceAndReload` wrote that
+text back as held.
+
 ## Change
 
+- `writeSourceAndReload` looks at the file's first line end and writes
+  the text with the file's own, as the editor's save does.
 - The three places read the notes again, and the two that empty the text
   for a tab without a file empty the notes with it.
 - The note box remembers its note by what it says: the quoted words, the
@@ -46,7 +58,10 @@ quote and a code block.
 ## Automated checks
 
 **`review_notes_after_edit`** (`review_note_tests.cpp`, in `input_tests`),
-on a copy of the fixture:
+on a copy of the fixture, once with Unix line ends and once with Windows',
+whichever the checkout has. Each time, besides what follows, every line of
+the file ends as it did after the editor's save, after a note deleted and
+after a note added:
 
 - a line typed at the top through `keystroke.h`, Ctrl+S, the editor left:
   both notes are there and each one's place holds its comment, whole;
@@ -62,13 +77,15 @@ on a copy of the fixture:
   is written as a line of its own after its paragraph and nothing else
   changes.
 
-Without the notes read again after a save, 1 check fails. Without the
-note found again before writing, 5 fail. With both taken out, as the code
-was, 7 fail, among them the deletion after an edit.
+Without the notes read again after a save, 1 check fails for each kind
+of line end. Without the note found again before writing, 5 fail. With
+both taken out, as the code was, 7 fail, among them the deletion after an
+edit. With the text written as held, 7 fail for Windows line ends and
+none for Unix ones, which is why it passed here and failed on the server.
 
 The full suite, without the three tests that use the clipboard
 (`notification_setting`, `copy_file_path`, `code_block_layout`), passes:
-63 of 63.
+64 of 64.
 
 ## Size
 

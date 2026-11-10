@@ -67,14 +67,37 @@ bool select(App& app, const std::wstring& words) {
     return true;
 }
 
-void everything(App& app, const char* fixture) {
-    const fs::path dir = fs::current_path() / "review-notes";
+// Whether every line of a text ends as asked: in a carriage return and a
+// line feed, or in a line feed alone
+bool endsLines(const std::string& text, bool crlf) {
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\r' && (i + 1 >= text.size() || text[i + 1] != '\n')) return false;
+        if (text[i] == '\n' && (i > 0 && text[i - 1] == '\r') != crlf) return false;
+    }
+    return true;
+}
+
+// Once for a file with Unix line ends and once for one with Windows': a
+// note written into the second turned every line of the file into the first
+void everything(App& app, const char* fixture, bool crlf) {
+    const std::string eol = crlf ? "\r\n" : "\n";
+    const std::string kind = crlf ? " (Windows line ends)" : " (Unix line ends)";
+    const fs::path dir = fs::current_path() / (crlf ? "review-notes-crlf" : "review-notes");
     std::error_code ec;
     fs::remove_all(dir, ec);
     fs::create_directories(dir, ec);
     const fs::path doc = dir / "Notes.md";
-    fs::copy_file(fixture, doc, ec);
-    check(!ec, "the fixture copies");
+    {
+        // The fixture with the line ends asked for, however it was checked out
+        std::string text;
+        for (char c : bytesOf(fixture)) {
+            if (c == '\r') continue;
+            if (c == '\n') text += eol;
+            else text += c;
+        }
+        check(!text.empty(), "the fixture is read");
+        std::ofstream(doc, std::ios::binary) << text;
+    }
 
     tabsInit(app);
     check(openDocumentInViewer(app, doc.wstring()), "the fixture opens");
@@ -90,6 +113,7 @@ void everything(App& app, const char* fixture) {
     keystroke(app, 'S', ctrl);
     const std::string saved = bytesOf(doc);
     check(!app.editorDirty && saved.rfind("zzz", 0) == 0, "a line typed at the top is saved");
+    check(endsLines(saved, crlf), "the editor's save keeps the file's line ends" + kind);
     exitEditMode(app);
     check(!app.editMode && app.annotations.size() == 2, "the reading view has both notes after the edit");
     check(notesInPlace(app), "each note's range holds its comment in the text as saved");
@@ -98,7 +122,8 @@ void everything(App& app, const char* fixture) {
     annotationOpenEditor(app, 0);
     annotationEditorDelete(app, app.hwnd);
     const std::string deleted = without(saved, "say which fox");
-    check(deleted.size() < saved.size() && bytesOf(doc) == deleted, "deleting a note after the edit takes its comment's line and nothing else");
+    check(deleted.size() < saved.size() && bytesOf(doc) == deleted, "deleting a note after the edit takes its comment's line and nothing else" + kind);
+    check(endsLines(bytesOf(doc), crlf), "and the file's lines end as they did" + kind);
     check(app.annotations.size() == 1 && notesInPlace(app), "one note is left, in place");
 
     // The other changed, its range out of date, as a text taken in without
@@ -109,10 +134,10 @@ void everything(App& app, const char* fixture) {
     app.annotEditorText = L"merge them";
     app.annotEditorCaret = app.annotEditorText.size();
     annotationEditorConfirm(app, app.hwnd);
-    std::string changed = "A line taken in from elsewhere.\n" + deleted;
+    std::string changed = "A line taken in from elsewhere." + eol + deleted;
     const size_t words = changed.find("merge with the first");
     if (words != std::string::npos) changed.replace(words, 20, "merge them");
-    check(words != std::string::npos && bytesOf(doc) == changed, "changing a note whose range is out of date changes its words and nothing else");
+    check(words != std::string::npos && bytesOf(doc) == changed, "changing a note whose range is out of date changes its words and nothing else" + kind);
     check(app.annotations.size() == 1 && notesInPlace(app) && app.annotations[0].note == "merge them", "and the note reads as changed");
 
     // A note that is gone from the text by the time it is deleted
@@ -138,7 +163,8 @@ void everything(App& app, const char* fixture) {
     annotationEditorConfirm(app, app.hwnd);
     const std::string noted = bytesOf(doc);
     check(noted.find("<!-- review \"quick brown fox\": which one -->") != std::string::npos && without(noted, "which one") == changed,
-          "a new note is written as a line of its own, and nothing else changes");
+          "a new note is written as a line of its own, and nothing else changes" + kind);
+    check(endsLines(noted, crlf), "with the file's line ends" + kind);
     check(app.annotations.size() == 2 && notesInPlace(app), "both notes are read, in place");
 }
 
@@ -156,7 +182,8 @@ int runReviewNoteTests(const char* fixture) {
     settings.keyProfile = "windows";
     applyKeymap(app, settings);
 
-    everything(app, fixture);
+    everything(app, fixture, false);
+    everything(app, fixture, true);
 
     app.editorDirty = false;
     DestroyWindow(app.hwnd);

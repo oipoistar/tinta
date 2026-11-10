@@ -178,9 +178,33 @@ void sanitizeForComment(std::string& text) {
 
 void writeSourceAndReload(App& app, HWND hwnd, const std::string& src) {
     if (app.currentFile.empty()) return;
+    // The reading view holds the text as it was read, its lines ending in a
+    // line feed whatever the file has. Written as held, a file with Windows
+    // line ends came back with every one of its lines changed for one note.
+    // They are written as the file has them, as the editor's save does
+    bool crlf = false;
+    {
+        std::ifstream was(toWide(app.currentFile), std::ios::binary);
+        char buffer[4096];
+        was.read(buffer, sizeof(buffer));
+        for (std::streamsize i = 0, n = was.gcount(); i < n; ++i) {
+            if (buffer[i] != '\n') continue;
+            crlf = i > 0 && buffer[i - 1] == '\r';
+            break;
+        }
+    }
+    std::string bytes;
+    if (crlf) {
+        bytes.reserve(src.size() + src.size() / 20);
+        for (size_t i = 0; i < src.size(); ++i) {
+            if (src[i] == '\n' && (i == 0 || src[i - 1] != '\r')) bytes += '\r';
+            bytes += src[i];
+        }
+    }
+    const std::string& text = crlf ? bytes : src;
     std::ofstream out(toWide(app.currentFile), std::ios::binary | std::ios::trunc);
     if (!out) return;
-    out.write(src.data(), (std::streamsize)src.size());
+    out.write(text.data(), (std::streamsize)text.size());
     out.close();
     handleFileWatchTimer(app, hwnd);  // reload now instead of on the timer
 }
