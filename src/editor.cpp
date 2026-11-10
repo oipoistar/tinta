@@ -1315,6 +1315,7 @@ static void editorEnsureCursorVisible(App& app) {
 void performEditorSearch(App& app) {
     app.editorSearchMatches.clear();
     app.editorSearchCurrentIndex = 0;
+    app.editorSearchRevision = app.editorTextRevision;
 
     const std::wstring& text = app.editorText;
     const size_t length = app.searchQuery.size();
@@ -1346,12 +1347,35 @@ void performEditorSearch(App& app) {
     }
 }
 
+// The matches are places in the text as it was when it was searched. With
+// the bar open the text still changes: typed into, a button of the rail
+// pressed, a change taken from the disk. A match used then was a place past
+// the text's end, which ended the program, or other words, which were
+// replaced. So whatever uses the matches asks for this first: the text is
+// searched again when it has changed, and the match that was current stays
+// so, or the next one after where it was
+void editorSearchRefresh(App& app) {
+    if (app.editorSearchRevision == app.editorTextRevision) return;
+    size_t was = 0;
+    if (app.editorSearchCurrentIndex >= 0 && app.editorSearchCurrentIndex < (int)app.editorSearchMatches.size()) {
+        was = app.editorSearchMatches[app.editorSearchCurrentIndex].startPos;
+    }
+    performEditorSearch(app);
+    for (size_t i = 0; i < app.editorSearchMatches.size(); ++i) {
+        if (app.editorSearchMatches[i].startPos >= was) {
+            app.editorSearchCurrentIndex = (int)i;
+            break;
+        }
+    }
+}
+
 // --- Find & replace (#121) ---
 
 static void scheduleReparse(App& app);  // defined below with the debounce
 
 void editorReplaceCurrent(App& app, HWND hwnd) {
     if (!app.editMode || app.searchQuery.empty()) return;
+    editorSearchRefresh(app);
     if (app.editorSearchMatches.empty()) return;
     app.editorExtraCarets.clear();  // find and replace work at one caret
     int idx = app.editorSearchCurrentIndex;
@@ -1418,6 +1442,7 @@ void editorReplaceAll(App& app, HWND hwnd) {
 }
 
 void scrollEditorToMatch(App& app) {
+    editorSearchRefresh(app);
     if (app.editorSearchMatches.empty() || app.editorSearchCurrentIndex < 0 ||
         app.editorSearchCurrentIndex >= (int)app.editorSearchMatches.size()) return;
     app.editorExtraCarets.clear();
@@ -4641,6 +4666,8 @@ static void renderEditorWrapped(App& app, float editorWidth) {
         selMin = editorSelMin(app);
         selMax = editorSelMax(app);
     }
+    // The marks are drawn where the words are now
+    if (app.showSearch) editorSearchRefresh(app);
     bool hasSearchMatches = app.showSearch && !app.searchQuery.empty() &&
                             !app.editorSearchMatches.empty();
     size_t searchScanIdx = 0;
@@ -4791,10 +4818,11 @@ void renderEditor(App& app, float editorWidth) {
 
     // Search match scanning index (both sorted by position, so we advance together)
     size_t searchScanIdx = 0;
+    if (app.showSearch) editorSearchRefresh(app);
     bool hasSearchMatches = app.showSearch && !app.searchQuery.empty() && !app.editorSearchMatches.empty();
 
     // Advance search scan index to first match that could overlap visible lines
-    if (hasSearchMatches && firstVisible > 0) {
+    if (hasSearchMatches && firstVisible > 0 && firstVisible < (int)app.editorLineStarts.size()) {
         size_t firstVisiblePos = app.editorLineStarts[firstVisible];
         while (searchScanIdx < app.editorSearchMatches.size() &&
                app.editorSearchMatches[searchScanIdx].startPos + app.editorSearchMatches[searchScanIdx].length <= firstVisiblePos) {

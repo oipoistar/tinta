@@ -1649,6 +1649,7 @@ struct App {
     };
     std::vector<EditorSearchMatch> editorSearchMatches;
     int editorSearchCurrentIndex = 0;
+    unsigned long long editorSearchRevision = 0;  // the editorTextRevision the matches were found in
 
     // Editor find & replace (#121): Ctrl+H adds a replace row to search
     bool searchReplaceMode = false;
