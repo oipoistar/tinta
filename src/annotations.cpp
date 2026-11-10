@@ -206,6 +206,10 @@ void writeSourceAndReload(App& app, HWND hwnd, const std::string& src) {
     if (!out) return;
     out.write(text.data(), (std::streamsize)text.size());
     out.close();
+    // Read it again whatever its time says: a write in the same tick of the
+    // clock as the last one leaves the file's time as it was, and the page
+    // then kept the text from before the note
+    app.lastFileWriteTime = FILETIME{};
     handleFileWatchTimer(app, hwnd);  // reload now instead of on the timer
 }
 

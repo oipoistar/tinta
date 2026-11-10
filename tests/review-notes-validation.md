@@ -32,12 +32,16 @@ the box.
 
 The reading view reads its text through the C runtime's text mode, which
 gives every line end as a line feed, and `writeSourceAndReload` wrote that
-text back as held.
+text back as held. It also read the file again only when the file's time
+had changed, which a write in the same tick of the clock as the save
+before it does not do: on the build server the page then kept the text
+from before the note, and the test's later steps worked on that.
 
 ## Change
 
 - `writeSourceAndReload` looks at the file's first line end and writes
-  the text with the file's own, as the editor's save does.
+  the text with the file's own, as the editor's save does. It then reads
+  the file again whatever its time.
 - The three places read the notes again, and the two that empty the text
   for a tab without a file empty the notes with it.
 - The note box remembers its note by what it says: the quoted words, the
