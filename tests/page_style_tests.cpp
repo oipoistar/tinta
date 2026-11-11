@@ -22,6 +22,7 @@
 #include "utils.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -933,6 +934,17 @@ void writeAll(const fs::path& path, const std::string& text) {
     out << text;
 }
 
+// A file changed by its owner while Tinta runs. Tinta knows a changed file
+// by its time, and on a fast machine a write can fall in the same tick of
+// the clock as the write before it and leave the time as it was: the file
+// is given a time two seconds after the one it had.
+void writeByHand(const fs::path& path, const std::string& text) {
+    std::error_code ignored;
+    const auto before = fs::last_write_time(path, ignored);
+    writeAll(path, text);
+    if (!ignored) fs::last_write_time(path, before + std::chrono::seconds(2), ignored);
+}
+
 // A themes.ini section is written as a CSS file (themes.cpp) and the page
 // is drawn from that sheet. It has to draw what the section drew before:
 // each of the fixture's themes lays two documents out at two widths both
@@ -1075,7 +1087,7 @@ void iniThemesAsCss(App& app, const fs::path& dir) {
     // The file changed by hand: it is the theme, under the section's name and in its place
     {
         const std::string own = readAll(themes / files[0]) + "h1 { color: #123456; }\npre { border-radius: 12px; }\n";
-        writeAll(themes / files[0], own);
+        writeByHand(themes / files[0], own);
         check(themeReloadIfChanged(plain), "a file changed by hand is noticed");
         check(themeSourcePath(plain) == (themes / files[0]).wstring() && std::wstring(themeAt(plain).name) == names[0],
               "and is the theme from then on, under the section's name and in its place");
@@ -1403,7 +1415,7 @@ void madeFromBuiltIns(App& app, const fs::path& dir) {
         fs::remove(themes / "Importer.css", ignored);
         loadCustomThemes();
         // The file changed by its owner is the theme, the design still in it
-        writeAll(themes / "Old look.css", readAll(themes / "Old look.css") + "h1 { color: #654321; }\n");
+        writeByHand(themes / "Old look.css", readAll(themes / "Old look.css") + "h1 { color: #654321; }\n");
         check(themeReloadIfChanged(index) && themeSourcePath(index) == (themes / "Old look.css").wstring() &&
                   themeAt(index).design == 1 && themeAt(index).headingSize[0] == 34 && themeAt(index).headingColors[0] &&
                   sameColor(*themeAt(index).headingColors[0], 0x654321) && sameColor(themeAt(index).link, 0x0B6E99),
