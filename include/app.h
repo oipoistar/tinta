@@ -994,6 +994,8 @@ struct App {
     bool helpScrollbarDragging = false;
     float helpScrollbarDragStartY = 0;
     float helpScrollbarDragStartScroll = 0;
+    // Where the shortcut list's rows were drawn (set in render)
+    std::vector<D2D1_RECT_F> helpRows;
 
     // Settings overlay (Ctrl+,): section rail + rows of toggles/chips.
     // Hit rects are stored during render (print-preview pattern); each

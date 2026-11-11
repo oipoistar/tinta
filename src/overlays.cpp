@@ -1843,171 +1843,91 @@ static void drawCenteredText(App& app, const wchar_t* text, IDWriteTextFormat* f
     layout->Release();
 }
 
-D2D1_RECT_F helpPanelRect(const App& app) {
-    const float width = std::min(dpi(app, 520.0f), app.width - dpi(app, 40.0f));
-    const float height = std::min(dpi(app, 700.0f), app.height - dpi(app, 40.0f));
-    const float x = (app.width - width) / 2;
-    const float y = (app.height - height) / 2 + (1 - app.helpAnimation) * dpi(app, 50.0f);
-    return D2D1::RectF(x, y, x + width, y + height);
-}
+// --- The shortcut list on the interface's scale (ui_scale.h) ------------
+//
+// Five groups of shortcuts under small labels: a key in Strong, what it
+// does in Small beside it. In a window wide enough the groups stand in two
+// columns (the list was one column of some sixty rows, 520 wide, in a
+// window of a thousand); what does not fit scrolls under the title.
+namespace {
+struct HelpEntry {
+    std::wstring key;
+    const wchar_t* desc;
+};
+struct HelpSection {
+    const wchar_t* title;
+    std::vector<HelpEntry> entries;
+};
 
-void renderHelpOverlay(App& app) {
-    // Animate in
-    if (app.helpAnimation < 1.0f) {
-        float prev = app.helpAnimation;
-        app.helpAnimation = std::min(1.0f, app.helpAnimation + 0.15f);
-        if (app.helpAnimation != prev)
-            InvalidateRect(app.hwnd, nullptr, FALSE);
-    }
-    float anim = app.helpAnimation;
+constexpr float kHelpHeader = 28.0f + uiscale::sp16;      // the title's line and its gap
+constexpr float kHelpRow = 24.0f;
+constexpr float kHelpLabel = 16.0f + uiscale::sp8;         // a group's label and its gap
+constexpr float kHelpFooter = uiscale::sp16 + 16.0f;       // gap and the footer's line
+constexpr float kHelpKeys = 152.0f;                        // the keys' column
+constexpr float kHelpColumn = 416.0f;                      // a column of keys and what they do
 
-    // Keep the document readable behind the shortcut sheet. The panel and
-    // all of its ink use the active theme below; the mask only separates it.
-    float backdropAlpha = app.theme.isDark ? 0.34f : 0.24f;
-    app.brush->SetColor(D2D1::ColorF(0, 0, 0, backdropAlpha * anim));
-    app.renderTarget->FillRectangle(
-        D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
-
-    // Panel dimensions - fit to window
-    const auto panel = helpPanelRect(app);
-    float panelWidth = panel.right - panel.left;
-    float panelHeight = panel.bottom - panel.top;
-    float panelX = panel.left;
-    float panelY = panel.top;
-
-    // Panel background follows the active document theme.
-    D2D1_ROUNDED_RECT panelRect = D2D1::RoundedRect(
-        D2D1::RectF(panelX, panelY, panelX + panelWidth, panelY + panelHeight),
-        dpi(app, 16.0f), dpi(app, 16.0f));
-    D2D1_COLOR_F panelColor = app.theme.background;
-    panelColor.a = 0.98f * anim;
-    panelColor = themeUiPanel(app.theme, panelColor);
-    app.brush->SetColor(panelColor);
-    app.renderTarget->FillRoundedRectangle(panelRect, app.brush);
-
-    // Border
-    D2D1_COLOR_F panelBorder = themeUiText(app.theme);
-    panelBorder.a = 0.35f * anim;
-    panelBorder = themeUiBorder(app.theme, panelBorder, anim);
-    app.brush->SetColor(panelBorder);
-    app.renderTarget->DrawRoundedRectangle(panelRect, app.brush, 1.0f);
-
-    // Title (fixed, not scrolled)
-    float titleBottomY = panelY + dpi(app, 55.0f);
-    IDWriteTextFormat* titleFormat = app.themeTitleFormat;
-    if (titleFormat) {
-        D2D1_COLOR_F titleColor = themeUiHeading(app.theme);
-        titleColor.a = anim;
-        app.brush->SetColor(titleColor);
-        drawCenteredText(app, tr(app, "help.title"), titleFormat,
-            D2D1::RectF(panelX, panelY + dpi(app, 15.0f), panelX + panelWidth, titleBottomY));
-    }
-
-    // Version badge in the panel's top-right corner (from CMake's
-    // TINTA_VERSION_* defines, the single source of truth)
-    if (app.tocFormat) {
-        wchar_t version[32];
-        swprintf_s(version, _countof(version), L"v%d.%d.%d",
-                   TINTA_VERSION_MAJOR, TINTA_VERSION_MINOR,
-                   TINTA_VERSION_PATCH);
-        IDWriteTextLayout* verLayout = nullptr;
-        app.dwriteFactory->CreateTextLayout(
-            version, (UINT32)wcslen(version), app.tocFormat,
-            panelWidth - dpi(app, 22.0f), dpi(app, 20.0f), &verLayout);
-        if (verLayout) {
-            // Shared formats may carry another overlay's alignment; pin it
-            verLayout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
-            D2D1_COLOR_F verColor = themeUiText(app.theme);
-            verColor.a = 0.45f * anim;
-            app.brush->SetColor(verColor);
-            app.renderTarget->DrawTextLayout(
-                D2D1::Point2F(panelX, panelY + dpi(app, 18.0f)), verLayout,
-                app.brush);
-            verLayout->Release();
-        }
-    }
-
-    IDWriteTextFormat* boldFmt = app.tocFormatBold;
-    IDWriteTextFormat* normalFmt = app.tocFormat;
-    if (!boldFmt || !normalFmt) return;
-
-    // Shortcut entries
-    struct HelpEntry {
-        const wchar_t* key;
-        const wchar_t* desc;
-    };
-
+std::vector<HelpSection> helpSections(const App& app) {
     // Remappable keys show their current binding ([Keys] in settings.ini)
-    std::wstring kDown = keyLabel(app.keymap[KA_SCROLLDOWN]) + L" / \x2193";
-    std::wstring kUp = keyLabel(app.keymap[KA_SCROLLUP]) + L" / \x2191";
-    std::wstring kSearch = keyLabel(app.keymap[KA_SEARCH]) + L" / Ctrl+F";
-    std::wstring kBrowse = keyLabel(app.keymap[KA_BROWSE]);
-    std::wstring kToc = keyLabel(app.keymap[KA_TOC]);
-    std::wstring kTheme = keyLabel(app.keymap[KA_THEME]);
-    std::wstring kStats = keyLabel(app.keymap[KA_STATS]);
-    std::wstring kHelp = keyLabel(app.keymap[KA_HELP]);
-    std::wstring kEdit = keyLabel(app.keymap[KA_EDIT]) + L" / Ctrl+E";
-    std::wstring kQuit = keyLabel(app.keymap[KA_QUIT]);
+    const std::wstring kDown = keyLabel(app.keymap[KA_SCROLLDOWN]) + L" / \x2193";
+    const std::wstring kUp = keyLabel(app.keymap[KA_SCROLLUP]) + L" / \x2191";
+    const std::wstring kSearch = keyLabel(app.keymap[KA_SEARCH]) + L" / Ctrl+F";
+    const std::wstring kEdit = keyLabel(app.keymap[KA_EDIT]) + L" / Ctrl+E";
     // Ctrl+E reads in Live and shows Source's preview pane (#308): the
     // keys of the editor E opens
     const bool live = app.editorLive;
-
-    const HelpEntry navEntries[] = {
-        {kDown.c_str(),   tr(app, "help.nav.scroll_down")},
-        {kUp.c_str(),     tr(app, "help.nav.scroll_up")},
-        {L"Space / PgDn", tr(app, "help.nav.page_down")},
-        {L"PgUp",         tr(app, "help.nav.page_up")},
-        {L"Home / End",   tr(app, "help.nav.jump_start_end")},
-        {L"Ctrl+Scroll",  tr(app, "help.nav.zoom")},
-    };
-
-    const HelpEntry overlayEntries[] = {
-        {kSearch.c_str(), tr(app, "help.view.search")},
-        {L"Enter",        tr(app, "help.view.next_match")},
-        {L"Ctrl+Shift+F", tr(app, "help.view.search_results")},
-        {kBrowse.c_str(), tr(app, "help.view.folder_browser")},
-        {kToc.c_str(),    tr(app, "help.view.toc")},
-        {L"Ctrl+T",       tr(app, "help.view.new_tab")},
-        {L"Ctrl+Tab",     tr(app, "help.view.next_tab")},
+    std::vector<HelpSection> sections;
+    sections.push_back({tr(app, "help.section.navigation"), {
+        {kDown,            tr(app, "help.nav.scroll_down")},
+        {kUp,              tr(app, "help.nav.scroll_up")},
+        {L"Space / PgDn",  tr(app, "help.nav.page_down")},
+        {L"PgUp",          tr(app, "help.nav.page_up")},
+        {L"Home / End",    tr(app, "help.nav.jump_start_end")},
+        {L"Ctrl+Scroll",   tr(app, "help.nav.zoom")},
+    }});
+    sections.push_back({tr(app, "help.section.view"), {
+        {kSearch,          tr(app, "help.view.search")},
+        {L"Enter",         tr(app, "help.view.next_match")},
+        {L"Ctrl+Shift+F",  tr(app, "help.view.search_results")},
+        {keyLabel(app.keymap[KA_BROWSE]), tr(app, "help.view.folder_browser")},
+        {keyLabel(app.keymap[KA_TOC]),    tr(app, "help.view.toc")},
+        {L"Ctrl+T",        tr(app, "help.view.new_tab")},
+        {L"Ctrl+Tab",      tr(app, "help.view.next_tab")},
         {L"Ctrl+W / Ctrl+F4", tr(app, "help.view.close_tab")},
-        {L"Ctrl+Shift+T", tr(app, "tab.menu.reopen")},
-        {kTheme.c_str(),  tr(app, "help.view.theme")},
-        {kStats.c_str(),  tr(app, "help.view.stats")},
-        {kHelp.c_str(),   tr(app, "help.view.help")},
-    };
-
-    const HelpEntry editEntries[] = {
-        {kEdit.c_str(),   tr(app, "help.edit.enter_edit")},
-        {L"Ctrl+S",       tr(app, "help.edit.save")},
-        {L"Ctrl+/",       tr(app, "help.edit.live")},
-        {L"/",            tr(app, "help.edit.slash")},
-        {L"Shift+F10",    tr(app, "help.edit.menu")},
-        {L"[[",           tr(app, "help.sheet.link")},
-        {L"Ctrl+K",       tr(app, "help.edit.link")},
+        {L"Ctrl+Shift+T",  tr(app, "tab.menu.reopen")},
+        {keyLabel(app.keymap[KA_THEME]),  tr(app, "help.view.theme")},
+        {keyLabel(app.keymap[KA_STATS]),  tr(app, "help.view.stats")},
+        {keyLabel(app.keymap[KA_HELP]),   tr(app, "help.view.help")},
+    }});
+    sections.push_back({tr(app, "help.section.editing"), {
+        {kEdit,            tr(app, "help.edit.enter_edit")},
+        {L"Ctrl+S",        tr(app, "help.edit.save")},
+        {L"Ctrl+/",        tr(app, "help.edit.live")},
+        {L"/",             tr(app, "help.edit.slash")},
+        {L"Shift+F10",     tr(app, "help.edit.menu")},
+        {L"[[",            tr(app, "help.sheet.link")},
+        {L"Ctrl+K",        tr(app, "help.edit.link")},
         {live ? L"Ctrl+/, Ctrl+E" : L"Ctrl+E", tr(app, "help.edit.preview")},
-        {L"Ctrl+W",       tr(app, "help.edit.word_wrap")},
+        {L"Ctrl+W",        tr(app, "help.edit.word_wrap")},
         {live ? L"Ctrl+E" : L"Ctrl+Shift+E", tr(app, "editor.read_help")},
-        {L"ESC ESC",      tr(app, "help.edit.exit_edit")},
+        {L"ESC ESC",       tr(app, "help.edit.exit_edit")},
         {L"Alt+\x2191 / Alt+\x2193", tr(app, "help.edit.move_line")},
         {L"Ctrl+Alt+\x2191 / \x2193", tr(app, "help.edit.add_caret")},
-        {L"Alt+Click",    tr(app, "help.edit.alt_click")},
+        {L"Alt+Click",     tr(app, "help.edit.alt_click")},
         {L"Drag / Ctrl+Drag", tr(app, "help.edit.drag_text")},
-        {L"Ctrl+D",       tr(app, "help.edit.next_match")},
-    };
-
-    const HelpEntry generalEntries[] = {
-        {L"Ctrl+A",       tr(app, "help.general.select_all")},
-        {L"Ctrl+C",       tr(app, "help.general.copy")},
-        {L"Ctrl+N",       tr(app, "help.general.new_note")},
-        {L"Ctrl+Shift+N", tr(app, "help.general.new_window")},
-        {L"Ctrl+P",       tr(app, "ctx.print")},
-        {L"Ctrl+G",       tr(app, "editor.goto_line")},
-        {L"ESC",          tr(app, "help.general.close")},
-        {kQuit.c_str(),   tr(app, "help.general.quit")},
-    };
-
+        {L"Ctrl+D",        tr(app, "help.edit.next_match")},
+    }});
+    sections.push_back({tr(app, "help.section.general"), {
+        {L"Ctrl+A",        tr(app, "help.general.select_all")},
+        {L"Ctrl+C",        tr(app, "help.general.copy")},
+        {L"Ctrl+N",        tr(app, "help.general.new_note")},
+        {L"Ctrl+Shift+N",  tr(app, "help.general.new_window")},
+        {L"Ctrl+P",        tr(app, "ctx.print")},
+        {L"Ctrl+G",        tr(app, "editor.goto_line")},
+        {L"ESC",           tr(app, "help.general.close")},
+        {keyLabel(app.keymap[KA_QUIT]), tr(app, "help.general.quit")},
+    }});
     // Sheets (sheet_ui.h): the keys a sheet's tab answers to
-    const HelpEntry sheetEntries[] = {
+    sections.push_back({tr(app, "help.section.sheets"), {
         {L"N / Double-click", tr(app, "sheet.tool.note")},
         {L"Tab / Shift+Enter", tr(app, "help.sheet.child")},
         {L"\x2190\x2191\x2192\x2193",       tr(app, "help.sheet.walk")},
@@ -2027,108 +1947,169 @@ void renderHelpOverlay(App& app) {
         {L"Z / Shift+Z",      tr(app, "help.sheet.fold")},
         {L"[[",               tr(app, "help.sheet.link")},
         {L"Alt / Hover",      tr(app, "help.sheet.peek")},
-    };
+    }});
+    return sections;
+}
 
-    float padding = dpi(app, 20.0f);
-    float keyColWidth = dpi(app, 150.0f);
-    float leftX = panelX + padding;
-    float descX = leftX + keyColWidth;
-    float rightEdge = panelX + panelWidth - padding;
-    float lineH = dpi(app, 22.0f);
-    float sectionGap = dpi(app, 10.0f);
-    float sectionHeaderExtra = dpi(app, 4.0f);
+// Which column a group stands in: reading and the general keys at the
+// left, the editor's and the sheets' at the right
+int helpColumnOf(size_t section, bool twoColumns) {
+    return twoColumns && (section == 2 || section == 4) ? 1 : 0;
+}
 
-    // Calculate total content height
-    auto sectionHeight = [&](int entryCount) {
-        return lineH + sectionHeaderExtra + entryCount * lineH + sectionGap;
-    };
-    float footerH = dpi(app, 35.0f);
-    float totalContentHeight = sectionHeight((int)_countof(navEntries)) +
-                               sectionHeight((int)_countof(overlayEntries)) +
-                               sectionHeight((int)_countof(editEntries)) +
-                               sectionHeight((int)_countof(generalEntries)) +
-                               sectionHeight((int)_countof(sheetEntries)) + footerH;
+bool helpTwoColumns(const App& app) {
+    return app.width - dpi(app, 64.0f) >= dpi(app, uiscale::sp24 * 2 + kHelpColumn * 2 + uiscale::sp32);
+}
 
-    // Scrollable area
-    float contentTopY = titleBottomY + dpi(app, 10.0f);
-    float contentBottomY = panelY + panelHeight;
-    float visibleHeight = contentBottomY - contentTopY;
+// The columns' heights in DIPs, and the taller one
+float helpContentHeight(const std::vector<HelpSection>& sections, bool twoColumns) {
+    float h[2] = {0.0f, 0.0f};
+    for (size_t i = 0; i < sections.size(); i++) {
+        float& col = h[helpColumnOf(i, twoColumns)];
+        if (col > 0.0f) col += uiscale::sp16;
+        col += kHelpLabel + (float)sections[i].entries.size() * kHelpRow;
+    }
+    return std::max(h[0], h[1]) + kHelpFooter;
+}
+}  // namespace
+
+D2D1_RECT_F helpPanelRect(const App& app) {
+    using namespace uiscale;
+    const bool two = helpTwoColumns(app);
+    const float width = two ? dpi(app, sp24 * 2 + kHelpColumn * 2 + sp32)
+                            : std::min(dpi(app, sp24 * 2 + kHelpColumn + 56.0f), app.width - dpi(app, 40.0f));
+    const float natural = dpi(app, sp24 * 2 + kHelpHeader + helpContentHeight(helpSections(app), two));
+    const float height = std::min(natural, app.height - dpi(app, 40.0f));
+    const float x = (app.width - width) / 2;
+    const float y = (app.height - height) / 2 + (1 - app.helpAnimation) * dpi(app, 50.0f);
+    return D2D1::RectF(x, y, x + width, y + height);
+}
+
+void renderHelpOverlay(App& app) {
+    using namespace uiscale;
+    // Animate in
+    if (app.helpAnimation < 1.0f) {
+        float prev = app.helpAnimation;
+        app.helpAnimation = std::min(1.0f, app.helpAnimation + 0.15f);
+        if (app.helpAnimation != prev)
+            InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+    float anim = app.helpAnimation;
+
+    // Keep the document readable behind the shortcut sheet. The panel and
+    // all of its ink use the active theme below; the mask only separates it.
+    float backdropAlpha = app.theme.isDark ? 0.34f : 0.24f;
+    app.brush->SetColor(D2D1::ColorF(0, 0, 0, backdropAlpha * anim));
+    app.renderTarget->FillRectangle(
+        D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
+
+    const std::vector<HelpSection> sections = helpSections(app);
+    const bool two = helpTwoColumns(app);
+    const auto panel = helpPanelRect(app);
+    const float panelWidth = panel.right - panel.left;
+    const float pad = dpi(app, sp24);
+
+    // Panel background follows the active document theme.
+    const float radius = dpi(app, radiusDialog);
+    paint::shadow(app, panel, radius, D2D1::ColorF(0, 0, 0, (themeUiDark(app.theme) ? 0.40f : 0.12f) * anim), 2.0f);
+    D2D1_ROUNDED_RECT panelRect = D2D1::RoundedRect(panel, radius, radius);
+    D2D1_COLOR_F panelColor = app.theme.background;
+    panelColor.a = 0.98f * anim;
+    panelColor = themeUiPanel(app.theme, panelColor);
+    app.brush->SetColor(panelColor);
+    app.renderTarget->FillRoundedRectangle(panelRect, app.brush);
+    app.brush->SetColor(themeUiBorder(app.theme, paint::ink(app.theme, 0.14f, anim), anim));
+    app.renderTarget->DrawRoundedRectangle(panelRect, app.brush, 1.0f);
+
+    // Title (fixed, not scrolled), the version at its right. The version
+    // comes from CMake's TINTA_VERSION_* defines, the single source of truth.
+    {
+        const float line = dpi(app, lineHeight(Type::Title));
+        D2D1_COLOR_F titleColor = themeUiHeading(app.theme);
+        titleColor.a = anim;
+        wchar_t version[32];
+        swprintf_s(version, _countof(version), L"v%d.%d.%d",
+                   TINTA_VERSION_MAJOR, TINTA_VERSION_MINOR,
+                   TINTA_VERSION_PATCH);
+        const float versionW = paint::labelWidth(app, version, Type::Small);
+        paint::label(app, tr(app, "help.title"), Type::Title,
+                     D2D1::RectF(panel.left + pad, panel.top + pad, panel.right - pad - versionW - dpi(app, sp12),
+                                 panel.top + pad + line),
+                     titleColor);
+        paint::label(app, version, Type::Small,
+                     D2D1::RectF(panel.right - pad - versionW - 1.0f,
+                                 paint::lineTop(app, panel.top + pad, line, Type::Small) + dpi(app, sp2),
+                                 panel.right - pad, panel.top + pad + line),
+                     paint::ink(app.theme, inkSecondary, anim));
+    }
+
+    // The room the groups scroll in, under the title
+    const D2D1_RECT_F view = D2D1::RectF(panel.left + pad, panel.top + pad + dpi(app, kHelpHeader),
+                                         panel.right - pad, panel.bottom - pad);
+    const float totalContentHeight = dpi(app, helpContentHeight(sections, two));
+    const float visibleHeight = view.bottom - view.top;
 
     // Store dimensions for input handling (scrollbar drag)
     app.helpContentHeight = totalContentHeight;
     app.helpVisibleHeight = visibleHeight;
-    app.helpScrollbarTop = contentTopY;
+    app.helpScrollbarTop = view.top;
 
     // Clamp scroll
     float maxScroll = std::max(0.0f, totalContentHeight - visibleHeight);
     app.helpScroll = std::max(0.0f, std::min(app.helpScroll, maxScroll));
 
-    // Push clip so content doesn't draw outside panel
-    app.renderTarget->PushAxisAlignedClip(
-        D2D1::RectF(panelX, contentTopY, panelX + panelWidth, contentBottomY),
-        D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    app.renderTarget->PushAxisAlignedClip(view, D2D1_ANTIALIAS_MODE_ALIASED);
 
-    float y = contentTopY - app.helpScroll;
-
-    auto drawSection = [&](const wchar_t* title, const HelpEntry* entries, int count) {
-        // Section header
-        boldFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        D2D1_COLOR_F headerColor = themeUiAccent(app.theme);
-        headerColor.a = anim;
-        app.brush->SetColor(headerColor);
-        app.renderTarget->DrawText(title, (UINT32)wcslen(title), boldFmt,
-            D2D1::RectF(leftX, y, rightEdge, y + lineH), app.brush);
-        y += lineH + sectionHeaderExtra;
-
-        for (int i = 0; i < count; i++) {
-            // Key
-            boldFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            D2D1_COLOR_F keyColor = themeUiText(app.theme);
-            keyColor.a = 0.9f * anim;
-            app.brush->SetColor(keyColor);
-            app.renderTarget->DrawText(entries[i].key, (UINT32)wcslen(entries[i].key), boldFmt,
-                D2D1::RectF(leftX + dpi(app, 8.0f), y, leftX + keyColWidth, y + lineH), app.brush);
-
-            // Description
-            normalFmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            D2D1_COLOR_F descriptionColor = themeUiText(app.theme);
-            descriptionColor.a = 0.7f * anim;
-            app.brush->SetColor(descriptionColor);
-            app.renderTarget->DrawText(entries[i].desc, (UINT32)wcslen(entries[i].desc), normalFmt,
-                D2D1::RectF(descX, y, rightEdge, y + lineH), app.brush);
-
-            y += lineH;
+    const float colW = two ? dpi(app, kHelpColumn) : view.right - view.left;
+    const float keysW = std::min(dpi(app, kHelpKeys), colW * 0.45f);
+    const float rowH = dpi(app, kHelpRow);
+    float colY[2] = {view.top - app.helpScroll, view.top - app.helpScroll};
+    bool colStarted[2] = {false, false};
+    app.helpRows.clear();
+    for (size_t i = 0; i < sections.size(); i++) {
+        const int col = helpColumnOf(i, two);
+        const float x = view.left + col * (colW + dpi(app, sp32));
+        float& y = colY[col];
+        if (colStarted[col]) y += dpi(app, sp16);
+        colStarted[col] = true;
+        paint::sectionLabel(app, sections[i].title, x, y, colW, paint::ink(app.theme, inkSecondary, anim));
+        y += dpi(app, kHelpLabel);
+        for (const HelpEntry& entry : sections[i].entries) {
+            if (y + rowH >= view.top && y <= view.bottom) {
+                paint::label(app, entry.key.c_str(), Type::Strong,
+                             D2D1::RectF(x, paint::lineTop(app, y, rowH, Type::Strong), x + keysW - dpi(app, sp12),
+                                         y + rowH),
+                             paint::ink(app.theme, inkPrimary, anim));
+                paint::label(app, entry.desc, Type::Small,
+                             D2D1::RectF(x + keysW, paint::lineTop(app, y, rowH, Type::Small), x + colW, y + rowH),
+                             paint::ink(app.theme, inkSecondary, anim));
+            }
+            app.helpRows.push_back(D2D1::RectF(x, y, x + colW, y + rowH));
+            y += rowH;
         }
-        y += sectionGap;
-    };
+    }
 
-    drawSection(tr(app, "help.section.navigation"), navEntries, (int)_countof(navEntries));
-    drawSection(tr(app, "help.section.view"), overlayEntries, (int)_countof(overlayEntries));
-    drawSection(tr(app, "help.section.editing"), editEntries, (int)_countof(editEntries));
-    drawSection(tr(app, "help.section.general"), generalEntries, (int)_countof(generalEntries));
-    drawSection(tr(app, "help.section.sheets"), sheetEntries, (int)_countof(sheetEntries));
-
-    // Footer hint
-    D2D1_COLOR_F footerColor = themeUiText(app.theme);
-    footerColor.a = 0.55f * anim;
-    app.brush->SetColor(footerColor);
-    drawCenteredText(app, tr(app, "help.footer"), normalFmt,
-        D2D1::RectF(panelX, y, panelX + panelWidth, y + lineH));
+    // Footer hint, under the taller column
+    {
+        const float line = dpi(app, lineHeight(Type::Small));
+        const float fy = view.top - app.helpScroll + totalContentHeight - line;
+        paint::label(app, tr(app, "help.footer"), Type::Small,
+                     D2D1::RectF(view.left, fy, view.right, fy + line),
+                     paint::ink(app.theme, inkSecondary, anim));
+    }
 
     app.renderTarget->PopAxisAlignedClip();
 
     // Scrollbar if content overflows
     if (maxScroll > 0) {
         float sbHeight = visibleHeight / totalContentHeight * visibleHeight;
-        sbHeight = std::max(sbHeight, dpi(app, 20.0f));
-        float sbY = contentTopY + (app.helpScroll / maxScroll * (visibleHeight - sbHeight));
-
-        D2D1_COLOR_F sbColor = themeUiText(app.theme);
-        sbColor.a = 0.3f * anim;
-        app.brush->SetColor(sbColor);
+        sbHeight = std::max(sbHeight, dpi(app, sp24));
+        float sbY = view.top + (app.helpScroll / maxScroll * (visibleHeight - sbHeight));
+        app.brush->SetColor(paint::ink(app.theme, 0.3f, anim));
         app.renderTarget->FillRoundedRectangle(
-            D2D1::RoundedRect(D2D1::RectF(panelX + panelWidth - dpi(app, 12.0f), sbY,
-                                          panelX + panelWidth - dpi(app, 8.0f), sbY + sbHeight), 2, 2),
+            D2D1::RoundedRect(D2D1::RectF(panel.left + panelWidth - dpi(app, sp12), sbY,
+                                          panel.left + panelWidth - dpi(app, sp8), sbY + sbHeight),
+                              dpi(app, sp2), dpi(app, sp2)),
             app.brush);
     }
 }

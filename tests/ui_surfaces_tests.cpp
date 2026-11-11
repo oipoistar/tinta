@@ -9,6 +9,7 @@
 #include "ui_frame.h"
 #include "ui_scale.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <functional>
 #include <fstream>
@@ -425,6 +426,72 @@ void sidePanels(App& app) {
     app.folderBrowserAnimation = 0.0f;
 }
 
+// --- The shortcut list ------------------------------------------------------
+//
+// One column of some sixty rows, 520 wide, whatever the window: most of it
+// was out of sight. In a window wide enough its groups stand in two columns.
+
+Frame help(App& app, int w, int h) {
+    app.width = w;
+    app.height = h;
+    app.showHelp = true;
+    app.helpAnimation = 1.0f;
+    return draw(app, [&] { renderHelpOverlay(app); });
+}
+
+void shortcutList(App& app) {
+    using namespace uiscale;
+    const float s = app.contentScale;
+    applyTheme(app, 0);
+    app.helpScroll = 0.0f;
+    Frame two = help(app, 1050, 900);
+    const D2D1_RECT_F panel = helpPanelRect(app);
+    std::vector<float> lefts;
+    bool rows = app.helpRows.size() > 55, inPanel = true;
+    for (const D2D1_RECT_F& r : app.helpRows) {
+        rows = rows && about(height(r), 24.0f * s);
+        if (r.left < panel.left + sp24 * s - 0.5f || r.right > panel.right - sp24 * s + 0.5f) inPanel = false;
+        if (std::none_of(lefts.begin(), lefts.end(), [&](float x) { return about(x, r.left); })) lefts.push_back(r.left);
+    }
+    check(rows, "every shortcut has a row of 24");
+    check(lefts.size() == 2 && inPanel && about(std::fabs(lefts[1] - lefts[0]), (416.0f + sp32) * s),
+          "at 1050 the groups stand in two columns, a dialog's padding inside it");
+    bool apart = true;
+    for (size_t i = 0; i < app.helpRows.size(); i++)
+        for (size_t j = i + 1; j < app.helpRows.size(); j++)
+            if (overlap(app.helpRows[i], app.helpRows[j])) apart = false;
+    check(apart, "no two rows share a place");
+    const float twoHeight = app.helpContentHeight;
+    check(app.helpContentHeight > app.helpVisibleHeight && about(height(panel), 900.0f * s - 40.0f * s),
+          "what does not fit a 900-high window scrolls");
+    shot(app, two, "help-two-columns");
+    wheel(app, -3, 500, 400);
+    Frame scrolled = help(app, 1050, 900);
+    check(app.helpScroll > 0.0f && two.differs(scrolled, panel), "the wheel scrolls the list");
+    const D2D1_RECT_F head = D2D1::RectF(panel.left, panel.top, panel.right, panel.top + (sp24 + 28.0f) * s);
+    check(!two.differs(scrolled, head), "under the title, which stays");
+    app.helpScroll = 0.0f;
+
+    // A window tall enough holds both columns whole
+    help(app, 1050, 1200);
+    check(app.helpContentHeight <= app.helpVisibleHeight + 0.5f &&
+              about(height(helpPanelRect(app)), (sp24 * 2 + 28.0f + sp16) * s + app.helpContentHeight),
+          "in a window tall enough the dialog is as tall as its columns and nothing scrolls");
+
+    // Narrow: one column, as it was
+    applyTheme(app, 5);
+    Frame one = help(app, 700, 900);
+    lefts.clear();
+    for (const D2D1_RECT_F& r : app.helpRows)
+        if (std::none_of(lefts.begin(), lefts.end(), [&](float x) { return about(x, r.left); })) lefts.push_back(r.left);
+    check(lefts.size() == 1 && app.helpContentHeight > twoHeight * 1.5f,
+          "at 700 the groups are one column, more than half again as long");
+    shot(app, one, "help-one-column-dark");
+    app.showHelp = false;
+    app.helpScroll = 0.0f;
+    applyTheme(app, 0);
+}
+
 }  // namespace
 
 int runUiSurfacesTests(const char* fixtures) {
@@ -451,6 +518,7 @@ int runUiSurfacesTests(const char* fixtures) {
     themeChooser(app);
     menus(app);
     sidePanels(app);
+    shortcutList(app);
 
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;
