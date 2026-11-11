@@ -167,6 +167,79 @@ Surface surface(const App& app) {
     return s;
 }
 
+void label(App& app, const wchar_t* text, uiscale::Type role, const D2D1_RECT_F& box, D2D1_COLOR_F color,
+           DWRITE_TEXT_ALIGNMENT align) {
+    IDWriteTextFormat* fmt = uiscale::font(app, role);
+    if (!fmt || !text || box.right <= box.left) return;
+    fmt->SetTextAlignment(align);
+    app.brush->SetColor(color);
+    app.renderTarget->DrawText(text, (UINT32)wcslen(text), fmt, box, app.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+}
+
+float labelWidth(App& app, const wchar_t* text, uiscale::Type role) {
+    if (!text || !text[0]) return 0.0f;
+    IDWriteTextLayout* layout = makeLayout(app, text, uiscale::font(app, role), 100000.0f, 100.0f);
+    if (!layout) return 0.0f;
+    const float w = metrics(layout).widthIncludingTrailingWhitespace;
+    layout->Release();
+    return w;
+}
+
+float lineTop(const App& app, float top, float height, uiscale::Type role) {
+    return top + (height - dpi(app, uiscale::lineHeight(role))) * 0.5f;
+}
+
+void sectionLabel(App& app, const wchar_t* text, float x, float y, float maxW, D2D1_COLOR_F color) {
+    std::wstring upper = text ? text : L"";
+    if (upper.empty() || maxW <= 0.0f) return;
+    CharUpperBuffW(upper.data(), (DWORD)upper.size());
+    IDWriteTextLayout* layout = nullptr;
+    app.dwriteFactory->CreateTextLayout(upper.c_str(), (UINT32)upper.size(), uiscale::font(app, uiscale::Type::Micro),
+                                        maxW, dpi(app, 16.0f), &layout);
+    if (!layout) return;
+    IDWriteTextLayout1* spaced = nullptr;
+    if (SUCCEEDED(layout->QueryInterface(__uuidof(IDWriteTextLayout1), reinterpret_cast<void**>(&spaced)))) {
+        spaced->SetCharacterSpacing(0.0f, dpi(app, 0.6f), 0.0f, {0, (UINT32)upper.size()});
+        spaced->Release();
+    }
+    app.brush->SetColor(color);
+    app.renderTarget->DrawTextLayout(D2D1::Point2F(x, y + dpi(app, 1.0f)), layout, app.brush,
+                                     D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    layout->Release();
+}
+
+D2D1_COLOR_F ink(const D2DTheme& theme, float share, float alpha) {
+    D2D1_COLOR_F c = themeUiText(theme);
+    c.a = share * alpha;
+    return c;
+}
+
+D2D1_RECT_F toggle(App& app, const D2D1_RECT_F& slot, bool on, const D2DTheme& theme, float alpha) {
+    const float w = dpi(app, 40.0f), h = dpi(app, 20.0f);
+    const float x = slot.right - w, y = (slot.top + slot.bottom - h) * 0.5f;
+    D2D1_COLOR_F track = on ? themeUiAccent(theme) : themeUiText(theme);
+    track.a = (on ? 0.9f : 0.25f) * alpha;
+    app.brush->SetColor(track);
+    app.renderTarget->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), h / 2, h / 2),
+                                           app.brush);
+    const float knobR = h / 2 - dpi(app, uiscale::sp2);
+    const float knobX = on ? x + w - h / 2 : x + h / 2;
+    app.brush->SetColor(D2D1::ColorF(1, 1, 1, alpha));
+    app.renderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(knobX, y + h / 2), knobR, knobR), app.brush);
+    return D2D1::RectF(x, y, x + w, y + h);
+}
+
+void closeCross(App& app, const D2D1_RECT_F& box, D2D1_COLOR_F color) {
+    const float cx = (box.left + box.right) * 0.5f, cy = (box.top + box.bottom) * 0.5f;
+    const float arm = dpi(app, uiscale::sp4);
+    app.brush->SetColor(color);
+    app.renderTarget->DrawLine(D2D1::Point2F(cx - arm, cy - arm), D2D1::Point2F(cx + arm, cy + arm), app.brush,
+                               dpi(app, 1.5f));
+    app.renderTarget->DrawLine(D2D1::Point2F(cx + arm, cy - arm), D2D1::Point2F(cx - arm, cy + arm), app.brush,
+                               dpi(app, 1.5f));
+}
+
 }  // namespace paint
 
 // The interface's type roles (ui_scale.h)

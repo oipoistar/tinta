@@ -14,6 +14,8 @@ void renderThemeChooser(App& app);
 // taller column (never below the built-in 5), and a theme's cell position
 // (light themes fill the left column top-down, dark the right)
 int themeChooserRows();
+// The wheel over the theme chooser: scrolls its columns by a card
+bool themeChooserWheel(App& app, float notches);
 void themeChooserCell(int themeIndex, int& col, int& row);
 void renderHelpOverlay(App& app);
 D2D1_RECT_F helpPanelRect(const App& app);

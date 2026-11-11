@@ -13,6 +13,7 @@
 #include "settings.h"
 #include "signals.h"
 #include "i18n.h"
+#include "ui_paint.h"
 #include "ui_scale.h"
 
 // Prompt-chip helpers defined with the dialogs below; the floating panels
@@ -1383,12 +1384,72 @@ void themeChooserCell(int themeIndex, int& col, int& row) {
     }
 }
 
+// --- The theme chooser on the interface's scale (ui_scale.h) ------------
+//
+// Two columns of cards, light and dark, each card a specimen of its theme
+// in the theme's own faces and colours. A card has one size: with more
+// themes than the dialog has room for, the columns scroll between the
+// header and the footer (they shrank the cards until the names lay over
+// the samples).
+namespace {
+constexpr float kChooserCard = 72.0f;      // sp8, the name, sp2, the sample, sp4, the swatches, sp8
+constexpr float kChooserHeader = 28.0f + uiscale::sp16;   // the title's line and its gap
+constexpr float kChooserLabel = 16.0f + uiscale::sp8;     // a column's label and its gap
+constexpr float kChooserFooter = uiscale::sp16 + 16.0f;   // gap and the footer's line
+constexpr float kChooserPitch = kChooserCard + uiscale::sp8;
+
+struct ChooserLayout {
+    D2D1_RECT_F panel{}, view{};
+    float cardW = 0.0f, colX[2]{}, gridH = 0.0f;
+};
+ChooserLayout chooserLayout(const App& app, float anim) {
+    using namespace uiscale;
+    ChooserLayout g;
+    const int rows = themeChooserRows();
+    const float pad = dpi(app, sp24);
+    const float w = std::min(dpi(app, 864.0f), app.width - dpi(app, 64.0f));
+    g.gridH = dpi(app, rows * kChooserCard + (rows - 1) * sp8);
+    const float around = pad * 2.0f + dpi(app, kChooserHeader + kChooserLabel + kChooserFooter);
+    // At least a card and a half of room, however short the window
+    const float h = std::max(around + dpi(app, kChooserCard * 1.5f),
+                             std::min(around + g.gridH, app.height - dpi(app, 64.0f)));
+    const float x = (app.width - w) / 2;
+    const float y = (app.height - h) / 2 + (1 - anim) * dpi(app, 40.0f);
+    g.panel = D2D1::RectF(x, y, x + w, y + h);
+    g.cardW = (w - pad * 2.0f - dpi(app, sp16)) / 2.0f;
+    g.colX[0] = x + pad;
+    g.colX[1] = x + pad + g.cardW + dpi(app, sp16);
+    const float top = y + pad + dpi(app, kChooserHeader + kChooserLabel);
+    g.view = D2D1::RectF(x + pad, top, x + w - pad, y + h - pad - dpi(app, kChooserFooter));
+    return g;
+}
+}  // namespace
+
+bool themeChooserWheel(App& app, float notches) {
+    if (!app.showThemeChooser) return false;
+    const float before = app.themeChooserScroll;
+    app.themeChooserScroll = std::clamp(app.themeChooserScroll - notches * dpi(app, kChooserPitch), 0.0f,
+                                        std::max(0.0f, app.themeChooserScrollMax));
+    if (app.themeChooserScroll != before) {
+        // Another card is under the pointer now: the theme it was showing
+        // goes, and the next move of the mouse shows the one that is there
+        if (app.themeChooserPreviewBase >= 0) {
+            applyTheme(app, app.themeChooserPreviewBase);
+            app.themeChooserPreviewBase = -1;
+        }
+        InvalidateRect(app.hwnd, nullptr, FALSE);
+    }
+    return true;
+}
+
 void renderThemeChooser(App& app) {
+    using namespace uiscale;
     // Preview formats are created lazily on first open (not at startup)
     ensureThemePreviewFormats(app);
     app.themeChooserHits.clear();
 
     // Animate in - only invalidate while progressing
+    const bool opening = app.themeChooserAnimation <= 0.0f;
     if (app.themeChooserAnimation < 1.0f) {
         float prev = app.themeChooserAnimation;
         app.themeChooserAnimation = std::min(1.0f, app.themeChooserAnimation + 0.15f);
@@ -1400,10 +1461,9 @@ void renderThemeChooser(App& app) {
     // The panel chrome follows the COMMITTED theme: while a hover preview
     // repaints the app behind the scrim, the chooser itself stays put
     // (design 12b)
-    const D2DTheme& chrome = themeAt(app.themeChooserPreviewBase >= 0
-                                         ? app.themeChooserPreviewBase
-                                         : app.currentThemeIndex);
-    D2D1_COLOR_F ink = themeUiText(chrome);
+    const int committed = app.themeChooserPreviewBase >= 0 ? app.themeChooserPreviewBase
+                                                           : app.currentThemeIndex;
+    const D2DTheme& chrome = themeAt(committed);
 
     // Scrim: dim the live app but keep it recognizable for hover preview
     float backdropAlpha = (chrome.isDark ? 0.45f : 0.3f) * anim;
@@ -1411,39 +1471,35 @@ void renderThemeChooser(App& app) {
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
-    // Layout: two columns of cards under section labels, header row above,
-    // footer row below (design t12)
-    int rows = themeChooserRows();
-    float pad = dpi(app, 22.0f);
-    float headerH = dpi(app, 46.0f);
-    float labelH = dpi(app, 22.0f);
-    float footerH = dpi(app, 32.0f);
-    float gap = dpi(app, 8.0f);
-    float panelWidth = std::min(dpi(app, 860.0f), app.width - dpi(app, 64.0f));
-    float cardH = std::min(
-        dpi(app, 74.0f),
-        (app.height - dpi(app, 60.0f) - headerH - labelH - footerH -
-         pad * 2.0f - gap * (rows - 1)) /
-            (float)rows);
-    float panelHeight = pad * 2.0f + headerH + labelH + footerH +
-                        rows * cardH + gap * (rows - 1);
-    float panelX = (app.width - panelWidth) / 2;
-    float panelY = (app.height - panelHeight) / 2 + (1 - anim) * dpi(app, 40.0f);
-    app.themeChooserPanel = D2D1::RectF(panelX, panelY, panelX + panelWidth,
-                                        panelY + panelHeight);
+    const ChooserLayout g = chooserLayout(app, anim);
+    const float pad = dpi(app, sp24);
+    const float panelX = g.panel.left, panelY = g.panel.top;
+    const float panelWidth = g.panel.right - g.panel.left;
+    const float panelHeight = g.panel.bottom - g.panel.top;
+    app.themeChooserPanel = g.panel;
+    app.themeChooserViewport = g.view;
+    const float room = g.view.bottom - g.view.top;
+    app.themeChooserScrollMax = std::max(0.0f, g.gridH - room);
+    if (opening) {
+        // Opened anew: the theme in use is in sight
+        int col = 0, row = 0;
+        themeChooserCell(committed, col, row);
+        const float top = row * dpi(app, kChooserPitch);
+        app.themeChooserScroll = top + dpi(app, kChooserCard) > room ? top + dpi(app, kChooserCard) - room : 0.0f;
+    }
+    app.themeChooserScroll = std::clamp(app.themeChooserScroll, 0.0f, app.themeChooserScrollMax);
 
     // Panel: the active theme's strip color as an acrylic-ish sheet
-    D2D1_ROUNDED_RECT panelRect = D2D1::RoundedRect(
-        app.themeChooserPanel, dpi(app, 12.0f), dpi(app, 12.0f));
+    D2D1_ROUNDED_RECT panelRect = D2D1::RoundedRect(g.panel, dpi(app, radiusDialog), dpi(app, radiusDialog));
     {
         // Soft drop shadow
         app.brush->SetColor(D2D1::ColorF(0, 0, 0, 0.35f * anim));
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(
-                D2D1::RectF(panelX + dpi(app, 2.0f), panelY + dpi(app, 6.0f),
-                            panelX + panelWidth + dpi(app, 2.0f),
-                            panelY + panelHeight + dpi(app, 10.0f)),
-                dpi(app, 14.0f), dpi(app, 14.0f)),
+                D2D1::RectF(panelX + dpi(app, sp2), panelY + dpi(app, sp4),
+                            panelX + panelWidth + dpi(app, sp2),
+                            panelY + panelHeight + dpi(app, sp8)),
+                dpi(app, radiusDialog), dpi(app, radiusDialog)),
             app.brush);
         // The committed theme's strip color, even while previewing; its
         // --ui-panel when a CSS theme gives one
@@ -1458,176 +1514,99 @@ void renderThemeChooser(App& app) {
         panelColor = themeUiPanel(chrome, panelColor);
         app.brush->SetColor(panelColor);
         app.renderTarget->FillRoundedRectangle(panelRect, app.brush);
-        D2D1_COLOR_F panelBorder = ink;
-        panelBorder.a = 0.14f * anim;
-        panelBorder = themeUiBorder(chrome, panelBorder, anim);
-        app.brush->SetColor(panelBorder);
+        app.brush->SetColor(themeUiBorder(chrome, paint::ink(chrome, 0.14f, anim), anim));
         app.renderTarget->DrawRoundedRectangle(panelRect, app.brush, 1.0f);
     }
 
     // Header: title, key hint, follow toggle, close
-    float hy = panelY + pad;
-    if (app.themeTitleFormat) {
-        app.themeTitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    const float hy = panelY + pad;
+    const float titleLine = dpi(app, lineHeight(Type::Title));
+    const D2D1_RECT_F closeBox = D2D1::RectF(g.panel.right - dpi(app, sp16 + controlBox), hy,
+                                             g.panel.right - dpi(app, sp16), hy + dpi(app, controlBox));
+    {
+        const wchar_t* title = tr(app, "theme.chooser.title");
         D2D1_COLOR_F titleColor = themeUiHeading(chrome);
         titleColor.a = anim;
-        app.brush->SetColor(titleColor);
-        const wchar_t* chooseTheme = tr(app, "theme.chooser.title");
-        app.renderTarget->DrawText(
-            chooseTheme, (UINT32)wcslen(chooseTheme), app.themeTitleFormat,
-            D2D1::RectF(panelX + pad, hy - dpi(app, 4.0f),
-                        panelX + panelWidth * 0.5f, hy + dpi(app, 26.0f)),
-            app.brush);
-    }
-    if (app.tocFormat) {
+        const float titleW = paint::labelWidth(app, title, Type::Title);
+        paint::label(app, title, Type::Title,
+                     D2D1::RectF(panelX + pad, hy, panelX + panelWidth * 0.5f, hy + titleLine), titleColor);
         // Key hint beside the title, built from the live keymap
         std::wstring hint = keyLabel(app.keymap[KA_THEME]) + L" / Esc";
-        app.tocFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        D2D1_COLOR_F hintColor = ink;
-        hintColor.a = 0.45f * anim;
-        app.brush->SetColor(hintColor);
-        float titleW = app.themeTitleFormat
-                           ? measureText(app, tr(app, "theme.chooser.title"),
-                                         app.themeTitleFormat)
-                           : dpi(app, 60.0f);
-        app.renderTarget->DrawText(
-            hint.c_str(), (UINT32)hint.size(), app.tocFormat,
-            D2D1::RectF(panelX + pad + titleW + dpi(app, 14.0f),
-                        hy + dpi(app, 3.0f), panelX + panelWidth * 0.6f,
-                        hy + dpi(app, 22.0f)),
-            app.brush);
+        const float hintX = panelX + pad + titleW + dpi(app, sp12);
+        paint::label(app, hint.c_str(), Type::Small,
+                     D2D1::RectF(hintX, paint::lineTop(app, hy, titleLine, Type::Small) + dpi(app, sp2),
+                                 panelX + panelWidth * 0.5f, hy + titleLine),
+                     paint::ink(chrome, inkSecondary, anim));
     }
-    // Close button, top-right
     {
-        float cs = dpi(app, 26.0f);
-        D2D1_RECT_F cb = D2D1::RectF(panelX + panelWidth - pad - cs,
-                                     hy - dpi(app, 2.0f),
-                                     panelX + panelWidth - pad,
-                                     hy - dpi(app, 2.0f) + cs);
-        D2D1_COLOR_F xc = ink;
-        xc.a = 0.6f * anim;
-        app.brush->SetColor(xc);
-        float ccx = (cb.left + cb.right) * 0.5f;
-        float ccy = (cb.top + cb.bottom) * 0.5f;
-        float arm = dpi(app, 4.5f);
-        app.renderTarget->DrawLine(D2D1::Point2F(ccx - arm, ccy - arm),
-                                   D2D1::Point2F(ccx + arm, ccy + arm),
-                                   app.brush, dpi(app, 1.2f));
-        app.renderTarget->DrawLine(D2D1::Point2F(ccx - arm, ccy + arm),
-                                   D2D1::Point2F(ccx + arm, ccy - arm),
-                                   app.brush, dpi(app, 1.2f));
-        app.themeChooserHits.push_back({cb, -2});
-    }
-    // "Follow Windows theme" label + toggle, right of center
-    if (app.folderBrowserFormat) {
-        float togW = dpi(app, 38.0f);
-        float togH = dpi(app, 19.0f);
-        float togX = panelX + panelWidth - pad - dpi(app, 26.0f) -
-                     dpi(app, 14.0f) - togW;
-        float togY = hy + dpi(app, 1.0f);
-        bool on = app.followSystemTheme;
-
-        const wchar_t* followWindows = tr(app, "settings.follow_windows");
-        float followWidth =
-            measureText(app, followWindows, app.folderBrowserFormat);
-        D2D1_COLOR_F toggleText = ink;
-        toggleText.a = 0.7f * anim;
-        app.folderBrowserFormat->SetTextAlignment(
-            DWRITE_TEXT_ALIGNMENT_LEADING);
-        app.brush->SetColor(toggleText);
-        app.renderTarget->DrawText(
-            followWindows, (UINT32)wcslen(followWindows),
-            app.folderBrowserFormat,
-            D2D1::RectF(togX - followWidth - dpi(app, 10.0f),
-                        togY + dpi(app, 1.0f), togX - dpi(app, 6.0f),
-                        togY + togH),
-            app.brush);
-
-        if (on) {
-            D2D1_COLOR_F track = themeUiAccent(chrome);
-            track.a = anim;
-            app.brush->SetColor(track);
+        const bool hover = app.mouseX >= closeBox.left && app.mouseX <= closeBox.right &&
+                           app.mouseY >= closeBox.top && app.mouseY <= closeBox.bottom;
+        if (hover) {
+            app.brush->SetColor(paint::ink(chrome, 0.10f, anim));
             app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(
-                    D2D1::RectF(togX, togY, togX + togW, togY + togH),
-                    togH / 2, togH / 2),
-                app.brush);
-            float lum = 0.299f * track.r + 0.587f * track.g + 0.114f * track.b;
-            app.brush->SetColor(lum > 0.45f
-                                    ? D2D1::ColorF(0.05f, 0.07f, 0.1f, anim)
-                                    : D2D1::ColorF(1, 1, 1, anim));
-            app.renderTarget->FillEllipse(
-                D2D1::Ellipse(D2D1::Point2F(togX + togW - togH / 2,
-                                            togY + togH / 2),
-                              togH / 2 - dpi(app, 3.0f),
-                              togH / 2 - dpi(app, 3.0f)),
-                app.brush);
-        } else {
-            D2D1_COLOR_F track = ink;
-            track.a = 0.35f * anim;
-            app.brush->SetColor(track);
-            app.renderTarget->DrawRoundedRectangle(
-                D2D1::RoundedRect(
-                    D2D1::RectF(togX, togY, togX + togW, togY + togH),
-                    togH / 2, togH / 2),
-                app.brush, 1.0f);
-            app.brush->SetColor(track);
-            app.renderTarget->FillEllipse(
-                D2D1::Ellipse(
-                    D2D1::Point2F(togX + togH / 2, togY + togH / 2),
-                    togH / 2 - dpi(app, 4.0f), togH / 2 - dpi(app, 4.0f)),
-                app.brush);
+                D2D1::RoundedRect(closeBox, dpi(app, radiusControl), dpi(app, radiusControl)), app.brush);
         }
-        app.themeChooserHits.push_back(
-            {D2D1::RectF(togX - followWidth - dpi(app, 10.0f),
-                         togY - dpi(app, 4.0f), togX + togW,
-                         togY + togH + dpi(app, 4.0f)),
-             -1});
+        paint::closeCross(app, closeBox, paint::ink(chrome, hover ? 1.0f : inkSecondary, anim));
+        app.themeChooserHits.push_back({closeBox, -2});
+    }
+    {
+        // "Follow Windows theme": its name and the switch, left of the close cross
+        const D2D1_RECT_F slot = D2D1::RectF(closeBox.left - dpi(app, sp16 + 40.0f), closeBox.top,
+                                             closeBox.left - dpi(app, sp16), closeBox.bottom);
+        const D2D1_RECT_F sw = paint::toggle(app, slot, app.followSystemTheme, chrome, anim);
+        const wchar_t* follow = tr(app, "settings.follow_windows");
+        const float left = std::max(panelX + panelWidth * 0.5f,
+                                    sw.left - dpi(app, sp12) - paint::labelWidth(app, follow, Type::Body));
+        paint::label(app, follow, Type::Body,
+                     D2D1::RectF(left, paint::lineTop(app, slot.top, slot.bottom - slot.top, Type::Body),
+                                 sw.left - dpi(app, sp12), slot.bottom),
+                     paint::ink(chrome, inkSecondary, anim), DWRITE_TEXT_ALIGNMENT_TRAILING);
+        app.themeChooserHits.push_back({D2D1::RectF(left, slot.top, sw.right, slot.bottom), -1});
     }
 
-    // Section labels + card columns
-    float gridY = panelY + pad + headerH;
-    float cardW = (panelWidth - pad * 2.0f - dpi(app, 16.0f)) / 2.0f;
-    float colX[2] = {panelX + pad, panelX + pad + cardW + dpi(app, 16.0f)};
-    if (app.themeHeaderFormat) {
-        app.themeHeaderFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        D2D1_COLOR_F headerColor = ink;
-        headerColor.a = 0.5f * anim;
-        app.brush->SetColor(headerColor);
-        const wchar_t* lightHdr = tr(app, "theme.chooser.light");
-        app.renderTarget->DrawText(
-            lightHdr, (UINT32)wcslen(lightHdr), app.themeHeaderFormat,
-            D2D1::RectF(colX[0] + dpi(app, 2.0f), gridY,
-                        colX[0] + cardW, gridY + labelH),
-            app.brush);
-        const wchar_t* darkHdr = tr(app, "theme.chooser.dark");
-        app.renderTarget->DrawText(
-            darkHdr, (UINT32)wcslen(darkHdr), app.themeHeaderFormat,
-            D2D1::RectF(colX[1] + dpi(app, 2.0f), gridY,
-                        colX[1] + cardW, gridY + labelH),
-            app.brush);
-    }
+    // The columns' labels, on the cards' own text edge
+    const float cardPad = dpi(app, sp12);
+    const float labelY = panelY + pad + dpi(app, kChooserHeader);
+    paint::sectionLabel(app, tr(app, "theme.chooser.light"), g.colX[0] + cardPad, labelY, g.cardW - cardPad,
+                        paint::ink(chrome, inkSecondary, anim));
+    paint::sectionLabel(app, tr(app, "theme.chooser.dark"), g.colX[1] + cardPad, labelY, g.cardW - cardPad,
+                        paint::ink(chrome, inkSecondary, anim));
 
     app.hoveredThemeIndex = -1;
-    float cardsTop = gridY + labelH;
+    const float cardH = dpi(app, kChooserCard);
+    // The shorter column stops with its last card at the foot of the room
+    // while the longer one scrolls on: no half of the dialog goes empty
+    int colCards[2] = {0, 0};
+    for (int i = 0; i < themeCount(); i++) colCards[themeAt(i).isDark ? 1 : 0]++;
+    float colScroll[2];
+    for (int c = 0; c < 2; c++) {
+        const float colH = dpi(app, colCards[c] * kChooserCard + std::max(0, colCards[c] - 1) * sp8);
+        colScroll[c] = std::min(app.themeChooserScroll, std::max(0.0f, colH - room));
+    }
+    const bool pointerInView = app.mouseY >= g.view.top && app.mouseY <= g.view.bottom;
+    // A little past the cards' room, for the ring around the chosen one
+    const float halo = dpi(app, sp4) + 1.0f;
+    app.renderTarget->PushAxisAlignedClip(
+        D2D1::RectF(g.view.left - halo, g.view.top - halo, g.view.right + halo, g.view.bottom + halo),
+        D2D1_ANTIALIAS_MODE_ALIASED);
 
     for (int i = 0; i < themeCount(); i++) {
         const D2DTheme& t = themeAt(i);
         int col, row;
         themeChooserCell(i, col, row);
-        float x = colX[col];
-        float y = cardsTop + row * (cardH + gap);
-        D2D1_RECT_F card = D2D1::RectF(x, y, x + cardW, y + cardH);
+        float x = g.colX[col];
+        float y = g.view.top + row * dpi(app, kChooserPitch) - colScroll[col];
+        D2D1_RECT_F card = D2D1::RectF(x, y, x + g.cardW, y + cardH);
+        if (card.bottom < g.view.top - halo || card.top > g.view.bottom + halo) continue;
         D2D1_ROUNDED_RECT cardRect =
-            D2D1::RoundedRect(card, dpi(app, 10.0f), dpi(app, 10.0f));
+            D2D1::RoundedRect(card, dpi(app, radiusCard), dpi(app, radiusCard));
 
-        bool isHovered = (app.mouseX >= card.left && app.mouseX <= card.right &&
+        bool isHovered = pointerInView &&
+                         (app.mouseX >= card.left && app.mouseX <= card.right &&
                           app.mouseY >= card.top && app.mouseY <= card.bottom);
         // The ring and check stay on the COMMITTED theme while a hover
         // preview repaints the app behind (design 12b)
-        bool isSelected = (i == (app.themeChooserPreviewBase >= 0
-                                     ? app.themeChooserPreviewBase
-                                     : app.currentThemeIndex));
+        bool isSelected = i == committed;
         if (isHovered) app.hoveredThemeIndex = i;
 
         // Card = the theme's own document surface
@@ -1643,62 +1622,52 @@ void renderThemeChooser(App& app) {
             app.brush->SetColor(glow);
             app.renderTarget->DrawRoundedRectangle(
                 D2D1::RoundedRect(
-                    D2D1::RectF(card.left - dpi(app, 3.0f),
-                                card.top - dpi(app, 3.0f),
-                                card.right + dpi(app, 3.0f),
-                                card.bottom + dpi(app, 3.0f)),
-                    dpi(app, 12.0f), dpi(app, 12.0f)),
-                app.brush, dpi(app, 2.0f));
+                    D2D1::RectF(card.left - dpi(app, sp2), card.top - dpi(app, sp2),
+                                card.right + dpi(app, sp2), card.bottom + dpi(app, sp2)),
+                    dpi(app, radiusCard + sp2), dpi(app, radiusCard + sp2)),
+                app.brush, dpi(app, sp2));
             D2D1_COLOR_F ring = t.accent;
             ring.a = anim;
             app.brush->SetColor(ring);
-            app.renderTarget->DrawRoundedRectangle(cardRect, app.brush,
-                                                   dpi(app, 1.5f));
+            app.renderTarget->DrawRoundedRectangle(cardRect, app.brush, dpi(app, 1.5f));
         } else {
-            D2D1_COLOR_F border = ink;
-            border.a = (isHovered ? 0.4f : 0.16f) * anim;
-            app.brush->SetColor(border);
+            app.brush->SetColor(paint::ink(chrome, isHovered ? 0.4f : 0.16f, anim));
             app.renderTarget->DrawRoundedRectangle(cardRect, app.brush, 1.0f);
         }
 
-        float cx = x + dpi(app, 12.0f);
-        float rowY = y + dpi(app, 7.0f);
-        IDWriteTextFormat* nameFormat =
-            (i < (int)app.themePreviewFormats.size())
-                ? app.themePreviewFormats[i].name
-                : nullptr;
-        IDWriteTextFormat* previewFormat =
-            (i < (int)app.themePreviewFormats.size())
-                ? app.themePreviewFormats[i].preview
-                : nullptr;
-        IDWriteTextFormat* codeFormat =
-            (i < (int)app.themePreviewFormats.size())
-                ? app.themePreviewFormats[i].code
-                : nullptr;
+        const float cx = x + cardPad;
+        const float nameY = y + dpi(app, sp8);
+        const float sampleY = nameY + dpi(app, 18.0f + sp2);
+        const float swatchY = sampleY + dpi(app, 16.0f + sp4);
+        const bool known = i < (int)app.themePreviewFormats.size();
+        IDWriteTextFormat* nameFormat = known ? app.themePreviewFormats[i].name : nullptr;
+        IDWriteTextFormat* previewFormat = known ? app.themePreviewFormats[i].preview : nullptr;
+        IDWriteTextFormat* codeFormat = known ? app.themePreviewFormats[i].code : nullptr;
 
         // Row 1: name in the theme's heading voice + accent dash (+ pin)
         float nameW = 0.0f;
         if (nameFormat) {
             nameFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+            nameFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
             D2D1_COLOR_F nameColor = t.heading;
             nameColor.a = anim;
             app.brush->SetColor(nameColor);
+            // Room for the dash, the pin and the check at the right
+            const float nameRight = x + g.cardW - dpi(app, sp32 + sp48 + sp24);
             app.renderTarget->DrawText(
                 t.name, (UINT32)wcslen(t.name), nameFormat,
-                D2D1::RectF(cx, rowY, x + cardW - dpi(app, 30.0f),
-                            rowY + dpi(app, 20.0f)),
-                app.brush);
-            nameW = measureText(app, t.name, nameFormat);
+                D2D1::RectF(cx, nameY, nameRight, nameY + dpi(app, 18.0f)),
+                app.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            nameW = std::min(measureText(app, t.name, nameFormat), nameRight - cx);
         }
         {
             D2D1_COLOR_F dash = t.accent;
             dash.a = anim;
             app.brush->SetColor(dash);
-            float dx = cx + nameW + dpi(app, 8.0f);
-            float dy = rowY + dpi(app, 8.0f);
+            float dx = cx + nameW + dpi(app, sp8);
+            float dy = nameY + dpi(app, 8.0f);
             app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(D2D1::RectF(dx, dy, dx + dpi(app, 22.0f),
-                                              dy + dpi(app, 3.0f)),
+                D2D1::RoundedRect(D2D1::RectF(dx, dy, dx + dpi(app, sp24), dy + dpi(app, 3.0f)),
                                   dpi(app, 1.5f), dpi(app, 1.5f)),
                 app.brush);
             // Default pin while follow-system is on: sun / moon on the
@@ -1706,29 +1675,23 @@ void renderThemeChooser(App& app) {
             bool pinned = app.followSystemTheme &&
                           ((t.isDark && i == app.darkThemeIndex) ||
                            (!t.isDark && i == app.lightThemeIndex));
-            if (pinned && app.tocFormat) {
-                float px = dx + dpi(app, 30.0f);
-                D2D1_RECT_F pin = D2D1::RectF(px, rowY + dpi(app, 1.0f),
-                                              px + dpi(app, 22.0f),
-                                              rowY + dpi(app, 17.0f));
+            if (pinned) {
+                float px = dx + dpi(app, sp32);
+                D2D1_RECT_F pin = D2D1::RectF(px, nameY + dpi(app, 1.0f), px + dpi(app, sp24),
+                                              nameY + dpi(app, 17.0f));
                 D2D1_COLOR_F pc = t.accent;
                 pc.a = anim;
                 app.brush->SetColor(pc);
                 app.renderTarget->DrawRoundedRectangle(
-                    D2D1::RoundedRect(pin, dpi(app, 8.0f), dpi(app, 8.0f)),
-                    app.brush, 1.0f);
-                app.tocFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-                app.renderTarget->DrawText(
-                    t.isDark ? L"\u263E" : L"\u2600", 1, app.tocFormat,
-                    D2D1::RectF(pin.left, pin.top - dpi(app, 1.0f), pin.right,
-                                pin.bottom),
-                    app.brush);
-                app.tocFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+                    D2D1::RoundedRect(pin, dpi(app, sp8), dpi(app, sp8)), app.brush, 1.0f);
+                paint::label(app, t.isDark ? L"\x263E" : L"\x2600", Type::Small,
+                             D2D1::RectF(pin.left, pin.top, pin.right, pin.bottom), pc,
+                             DWRITE_TEXT_ALIGNMENT_CENTER);
             }
         }
 
         // Row 2: body voice
-        if (previewFormat && cardH > dpi(app, 52.0f)) {
+        if (previewFormat) {
             previewFormat->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
             previewFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
             D2D1_COLOR_F textColor = t.text;
@@ -1737,35 +1700,31 @@ void renderThemeChooser(App& app) {
             app.renderTarget->DrawText(
                 L"The quick brown fox jumps over the lazy dog", 43,
                 previewFormat,
-                D2D1::RectF(cx, y + dpi(app, 27.0f), x + cardW - dpi(app, 10.0f),
-                            y + dpi(app, 43.0f)),
-                app.brush);
+                D2D1::RectF(cx, sampleY, x + g.cardW - cardPad, sampleY + dpi(app, 16.0f)),
+                app.brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
 
         // Row 3: link, code chip, blockquote bar, syntax dots
-        float by = y + cardH - dpi(app, 24.0f);
         if (previewFormat) {
             D2D1_COLOR_F linkColor = t.link;
             linkColor.a = anim;
             app.brush->SetColor(linkColor);
             app.renderTarget->DrawText(
                 L"hyperlink", 9, previewFormat,
-                D2D1::RectF(cx, by, cx + dpi(app, 70.0f), by + dpi(app, 16.0f)),
+                D2D1::RectF(cx, swatchY, cx + dpi(app, 80.0f), swatchY + dpi(app, 16.0f)),
                 app.brush);
             float lw = measureText(app, L"hyperlink", previewFormat);
             app.renderTarget->DrawLine(
-                D2D1::Point2F(cx, by + dpi(app, 14.0f)),
-                D2D1::Point2F(cx + lw, by + dpi(app, 14.0f)), app.brush, 1.0f);
+                D2D1::Point2F(cx, swatchY + dpi(app, 15.0f)),
+                D2D1::Point2F(cx + lw, swatchY + dpi(app, 15.0f)), app.brush, 1.0f);
 
-            float chipX = cx + lw + dpi(app, 10.0f);
+            float chipX = cx + lw + dpi(app, sp12);
             D2D1_COLOR_F codeBg = t.codeBackground;
             codeBg.a = anim;
             app.brush->SetColor(codeBg);
-            D2D1_RECT_F chip = D2D1::RectF(chipX, by - dpi(app, 1.0f),
-                                           chipX + dpi(app, 52.0f),
-                                           by + dpi(app, 15.0f));
+            D2D1_RECT_F chip = D2D1::RectF(chipX, swatchY, chipX + dpi(app, 56.0f), swatchY + dpi(app, 16.0f));
             app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(chip, dpi(app, 4.0f), dpi(app, 4.0f)),
+                D2D1::RoundedRect(chip, dpi(app, radiusControl), dpi(app, radiusControl)),
                 app.brush);
             if (codeFormat) {
                 codeFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
@@ -1783,9 +1742,8 @@ void renderThemeChooser(App& app) {
             app.brush->SetColor(bq);
             app.renderTarget->FillRoundedRectangle(
                 D2D1::RoundedRect(
-                    D2D1::RectF(chip.right + dpi(app, 10.0f), by,
-                                chip.right + dpi(app, 13.0f),
-                                by + dpi(app, 13.0f)),
+                    D2D1::RectF(chip.right + dpi(app, sp12), swatchY,
+                                chip.right + dpi(app, sp12 + 3.0f), swatchY + dpi(app, 16.0f)),
                     dpi(app, 1.5f), dpi(app, 1.5f)),
                 app.brush);
         }
@@ -1795,10 +1753,10 @@ void renderThemeChooser(App& app) {
                 &t.syntaxKeyword, &t.syntaxString,  &t.syntaxComment,
                 &t.syntaxNumber,  &t.syntaxFunction, &t.syntaxType,
                 &t.syntaxControlFlow};
-            float dotR = dpi(app, 3.5f);
-            float step = dpi(app, 10.0f);
-            float dxr = x + cardW - dpi(app, 13.0f);
-            float dy = by + dpi(app, 7.0f);
+            float dotR = dpi(app, sp4);
+            float step = dpi(app, sp12);
+            float dxr = x + g.cardW - cardPad - dotR;
+            float dy = swatchY + dpi(app, sp8);
             for (int d = 6; d >= 0; d--) {
                 D2D1_COLOR_F c = *dots[d];
                 c.a = anim;
@@ -1812,14 +1770,13 @@ void renderThemeChooser(App& app) {
 
         // Active check bead, top-right
         if (isSelected) {
-            float bx2 = card.right - dpi(app, 18.0f);
-            float by2 = card.top + dpi(app, 18.0f);
+            float bx2 = card.right - dpi(app, sp12 + sp8);
+            float by2 = card.top + dpi(app, sp12 + sp8);
             D2D1_COLOR_F bead = t.accent;
             bead.a = anim;
             app.brush->SetColor(bead);
             app.renderTarget->FillEllipse(
-                D2D1::Ellipse(D2D1::Point2F(bx2, by2), dpi(app, 9.0f),
-                              dpi(app, 9.0f)),
+                D2D1::Ellipse(D2D1::Point2F(bx2, by2), dpi(app, sp8), dpi(app, sp8)),
                 app.brush);
             float lum = 0.299f * t.accent.r + 0.587f * t.accent.g +
                         0.114f * t.accent.b;
@@ -1836,28 +1793,37 @@ void renderThemeChooser(App& app) {
                 app.brush, dpi(app, 1.8f));
         }
 
-        app.themeChooserHits.push_back({card, i});
+        // What scrolled out of the cards' room cannot be clicked
+        D2D1_RECT_F hit = card;
+        hit.top = std::max(hit.top, g.view.top);
+        hit.bottom = std::min(hit.bottom, g.view.bottom);
+        if (hit.bottom > hit.top) app.themeChooserHits.push_back({hit, i});
+    }
+    app.renderTarget->PopAxisAlignedClip();
+
+    if (app.themeChooserScrollMax > 0.0f) {
+        const float thumb = std::max(dpi(app, sp24), room * room / g.gridH);
+        const float ty = g.view.top + app.themeChooserScroll / app.themeChooserScrollMax * (room - thumb);
+        const float tx = g.view.right + dpi(app, sp8);
+        app.brush->SetColor(paint::ink(chrome, 0.22f, anim));
+        app.renderTarget->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(tx, ty, tx + dpi(app, sp4), ty + thumb), dpi(app, sp2), dpi(app, sp2)),
+            app.brush);
     }
 
-    // Footer: edit-theme entry (left), follow-system explainer (right)
-    if (app.tocFormat) {
-        float fy = panelY + panelHeight - pad - dpi(app, 18.0f);
-        app.tocFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-        std::wstring edit = std::wstring(L"\u270E ") + tr(app, "settings.edit");
+    // Footer: edit-theme entry
+    {
+        const float line = dpi(app, lineHeight(Type::Small));
+        const float fy = g.panel.bottom - pad - line;
+        std::wstring edit = std::wstring(L"\x270E ") + tr(app, "settings.edit");
         edit += L" - themes.ini";
-        D2D1_COLOR_F ec = ink;
-        ec.a = 0.55f * anim;
-        app.brush->SetColor(ec);
-        app.renderTarget->DrawText(
-            edit.c_str(), (UINT32)edit.size(), app.tocFormat,
-            D2D1::RectF(panelX + pad, fy, panelX + panelWidth * 0.6f,
-                        fy + dpi(app, 18.0f)),
-            app.brush);
-        float ew = measureText(app, edit.c_str(), app.tocFormat);
+        paint::label(app, edit.c_str(), Type::Small,
+                     D2D1::RectF(panelX + pad + cardPad, fy, panelX + panelWidth * 0.6f, fy + line),
+                     paint::ink(chrome, inkSecondary, anim));
+        const float ew = paint::labelWidth(app, edit.c_str(), Type::Small);
         app.themeChooserHits.push_back(
-            {D2D1::RectF(panelX + pad - dpi(app, 4.0f), fy - dpi(app, 4.0f),
-                         panelX + pad + ew + dpi(app, 8.0f),
-                         fy + dpi(app, 20.0f)),
+            {D2D1::RectF(panelX + pad + cardPad - dpi(app, sp4), fy - dpi(app, sp4),
+                         panelX + pad + cardPad + ew + dpi(app, sp4), fy + line + dpi(app, sp4)),
              -3});
     }
 }
@@ -2618,30 +2584,21 @@ D2D1_COLOR_F settingsLift(const App& app, float darkT, float lightT,
 // moves under the label. Every gap, row height and corner is the scale's.
 
 D2D1_COLOR_F settingsInk(const App& app, float share, float anim) {
-    D2D1_COLOR_F c = themeUiText(app.theme);
-    c.a = share * anim;
-    return c;
+    return paint::ink(app.theme, share, anim);
 }
 
-// One line of interface text in a type role, trimmed with an ellipsis
+// The shared pieces (ui_paint.h) under the names this dialog grew up with
 void settingsText(App& app, const wchar_t* text, uiscale::Type role, const D2D1_RECT_F& box,
                   D2D1_COLOR_F color, DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING) {
-    IDWriteTextFormat* fmt = uiscale::font(app, role);
-    if (!fmt || !text || box.right <= box.left) return;
-    fmt->SetTextAlignment(align);
-    app.brush->SetColor(color);
-    app.renderTarget->DrawText(text, (UINT32)wcslen(text), fmt, box, app.brush,
-                               D2D1_DRAW_TEXT_OPTIONS_CLIP);
-    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    paint::label(app, text, role, box, color, align);
 }
 
 float settingsTextWidth(App& app, const wchar_t* text, uiscale::Type role) {
-    return text ? measureText(app, text, uiscale::font(app, role)) : 0.0f;
+    return paint::labelWidth(app, text, role);
 }
 
-// A line of `role` centred in a box as high as `height`: where its top goes
 float settingsLineTop(const App& app, float top, float height, uiscale::Type role) {
-    return top + (height - dpi(app, uiscale::lineHeight(role))) * 0.5f;
+    return paint::lineTop(app, top, height, role);
 }
 
 constexpr float kSettingsToggleW = 40.0f;
@@ -2663,22 +2620,11 @@ constexpr float kSettingsRailW = 140.0f;
 constexpr float kSettingsMark = 3.0f;
 
 D2D1_RECT_F settingsToggle(App& app, const D2D1_RECT_F& slot, bool on, int action, float anim) {
-    const float w = dpi(app, kSettingsToggleW), h = dpi(app, kSettingsToggleH);
-    const float x = slot.right - w, y = (slot.top + slot.bottom - h) * 0.5f;
-    D2D1_COLOR_F track = on ? themeUiAccent(app.theme) : themeUiText(app.theme);
-    track.a = (on ? 0.9f : 0.25f) * anim;
-    app.brush->SetColor(track);
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), h / 2, h / 2), app.brush);
-    const float knobR = h / 2 - dpi(app, uiscale::sp2);
-    const float knobX = on ? x + w - h / 2 : x + h / 2;
-    app.brush->SetColor(D2D1::ColorF(1, 1, 1, anim));
-    app.renderTarget->FillEllipse(
-        D2D1::Ellipse(D2D1::Point2F(knobX, y + h / 2), knobR, knobR), app.brush);
+    const D2D1_RECT_F r = paint::toggle(app, slot, on, app.theme, anim);
     // Generous hit area: the whole row height around the switch
     const float reach = dpi(app, uiscale::sp8);
-    app.settingsHits.push_back({D2D1::RectF(x - reach, y - reach, x + w + reach, y + h + reach), action});
-    return D2D1::RectF(x, y, x + w, y + h);
+    app.settingsHits.push_back({D2D1::RectF(r.left - reach, r.top - reach, r.right + reach, r.bottom + reach), action});
+    return r;
 }
 
 float settingsChipWidth(App& app, const wchar_t* label) {
@@ -2930,14 +2876,7 @@ void renderSettingsOverlay(App& app) {
         app.renderTarget->FillRoundedRectangle(
             D2D1::RoundedRect(closeRect, dpi(app, radiusControl), dpi(app, radiusControl)), app.brush);
     }
-    app.brush->SetColor(settingsInk(app, closeHover ? 1.0f : inkSecondary, anim));
-    float closeX = (closeRect.left + closeRect.right) / 2;
-    float closeY = (closeRect.top + closeRect.bottom) / 2;
-    float arm = dpi(app, sp4);
-    app.renderTarget->DrawLine(D2D1::Point2F(closeX-arm, closeY-arm),
-        D2D1::Point2F(closeX+arm, closeY+arm), app.brush, dpi(app, 1.5f));
-    app.renderTarget->DrawLine(D2D1::Point2F(closeX+arm, closeY-arm),
-        D2D1::Point2F(closeX-arm, closeY+arm), app.brush, dpi(app, 1.5f));
+    paint::closeCross(app, closeRect, settingsInk(app, closeHover ? 1.0f : inkSecondary, anim));
     app.settingsHits.push_back({closeRect, SET_CLOSE});
 
     // Sections: a rail at the left, or across the top of a narrow dialog
@@ -3019,23 +2958,8 @@ void renderSettingsOverlay(App& app) {
         const SettingsGroupSpec& group = page[groupAt];
         if (groupAt) cy += dpi(app, sp24);
         // The label: small capitals with a little air between the letters
-        std::wstring label = group.label ? group.label : L"";
-        if (!label.empty()) CharUpperBuffW(label.data(), (DWORD)label.size());
-        IDWriteTextLayout* tl = nullptr;
-        app.dwriteFactory->CreateTextLayout(label.c_str(), (UINT32)label.size(), font(app, Type::Micro),
-                                            std::max(1.0f, cw - rowPad * 2), dpi(app, 16.0f), &tl);
-        if (tl) {
-            IDWriteTextLayout1* spaced = nullptr;
-            if (SUCCEEDED(tl->QueryInterface(__uuidof(IDWriteTextLayout1),
-                                             reinterpret_cast<void**>(&spaced)))) {
-                spaced->SetCharacterSpacing(0.0f, dpi(app, 0.6f), 0.0f, {0, (UINT32)label.size()});
-                spaced->Release();
-            }
-            app.brush->SetColor(settingsInk(app, inkSecondary, anim));
-            app.renderTarget->DrawTextLayout(D2D1::Point2F(cx + rowPad, cy + dpi(app, 1.0f)), tl, app.brush,
-                                             D2D1_DRAW_TEXT_OPTIONS_CLIP);
-            tl->Release();
-        }
+        paint::sectionLabel(app, group.label, cx + rowPad, cy, std::max(1.0f, cw - rowPad * 2),
+                            settingsInk(app, inkSecondary, anim));
         app.settingsGroupLabels.push_back(D2D1::RectF(cx + rowPad, cy, cx + cw - rowPad, cy + dpi(app, 16.0f)));
         cy += dpi(app, kSettingsGroupHead);
         float cardH = 0.0f;

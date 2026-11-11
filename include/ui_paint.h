@@ -4,6 +4,7 @@
 #pragma once
 
 #include "app.h"
+#include "ui_scale.h"
 
 #include <d2d1.h>
 #include <dwrite.h>
@@ -41,5 +42,23 @@ struct Surface {
 };
 Surface surface(const App& app);
 Surface pageSurface(const App& app);
+
+// --- Pieces every surface on the interface's scale draws with (ui_scale.h)
+
+// One line of interface text in a type role, trimmed with an ellipsis
+void label(App& app, const wchar_t* text, uiscale::Type role, const D2D1_RECT_F& box, D2D1_COLOR_F color,
+           DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING);
+float labelWidth(App& app, const wchar_t* text, uiscale::Type role);
+// Where a line of `role` goes to stand centred in a box `height` high
+float lineTop(const App& app, float top, float height, uiscale::Type role);
+// A section's label: Micro, upper case, a little air between the letters
+void sectionLabel(App& app, const wchar_t* text, float x, float y, float maxW, D2D1_COLOR_F color);
+// The interface's text colour at a share of its strength
+D2D1_COLOR_F ink(const D2DTheme& theme, float share, float alpha = 1.0f);
+// A switch, 40 by 20, at the right of `slot` and centred in its height.
+// Returns where it stands.
+D2D1_RECT_F toggle(App& app, const D2D1_RECT_F& slot, bool on, const D2DTheme& theme, float alpha);
+// A dialog's close cross in its box
+void closeCross(App& app, const D2D1_RECT_F& box, D2D1_COLOR_F color);
 
 }  // namespace paint

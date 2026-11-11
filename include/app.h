@@ -741,6 +741,10 @@ struct App {
     float themeChooserAnimation = 0.0f;  // 0 to 1 for fade in
     std::vector<std::pair<D2D1_RECT_F, int>> themeChooserHits;
     D2D1_RECT_F themeChooserPanel{};
+    // More themes than the dialog has room for scroll in it (the wheel)
+    float themeChooserScroll = 0.0f;
+    float themeChooserScrollMax = 0.0f;
+    D2D1_RECT_F themeChooserViewport{};
     int themeChooserPreviewBase = -1;
 
     // --- Tabbed interface (Win11 Notepad-style tabs in the title bar) ---

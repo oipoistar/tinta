@@ -700,6 +700,7 @@ void ensureThemePreviewFormats(App& app) {
     if (!app.themePreviewFormats.empty()) return;
 
     float scale = app.contentScale;
+    // A card's specimen in the scale's sizes: 13, 12 and 11 (ui_scale.h)
     app.themePreviewFormats.resize(themeCount());
     for (int i = 0; i < themeCount(); i++) {
         // In the faces the theme will draw with
@@ -707,13 +708,13 @@ void ensureThemePreviewFormats(App& app) {
         useInstalledFaces(app, t);
         app.dwriteFactory->CreateTextFormat(fontfaces::name(t.fontFamily), fontfaces::collection(t.fontFamily),
             DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            14.0f * scale, L"en-us", &app.themePreviewFormats[i].name);
+            13.0f * scale, L"en-us", &app.themePreviewFormats[i].name);
         app.dwriteFactory->CreateTextFormat(fontfaces::name(t.fontFamily), fontfaces::collection(t.fontFamily),
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            11.0f * scale, L"en-us", &app.themePreviewFormats[i].preview);
+            12.0f * scale, L"en-us", &app.themePreviewFormats[i].preview);
         app.dwriteFactory->CreateTextFormat(fontfaces::name(t.codeFontFamily), fontfaces::collection(t.codeFontFamily),
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            10.0f * scale, L"en-us", &app.themePreviewFormats[i].code);
+            11.0f * scale, L"en-us", &app.themePreviewFormats[i].code);
         useUiFontFallback(app, app.themePreviewFormats[i].name);
         useUiFontFallback(app, app.themePreviewFormats[i].preview);
         useUiFontFallback(app, app.themePreviewFormats[i].code);

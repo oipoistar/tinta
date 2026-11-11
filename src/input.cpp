@@ -1098,6 +1098,11 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
         return;
     }
 
+    if (app.showThemeChooser) {
+        themeChooserWheel(app, (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA);
+        return;
+    }
+
     if (app.showSettings) {
         const float notches = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
         if (!settingsWheel(app, notches)) frontmatterScroll(app, notches);
