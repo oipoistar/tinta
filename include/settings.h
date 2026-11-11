@@ -23,6 +23,10 @@ void clearRecentFiles();
 
 // Theme changes persist immediately so new windows spawn in the same look
 void persistThemeChoice(const App& app);
+// The themes in use, for light and for dark, into settings by place and by
+// name; and out of them, each where the theme of that name stands now
+void settingsTakeThemes(Settings& settings, const App& app);
+void settingsGiveThemes(const Settings& settings, int& current, int& light, int& dark);
 // Editor mode pill choice (and the assists switch) persist immediately
 void persistEditorMode(const App& app);
 void persistWordCount(const App& app);

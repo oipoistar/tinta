@@ -12,6 +12,10 @@
 // background and text to body, h1-h6, link to a, code and codebackground
 // to pre, inlinecode to code, and so on
 std::string themeToCss(const D2DTheme& theme);
+// The same as the text of a file of its own (themes\<name>.css, written
+// for a themes.ini section): each face followed by the ones Tinta falls
+// back to, so the HTML export's page finds a face on another system too
+std::string themeToCssFile(const D2DTheme& theme);
 
 // A CSS theme read into the theme Tinta draws with: it starts from Paper,
 // or Midnight when dark, and takes what the sheet declares for the page,

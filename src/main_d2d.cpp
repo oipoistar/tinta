@@ -1856,7 +1856,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             {
                 // Load existing settings to preserve values like hasAskedFileAssociation
                 Settings settings = loadSettings();
-                settings.themeIndex = app->currentThemeIndex;
+                settingsTakeThemes(settings, *app);
                 settings.zoomFactor = app->zoomFactor;
                 settings.editorShowPreview = app->editorShowPreview;
                 settings.editorWordWrap = app->editorWordWrap;
@@ -1869,8 +1869,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // showWordCount, closeKeepsDrafts and printMarginMm persist
                 // when changed and stay as on disk here, like openInTabs below
                 settings.followSystemTheme = app->followSystemTheme;
-                settings.lightThemeIndex = app->lightThemeIndex;
-                settings.darkThemeIndex = app->darkThemeIndex;
                 settings.checkUpdates = app->updateCheckEnabled;
                 settings.lastUpdateCheck = app->updateLastCheck;
                 settings.dismissedUpdate = app->updateDismissedVersion;
@@ -1995,8 +1993,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.updateCheckEnabled = savedSettings.checkUpdates;
     app.updateLastCheck = savedSettings.lastUpdateCheck;
     app.updateDismissedVersion = savedSettings.dismissedUpdate;
-    app.lightThemeIndex = savedSettings.lightThemeIndex;
-    app.darkThemeIndex = savedSettings.darkThemeIndex;
+    // By name, wherever the themes stand in the list now
+    int chosenTheme = 0;
+    settingsGiveThemes(savedSettings, chosenTheme, app.lightThemeIndex, app.darkThemeIndex);
     app.folderSearchEnabled = savedSettings.folderSearchEnabled;
     app.tabSearchEnabled = savedSettings.tabSearchEnabled;
     app.browserFocusPath = savedSettings.browserFocusPath;
@@ -2019,8 +2018,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.mathFont = toWide(savedSettings.mathFont);
     app.cjkFont = toWide(savedSettings.cjkFont);
     themesSetSystemDark(!systemPrefersLight());
-    int startTheme = app.followSystemTheme ? autoThemeIndex(app)
-                                           : savedSettings.themeIndex;
+    int startTheme = app.followSystemTheme ? autoThemeIndex(app) : chosenTheme;
     app.currentThemeIndex = startTheme;
     if (startTheme >= themeCount()) startTheme = 0;
     app.currentThemeIndex = startTheme;

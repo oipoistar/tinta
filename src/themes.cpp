@@ -284,6 +284,8 @@ void writeThemesIni() {
     file << "; Optional bold, italic and bolditalic colour emphasised text;\n";
     file << "; selection tints the selection and hr colours horizontal rules.\n";
     file << "; An empty headingfont= sets headings in font=.\n";
+    file << "; Each theme is also written as themes/<name>.css, which follows its\n";
+    file << "; section here until that file is changed by hand (docs/css-themes.md).\n";
     for (const auto& ct : g_customThemes) {
         const D2DTheme& t = ct->theme;
         file << "\n[theme]\n";
@@ -376,6 +378,10 @@ struct CssEntry {
     std::unique_ptr<CustomTheme> light, dark;  // dark: a sheet that follows Windows
     std::shared_ptr<const css::Sheet> sheet;
     std::vector<css::Diagnostic> diagnostics;
+    // The file of a themes.ini section (below): the theme has the section's
+    // name, whatever the file's, and starts from Paper as the section does
+    std::wstring name;
+    bool fromIni = false;
 };
 std::vector<std::unique_ptr<CssEntry>> g_cssThemes;
 // Themes a reload replaced: copies of a D2DTheme may still point into
@@ -442,10 +448,12 @@ void readCssTheme(CssEntry& entry) {
     };
     std::wstring name = entry.path.substr(entry.path.find_last_of(L"\\/") + 1);
     if (name.size() > 4) name.resize(name.size() - 4);  // .css
+    if (!entry.name.empty()) name = entry.name;
+    const D2DTheme* base = entry.fromIni ? &THEMES[0] : nullptr;
     auto light = std::make_unique<CustomTheme>();
     light->name = name;
     CssTheme compiled = compileCssTheme(readable ? text : std::string(), wideToUtf8Theme(entry.path), false,
-                                        imports, *light);
+                                        imports, *light, base);
     light->sourcePath = entry.path;
     bindStrings(*light);
     light->theme.sourcePath = light->sourcePath.c_str();
@@ -453,7 +461,7 @@ void readCssTheme(CssEntry& entry) {
     if (compiled.lightDark) {
         dark = std::make_unique<CustomTheme>();
         dark->name = name;
-        compileCssTheme(text, wideToUtf8Theme(entry.path), true, imports, *dark);
+        compileCssTheme(text, wideToUtf8Theme(entry.path), true, imports, *dark, base);
         dark->sourcePath = entry.path;
         bindStrings(*dark);
         dark->theme.sourcePath = dark->sourcePath.c_str();
@@ -465,6 +473,157 @@ void readCssTheme(CssEntry& entry) {
     entry.sheet = compiled.sheet;
     entry.diagnostics = std::move(compiled.diagnostics);
     if (!readable) entry.diagnostics.push_back({css::Diagnostic::Error, wideToUtf8Theme(entry.path), 0, 0, "the file cannot be read"});
+}
+
+// ---- themes.ini sections as CSS files ----
+//
+// Every theme is to be a CSS file. Until themes.ini is read no more, each
+// of its sections is written as <config>\themes\<name>.css and the page is
+// styled from that sheet, as a built-in theme's is from its own. The theme
+// keeps its name and its place in the list.
+//
+// The file follows its section for as long as it stays as Tinta wrote it:
+// a hand edit of themes.ini (#310) or a save from the theme editor writes
+// it again. Its first comment carries a sum of what follows; once the two
+// disagree the file was changed by its owner, and from then on it is the
+// theme: read as any CSS theme is, the section left alone. A sheet of the
+// same name without the comment is somebody's own, and both stay listed.
+// A section taken out of themes.ini takes its unchanged file with it.
+
+const char kIniMark[] = "tinta-themes-ini: ";
+bool g_iniBecomesCss = true;
+
+struct Converted {
+    std::unique_ptr<CssEntry> entry;  // null: the section is drawn without a sheet
+    bool pristine = false;            // the file is as written: the section is the theme
+};
+std::vector<Converted> g_converted;   // one for each of g_customThemes
+
+unsigned sumOf(const std::string& text) {
+    unsigned h = 2166136261u;
+    for (unsigned char c : text) h = (h ^ c) * 16777619u;
+    return h;
+}
+
+// A theme's name as a file's: what a file name cannot hold becomes _
+std::wstring fileSafe(const std::wstring& name) {
+    std::wstring safe;
+    for (wchar_t c : name) safe += c < 32 || wcschr(L"<>:\"/\\|?*", c) ? L'_' : c;
+    while (!safe.empty() && (safe.back() == L' ' || safe.back() == L'.')) safe.pop_back();
+    while (!safe.empty() && safe.front() == L' ') safe.erase(0, 1);
+    return safe.empty() ? L"theme" : safe;
+}
+
+std::string convertedText(const CustomTheme& ct) {
+    const std::string body = themeToCssFile(ct.theme);
+    std::string name = wideToUtf8Theme(ct.name);
+    for (size_t at = name.find("*/"); at != std::string::npos; at = name.find("*/", at)) name.replace(at, 2, "* /");
+    char sum[16];
+    snprintf(sum, sizeof(sum), "%08x", sumOf(body));
+    return "/* " + name + "\n"
+           "   Written by Tinta from this theme's section in themes.ini, which it\n"
+           "   follows while it stays as written: change the section, or the theme in\n"
+           "   Settings, and this file is written again. Change anything below and the\n"
+           "   theme is this file: Tinta leaves it alone from then on and reads its\n"
+           "   section no more. What CSS a theme can hold: docs/css-themes.md\n"
+           "   " + kIniMark + sum + " */\n" + body;
+}
+
+// 0: not written by Tinta. 1: written by it and changed since. 2: as written
+int convertedState(const std::string& text) {
+    if (text.compare(0, 2, "/*") != 0) return 0;
+    const size_t end = text.find("*/");
+    const size_t mark = text.find(kIniMark);
+    if (end == std::string::npos || mark == std::string::npos || mark > end) return 0;
+    const std::string sum = text.substr(mark + sizeof(kIniMark) - 1, 8);
+    const size_t body = end + 2 < text.size() && text[end + 2] == '\n' ? end + 3 : end + 2;
+    char now[16];
+    snprintf(now, sizeof(now), "%08x", sumOf(text.substr(body)));
+    return sum == now ? 2 : 1;
+}
+
+bool writeUtf8(const std::wstring& path, const std::string& text) {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    file << text;
+    file.close();
+    return file.good();
+}
+
+void retire(std::unique_ptr<CssEntry>& entry) {
+    if (!entry) return;
+    if (entry->light) g_retiredThemes.push_back(std::move(entry->light));
+    if (entry->dark) g_retiredThemes.push_back(std::move(entry->dark));
+    entry.reset();
+}
+
+// Writes the files that are missing or follow a changed section, and reads
+// each section's sheet
+void convertIniThemes() {
+    for (auto& converted : g_converted) retire(converted.entry);
+    g_converted.clear();
+    g_converted.resize(g_customThemes.size());
+    const std::wstring config = tintaConfigDir();
+    if (config.empty() || !g_iniBecomesCss) return;
+    const std::wstring dir = config + L"\\themes";
+    std::vector<std::wstring> taken;
+    for (size_t i = 0; i < g_customThemes.size(); ++i) {
+        const CustomTheme& ct = *g_customThemes[i];
+        const std::wstring stem = fileSafe(ct.name);
+        // Two sections that come to one file's name: the first has it
+        bool twice = false;
+        for (const auto& name : taken) twice = twice || _wcsicmp(name.c_str(), stem.c_str()) == 0;
+        if (twice) continue;
+        taken.push_back(stem);
+        const std::wstring path = dir + L"\\" + stem + L".css";
+        const std::string wanted = convertedText(ct);
+        std::string have;
+        int state = 2;
+        if (!readUtf8(path, have)) {
+            CreateDirectoryW(dir.c_str(), nullptr);
+            if (!writeUtf8(path, wanted)) continue;  // nowhere to write: as before, without a sheet
+        } else {
+            state = convertedState(have);
+            if (state == 0) continue;
+            if (state == 2 && have != wanted) writeUtf8(path, wanted);
+        }
+        auto entry = std::make_unique<CssEntry>();
+        entry->path = path;
+        entry->name = ct.name;
+        entry->fromIni = true;
+        if (state == 2) {
+            // The section is the theme, as it always was; its sheet is for the page
+            const css::ImportSource none = [](std::string_view, std::string_view, std::string&, std::string&) { return false; };
+            CustomTheme unused;
+            entry->sheet = compileCssTheme(wanted, wideToUtf8Theme(path), false, none, unused, &THEMES[0]).sheet;
+            FILETIME time{};
+            fileTime(path, time);
+            entry->files.push_back({path, time});
+        } else {
+            readCssTheme(*entry);
+        }
+        g_converted[i].pristine = state == 2;
+        g_converted[i].entry = std::move(entry);
+    }
+}
+
+// The sheet of a themes.ini section, when it has one
+Converted* convertedAt(int index) {
+    const int custom = index - THEME_COUNT;
+    if (custom < 0 || custom >= (int)g_converted.size() || !g_converted[custom].entry) return nullptr;
+    return &g_converted[custom];
+}
+
+// A theme that is its file: a CSS theme, or a section's file changed by hand
+CssEntry* fileThemeAt(int index) {
+    if (Converted* converted = convertedAt(index)) return converted->pristine ? nullptr : converted->entry.get();
+    return cssEntryAt(index);
+}
+
+bool isSectionFile(const std::wstring& path) {
+    for (const auto& converted : g_converted) {
+        if (converted.entry && _wcsicmp(converted.entry->path.c_str(), path.c_str()) == 0) return true;
+    }
+    return false;
 }
 
 void loadCssThemes() {
@@ -480,7 +639,19 @@ void loadCssThemes() {
     } while (FindNextFileW(search, &found));
     FindClose(search);
     std::sort(paths.begin(), paths.end(), [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
+    const std::wstring ini = themesIniPath();
+    const bool iniThere = !ini.empty() && GetFileAttributesW(ini.c_str()) != INVALID_FILE_ATTRIBUTES;
     for (const auto& path : paths) {
+        if (isSectionFile(path)) continue;  // listed where its section stands
+        // A section's file, still as Tinta wrote it, whose section has gone
+        // from themes.ini (taken out, or given another name): it goes with
+        // it, as the theme did before. With no themes.ini at all the files
+        // are the themes; and one its owner changed is always kept
+        std::string text;
+        if (iniThere && g_iniBecomesCss && readUtf8(path, text) && convertedState(text) == 2) {
+            DeleteFileW(path.c_str());
+            continue;
+        }
         auto entry = std::make_unique<CssEntry>();
         entry->path = path;
         readCssTheme(*entry);
@@ -492,31 +663,42 @@ void loadCssThemes() {
 
 void themesSetSystemDark(bool dark) { g_systemDark = dark; }
 
+bool& themesIniBecomesCss() { return g_iniBecomesCss; }
+
 bool themeFollowsSystem(int index) {
-    const CssEntry* entry = cssEntryAt(index);
+    const CssEntry* entry = fileThemeAt(index);
     return entry && entry->dark;
 }
 
 std::wstring themeSourcePath(int index) {
-    const CssEntry* entry = cssEntryAt(index);
+    const CssEntry* entry = fileThemeAt(index);
     return entry ? entry->path : std::wstring();
 }
 
 bool themeReloadIfChanged(int index) {
-    CssEntry* entry = cssEntryAt(index);
+    Converted* converted = convertedAt(index);
+    CssEntry* entry = converted ? converted->entry.get() : cssEntryAt(index);
     if (!entry) return false;
     bool changed = false;
     for (const auto& file : entry->files) {
         FILETIME now{};
         if (!fileTime(file.first, now) || CompareFileTime(&now, &file.second) != 0) changed = true;
     }
-    if (changed) readCssTheme(*entry);
-    return changed;
+    if (!changed) return false;
+    if (converted) {
+        // A section's file: changed by hand it is the theme from now on,
+        // and one taken away is written again
+        convertIniThemes();
+        loadCssThemes();
+    } else {
+        readCssTheme(*entry);
+    }
+    return true;
 }
 
 std::vector<std::wstring> themeProblems(int index) {
     std::vector<std::wstring> problems;
-    const CssEntry* entry = cssEntryAt(index);
+    const CssEntry* entry = fileThemeAt(index);
     if (!entry) return problems;
     for (const auto& d : entry->diagnostics) {
         std::wstring file = utf8ToWideTheme(d.file);
@@ -535,6 +717,7 @@ std::shared_ptr<const css::Sheet> themeSheet(int index) {
         builtinTheme(index);
         return builtinMade(index).sheet;
     }
+    if (const Converted* converted = convertedAt(index)) return converted->entry->sheet;
     const CssEntry* entry = cssEntryAt(index);
     return entry ? entry->sheet : nullptr;
 }
@@ -552,18 +735,35 @@ const D2DTheme& themeAt(int index) {
     if (index >= 0 && index < THEME_COUNT) return THEMES[index];
     int custom = index - THEME_COUNT;
     if (custom >= 0 && custom < (int)g_customThemes.size()) {
-        return g_customThemes[custom]->theme;
+        // Its file, once that was changed by hand; else the section itself
+        const Converted* converted = convertedAt(index);
+        if (!converted || converted->pristine) return g_customThemes[custom]->theme;
     }
-    if (const CssEntry* entry = cssEntryAt(index)) {
+    if (const CssEntry* entry = fileThemeAt(index)) {
         return g_systemDark && entry->dark ? entry->dark->theme : entry->light->theme;
     }
     return THEMES[0];
+}
+
+int themeIndexNamed(const std::string& name, int index) {
+    if (name.empty()) return index;
+    const std::wstring wanted = utf8ToWideTheme(name);
+    if (index >= 0 && index < themeCount() && _wcsicmp(themeAt(index).name, wanted.c_str()) == 0) return index;
+    for (int i = 0; i < themeCount(); ++i) {
+        if (_wcsicmp(themeAt(i).name, wanted.c_str()) == 0) return i;
+    }
+    return -1;
+}
+
+std::string themeNameAt(int index) {
+    return index >= 0 && index < themeCount() ? wideToUtf8Theme(themeAt(index).name) : std::string();
 }
 
 static void loadCustomThemesIni();
 
 void loadCustomThemes() {
     loadCustomThemesIni();
+    convertIniThemes();
     loadCssThemes();
 }
 
@@ -624,7 +824,7 @@ int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
     if (!slot) {
         g_customThemes.push_back(std::make_unique<CustomTheme>());
         slot = g_customThemes.back().get();
-        index = themeCount() - 1;
+        index = THEME_COUNT + (int)g_customThemes.size() - 1;  // CSS themes stand after the sections
     }
     slot->name = name;
     slot->fontFamily = fontFamily.empty() ? L"Segoe UI" : fontFamily;
@@ -633,5 +833,8 @@ int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
     slot->theme = t;
     bindStrings(*slot);
     writeThemesIni();
+    // Its CSS file follows, and a sheet of that name is listed where the section stands
+    convertIniThemes();
+    loadCssThemes();
     return index;
 }

@@ -99,6 +99,10 @@ tr:nth-child(even) td { background: color-mix(in oklab, var(--ink) 4%, transpare
 - Settings > Appearance: **New CSS theme** writes a commented starter file
   (the current theme as CSS) and opens it in a tab; **Edit** on a CSS theme
   opens its file. The colour editor keeps editing `themes.ini` themes.
+- A `themes.ini` section is written as a CSS file of its name and drawn
+  from it, in its place among the sections. The file follows the section
+  while it is as written (a sum in its first comment tells); changed by
+  hand it is the theme, and Edit opens it (docs/css-themes.md).
 
 ## The language
 

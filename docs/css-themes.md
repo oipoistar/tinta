@@ -277,10 +277,38 @@ what Tinta shows, and also draws the properties Tinta leaves to it.
 
 ## themes.ini
 
-`themes.ini` keeps working. Each of its keys is a CSS declaration: `text=`
-is `body { color }`, `h1=` is `h1 { color }`, `inlinecode=` is
-`code { color }` and so on; a built-in theme or a `themes.ini` section is
-what `@import "Name"` reads.
+`themes.ini` keeps working, and each of its themes is a CSS file as well.
+For every section Tinta writes `themes\<name>.css` (what a file name cannot
+hold becomes `_`) and draws the theme from that sheet. The theme keeps its
+name and its place in the chooser, and looks as it did.
+
+The file follows its section for as long as it stays as Tinta wrote it:
+change the section by hand, or save the theme from Settings, and the file
+is written again. Its first comment says so. Change anything in the file
+and it is yours: from then on the file is the theme, **Edit** opens it in
+place of the colour editor, and its section is read no more. Delete the
+file to have the section back.
+
+A section taken out of `themes.ini` takes its unchanged file with it; a
+file you changed stays, as a CSS theme of its own. With no `themes.ini` at
+all, the files are the themes. A sheet of your own that has a section's
+name is left alone, and both are listed.
+
+Each key is a CSS declaration: `text=` is `body { color }`, `h1=` is
+`h1 { color }`, `inlinecode=` is `code { color }` and so on; a built-in
+theme or a `themes.ini` section is what `@import "Name"` reads. Two things
+in a written file say what Tinta has always drawn: inside a link, code and
+emphasis keep the link's colour (`code:not(a *)`, `strong:not(a *)`), and
+text that is both bold and italic takes `bolditalic=`, else `bold=`, else
+`italic=`, whichever is inside the other. The lines under level 1 and 2
+headings are not in the file: **Settings > Appearance > Heading
+separators** draws or hides them under every theme that sets no border
+there itself.
+
+The theme in use, and the ones for light and for dark, are kept in
+`settings.ini` by name (`themeName=`, `lightThemeName=`, `darkThemeName=`)
+beside their places in the list, so adding or removing a theme does not
+move the choice.
 
 The design, and what comes next, is in
 [docs/specs/theming.md](specs/theming.md). Try the themes in

@@ -621,6 +621,51 @@ static void openThemesIniFile() {
                   nullptr, nullptr, SW_SHOWNORMAL);
 }
 
+// The chosen themes into settings and out of them (settings.h). Here, not
+// in settings.cpp or themes.cpp: some tests link one of those without the other
+void settingsTakeThemes(Settings& settings, const App& app) {
+    settings.themeIndex = app.currentThemeIndex;
+    settings.lightThemeIndex = app.lightThemeIndex;
+    settings.darkThemeIndex = app.darkThemeIndex;
+    settings.themeName = themeNameAt(app.currentThemeIndex);
+    settings.lightThemeName = themeNameAt(app.lightThemeIndex);
+    settings.darkThemeName = themeNameAt(app.darkThemeIndex);
+}
+
+void settingsGiveThemes(const Settings& settings, int& current, int& light, int& dark) {
+    // A theme that is gone gives way to the first of its kind
+    auto place = [](const std::string& name, int index, int otherwise) {
+        const int found = themeIndexNamed(name, index);
+        return found >= 0 && found < themeCount() ? found : otherwise;
+    };
+    current = place(settings.themeName, settings.themeIndex, 0);
+    light = place(settings.lightThemeName, settings.lightThemeIndex, 0);
+    dark = place(settings.darkThemeName, settings.darkThemeIndex, 5);
+}
+
+// A theme change persists immediately: windows spawned afterwards
+// (quick notes, drag-outs) read settings.ini at startup and would
+// otherwise come up in the look from the previous session
+void persistThemeChoice(const App& app) {
+    Settings settings = loadSettings();
+    settingsTakeThemes(settings, app);
+    settings.followSystemTheme = app.followSystemTheme;
+    saveSettings(settings);
+}
+
+// The themes for light and for dark by name, to find again after the list
+// of themes changed (one saved from the editor, one imported)
+struct LightAndDark { std::string light, dark; };
+static LightAndDark lightAndDark(const App& app) {
+    return {themeNameAt(app.lightThemeIndex), themeNameAt(app.darkThemeIndex)};
+}
+static void findLightAndDark(App& app, const LightAndDark& names) {
+    const int light = themeIndexNamed(names.light, app.lightThemeIndex);
+    const int dark = themeIndexNamed(names.dark, app.darkThemeIndex);
+    if (light >= 0 && light < themeCount()) app.lightThemeIndex = light;
+    if (dark >= 0 && dark < themeCount()) app.darkThemeIndex = dark;
+}
+
 // editCurrent seeds the editor with the active theme's name so saving
 // updates that custom theme in place (built-ins save as a copy)
 static void openThemeEditor(App& app, bool editCurrent) {
@@ -718,7 +763,9 @@ int importThemeFrom(App& app, const std::wstring& source) {
             }
         }
     }
+    const LightAndDark chosen = lightAndDark(app);
     loadCustomThemes();
+    findLightAndDark(app, chosen);
     // The chooser's preview formats grow with the list
     for (auto& pf : app.themePreviewFormats) {
         if (pf.name) pf.name->Release();
@@ -3472,9 +3519,12 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
                 // so deriving from Abyss keeps its pinned heading face. A
                 // hand edit made since the themes loaded is read first, so
                 // the rewrite keeps it (#310)
+                const LightAndDark chosen = lightAndDark(app);
                 if (customThemesChangedOnDisk()) loadCustomThemes();
                 int idx = saveCustomTheme(app.themeEditorTheme, name, app.themeEditorFont,
                     app.themeEditorCodeFont, app.themeEditorHeadingFont);
+                // A new section stands before the CSS themes, which move one place on
+                findLightAndDark(app, chosen);
                 if (idx >= 0) {
                     // Preview format cache must grow for the chooser
                     for (auto& pf : app.themePreviewFormats) {

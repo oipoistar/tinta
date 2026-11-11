@@ -18,6 +18,7 @@
 #include "page_style.h"
 #include "print.h"
 #include "render.h"
+#include "settings.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -673,7 +674,7 @@ std::string colourOf(const D2D1_COLOR_F& c) {
 std::string boxOf(const D2D1_RECT_F& r) {
     return hundredths(r.left) + "," + hundredths(r.top) + "," + hundredths(r.right) + "," + hundredths(r.bottom);
 }
-std::vector<std::string> drawnOf(const App& app) {
+std::vector<std::string> drawnOf(const App& app, bool look = false) {
     std::vector<std::string> out;
     for (const auto& run : app.layoutTextRuns) {
         std::string words;
@@ -685,7 +686,12 @@ std::vector<std::string> drawnOf(const App& app) {
     }
     // A box by its place and hue: its corners, its edge and how strong its
     // ground is are the theme's look, checked on their own
-    for (const auto& rect : app.layoutRects) out.push_back("box " + boxOf(rect.rect) + " " + colourOf(rect.color).substr(0, 6));
+    // (look: with them, for two drawings that have to be the same in all)
+    for (const auto& rect : app.layoutRects) {
+        out.push_back("box " + boxOf(rect.rect) + " " +
+                      (look ? colourOf(rect.color) + " r" + hundredths(rect.radius) + " edge " + hundredths(rect.strokeWidth)
+                            : colourOf(rect.color).substr(0, 6)));
+    }
     for (const auto& line : app.layoutLines) {
         out.push_back("line " + hundredths(line.p1.x) + "," + hundredths(line.p1.y) + " to " + hundredths(line.p2.x) + "," +
                       hundredths(line.p2.y) + " " + colourOf(line.color) + " w" + hundredths(line.stroke));
@@ -743,6 +749,8 @@ void builtInsStyled(App& app, const fs::path& dir) {
     app.currentFile = toUtf8(doc.wstring());
     app.root = parseDocument(app.parser, source, doc.wstring()).root;
     app.scrollY = app.targetScrollY = 0;
+    // The twins are to have no sheet: their sections are not written as CSS here
+    themesIniBecomesCss() = false;
 
     for (int theme = 0; theme < THEME_COUNT; ++theme) {
         const D2DTheme& own = THEMES[theme];
@@ -828,9 +836,297 @@ void builtInsStyled(App& app, const fs::path& dir) {
     } else {
         fs::remove(ini, ignored);
     }
+    themesIniBecomesCss() = true;
     loadCustomThemes();
     app.currentFile = fileBefore;
     app.width = widthBefore;
+    applyTheme(app, 0);
+}
+std::string readAll(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+void writeAll(const fs::path& path, const std::string& text) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << text;
+}
+
+// A themes.ini section is written as a CSS file (themes.cpp) and the page
+// is drawn from that sheet. It has to draw what the section drew before:
+// each of the fixture's themes lays two documents out at two widths both
+// ways, and every run, box, line and shape is in the same place, colour,
+// strength and shape. Then the file's life: it follows its section while
+// it stays as written, becomes the theme once changed by hand, comes back
+// when taken away, and leaves a sheet of the user's own alone. And Heading
+// separators, the setting, still decides the lines under headings.
+void iniThemesAsCss(App& app, const fs::path& dir) {
+    const fs::path fixtures = fs::path(TINTA_THEME_FIXTURE).parent_path();
+    const std::string iniText = readAll(fixtures / "themes-ini-as-css.ini");
+    check(iniText.size() > 500, "the fixture's themes are read");
+    const fs::path ini = dir / "themes.ini", themes = dir / "themes";
+    std::error_code ignored;
+    const bool hadIni = fs::exists(ini, ignored);
+    const std::string iniBefore = hadIni ? readAll(ini) : std::string();
+    const std::string fileBefore = app.currentFile;
+    const int widthBefore = app.width;
+    const wchar_t* const names[] = {L"Ini plain", L"Ini dark full", L"Ini no box", L"Ini: \"odd\" / name?"};
+    const wchar_t* const files[] = {L"Ini plain.css", L"Ini dark full.css", L"Ini no box.css", L"Ini_ _odd_ _ name_.css"};
+    for (const wchar_t* file : files) fs::remove(themes / file, ignored);
+    fs::remove(themes / "Own sheet.css", ignored);
+    writeAll(ini, iniText);
+
+    struct Page { const char* file; std::string source; };
+    Page pages[] = {{"themes-ini-as-css.md", {}}, {"builtin-themes-styled.md", {}}};
+    for (auto& page : pages) page.source = readAll(fixtures / page.file);
+    app.scrollY = app.targetScrollY = 0;
+
+    // Without the files first, as when they cannot be written; then with
+    // them, the section still the theme; then with each file changed by its
+    // owner, so that the file is the theme, read as any CSS theme is: what
+    // every theme will be once themes.ini is read no more
+    std::vector<std::vector<std::string>> without;
+    std::vector<float> tall;
+    for (int pass = 0; pass < 3; ++pass) {
+        themesIniBecomesCss() = pass >= 1;
+        if (pass == 2) {
+            for (const wchar_t* file : files) writeAll(themes / file, readAll(themes / file) + "/* kept by its owner */\n");
+        }
+        loadCustomThemes();
+        applyTheme(app, 0);
+        size_t at = 0;
+        for (int theme = 0; theme < 4; ++theme) {
+            const int index = THEME_COUNT + theme;
+            const std::string name = toUtf8(names[theme]);
+            check(index < themeCount() && std::wstring(themeAt(index).name) == names[theme],
+                  name + " keeps its name and its place in the list");
+            if (index >= themeCount()) continue;
+            if (pass == 0) {
+                check(!themeSheet(index) && !fs::exists(themes / files[theme], ignored), name + ": no file while they are not to be written");
+            } else {
+                check(themeSheet(index) != nullptr && fs::exists(themes / files[theme], ignored),
+                      name + " has its CSS file, and the page a sheet: " + toUtf8(files[theme]));
+                if (pass == 1) check(themeSourcePath(index).empty(), name + " is still its section, for the theme editor");
+                else check(themeSourcePath(index) == (themes / files[theme]).wstring(), name + " is its file once that was changed");
+            }
+            for (auto& page : pages) {
+                const fs::path doc = dir / page.file;
+                app.currentFile = toUtf8(doc.wstring());
+                app.root = parseDocument(app.parser, page.source, doc.wstring()).root;
+                for (int width : {1000, 600}) {
+                    app.width = width;
+                    applyTheme(app, index);
+                    layoutDocument(app);
+                    if (pass == 0) {
+                        without.push_back(drawnOf(app, true));
+                        tall.push_back(app.contentHeight);
+                        continue;
+                    }
+                    const std::vector<std::string> with = drawnOf(app, true);
+                    const std::vector<std::string>& plain = without[at];
+                    size_t differing = 0;
+                    std::string first;
+                    for (size_t i = 0; i < with.size() && i < plain.size(); ++i) {
+                        if (with[i] == plain[i]) continue;
+                        if (differing++ < 6) first += " ;; " + with[i] + "  |  without: " + plain[i];
+                    }
+                    check(closeTo(app.contentHeight, tall[at], 0.01f) && with.size() == plain.size() && differing == 0,
+                          name + ", " + page.file + " at " + std::to_string(width) +
+                              (pass == 1 ? ": drawn from its file as without it (" : ": drawn as before with the file as the theme (") +
+                              std::to_string(with.size()) + " against " + std::to_string(plain.size()) + " parts, " +
+                              std::to_string(differing) + " differ" + first + ")");
+                    ++at;
+                }
+            }
+        }
+    }
+    // Back to files as Tinta writes them
+    for (const wchar_t* file : files) fs::remove(themes / file, ignored);
+    loadCustomThemes();
+
+    // The file: named for the theme, the section's colours and faces, a note on top
+    const int plain = THEME_COUNT;
+    const std::string written = readAll(themes / files[0]);
+    check(written.rfind("/* Ini plain\n", 0) == 0 && written.find("tinta-themes-ini: ") != std::string::npos,
+          "the file starts with a note that says what it is");
+    check(written.find("background-color: #faf7f0") != std::string::npos && written.find("a { color: #0b6e99") != std::string::npos,
+          "and holds the section's colours");
+    check(written.find("font-family: \"Segoe UI\", \"Arial\", sans-serif") != std::string::npos &&
+              written.find("font-family: \"Consolas\", \"Cascadia Mono\", \"Cascadia Code\", \"Courier New\", monospace") != std::string::npos,
+          "and its faces, each followed by the ones Tinta falls back to");
+    check(written.find("border-bottom") == std::string::npos, "but no line under headings: that is the setting's");
+
+    // Heading separators, the setting, decides the lines under h1 and h2
+    {
+        const fs::path doc = dir / pages[0].file;
+        app.currentFile = toUtf8(doc.wstring());
+        app.root = parseDocument(app.parser, pages[0].source, doc.wstring()).root;
+        app.width = 1000;
+        const bool rules = app.headingRules;
+        for (int index : {0, 5, plain, plain + 1}) {
+            applyTheme(app, index);
+            app.headingRules = true;
+            layoutDocument(app);
+            const size_t on = app.layoutLines.size();
+            const float tallOn = app.contentHeight;
+            app.headingRules = false;
+            layoutDocument(app);
+            check(on == app.layoutLines.size() + 3 && app.contentHeight < tallOn,
+                  toUtf8(themeAt(index).name) + ": Heading separators off takes the three lines under h1 and h2 away: " +
+                      std::to_string(on) + " and " + std::to_string(app.layoutLines.size()));
+        }
+        app.headingRules = rules;
+    }
+
+    // The section changed by hand: the file follows
+    {
+        std::string changed = iniText;
+        const size_t at = changed.find("link=0B6E99");
+        check(at != std::string::npos, "the fixture's link colour is found");
+        if (at != std::string::npos) changed.replace(at, 11, "link=AA5500");
+        writeAll(ini, changed);
+        loadCustomThemes();
+        const D2D1_COLOR_F link = themeAt(plain).link;
+        check(sameColor(link, 0xAA5500) && readAll(themes / files[0]).find("a { color: #aa5500") != std::string::npos &&
+                  themeSourcePath(plain).empty(),
+              "a section changed by hand writes its file again");
+    }
+    // The file changed by hand: it is the theme, under the section's name and in its place
+    {
+        const std::string own = readAll(themes / files[0]) + "h1 { color: #123456; }\npre { border-radius: 12px; }\n";
+        writeAll(themes / files[0], own);
+        check(themeReloadIfChanged(plain), "a file changed by hand is noticed");
+        check(themeSourcePath(plain) == (themes / files[0]).wstring() && std::wstring(themeAt(plain).name) == names[0],
+              "and is the theme from then on, under the section's name and in its place");
+        check(themeAt(plain).headingColors[0] && sameColor(*themeAt(plain).headingColors[0], 0x123456) &&
+                  sameColor(themeAt(plain).link, 0xAA5500),
+              "with what was added to it and what it held");
+        writeAll(ini, iniText);  // the section goes back to its first link colour
+        loadCustomThemes();
+        check(readAll(themes / files[0]) == own && sameColor(themeAt(plain).link, 0xAA5500),
+              "its section is read no more: the file stays as its owner left it");
+        check(themeCount() == THEME_COUNT + 4, "and it is listed once");
+    }
+    // Taken away, it is written again from the section
+    {
+        fs::remove(themes / files[0], ignored);
+        loadCustomThemes();
+        check(readAll(themes / files[0]).find("a { color: #0b6e99") != std::string::npos && themeSourcePath(plain).empty() &&
+                  sameColor(themeAt(plain).link, 0x0B6E99),
+              "a file taken away is written again, and the section is the theme");
+    }
+    // A sheet of the user's own under a section's name is left alone; both are listed
+    {
+        const std::string mine = "body { background: #010203; }\n";
+        writeAll(themes / "Own sheet.css", mine);
+        writeAll(ini, iniText + "\n[theme]\nname=Own sheet\nbackground=F0F0F0\n");
+        loadCustomThemes();
+        const int section = THEME_COUNT + 4;
+        check(themeCount() == THEME_COUNT + 6 && std::wstring(themeAt(section).name) == L"Own sheet" && !themeSheet(section) &&
+                  sameColor(themeAt(section).background, 0xF0F0F0),
+              "a section whose name a sheet of one's own has is drawn as before");
+        check(readAll(themes / "Own sheet.css") == mine && sameColor(themeAt(section + 1).background, 0x010203),
+              "and that sheet is untouched and listed too");
+        fs::remove(themes / "Own sheet.css", ignored);
+    }
+    // The theme editor's save: the section and its file, the new theme after the sections
+    {
+        writeAll(ini, iniText);
+        loadCustomThemes();
+        D2DTheme made = THEMES[2];
+        made.link = hexColor(0x00AA77);
+        const int index = saveCustomTheme(made, L"Made in Settings", L"Segoe UI", L"Consolas");
+        check(index == THEME_COUNT + 4 && std::wstring(themeAt(index).name) == L"Made in Settings" && themeSheet(index) &&
+                  readAll(themes / "Made in Settings.css").find("a { color: #00aa77") != std::string::npos,
+              "a theme saved from Settings gets its section and its file");
+        made.link = hexColor(0x7700AA);
+        check(saveCustomTheme(made, L"Made in Settings", L"Segoe UI", L"Consolas") == index &&
+                  readAll(themes / "Made in Settings.css").find("a { color: #7700aa") != std::string::npos,
+              "and saved again, the file follows");
+        fs::remove(themes / "Made in Settings.css", ignored);
+    }
+
+    for (const wchar_t* file : files) fs::remove(themes / file, ignored);
+    if (hadIni) writeAll(ini, iniBefore);
+    else fs::remove(ini, ignored);
+    loadCustomThemes();
+    app.currentFile = fileBefore;
+    app.width = widthBefore;
+    applyTheme(app, 0);
+}
+// The themes in use, for light and for dark, are kept by name beside their
+// places in the list: a theme added or taken away moves the others, and a
+// place then means another theme. A settings.ini without names, from a
+// build before them, is read by place as it always was.
+void chosenByName(App& app, const fs::path& dir) {
+    const fs::path ini = dir / "themes.ini", themes = dir / "themes", settingsFile = dir / "settings.ini";
+    std::error_code ignored;
+    const bool hadIni = fs::exists(ini, ignored);
+    const std::string iniBefore = hadIni ? readAll(ini) : std::string();
+    const std::string settingsBefore = readAll(settingsFile);
+    const int current = app.currentThemeIndex, light = app.lightThemeIndex, dark = app.darkThemeIndex;
+    fs::create_directories(themes, ignored);
+    const std::string sections = "[theme]\nname=Chosen one\nbackground=FAFAFA\n\n[theme]\nname=Chosen two\ndark=1\nbackground=101010\n";
+    writeAll(ini, sections);
+    writeAll(themes / "Aaa first.css", "body { background: #eeeeee; }\n");
+    writeAll(themes / "Zed last.css", "body { background: #111111; color: #dddddd; }\n");
+    loadCustomThemes();
+    auto placeOf = [](const wchar_t* name) {
+        for (int i = 0; i < themeCount(); ++i) {
+            if (std::wstring(themeAt(i).name) == name) return i;
+        }
+        return -1;
+    };
+    const int zed = placeOf(L"Zed last"), two = placeOf(L"Chosen two"), one = placeOf(L"Chosen one");
+    check(one == THEME_COUNT && two == THEME_COUNT + 1 && zed == THEME_COUNT + 3, "the sections stand first, the sheets after them by name");
+    app.currentThemeIndex = zed;
+    app.lightThemeIndex = one;
+    app.darkThemeIndex = zed;
+    persistThemeChoice(app);
+    Settings kept = loadSettings();
+    check(kept.themeIndex == zed && kept.themeName == "Zed last" && kept.lightThemeName == "Chosen one" && kept.darkThemeName == "Zed last",
+          "the chosen themes are kept by place and by name");
+
+    // A sheet that sorts before it and a section more: every place after them moves
+    writeAll(themes / "Middle.css", "body { background: #abcdef; }\n");
+    writeAll(ini, "[theme]\nname=Chosen zero\nbackground=F0F0F0\n\n" + sections);
+    loadCustomThemes();
+    check(placeOf(L"Zed last") == zed + 2 && placeOf(L"Chosen one") == one + 1, "a theme added moves the ones after it");
+    int nowCurrent = -1, nowLight = -1, nowDark = -1;
+    settingsGiveThemes(kept, nowCurrent, nowLight, nowDark);
+    check(nowCurrent == zed + 2 && nowLight == one + 1 && nowDark == zed + 2, "and the chosen ones are found by name where they stand now");
+
+    // One that is gone gives way to Paper, or to Midnight for dark
+    fs::remove(themes / "Zed last.css", ignored);
+    loadCustomThemes();
+    settingsGiveThemes(kept, nowCurrent, nowLight, nowDark);
+    check(nowCurrent == 0 && nowLight == one + 1 && nowDark == 5, "a chosen theme that is gone gives way to Paper, or Midnight for dark");
+
+    // No names, as an older build wrote it: by place
+    Settings old = kept;
+    old.themeName.clear();
+    old.lightThemeName.clear();
+    old.darkThemeName.clear();
+    old.themeIndex = 3;
+    old.lightThemeIndex = 1;
+    old.darkThemeIndex = 7;
+    settingsGiveThemes(old, nowCurrent, nowLight, nowDark);
+    check(nowCurrent == 3 && nowLight == 1 && nowDark == 7, "a settings.ini without names is read by place");
+    // A built-in theme is found by its name too, should the built-ins ever change places
+    old.themeName = "Dracula";
+    old.themeIndex = 2;
+    settingsGiveThemes(old, nowCurrent, nowLight, nowDark);
+    check(nowCurrent == 6, "a built-in theme is found by its name");
+
+    for (const char* file : {"Aaa first.css", "Zed last.css", "Middle.css", "Chosen zero.css", "Chosen one.css", "Chosen two.css"}) {
+        fs::remove(themes / file, ignored);
+    }
+    if (hadIni) writeAll(ini, iniBefore);
+    else fs::remove(ini, ignored);
+    writeAll(settingsFile, settingsBefore);
+    loadCustomThemes();
+    app.currentThemeIndex = current;
+    app.lightThemeIndex = light;
+    app.darkThemeIndex = dark;
     applyTheme(app, 0);
 }
 }  // namespace
@@ -861,6 +1157,8 @@ int testPageStyles(App&, const fs::path& dir) {
     wordStyles(app, dir);
     caretShadowOpacity(app, dir);
     builtInsStyled(app, dir);
+    iniThemesAsCss(app, dir);
+    chosenByName(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;

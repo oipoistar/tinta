@@ -35,6 +35,7 @@ void saveSettings(const Settings& settings) {
 
     file << "[Settings]\n";
     file << "themeIndex=" << settings.themeIndex << "\n";
+    if (!settings.themeName.empty()) file << "themeName=" << settings.themeName << "\n";
     file << "zoomFactor=" << settings.zoomFactor << "\n";
     file << "windowX=" << settings.windowX << "\n";
     file << "windowY=" << settings.windowY << "\n";
@@ -67,6 +68,8 @@ void saveSettings(const Settings& settings) {
     file << "followSystemTheme=" << (settings.followSystemTheme ? 1 : 0) << "\n";
     file << "lightThemeIndex=" << settings.lightThemeIndex << "\n";
     file << "darkThemeIndex=" << settings.darkThemeIndex << "\n";
+    if (!settings.lightThemeName.empty()) file << "lightThemeName=" << settings.lightThemeName << "\n";
+    if (!settings.darkThemeName.empty()) file << "darkThemeName=" << settings.darkThemeName << "\n";
     file << "folderSearchEnabled=" << (settings.folderSearchEnabled ? 1 : 0) << "\n";
     file << "tabSearchEnabled=" << (settings.tabSearchEnabled ? 1 : 0) << "\n";
     file << "browserFocusPath=" << (settings.browserFocusPath ? 1 : 0) << "\n";
@@ -230,18 +233,6 @@ void persistAlwaysOnTop(const App& app) {
     saveSettings(settings);
 }
 
-// A theme change persists immediately: windows spawned afterwards
-// (quick notes, drag-outs) read settings.ini at startup and would
-// otherwise come up in the look from the previous session
-void persistThemeChoice(const App& app) {
-    Settings settings = loadSettings();
-    settings.themeIndex = app.currentThemeIndex;
-    settings.followSystemTheme = app.followSystemTheme;
-    settings.lightThemeIndex = app.lightThemeIndex;
-    settings.darkThemeIndex = app.darkThemeIndex;
-    saveSettings(settings);
-}
-
 // Start page recents: every successful document open moves (or inserts)
 // its path at the head of the [Recent] list
 void persistRecentFile(const std::string& path) {
@@ -317,6 +308,12 @@ Settings loadSettings() {
         } else if (key == "themeIndex") {
             int idx = std::stoi(value);
             if (idx >= 0) settings.themeIndex = idx;  // clamped at apply via themeCount()
+        } else if (key == "themeName") {
+            settings.themeName = value;
+        } else if (key == "lightThemeName") {
+            settings.lightThemeName = value;
+        } else if (key == "darkThemeName") {
+            settings.darkThemeName = value;
         } else if (key == "zoomFactor") {
             float z = std::stof(value);
             if (z >= 0.5f && z <= 3.0f) settings.zoomFactor = z;

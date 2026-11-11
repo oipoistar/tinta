@@ -294,6 +294,11 @@ struct CustomTheme {
 };
 int themeCount();
 const D2DTheme& themeAt(int index);  // out-of-range clamps to theme 0
+// Where the theme of that name (UTF-8) stands now: at `index` when it is
+// still there, else wherever it moved; -1 when no theme has the name. With
+// no name, `index` as it is
+int themeIndexNamed(const std::string& name, int index);
+std::string themeNameAt(int index);  // UTF-8; empty out of range
 
 // The face headings render with: headingfont= when the theme sets one,
 // else the theme's main font - so font= means the whole document (#155)
@@ -321,8 +326,13 @@ int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
 // Windows (color-scheme: light dark) is drawn as Windows is set
 void themesSetSystemDark(bool dark);
 bool themeFollowsSystem(int index);
-// The sheet a CSS theme came from, else empty
+// The sheet a CSS theme came from, else empty. A themes.ini section has
+// a CSS file too (themes.cpp), written from it and followed by it; that
+// file is the theme's source only once somebody changed it by hand
 std::wstring themeSourcePath(int index);
+// Off, themes.ini sections are drawn without a sheet, as when their
+// files cannot be written. For tests of that drawing
+bool& themesIniBecomesCss();
 // Reads a CSS theme again when its file, or one it imports, changed;
 // true when it did, and the theme is to be applied again
 bool themeReloadIfChanged(int index);
@@ -369,6 +379,10 @@ struct Settings {
     bool followSystemTheme = false;
     int lightThemeIndex = 0;   // Paper
     int darkThemeIndex = 5;    // Midnight
+    // The three themes by name as well (UTF-8): the list changes when a
+    // theme is added or taken away, and a place in it then means another
+    // theme. Empty in a settings.ini written before names were kept
+    std::string themeName, lightThemeName, darkThemeName;
     // Search results panel (#246): other open tabs and sibling markdown
     // files join the current document's matches
     bool folderSearchEnabled = true;

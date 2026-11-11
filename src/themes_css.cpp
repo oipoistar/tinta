@@ -51,36 +51,75 @@ std::string color(const char* property, const D2D1_COLOR_F& c) {
 
 }  // namespace
 
-std::string themeToCss(const D2DTheme& t) {
-    std::string css = "/* " + utf8(t.name) + " */\n";
+namespace {
+std::string themeCss(const D2DTheme& t, bool file);
+}
+std::string themeToCss(const D2DTheme& t) { return themeCss(t, false); }
+std::string themeToCssFile(const D2DTheme& t) { return themeCss(t, true); }
+
+namespace {
+// A face and, in a file, the faces Tinta stands in for a missing one, in
+// its own order (installedFace, d2d_init.cpp), then the generic family
+std::string faces(const wchar_t* name, bool mono, bool file) {
+    std::string list = family(name);
+    if (!file) return list;
+    if (mono) {
+        for (const wchar_t* face : {L"Cascadia Mono", L"Cascadia Code", L"Consolas", L"Courier New"}) {
+            if (_wcsicmp(face, name) != 0) list += ", " + family(face);
+        }
+        return list + ", monospace";
+    }
+    for (const wchar_t* face : {L"Segoe UI", L"Arial"}) {
+        if (_wcsicmp(face, name) != 0) list += ", " + family(face);
+    }
+    return list + ", sans-serif";
+}
+
+std::string themeCss(const D2DTheme& t, bool file) {
+    std::string css = file ? std::string() : "/* " + utf8(t.name) + " */\n";
     rule(css, ":root", std::string("color-scheme: ") + (t.isDark ? "dark" : "light") + "; " +
                            color("accent-color", t.accent));
     std::string body = color("background-color", t.background) + color("color", t.text);
-    if (t.fontFamily && *t.fontFamily) body += "font-family: " + family(t.fontFamily) + "; ";
+    if (t.fontFamily && *t.fontFamily) body += "font-family: " + faces(t.fontFamily, false, file) + "; ";
     rule(css, "body", body);
     std::string headings = color("color", t.heading);
-    if (t.headingFontFamily && *t.headingFontFamily) headings += "font-family: " + family(t.headingFontFamily) + "; ";
+    // A heading face this PC lacks gives way to the body's (useInstalledFaces)
+    if (t.headingFontFamily && *t.headingFontFamily) {
+        headings += "font-family: " + family(t.headingFontFamily) +
+                    (file && t.fontFamily && *t.fontFamily && _wcsicmp(t.fontFamily, t.headingFontFamily) != 0
+                         ? ", " + faces(t.fontFamily, false, true)
+                         : file ? std::string(", sans-serif") : std::string()) +
+                    "; ";
+    }
     rule(css, "h1, h2, h3, h4, h5, h6", headings);
+    bool levels = false;
     for (int i = 0; i < 6; i++) {
         if (!t.headingColors[i]) continue;
         const std::string tag = "h" + std::to_string(i + 1);
         rule(css, tag.c_str(), color("color", *t.headingColors[i]));
+        levels = true;
     }
+    // A table's header row is in the heading colour, which the levels' own no longer say
+    if (levels) rule(css, "th", color("color", t.heading));
     rule(css, "a", color("color", t.link));
-    if (t.codeFontFamily && *t.codeFontFamily) rule(css, "code, pre", "font-family: " + family(t.codeFontFamily) + "; ");
+    if (t.codeFontFamily && *t.codeFontFamily) rule(css, "code, pre", "font-family: " + faces(t.codeFontFamily, true, file) + "; ");
     rule(css, "pre", color("background-color", t.codeBackground) + color("color", t.code));
-    std::string inlineCode = color("color", themeInlineCodeColor(t));
+    // Inside a link everything is the link's colour, code and emphasis too,
+    // as Tinta has always drawn it: these colours are for what is in no link
     const D2D1_COLOR_F box = themeInlineCodeBackground(t);
-    inlineCode += box.a == 0 ? std::string("background: none; ") : color("background-color", box);
-    rule(css, ":not(pre) > code", inlineCode);
+    rule(css, ":not(pre) > code", box.a == 0 ? std::string("background: none; ") : color("background-color", box));
+    rule(css, ":not(pre) > code:not(a *)", color("color", themeInlineCodeColor(t)));
     rule(css, "blockquote", color("border-left-color", t.blockquoteBorder));
     std::string mark;
     if (t.highlightBackground) mark += color("background-color", *t.highlightBackground);
     if (t.highlightText) mark += color("color", *t.highlightText);
     rule(css, "mark", mark);
-    if (t.boldText) rule(css, "strong", color("color", *t.boldText));
-    if (t.italicText) rule(css, "em", color("color", *t.italicText));
-    if (t.boldItalicText) rule(css, "strong em, em strong", color("color", *t.boldItalicText));
+    if (t.boldText) rule(css, "strong:not(a *)", color("color", *t.boldText));
+    if (t.italicText) rule(css, "em:not(a *)", color("color", *t.italicText));
+    // Text that is both: bolditalic=, else bold=, else italic=, whichever is inside the other
+    if (const auto both = themeEmphasisColor(t, true, true)) {
+        rule(css, "strong em:not(a *), em strong:not(a *)", color("color", *both));
+    }
     if (t.selection) rule(css, "::selection", color("background-color", *t.selection));
     if (t.rule) rule(css, "hr", color("border-top-color", *t.rule));
     rule(css, ".token.keyword", color("color", t.syntaxKeyword));
@@ -92,6 +131,7 @@ std::string themeToCss(const D2DTheme& t) {
     rule(css, ".token.control", color("color", t.syntaxControlFlow));
     return css;
 }
+}  // namespace
 
 namespace {
 
@@ -348,6 +388,11 @@ CssTheme compileCssTheme(const std::string& text, const std::string& file, bool 
     if (same) {
         t.heading = *t.headingColors[0];
         for (auto& level : t.headingColors) level.reset();
+    } else if (base) {
+        // A themes.ini section's file: with a colour for some levels, its
+        // heading= is what it gives a table's header row (themeToCss)
+        const css::ComputedStyle th = engine.style(engine.child(body, tag("th")));
+        if (th.has(Prop::Color)) t.heading = d2d(th.color);
     }
 
     const css::ComputedStyle a = engine.style(engine.child(p, tag("a")));
