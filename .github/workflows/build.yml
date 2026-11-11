@@ -55,37 +55,31 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown, Mermaid and PlantUML files
 
-            A fix release for 4.0.2. For what is new in 4.0 (Live and Sheets), see the [v4.0.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.0.0).
+            Citations and papers, themes in CSS, and an interface on one scale. For Live and Sheets, new in 4.0, see the [v4.0.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.0.0).
 
             ### Added
-            - Sections fold: an arrow beside a heading in the reading view folds what is under it, and Settings > Appearance > Fold sections turns it off or opens documents folded. Requested by @Ra0EL (#316)
+            - Citations: name a BibTeX or CSL-JSON library in the front matter and cite in pandoc's syntax. Citations and references are set in APA, Chicago, IEEE, Nature, GB/T 7714 or any `.csl` style; figures, tables, equations and sections number themselves and `@fig:id` refers to them. HTML, Word and PDF keep it all. See [Citations, figures and tables](https://github.com/oipoistar/tinta/blob/master/docs/citations.md)
+            - Citing as you write: `[@` lists the library's keys, and the Cite button opens Zotero's picker.
+            - Papers: a front matter in pandoc's variables prints as a journal manuscript, with a title block, two columns, page numbers and running heads, and Word gets matching styles.
+            - CSS themes: a `.css` file in the `themes` folder is a theme, with real selectors, variables and `light-dark()`; every element takes its own rules on screen, on paper and in Word. `--ui-*` colours the window, a `tinta.css` styles a folder, Ctrl+Alt+click shows which rules style what, and Typora and Obsidian themes import from Settings. See [THEMES.md](https://github.com/oipoistar/tinta/blob/master/THEMES.md)
+            - Ctrl+Shift+T reopens the tab closed last, with its place and unsaved text; a tab's menu lists the last five.
 
             ### Changed
-            - A click on a link asks before it opens a program, a script, a file on another server or another app's address such as `ms-settings:` or `obsidian://`, with the target in full. Web addresses, mail and documents open at once. Relative links to PDFs and other documents now open.
-
-            ### Fixed
-            - The tool rail stays in place while tabs open, close and switch in the editor. Reported by @Fallgrim (#317)
-            - A double- or triple-click above a table with styled or wrapping cells selects what was clicked. Reported by @shinfd (#318)
-            - `themes.ini` reads `bold=`, `italic=`, `selection=` and `hr=` with notes and spaces around them, and applies a saved change while Tinta runs. Reported by @Fallgrim (#310)
-            - Live answers at once in a table, list or code block of thousands of lines; a letter in a 5,000-row table took over four seconds.
-            - Scrolling stays smooth in a long document with Find open or everything selected.
-            - Find, Contents, wiki links and Live's menus match letters in either case in every alphabet, not only A to Z.
-            - Closing the window over the print preview asks about unsaved edits instead of losing them.
-            - "Create this file?" opens a file that is there after all instead of emptying it.
-            - Deleting or changing a review note after a saved edit no longer writes over other text, and a note keeps a file's Windows line endings.
-            - In the Source editor, Find and Replace follow the text when it changes with the bar open; Replace could change the wrong words or end Tinta.
-            - Equations nested deep, and files with thousands of self-closing tags, open instead of hanging or ending Tinta.
-            - Sheets: a cut-short `.smd` is not saved over, Tidy does not hang on two groups in one place, and a sheet at rest stops redrawing.
-            - A page with more pictures than the image cache holds no longer decodes them again at every resize.
-            - In Live, a paragraph that begins with a triple-backtick code span is a paragraph.
+            - The ten built-in themes are one design in ten palettes, with clearer headings, rounder code blocks, calmer tables and colours that read at 4.5 to 1. A theme of your own can start from one with `@import "Paper"`.
+            - Themes made in the colour editor from a built-in theme keep its new design; themes already in `themes.ini` keep their look.
+            - Settings is grouped under labels and scrolls in a short window, where its last settings could not be reached.
+            - The theme chooser's cards keep their size and scroll; with many themes the names lay over the samples.
+            - Menus look alike everywhere, the shortcut list stands in two columns, and no label in the interface is smaller than 11.
+            - The window has an edge in the theme's colour, and the tab row a line under it, an edged chosen tab and names on one line.
+            - Letters are smoothed for the monitor the window is on.
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats
             - 22 natively rendered Mermaid diagram families, and PlantUML diagrams through a local PlantUML
             - Tabbed interface with drag, session restore, and a tab context menu
-            - 10 tuned themes (5 light, 5 dark) plus custom themes
+            - 10 themes (5 light, 5 dark) plus themes of your own in CSS
             - Hardware-accelerated rendering via Direct2D
-            - Single portable executable about 4 MB, no dependencies
+            - Single portable executable of about 5 MB, no dependencies
           files: build/Release/tinta.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,5 +1,28 @@
 # Changelog
 
+## [v4.1.0] - 2026-11-11
+
+### Added
+- Citations. Name a BibTeX, BibLaTeX, CSL-JSON or CSL YAML library in the front matter, or write the references there, and cite in pandoc's syntax (`[@doe2024, p. 4]`, `@doe2024 says`). Citations and the list of references are set in APA, Chicago, IEEE, Nature or GB/T 7714, or any `.csl` style, note styles as footnotes; a citation shows its reference on hover and goes to it on a click, and a key that is not in the library shows in the warning colour. Figures, tables, equations and sections number themselves and `@fig:id`, `@tbl:id`, `@eq:id` and `@sec:id` refer to them, as pandoc-crossref does. HTML, Word and PDF keep all of it, and pandoc exports get `--citeproc`. See [Citations, figures and tables](docs/citations.md)
+- Citing as you write. In the editor, `[@` lists the library's keys by author, year and title, `@fig:` the document's figures, and the tool rail's Cite button opens Zotero's picker through Better BibTeX. A library saved by another program is read again.
+- Papers. A front matter in pandoc's variables (`title`, `author`, `abstract`, `keywords`, `classoption: twocolumn`, `papersize`, `fontsize`) prints as a journal sets a manuscript: a title block, two columns, page numbers and running heads, chosen in the print preview too. Word gets Title, Author and Abstract styles and captions numbered with fields it updates.
+- CSS themes. A `.css` file in the `themes` folder is a theme: real selectors and cascade, variables, `oklch()`, `color-mix()`, and `light-dark()` for one sheet that follows Windows. Every element takes its own rules, from margins, borders, round corners and justified text to list markers, counters, generated content and fonts loaded with `@font-face`, on screen, on paper and in Word. `--ui-*` variables colour the window and `--mermaid-*` the diagrams, a `tinta.css` styles one folder's documents, and `cssclasses` in the front matter names classes for a page. Saving a sheet restyles the window, its mistakes are reported with their lines, and Ctrl+Alt+click on the page shows which rules style what. Settings > Appearance > Import takes a Typora or Obsidian theme. [THEMES.md](THEMES.md) is the short guide and [CSS themes](docs/css-themes.md) the reference
+- Ctrl+Shift+T reopens the tab closed last, with its place, its scroll and any unsaved text, and again for the one before; tabs closed in one sweep come back together. A tab's menu lists the last five closed tabs by name.
+
+### Changed
+- The ten built-in themes are one design in ten palettes: headings in Segoe UI Variable Display with a hairline under the first two levels, code blocks with round corners and an edge, inline code on a chip, callouts on a tint, tables with lines across only, quotes in softer ink, and links, code and syntax colours that read at 4.5 to 1 or more. Each is a CSS file inside Tinta, and a sheet of your own can start from one with `@import "Paper"`.
+- A theme made in the colour editor from a built-in theme keeps that theme's new design. Themes already in `themes.ini` keep the look they had. Each `themes.ini` theme is also written as a CSS file in the `themes` folder, which follows it until it is edited by hand, and the theme in use is remembered by its name.
+- Settings is grouped: each page has two or three groups under small labels, a setting's description is smaller and softer than its name, and Follow Windows theme stands with Themes. A page taller than the window scrolls with the wheel, where its last settings could not be reached (Appearance did not fit a 1080p screen at 150%). In a narrow window the sections go across the top.
+- The theme chooser's cards have one size and its columns scroll. With many themes the cards shrank until each name lay over its sample. It opens with the theme in use in sight.
+- The menus of the reading view, the tabs and the two editors look alike: one row height, padding, corner and type. The shortcut list (F1) stands in two columns where the window is wide enough. Contents, the folder browser and the search results have slightly taller rows, and no label, footer or badge in the interface is smaller than 11.
+- The window has an edge: a hairline in the theme's own colour around it, where a dark window on a dark desktop had none. The same line parts the tab row from the page, the chosen tab has an edge in place of its shadow, a thin line stands between tabs at rest, and tab names, the + and the window's buttons stand on one line; a name used to drop by 2 when its tab was left.
+- Letters are smoothed for the monitor the window is on, with that monitor's ClearType settings, and follow the window to another monitor. Tinta used the primary monitor's for every screen.
+- A line through struck text runs through the middle of the letters.
+- Settings > Appearance > Heading separators also takes away a CSS theme's own line under level 1 and 2 headings.
+
+### Fixed
+- After the interface language is changed to Chinese, Japanese or Korean, the editors' menus and the other text made before the change take that language's fonts at once; they kept the old ones until Tinta was started again.
+
 ## [v4.0.3] - 2026-11-10
 
 ### Added
