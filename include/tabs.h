@@ -79,6 +79,11 @@ void renderTabHoverCard(App& app);
 
 // Right-click tab context menu (NPP-style close operations)
 int tabContextMenuIndexAt(const App& app, float x, float y);
+// The colour of the line under the tab row, of the chosen tab's edge and of
+// the window's own border, and the line every name, the + and the window's
+// buttons are centred on
+D2D1_COLOR_F tabStripEdge(const App& app);
+float tabRowCentre(const App& app);
 void openTabMenu(App& app, int tabIndex, float x, float y);
 void closeTabMenu(App& app);
 int tabMenuItemAt(const App& app, float x, float y);

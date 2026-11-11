@@ -497,6 +497,8 @@ struct App {
     // The warm-up thread flips this and the target is recreated on
     // WM_APP_GPU_READY, after the first frame is already on screen.
     bool useHardwareRT = false;
+    // The colour last given to the window's border (applyWindowChrome)
+    COLORREF windowBorder = 0;
     // The monitor the target's text is smoothed for, and that monitor's
     // gamma, contrast and subpixel order (followMonitorText, d2d_init.h)
     HMONITOR textMonitor = nullptr;

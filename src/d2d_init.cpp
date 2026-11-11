@@ -50,8 +50,13 @@ void applyWindowChrome(App& app) {
     COLORREF caption = toColorref(tabStripBackground(app));
     DwmSetWindowAttribute(app.hwnd, DWMWA_CAPTION_COLOR,
                           &caption, sizeof(caption));
+    // The window's border is the row's edge colour: a hairline of the
+    // theme's own, where the row's own colour left the window without an
+    // edge (a dark window on a dark desktop had none)
+    COLORREF border = toColorref(tabStripEdge(app));
+    app.windowBorder = border;
     DwmSetWindowAttribute(app.hwnd, DWMWA_BORDER_COLOR,
-                          &caption, sizeof(caption));
+                          &border, sizeof(border));
     COLORREF text = toColorref(themeUiText(app.theme));
     DwmSetWindowAttribute(app.hwnd, DWMWA_TEXT_COLOR,
                           &text, sizeof(text));

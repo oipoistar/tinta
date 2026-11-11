@@ -95,9 +95,10 @@ bool drawStrip(App& app, std::vector<uint32_t>& pixels, UINT& width, UINT& heigh
     return true;
 }
 
-// #271: the active tab's halo shows on both sides of the first and the last
-// tab, as on a tab in the middle. The strip's clip ended exactly at the row's
-// ends and cut it away on their outer side.
+// #271: what marks the active tab shows on both sides of the first and the
+// last tab, as on a tab in the middle. The strip's clip ended exactly at the
+// row's ends and cut the tab's halo away on their outer side. The halo is an
+// edge now (the tab row's own line), and it is the edge that must not be cut.
 void endTabsKeepTheirHalo(App& app) {
     const int savedActive = app.activeTab, savedHovered = app.hoveredTab;
     app.hoveredTab = -1;
@@ -114,15 +115,15 @@ void endTabsKeepTheirHalo(App& app) {
         const App::TabHit* hit = hitFor(app, end);
         check(hit != nullptr, "the end tab is in view");
         if (!hit || pixels.empty() || plain.size() != pixels.size()) continue;
-        // Green channel (the shadow is grey), averaged over the pixels whose
-        // centres lie 2-5 DIPs outside the tab's left or right edge
+        // Green channel, averaged over the pixels whose centres lie within
+        // 1.5 DIPs inside the tab's left or right edge: where its edge is drawn
         const int row = std::clamp((int)(hit->rect.bottom - dpi(app, 4.0f)), 0, (int)height - 1);
         auto side = [&](const std::vector<uint32_t>& image, bool left) {
             const float edge = left ? hit->rect.left : hit->rect.right;
             int sum = 0, count = 0;
             for (int x = (int)edge - (int)dpi(app, 7.0f); x <= (int)edge + (int)dpi(app, 7.0f); x++) {
                 const float distance = left ? edge - (x + 0.5f) : (x + 0.5f) - edge;
-                if (x < 0 || x >= (int)width || distance < dpi(app, 2.0f) || distance > dpi(app, 5.0f))
+                if (x < 0 || x >= (int)width || distance < -dpi(app, 1.5f) || distance > 0.0f)
                     continue;
                 sum += (int)((image[(size_t)row * width + x] >> 8) & 0xFF);
                 count++;
@@ -131,12 +132,12 @@ void endTabsKeepTheirHalo(App& app) {
         };
         const float outer = side(pixels, end == 0), inner = side(pixels, end != 0);
         const float base = side(plain, end == 0);
-        if (std::abs(outer - inner) > 2.0f || outer > base - 1.0f)
+        if (std::abs(outer - inner) > 2.0f || std::abs(outer - base) < 1.0f)
             std::cerr << "  tab " << end << ": outer side " << outer << ", inner side " << inner
-                      << ", without the halo " << base << '\n';
-        check(outer <= base - 1.0f, "the active end tab's halo shows on its outer side");
+                      << ", without the edge " << base << '\n';
+        check(std::abs(outer - base) >= 1.0f, "the active end tab's edge shows on its outer side");
         check(std::abs(outer - inner) <= 2.0f,
-              "the halo is as dark on the outer side as on the inner side");
+              "the edge is as strong on the outer side as on the inner side");
     }
     app.activeTab = savedActive;
     app.hoveredTab = savedHovered;

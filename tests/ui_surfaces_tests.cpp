@@ -196,6 +196,7 @@ void themeChooser(App& app) {
     }
 
     // Opened with a theme far down in use: it is in sight
+    app.themeChooserScroll = 0.0f;
     Frame reopened = chooser(app, 1050, 800, true);
     const D2D1_RECT_F* chosen = chooserHit(app, lastLight);
     check(app.themeChooserScroll > 0.0f && chosen && about(height(*chosen), 72.0f * s) &&
@@ -207,15 +208,23 @@ void themeChooser(App& app) {
     for (int i = 0; i < themeCount(); i++)
         if (std::wstring(themeAt(i).name).size() > 30) longName = i;
     applyTheme(app, longName);
-    Frame longFrame = chooser(app, 1050, 800, true);
+    Frame longFrame = chooser(app, 650, 800, true);  // narrow cards: the name is longer than its room
     const D2D1_RECT_F* longCard = chooserHit(app, longName);
     check(longCard && std::wstring(themeAt(longName).name).size() > 30, "the long-named theme has a card");
     if (longCard) {
         // The bead at the corner is the accent, not letters of the name
         const D2D1_COLOR_F bead = longFrame.at(longCard->right - 20.0f * s - 5.0f * s, longCard->top + 20.0f * s - 5.0f * s);
         const D2D1_COLOR_F accent = themeAt(longName).accent;
+        // and beside the bead, on the name's own line, is the card's ground
+        const D2D1_COLOR_F card = themeAt(longName).background;
+        bool clear = true;
+        for (float x = longCard->right - 60.0f * s; x < longCard->right - 32.0f * s; x += 1.0f)
+            for (float y = longCard->top + 10.0f * s; y < longCard->top + 24.0f * s; y += 1.0f) {
+                const D2D1_COLOR_F c = longFrame.at(x, y);
+                if (std::fabs(c.r - card.r) > 0.03f || std::fabs(c.g - card.g) > 0.03f || std::fabs(c.b - card.b) > 0.03f) clear = false;
+            }
         check(std::fabs(bead.r - accent.r) < 0.08f && std::fabs(bead.g - accent.g) < 0.08f &&
-                  std::fabs(bead.b - accent.b) < 0.08f,
+                  std::fabs(bead.b - accent.b) < 0.08f && clear,
               "a long name ends before the chosen card's check");
     }
     shot(app, longFrame, "chooser-long-name");
@@ -267,6 +276,9 @@ void menus(App& app) {
     applyTheme(app, 0);
     app.width = 1050;
     app.height = 900;
+
+    check(rowMenu == 32.0f && rowList == 28.0f && menuPad == 4.0f && menuSeparator == 8.0f && menuLabelRow == 24.0f,
+          "a menu's row is 32, a list's 28, a menu's padding 4, a separator's room 8 and a label's row 24");
 
     // The reading view's menu
     openContextMenu(app, 260.0f, 160.0f, false);
@@ -546,6 +558,132 @@ void dialogsAndStart(App& app) {
     shot(app, start, "start-page");
 }
 
+// --- The tab row and the window's edge ---------------------------------------
+//
+// The window had no edge (its border was the tab row's own colour), the row
+// and the page were 4.5% apart with no line between, the chosen tab was held
+// apart by a shadow, tabs at rest had no shape, and the names, the + and the
+// window's buttons stood on three lines (20, 23 and 25).
+
+bool same(D2D1_COLOR_F a, D2D1_COLOR_F b, float within = 0.02f) {
+    return std::fabs(a.r - b.r) <= within && std::fabs(a.g - b.g) <= within && std::fabs(a.b - b.b) <= within;
+}
+
+// The middle of what is drawn in a box, top to bottom: the rows in which a
+// pixel is not the box's ground. Negative when nothing is drawn.
+float inkCentre(const Frame& frame, const D2D1_RECT_F& box, D2D1_COLOR_F ground, float within = 0.10f) {
+    int first = -1, last = -1;
+    for (int y = (int)box.top; y < (int)box.bottom; y++)
+        for (int x = (int)box.left; x < (int)box.right; x++)
+            if (!same(frame.at((float)x, (float)y), ground, within)) {
+                if (first < 0) first = y;
+                last = y;
+                break;
+            }
+    return first < 0 ? -1.0f : (first + last + 1) * 0.5f;
+}
+
+const App::TabHit* tabHit(const App& app, int index) {
+    for (const auto& hit : app.tabHits)
+        if (hit.index == index) return &hit;
+    return nullptr;
+}
+
+void tabRow(App& app) {
+    const float s = app.contentScale;
+    app.width = 1050;
+    app.height = 300;
+    app.tabs.resize(3);
+    app.activeTab = 0;
+    app.hoveredTab = -1;
+    app.mouseX = app.mouseY = -100;
+    // The chosen tab takes the open document's name; the others get the
+    // same one, so that the letters measured stand alike
+    draw(app, [&] { renderTabStrip(app); });
+    for (auto& tab : app.tabs) tab.title = app.tabs[0].title;
+
+    for (int theme : {0, 5}) {
+        applyTheme(app, theme);
+        const std::string name = theme ? "Midnight" : "Paper";
+        Frame row = draw(app, [&] { renderTabStrip(app); });
+        const float stripH = chromeTopHeight(app);
+        const float centre = tabRowCentre(app);
+        const D2D1_COLOR_F ground = tabStripBackground(app), edge = tabStripEdge(app), page = app.theme.background;
+        const App::TabHit* chosen = tabHit(app, 0);
+        const App::TabHit* second = tabHit(app, 1);
+        const App::TabHit* third = tabHit(app, 2);
+        const App::TabHit* plus = tabHit(app, -2);
+        check(chosen && second && third && plus, name + ": the row has its three tabs and the +");
+        if (!chosen || !second || !third || !plus) continue;
+
+        // The line under the row, open under the chosen tab
+        const float lineY = stripH - 0.5f;
+        check(same(row.at((second->rect.left + second->rect.right) * 0.5f, lineY), edge) &&
+                  same(row.at(app.width - 200.0f * s, lineY), edge) && same(row.at(2.0f, lineY), edge),
+              name + ": a hairline in the edge's colour parts the row from the page");
+        check(same(row.at((chosen->rect.left + chosen->rect.right) * 0.5f, lineY), page),
+              name + ": the line is open where the chosen tab meets the page");
+        check(contrast(edge, ground) >= 1.25f, name + ": the edge stands out from the row's ground");
+
+        // The chosen tab has an edge and no shadow
+        const float midY = (chosen->rect.top + stripH) * 0.5f;
+        check(!same(row.at((chosen->rect.left + chosen->rect.right) * 0.5f, chosen->rect.top + 0.5f), page) &&
+                  !same(row.at(chosen->rect.left + 0.5f, midY), page) &&
+                  same(row.at((chosen->rect.left + chosen->rect.right) * 0.5f, midY + 6.0f * s), page),
+              name + ": the chosen tab is the page's colour inside an edge of its own");
+        check(same(row.at(chosen->rect.left - 4.0f * s, midY), ground, 0.004f) &&
+                  same(row.at(chosen->rect.left + 60.0f * s, chosen->rect.top - 2.0f * s), ground, 0.004f),
+              name + ": and casts no shadow on the row around it");
+
+        // Names, the + and the window's close cross on one line
+        const D2D1_RECT_F nameChosen = D2D1::RectF(chosen->rect.left + 12.0f * s, chosen->rect.top + 3.0f * s,
+                                                   chosen->rect.left + 110.0f * s, stripH - 3.0f * s);
+        const D2D1_RECT_F nameSecond = D2D1::RectF(second->rect.left + 12.0f * s, chosen->rect.top + 3.0f * s,
+                                                   second->rect.left + 110.0f * s, stripH - 3.0f * s);
+        // A name at rest is fainter: its faintest rows count too. The names were 2 apart.
+        const float a = inkCentre(row, nameChosen, page, 0.03f), b = inkCentre(row, nameSecond, ground, 0.03f);
+        check(a > 0.0f && b > 0.0f && std::fabs(a - b) < 0.6f,
+              name + ": a tab's name stands at the same height chosen or not");
+        check(std::fabs(a - centre) < 2.6f * s, name + ": on the row's centre line");
+        const float plusInk = inkCentre(row, plus->rect, ground);
+        const D2D1_RECT_F closeBox = captionButtonRect(app, 2);
+        const float closeInk = inkCentre(row, D2D1::RectF(closeBox.left + 4.0f, closeBox.top + 2.0f, closeBox.right - 4.0f,
+                                                          stripH - 3.0f),
+                                         ground);
+        check(std::fabs(plusInk - centre) < 0.8f && std::fabs(closeInk - centre) < 0.8f,
+              name + ": the + and the window's close cross are centred on that line too");
+
+        // A line between two tabs at rest, none beside the chosen one
+        const float gapRest = second->rect.right + 1.0f, gapChosen = chosen->rect.right + 1.0f;
+        check(!same(row.at(gapRest, centre), ground) && same(row.at(gapRest, chosen->rect.top + 1.0f), ground, 0.004f),
+              name + ": a thin line stands between two tabs at rest, shorter than the row");
+        check(same(row.at(gapChosen, centre), ground, 0.004f), name + ": none beside the chosen tab");
+        app.hoveredTab = 1;
+        Frame hovered = draw(app, [&] { renderTabStrip(app); });
+        check(same(hovered.at(gapRest, centre), ground, 0.004f), name + ": none beside a tab under the pointer");
+        app.hoveredTab = -1;
+        shot(app, row, theme ? "tab-row-dark" : "tab-row-light");
+    }
+
+    // The window's border is that edge, in every built-in theme
+    bool edged = true, stepped = true;
+    for (int theme = 0; theme < 10; theme++) {
+        applyTheme(app, theme);
+        applyWindowChrome(app);
+        const D2D1_COLOR_F edge = tabStripEdge(app), ground = tabStripBackground(app);
+        const COLORREF wanted = RGB((BYTE)(edge.r * 255.0f + 0.5f), (BYTE)(edge.g * 255.0f + 0.5f), (BYTE)(edge.b * 255.0f + 0.5f));
+        const COLORREF row = RGB((BYTE)(ground.r * 255.0f + 0.5f), (BYTE)(ground.g * 255.0f + 0.5f), (BYTE)(ground.b * 255.0f + 0.5f));
+        if (app.windowBorder != wanted || app.windowBorder == row || contrast(edge, ground) < 1.25f) edged = false;
+        if (!app.theme.isDark && contrast(app.theme.background, ground) < 1.12f) stepped = false;
+    }
+    check(edged, "in all ten themes the window's border is the row's edge colour, not the row's own");
+    check(stepped, "and in the light ones the row is a clear step under the page");
+    applyTheme(app, 0);
+    applyWindowChrome(app);
+    app.tabs.clear();
+    app.height = 900;
+}
+
 }  // namespace
 
 int runUiSurfacesTests(const char* fixtures) {
@@ -574,6 +712,7 @@ int runUiSurfacesTests(const char* fixtures) {
     sidePanels(app);
     shortcutList(app);
     dialogsAndStart(app);
+    tabRow(app);
 
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;

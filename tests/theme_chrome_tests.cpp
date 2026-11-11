@@ -293,9 +293,9 @@ void chromeColours(App& app, int sheetIndex) {
     for (int index : {0, 5}) {
         applyTheme(app, index);
         const D2DTheme& t = app.theme;
-        const float f = t.isDark ? 0.78f : 0.955f;
+        const float f = t.isDark ? 0.78f : 0.94f;  // a clearer step in a light theme since the row got its edges
         check(closeTo(tabStripBackground(app), D2D1::ColorF(t.background.r * f, t.background.g * f, t.background.b * f, t.background.a)),
-              toUtf8(t.name) + ": the strip is the page's background, darkened, as before");
+              toUtf8(t.name) + ": the strip is the page's background, darkened");
         const float lift = t.isDark ? 0.012f : 0.31f;
         D2D1_COLOR_F panel = t.background;
         panel.r += (1.0f - panel.r) * lift;
