@@ -103,6 +103,10 @@ tr:nth-child(even) td { background: color-mix(in oklab, var(--ink) 4%, transpare
   from it, in its place among the sections. The file follows the section
   while it is as written (a sum in its first comment tells); changed by
   hand it is the theme, and Edit opens it (docs/css-themes.md).
+- A theme made in Settings from a built-in theme keeps that theme's design:
+  `design=1` in its section, and a file that starts from Paper's or
+  Midnight's sheet with the section's colours as its variables. A section
+  without the key keeps the look sections had up to 4.0.3.
 
 ## The language
 

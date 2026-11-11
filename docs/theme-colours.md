@@ -69,6 +69,18 @@ editor keep them, though the editor has no controls for them yet; edit them in
 Try `tests/fixtures/theme-emphasis-310.md` with
 `tests/fixtures/theme-emphasis-310.ini`.
 
+## The built-in themes' design
+
+`design=1` in a section gives the theme the look of the ten built-in
+themes in its own colours: their heading sizes, the hairlines under level 1
+and 2 headings, round code blocks, callouts on a tint, tables with lines
+across only. A theme made in Settings from a built-in theme gets the line;
+a section without it keeps the look themes had up to 4.0.3. `hr=` then also
+colours the hairlines, which are otherwise worked out from `background=`
+and `text=`. More in [css-themes.md](css-themes.md#themesini). Try
+`tests/fixtures/themes-ini-design.ini` with
+`tests/fixtures/theme-showcase.md`.
+
 ## Editing themes.ini by hand
 
 A saved edit to `themes.ini` applies at once, to the theme in use too; there

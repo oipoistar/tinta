@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -1117,11 +1118,11 @@ void iniThemesAsCss(App& app, const fs::path& dir) {
         made.link = hexColor(0x00AA77);
         const int index = saveCustomTheme(made, L"Made in Settings", L"Segoe UI", L"Consolas");
         check(index == THEME_COUNT + 4 && std::wstring(themeAt(index).name) == L"Made in Settings" && themeSheet(index) &&
-                  readAll(themes / "Made in Settings.css").find("a { color: #00aa77") != std::string::npos,
+                  readAll(themes / "Made in Settings.css").find("--link: #00aa77") != std::string::npos,
               "a theme saved from Settings gets its section and its file");
         made.link = hexColor(0x7700AA);
         check(saveCustomTheme(made, L"Made in Settings", L"Segoe UI", L"Consolas") == index &&
-                  readAll(themes / "Made in Settings.css").find("a { color: #7700aa") != std::string::npos,
+                  readAll(themes / "Made in Settings.css").find("--link: #7700aa") != std::string::npos,
               "and saved again, the file follows");
         fs::remove(themes / "Made in Settings.css", ignored);
     }
@@ -1210,6 +1211,282 @@ void chosenByName(App& app, const fs::path& dir) {
     app.darkThemeIndex = dark;
     applyTheme(app, 0);
 }
+// A theme made in Settings from a built-in one is that theme's design in
+// its own colours: its section says design=1, its file starts from Paper's
+// sheet, or Midnight's when dark, and names the colours as that sheet's
+// variables. Made from each of the ten and left as it is, it draws two
+// documents at two widths as the built-in theme does, part for part. A
+// section without the key, every theme there was before, keeps the look it
+// had, also when it is saved again or a new theme is made from it.
+void madeFromBuiltIns(App& app, const fs::path& dir) {
+    const fs::path fixtures = fs::path(TINTA_THEME_FIXTURE).parent_path();
+    const fs::path ini = dir / "themes.ini", themes = dir / "themes";
+    std::error_code ignored;
+    const bool hadIni = fs::exists(ini, ignored);
+    const std::string iniBefore = hadIni ? readAll(ini) : std::string();
+    const std::string fileBefore = app.currentFile;
+    const int widthBefore = app.width;
+    std::vector<fs::path> made;
+    auto fileOf = [&](const std::wstring& name) {
+        made.push_back(themes / (name + L".css"));
+        return made.back();
+    };
+    for (int i = 0; i < THEME_COUNT; ++i) fs::remove(fileOf(std::wstring(L"From ") + THEMES[i].name), ignored);
+    for (const wchar_t* name : {L"Old look", L"Old look again", L"Importer"}) fs::remove(fileOf(name), ignored);
+    fs::remove(ini, ignored);
+    loadCustomThemes();
+
+    struct Page { const char* file; std::string source; };
+    Page pages[] = {{"builtin-themes-styled.md", {}}, {"themes-ini-as-css.md", {}}};
+    for (auto& page : pages) page.source = readAll(fixtures / page.file);
+    app.scrollY = app.targetScrollY = 0;
+    // What the theme editor does with the theme it starts from (themeEditorAdoptBase) and on Save
+    auto saveFrom = [](int base, const std::wstring& name, const std::function<void(D2DTheme&)>& change = nullptr) {
+        D2DTheme t = themeAsBase(base);
+        const std::wstring font = t.fontFamily, code = t.codeFontFamily ? t.codeFontFamily : L"",
+                           heading = t.headingFontFamily ? t.headingFontFamily : L"";
+        if (change) change(t);
+        return saveCustomTheme(t, name, font, code, heading);
+    };
+    auto blocks = [&] {
+        int count = 0;
+        for (const auto& rect : app.layoutRects) count += rect.radius == 10 && rect.strokeWidth == 1 ? 1 : 0;
+        return count;
+    };
+    auto show = [&](int index, const Page& page, int width) {
+        const fs::path doc = dir / page.file;
+        app.currentFile = toUtf8(doc.wstring());
+        app.root = parseDocument(app.parser, page.source, doc.wstring()).root;
+        app.width = width;
+        applyTheme(app, index);
+        layoutDocument(app);
+    };
+
+    for (int base = 0; base < THEME_COUNT; ++base) {
+        const std::wstring wide = std::wstring(L"From ") + THEMES[base].name;
+        const std::string name = toUtf8(wide);
+        const int index = saveFrom(base, wide);
+        check(index == THEME_COUNT + base && std::wstring(themeAt(index).name) == wide, name + " stands after the themes before it");
+        if (index != THEME_COUNT + base) continue;
+        const D2DTheme& own = themeAt(index);
+        const D2DTheme& from = THEMES[base];
+        check(own.design == 1 && themeSourcePath(index).empty() && themeSheet(index) != nullptr,
+              name + " has the design, is still its section for the theme editor, and hands the page a sheet");
+        bool type = own.bodySize == from.bodySize && own.codeSize == from.codeSize && own.lineHeight == from.lineHeight;
+        for (int level = 0; level < 6; ++level) {
+            type = type && own.headingSize[level] == from.headingSize[level] && own.headingWeight[level] == from.headingWeight[level];
+        }
+        check(type && own.headingSize[0] == 34, name + " has the built-in theme's type sizes");
+        check(std::wstring(themeHeadingFont(own)) == themeHeadingFont(from) && std::wstring(own.fontFamily) == from.fontFamily &&
+                  std::wstring(own.codeFontFamily) == from.codeFontFamily,
+              name + " has its faces");
+        const std::string file = readAll(themes / (wide + L".css"));
+        check(file.find(from.isDark ? "@import \"Midnight\";" : "@import \"Paper\";") != std::string::npos &&
+                  file.find("tinta-themes-ini: ") != std::string::npos,
+              name + ": its file starts from a built-in theme's sheet");
+        check(file.find("--page: #") != std::string::npos && file.find("--ink-soft: #") != std::string::npos &&
+                  file.find("--line-firm: #") != std::string::npos && file.find("body { background-color") == std::string::npos,
+              name + ": and names its colours as that sheet's variables");
+        // A mark's ground is a colour of its own in a section, not a tint
+        if (from.highlightBackground) {
+            check(own.highlightBackground && own.highlightBackground->a == 1 && own.highlightText &&
+                      readsAt(*own.highlightText, *own.highlightBackground) >= 4.5f,
+                  name + ": a marked word reads on its ground");
+        }
+        for (const auto& page : pages) {
+            for (int width : {1000, 600}) {
+                show(base, page, width);
+                const std::vector<std::string> theirs = drawnOf(app, true);
+                const float tall = app.contentHeight;
+                // The built-in theme's mark as it comes out on the page, which is what its copy holds
+                std::string tint, flat;
+                if (from.highlightBackground && from.highlightBackground->a < 1) {
+                    tint = colourOf(*from.highlightBackground);
+                    flat = colourOf(*own.highlightBackground);
+                }
+                show(index, page, width);
+                const std::vector<std::string> ours = drawnOf(app, true);
+                size_t differing = 0;
+                std::string first;
+                for (size_t i = 0; i < ours.size() && i < theirs.size(); ++i) {
+                    std::string theirOne = theirs[i];
+                    if (const size_t at = tint.empty() ? std::string::npos : theirOne.find(tint); at != std::string::npos) {
+                        theirOne.replace(at, tint.size(), flat);
+                    }
+                    if (ours[i] == theirOne) continue;
+                    if (differing++ < 6) first += " ;; " + ours[i] + "  |  built-in: " + theirs[i];
+                }
+                check(closeTo(app.contentHeight, tall, 0.01f) && ours.size() == theirs.size() && differing == 0,
+                      name + ", " + page.file + " at " + std::to_string(width) + ": drawn as the theme it was made from (" +
+                          std::to_string(ours.size()) + " against " + std::to_string(theirs.size()) + " parts, " +
+                          std::to_string(differing) + " differ" + first + ")");
+            }
+        }
+    }
+    const std::string all = readAll(ini);
+    size_t sections = 0, designs = 0;
+    for (size_t at = all.find("[theme]"); at != std::string::npos; at = all.find("[theme]", at + 1)) sections++;
+    for (size_t at = all.find("\ndesign=1"); at != std::string::npos; at = all.find("\ndesign=1", at + 1)) designs++;
+    check(sections == (size_t)THEME_COUNT && designs == sections, "each of their sections says design=1: " + std::to_string(designs));
+    check(all.find("\nhr=") == std::string::npos, "and none holds the built-in theme's hairline as a colour of its own");
+
+    // Its colours changed: the variables follow, the lines worked out from the page and the ink
+    {
+        const int index = saveFrom(0, L"From Paper", [](D2DTheme& t) { t.link = hexColor(0x0B6E99); });
+        const std::string file = readAll(themes / "From Paper.css");
+        check(index == THEME_COUNT && file.find("--link: #0b6e99;") != std::string::npos &&
+                  file.find("text-decoration-color: rgba(11, 110, 153, 0.4)") != std::string::npos,
+              "a colour changed in Settings is the file's variable, and the underline's tint");
+        check(file.find("--line: #dfdad1;") != std::string::npos && readAll(ini).find("\nhr=") == std::string::npos &&
+                  themeAt(index).rule && colourOf(*themeAt(index).rule).substr(0, 6) == "DFDAD1",
+              "Paper's hairline is not taken along as a colour: it is worked out from the page and the ink, as Paper's was");
+        show(index, pages[0], 1000);
+        const auto* found = runOf(app, L"found");
+        check(blocks() == 1 && found && colourOf(found->color).substr(0, 6) == "0B6E99", "and the page is drawn in the design with that colour");
+        saveFrom(index, L"From Paper", [](D2DTheme& t) {
+            t.background = hexColor(0x101418);
+            t.text = hexColor(0xE0E0E0);
+            t.isDark = true;
+        });
+        const std::string dark = readAll(themes / "From Paper.css");
+        check(themeAt(index).design == 1 && dark.find("@import \"Midnight\";") != std::string::npos &&
+                  dark.find("--line: #313538;") != std::string::npos,
+              "made dark it starts from Midnight, its lines worked out anew: " +
+                  dark.substr(dark.find("--line:") == std::string::npos ? 0 : dark.find("--line:"), 16));
+    }
+
+    // A section without the key keeps the look it had: saved again, and as what a new theme is made from
+    {
+        const std::string old = "[theme]\nname=Old look\nbackground=FAF7F0\ntext=202428\nlink=0B6E99\n";
+        writeAll(ini, old);
+        loadCustomThemes();
+        const int index = THEME_COUNT;
+        check(themeCount() == THEME_COUNT + 1 && themeAt(index).design == 0 && themeAt(index).headingSize[0] == 0 &&
+                  readAll(themes / "Old look.css").find("@import") == std::string::npos,
+              "a section without design= is what it was: no built-in sheet, Tinta's own type sizes");
+        show(index, pages[0], 1000);
+        const std::vector<std::string> before = drawnOf(app, true);
+        check(blocks() == 0, "and its code block has no round corners");
+        check(saveFrom(index, L"Old look") == index && readAll(ini).find("\ndesign=") == std::string::npos &&
+                  readAll(themes / "Old look.css").find("@import") == std::string::npos,
+              "saved again from Settings it stays so");
+        show(index, pages[0], 1000);
+        check(drawnOf(app, true) == before, "and draws what it drew");
+        const int copy = saveFrom(index, L"Old look again", [](D2DTheme& t) { t.link = hexColor(0xAA5500); });
+        check(copy == index + 1 && themeAt(copy).design == 0 && readAll(themes / "Old look again.css").find("@import") == std::string::npos,
+              "a theme made from it has its look too");
+
+        // The key written by hand: the file follows its section into the design
+        writeAll(ini, "[theme]\nname=Old look\ndesign=1\nbackground=FAF7F0\ntext=202428\nlink=0B6E99\n");
+        loadCustomThemes();
+        check(themeAt(index).design == 1 && themeAt(index).headingSize[0] == 34 && themeAt(index).headingWeight[1] == 600 &&
+                  readAll(themes / "Old look.css").find("@import \"Paper\";") != std::string::npos,
+              "design=1 written by hand gives a section the design, and its file follows");
+        show(index, pages[0], 1000);
+        check(blocks() == 1, "with the round code block");
+        // Without the file, as when it cannot be written: the type sizes at least
+        themesIniBecomesCss() = false;
+        loadCustomThemes();
+        check(!themeSheet(index) && themeAt(index).headingSize[0] == 34, "without its file the section still has the design's type sizes");
+        themesIniBecomesCss() = true;
+        loadCustomThemes();
+        // A sheet of one's own that starts from it by name takes the design with it
+        writeAll(themes / "Importer.css", "@import \"Old look\";\nh3 { color: #123456; }\n");
+        loadCustomThemes();
+        const int importer = THEME_COUNT + 1;
+        check(themeCount() == THEME_COUNT + 2 && std::wstring(themeAt(importer).name) == L"Importer" &&
+                  themeProblems(importer).empty() && themeAt(importer).headingSize[0] == 34 &&
+                  sameColor(themeAt(importer).link, 0x0B6E99),
+              "a sheet that imports the theme by its name starts from the design in its colours");
+        show(importer, pages[0], 1000);
+        check(blocks() == 1, "round code block and all");
+        fs::remove(themes / "Importer.css", ignored);
+        loadCustomThemes();
+        // The file changed by its owner is the theme, the design still in it
+        writeAll(themes / "Old look.css", readAll(themes / "Old look.css") + "h1 { color: #654321; }\n");
+        check(themeReloadIfChanged(index) && themeSourcePath(index) == (themes / "Old look.css").wstring() &&
+                  themeAt(index).design == 1 && themeAt(index).headingSize[0] == 34 && themeAt(index).headingColors[0] &&
+                  sameColor(*themeAt(index).headingColors[0], 0x654321) && sameColor(themeAt(index).link, 0x0B6E99),
+              "its file changed by hand is the theme, with the design and what was added");
+    }
+
+    // The fixture's sections, written by hand: two in the design, one without the key
+    {
+        fs::remove(themes / "Old look.css", ignored);  // its owner's by now: it would stay, a theme of its own
+        writeAll(ini, readAll(fixtures / "themes-ini-design.ini"));
+        loadCustomThemes();
+        const int light = THEME_COUNT, dark = THEME_COUNT + 1, none = THEME_COUNT + 2;
+        check(themeCount() == THEME_COUNT + 3 && themeAt(light).design == 1 && themeAt(dark).design == 1 && themeAt(none).design == 0,
+              "the fixture: two themes in the design and one without");
+        for (int index : {light, dark, none}) {
+            const std::string name = toUtf8(themeAt(index).name);
+            const bool design = index != none;
+            for (int width : {1000, 600}) {
+                show(index, pages[0], width);
+                const std::string where = name + " at " + std::to_string(width);
+                check(blocks() == (design ? 1 : 0), where + (design ? ": the code block is round, with an edge" : ": the code block as it was"));
+                int down = 0;
+                if (app.tableRects.size() == 1) {
+                    const D2D1_RECT_F table = app.tableRects[0].bounds;
+                    for (const auto& line : app.layoutLines) {
+                        down += closeTo(line.p1.x, line.p2.x, 0.01f) && line.p2.y - line.p1.y > 20 && line.p1.y >= table.top - 0.5f &&
+                                        line.p2.y <= table.bottom + 0.5f
+                                    ? 1 : 0;
+                    }
+                }
+                check(app.tableRects.size() == 1 && (down == 0) == design,
+                      where + (design ? ": the table has lines across only" : ": the table keeps its grid") + ": " + std::to_string(down) + " down");
+                const auto* quoted = runStarting(app, L"A plain quote");
+                check(quoted && (colourOf(quoted->color) != colourOf(themeAt(index).text)) == design &&
+                          readsAt(quoted->color, themeAt(index).background) >= 4.5f,
+                      where + (design ? ": a quote's text is set back, and reads" : ": a quote's text is the page's"));
+            }
+        }
+        const std::string lightFile = readAll(themes / "Design light.css"), darkFile = readAll(themes / "Design dark.css");
+        check(lightFile.find("h1, h2, h3, h4, h5, h6 { font-family: \"Georgia\"") != std::string::npos &&
+                  darkFile.find("h1, h2, h3, h4, h5, h6 { font-family: \"Segoe UI\"") != std::string::npos,
+              "headings in the section's heading face, or in its text face when it has none");
+        check(std::wstring(themeHeadingFont(themeAt(dark))) == L"Segoe UI" && themeAt(light).headingFontFamily &&
+                  std::wstring(themeAt(light).headingFontFamily) == L"Georgia",
+              "and so the themes say");
+        check(darkFile.find("--line: #3b4252;") != std::string::npos && darkFile.find("h2 { color: #88c0d0; }") != std::string::npos &&
+                  darkFile.find(":not(pre) > code:not(a *) { color: #ebcb8b; }") != std::string::npos &&
+                  darkFile.find("mark { background-color: #4a3f1a; color: #f5e0a0; }") != std::string::npos,
+              "hr= is the hairlines' colour; a heading level's, inline code's and a mark's colours are rules after the variables");
+        check(lightFile.find(":not(pre) > code") == std::string::npos && lightFile.find("mark {") == std::string::npos,
+              "and what a section leaves unsaid is left to the design");
+        show(dark, pages[0], 1000);
+        const auto* second = runStarting(app, L"Callouts keep");
+        check(second && colourOf(second->color).substr(0, 6) == "88C0D0", "the level's own colour is drawn");
+        auto marks = [&](const D2D1_COLOR_F& ground) {
+            int count = 0;
+            for (const auto& rect : app.layoutRects) count += colourOf(rect.color) == colourOf(ground) ? 1 : 0;
+            return count;
+        };
+        check(marks(hexColor(0x4A3F1A)) >= 1, "a marked word stands on the section's mark colour");
+        // A dark theme in the design with no mark colours of its own: Midnight's, whose sheet it starts from
+        std::string unmarked = readAll(fixtures / "themes-ini-design.ini");
+        for (const char* key : {"highlightbackground=4A3F1A", "highlighttext=F5E0A0"}) {
+            const size_t at = unmarked.find(key);
+            check(at != std::string::npos, std::string("the fixture has ") + key);
+            if (at != std::string::npos) unmarked.replace(at, strlen(key), "");
+        }
+        writeAll(ini, unmarked);
+        loadCustomThemes();
+        show(dark, pages[0], 1000);
+        check(!themeAt(dark).highlightBackground && THEMES[5].highlightBackground && marks(*THEMES[5].highlightBackground) >= 1,
+              "a dark theme in the design that names no mark colour marks words as Midnight does");
+        for (const wchar_t* name : {L"Design light", L"Design dark", L"Design none"}) fs::remove(fileOf(name), ignored);
+    }
+
+    for (const auto& file : made) fs::remove(file, ignored);
+    if (hadIni) writeAll(ini, iniBefore);
+    else fs::remove(ini, ignored);
+    loadCustomThemes();
+    app.currentFile = fileBefore;
+    app.width = widthBefore;
+    applyTheme(app, 0);
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -1240,6 +1517,7 @@ int testPageStyles(App&, const fs::path& dir) {
     builtInsStyled(app, dir);
     iniThemesAsCss(app, dir);
     chosenByName(app, dir);
+    madeFromBuiltIns(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;

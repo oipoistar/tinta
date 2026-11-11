@@ -11,11 +11,21 @@
 // and what a new CSS theme starts from. themes.ini's keys map one to one:
 // background and text to body, h1-h6, link to a, code and codebackground
 // to pre, inlinecode to code, and so on
-std::string themeToCss(const D2DTheme& theme);
+//
+// `design` (D2DTheme::design, for a section that has design=1) writes the
+// theme as the built-in themes are written: it starts from one of them,
+// Paper or Midnight when dark, with @import, and so takes their type
+// sizes and rules; its colours are that sheet's variables, the lines and
+// the quieter ink worked out from them as the built-in themes' were, and
+// rules follow only for what no variable carries
+std::string themeToCss(const D2DTheme& theme, bool design = false);
 // The same as the text of a file of its own (themes\<name>.css, written
 // for a themes.ini section): each face followed by the ones Tinta falls
 // back to, so the HTML export's page finds a face on another system too
-std::string themeToCssFile(const D2DTheme& theme);
+std::string themeToCssFile(const D2DTheme& theme, bool design = false);
+// The hairline's colour in that design, worked out from the page and the
+// ink: what --line is for a theme that names no colour for rules (hr=)
+D2D1_COLOR_F themeDesignLine(const D2DTheme& theme);
 
 // A CSS theme read into the theme Tinta draws with: it starts from Paper,
 // or Midnight when dark, and takes what the sheet declares for the page,

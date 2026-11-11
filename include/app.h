@@ -170,6 +170,12 @@ struct D2DTheme {
     float headingSize[6] = {};
     int headingWeight[6] = {};
     bool headingItalic[6] = {};
+    // 1: the built-in themes' design, their type sizes and rules. A theme
+    // made in Settings takes it from the theme it was made from and keeps
+    // it as design=1 in its themes.ini section, whose CSS file then starts
+    // from a built-in theme's rules; 0 is the look every section had up to
+    // 4.0.3, which a section without the key keeps
+    int design = 0;
     // The file a CSS theme came from, for following its changes; else empty
     const wchar_t* sourcePath = nullptr;
     // The window around the page as a CSS theme sets it with --ui-* on
@@ -294,6 +300,9 @@ struct CustomTheme {
 };
 int themeCount();
 const D2DTheme& themeAt(int index);  // out-of-range clamps to theme 0
+// A theme as what a new one is made from in the theme editor: its copy,
+// without the hairline colour when that is only the design's own
+D2DTheme themeAsBase(int index);
 // Where the theme of that name (UTF-8) stands now: at `index` when it is
 // still there, else wherever it moved; -1 when no theme has the name. With
 // no name, `index` as it is

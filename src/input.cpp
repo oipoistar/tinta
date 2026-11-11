@@ -592,7 +592,7 @@ static std::optional<D2D1_COLOR_F>& themeEditorOverride(App& app, int field) {
 static void themeEditorAdoptBase(App& app, int baseIndex) {
     app.themeEditorBase = baseIndex;
     const D2DTheme& bt = themeAt(baseIndex);
-    app.themeEditorTheme = bt;
+    app.themeEditorTheme = themeAsBase(baseIndex);
     app.themeEditorFont = bt.fontFamily;
     app.themeEditorHeadingFont =
         (bt.headingFontFamily && bt.headingFontFamily[0]) ? bt.headingFontFamily : L"";

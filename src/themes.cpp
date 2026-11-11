@@ -47,6 +47,7 @@ const D2DTheme& builtinTheme(int index) {
         // None of its own inherits the main font (themeHeadingFont)
         t.headingFontFamily = m.theme.headingFontFamily.empty() ? nullptr : m.theme.headingFontFamily.c_str();
         t.codeFontFamily = m.theme.codeFontFamily.c_str();
+        t.design = 1;  // a theme made from it in Settings takes its design along
     });
     return m.theme.theme;
 }
@@ -258,6 +259,7 @@ void applyThemeKey(CustomTheme& ct, const std::string& key, const std::string& v
     else if (key == "headingfont") ct.headingFontFamily = utf8ToWideTheme(value);
     else if (key == "codefont") ct.codeFontFamily = utf8ToWideTheme(value);
     else if (key == "dark") t.isDark = (value == "1");
+    else if (key == "design") t.design = atoi(value.c_str()) >= 1 ? 1 : 0;
     else if (key == "background") parseHexColor(value, t.background);
     else if (key == "text") parseHexColor(value, t.text);
     else if (key == "heading") parseHexColor(value, t.heading);
@@ -316,6 +318,9 @@ void writeThemesIni() {
     file << "; Optional bold, italic and bolditalic colour emphasised text;\n";
     file << "; selection tints the selection and hr colours horizontal rules.\n";
     file << "; An empty headingfont= sets headings in font=.\n";
+    file << "; design=1 gives a theme the built-in themes' look (their type sizes,\n";
+    file << "; hairlines and round code blocks) in its own colours; without it a\n";
+    file << "; theme keeps the look themes had up to 4.0.3.\n";
     file << "; Each theme is also written as themes/<name>.css, which follows its\n";
     file << "; section here until that file is changed by hand (docs/css-themes.md).\n";
     for (const auto& ct : g_customThemes) {
@@ -323,6 +328,7 @@ void writeThemesIni() {
         file << "\n[theme]\n";
         file << "name=" << wideToUtf8Theme(ct->name) << "\n";
         file << "dark=" << (t.isDark ? 1 : 0) << "\n";
+        if (t.design) file << "design=" << t.design << "\n";
         file << "font=" << wideToUtf8Theme(ct->fontFamily) << "\n";
         // Always written, empty while headings use font=, so the key is
         // there to fill in by hand (#256)
@@ -339,7 +345,10 @@ void writeThemesIni() {
         if (t.italicText) file << "italic=" << colorToHex(*t.italicText) << "\n";
         if (t.boldItalicText) file << "bolditalic=" << colorToHex(*t.boldItalicText) << "\n";
         if (t.selection) file << "selection=" << colorToHex(*t.selection) << "\n";
-        if (t.rule) file << "hr=" << colorToHex(*t.rule) << "\n";
+        // (not one the design worked out: it is worked out again)
+        if (t.rule && !(t.design == 1 && colorToHex(*t.rule) == colorToHex(themeDesignLine(t)))) {
+            file << "hr=" << colorToHex(*t.rule) << "\n";
+        }
         file << "link=" << colorToHex(t.link) << "\n";
         file << "code=" << colorToHex(t.code) << "\n";
         if (t.inlineCode) file << "inlinecode=" << colorToHex(*t.inlineCode) << "\n";
@@ -378,6 +387,7 @@ const char* themesIniTemplate() {
            "; [theme]\n"
            "; name=My theme\n"
            "; dark=0\n"
+           "; design=1                 (the built-in themes' look; leave out for the old)\n"
            "; font=Segoe UI\n"
            "; headingfont=Georgia      (empty: headings use font=)\n"
            "; codefont=Cascadia Mono\n"
@@ -414,6 +424,7 @@ struct CssEntry {
     // name, whatever the file's, and starts from Paper as the section does
     std::wstring name;
     bool fromIni = false;
+    int design = 0;  // its section's design=, which a theme made from this one takes along
 };
 std::vector<std::unique_ptr<CssEntry>> g_cssThemes;
 // Themes a reload replaced: copies of a D2DTheme may still point into
@@ -463,7 +474,7 @@ void readCssTheme(CssEntry& entry) {
         }
         for (const auto& custom : g_customThemes) {
             if (_wcsicmp(custom->name.c_str(), wanted.c_str()) == 0) {
-                out = themeToCss(custom->theme);
+                out = themeToCss(custom->theme, custom->theme.design == 1);
                 file = std::string(name);
                 return true;
             }
@@ -489,6 +500,7 @@ void readCssTheme(CssEntry& entry) {
     light->sourcePath = entry.path;
     bindStrings(*light);
     light->theme.sourcePath = light->sourcePath.c_str();
+    if (entry.fromIni) light->theme.design = entry.design;
     std::unique_ptr<CustomTheme> dark;
     if (compiled.lightDark) {
         dark = std::make_unique<CustomTheme>();
@@ -497,6 +509,7 @@ void readCssTheme(CssEntry& entry) {
         dark->sourcePath = entry.path;
         bindStrings(*dark);
         dark->theme.sourcePath = dark->sourcePath.c_str();
+        if (entry.fromIni) dark->theme.design = entry.design;
     }
     if (entry.light) g_retiredThemes.push_back(std::move(entry.light));
     if (entry.dark) g_retiredThemes.push_back(std::move(entry.dark));
@@ -547,7 +560,7 @@ std::wstring fileSafe(const std::wstring& name) {
 }
 
 std::string convertedText(const CustomTheme& ct) {
-    const std::string body = themeToCssFile(ct.theme);
+    const std::string body = themeToCssFile(ct.theme, ct.theme.design == 1);
     std::string name = wideToUtf8Theme(ct.name);
     for (size_t at = name.find("*/"); at != std::string::npos; at = name.find("*/", at)) name.replace(at, 2, "* /");
     char sum[16];
@@ -622,11 +635,19 @@ void convertIniThemes() {
         entry->path = path;
         entry->name = ct.name;
         entry->fromIni = true;
+        entry->design = ct.theme.design;
         if (state == 2) {
-            // The section is the theme, as it always was; its sheet is for the page
-            const css::ImportSource none = [](std::string_view, std::string_view, std::string&, std::string&) { return false; };
+            // The section is the theme, as it always was; its sheet is for
+            // the page. One in the built-in themes' design starts from theirs
+            const css::ImportSource builtins = [](std::string_view name, std::string_view, std::string& out, std::string& file) {
+                const char* sheet = builtinThemeCss(utf8ToWideTheme(std::string(name)));
+                if (!sheet) return false;
+                out = sheet;
+                file = std::string(name);
+                return true;
+            };
             CustomTheme unused;
-            entry->sheet = compileCssTheme(wanted, wideToUtf8Theme(path), false, none, unused, &iniBaseTheme()).sheet;
+            entry->sheet = compileCssTheme(wanted, wideToUtf8Theme(path), false, builtins, unused, &iniBaseTheme()).sheet;
             FILETIME time{};
             fileTime(path, time);
             entry->files.push_back({path, time});
@@ -777,6 +798,15 @@ const D2DTheme& themeAt(int index) {
     return THEMES[0];
 }
 
+D2DTheme themeAsBase(int index) {
+    D2DTheme t = themeAt(index);
+    // A hairline that is only what the design works out from the page and
+    // the ink is no choice of the theme's: left out, it is worked out again
+    // from the colours the new theme is saved with
+    if (t.design == 1 && t.rule && colorToHex(*t.rule) == colorToHex(themeDesignLine(t))) t.rule.reset();
+    return t;
+}
+
 int themeIndexNamed(const std::string& name, int index) {
     if (name.empty()) return index;
     const std::wstring wanted = utf8ToWideTheme(name);
@@ -812,6 +842,23 @@ static void loadCustomThemesIni() {
     std::unique_ptr<CustomTheme> current;
     auto finalize = [&]() {
         if (current && !current->name.empty()) {
+            if (current->theme.design == 1) {
+                // The built-in themes' design: their type sizes, the same in
+                // all ten. Its rules are in the section's file (convertedText)
+                const D2DTheme& paper = builtinTheme(0);
+                D2DTheme& t = current->theme;
+                t.bodySize = paper.bodySize;
+                t.codeSize = paper.codeSize;
+                t.lineHeight = paper.lineHeight;
+                for (int i = 0; i < 6; ++i) {
+                    t.headingSize[i] = paper.headingSize[i];
+                    t.headingWeight[i] = paper.headingWeight[i];
+                    t.headingItalic[i] = paper.headingItalic[i];
+                }
+                // Its hairline, where it names none: worked out from its page
+                // and ink, for what draws from the theme and not the sheet
+                if (!t.rule) t.rule = themeDesignLine(t);
+            }
             bindStrings(*current);
             g_customThemes.push_back(std::move(current));
         }
@@ -865,6 +912,13 @@ int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
     slot->headingFontFamily = headingFontFamily;  // empty inherits font
     slot->codeFontFamily = codeFontFamily.empty() ? L"Consolas" : codeFontFamily;
     slot->theme = t;
+    // A section's colours are RRGGBB: a mark's translucent ground (a dark
+    // built-in theme's) is kept as what it comes to on the page
+    if (auto& mark = slot->theme.highlightBackground; mark && mark->a < 1.0f) {
+        const D2D1_COLOR_F page = t.background;
+        mark = D2D1::ColorF(page.r + (mark->r - page.r) * mark->a, page.g + (mark->g - page.g) * mark->a,
+                            page.b + (mark->b - page.b) * mark->a, 1.0f);
+    }
     bindStrings(*slot);
     writeThemesIni();
     // Read back, so that the theme is what its section holds: a built-in

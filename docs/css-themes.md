@@ -302,6 +302,38 @@ and it is yours: from then on the file is the theme, **Edit** opens it in
 place of the colour editor, and its section is read no more. Delete the
 file to have the section back.
 
+A theme made in **Settings > Appearance** from a built-in theme is that
+theme's design in the colours you gave it: its section says `design=1`, and
+its file starts from Paper's sheet, or Midnight's for a dark theme, and
+names its colours as that sheet's variables:
+
+```css
+@import "Paper";
+:root {
+  color-scheme: light;
+  accent-color: #0b6e99;
+  --page: #fbfaf7;
+  --ink: #24292f;
+  --ink-strong: #1b1f24;      /* headings */
+  --ink-soft: #5c5f63;        /* quotes and list markers */
+  --link: #0b6e99;
+  --line: #e1e1df;            /* hairlines: under headings, between rows, rules */
+  ...
+}
+a { text-decoration-color: rgba(11, 110, 153, 0.4); }
+body { font-family: "Segoe UI", "Arial", sans-serif; }
+```
+
+The lines and the quieter ink are worked out from the page and the text
+colours as the built-in themes' own were; `hr=` sets the hairlines'
+colour. Rules follow only for what no variable carries: faces, code tokens,
+and the optional keys. A section without `design=1`, which is every theme
+made before the built-in themes were redesigned, keeps the look it had,
+also when it is saved again or a new theme is made from it. Write
+`design=1` into such a section to give it the design, or take the line out
+to go back. Try
+[tests/fixtures/themes-ini-design.ini](../tests/fixtures/themes-ini-design.ini).
+
 A section taken out of `themes.ini` takes its unchanged file with it; a
 file you changed stays, as a CSS theme of its own. With no `themes.ini` at
 all, the files are the themes. A sheet of your own that has a section's

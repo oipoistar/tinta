@@ -11,6 +11,7 @@
 
 #include <dwrite.h>
 
+#include <cmath>
 #include <cstdio>
 #include <mutex>
 
@@ -52,10 +53,14 @@ std::string color(const char* property, const D2D1_COLOR_F& c) {
 }  // namespace
 
 namespace {
-std::string themeCss(const D2DTheme& t, bool file);
+std::string themeCss(const D2DTheme& t, bool file, bool design);
 }
-std::string themeToCss(const D2DTheme& t) { return themeCss(t, false); }
-std::string themeToCssFile(const D2DTheme& t) { return themeCss(t, true); }
+std::string themeToCss(const D2DTheme& t, bool design) { return themeCss(t, false, design); }
+std::string themeToCssFile(const D2DTheme& t, bool design) { return themeCss(t, true, design); }
+namespace {
+D2D1_COLOR_F mixedColor(const D2D1_COLOR_F& from, const D2D1_COLOR_F& to, double share);
+}
+D2D1_COLOR_F themeDesignLine(const D2DTheme& t) { return mixedColor(t.background, t.text, t.isDark ? 0.16 : 0.12); }
 
 namespace {
 // A face and, in a file, the faces Tinta stands in for a missing one, in
@@ -75,14 +80,59 @@ std::string faces(const wchar_t* name, bool mono, bool file) {
     return list + ", sans-serif";
 }
 
-std::string themeCss(const D2DTheme& t, bool file) {
+// One colour moved towards another, as the built-in themes' own lines and
+// quieter inks were worked out from their pages and inks: in whole steps
+// of 255 and rounded half to even, so that a theme made from a built-in
+// one comes to that theme's very colours
+D2D1_COLOR_F mixedColor(const D2D1_COLOR_F& from, const D2D1_COLOR_F& to, double share) {
+    auto part = [&](float a, float b) {
+        const int x = (int)(a * 255.0f + 0.5f), y = (int)(b * 255.0f + 0.5f);
+        return (float)std::nearbyint(x + (y - x) * share) / 255.0f;
+    };
+    return D2D1::ColorF(part(from.r, to.r), part(from.g, to.g), part(from.b, to.b), 1.0f);
+}
+std::string mixed(const D2D1_COLOR_F& from, const D2D1_COLOR_F& to, double share) {
+    return hexCss(mixedColor(from, to, share));
+}
+
+// The head of a theme in the built-in themes' design: their sheet, and
+// this theme's colours as its variables
+std::string designHead(const D2DTheme& t) {
+    auto variable = [](const char* name, const std::string& value, const char* note = "") {
+        return std::string("  ") + name + ": " + value + ";" + note + "\n";
+    };
+    char underline[48];
+    snprintf(underline, sizeof(underline), "rgba(%d, %d, %d, 0.4)", (int)(t.link.r * 255.0f + 0.5f),
+             (int)(t.link.g * 255.0f + 0.5f), (int)(t.link.b * 255.0f + 0.5f));
+    return std::string("/* The built-in themes' design: their type, lines and corners, in this\n"
+                       "   theme's colours, which are the variables below */\n") +
+           "@import " + (t.isDark ? "\"Midnight\"" : "\"Paper\"") + ";\n:root {\n" +
+           variable("color-scheme", t.isDark ? "dark" : "light") + variable("accent-color", hexCss(t.accent)) +
+           variable("--page", hexCss(t.background)) + variable("--ink", hexCss(t.text)) +
+           variable("--ink-strong", hexCss(t.heading), "      /* headings */") +
+           variable("--ink-soft", mixed(t.text, t.background, 0.26), "        /* quotes and list markers */") +
+           variable("--link", hexCss(t.link)) +
+           variable("--line", hexCss(t.rule ? *t.rule : themeDesignLine(t)),
+                    "            /* hairlines: under headings, between rows, rules */") +
+           variable("--line-firm", mixed(t.background, t.text, t.isDark ? 0.34 : 0.28), "       /* under a table's header */") +
+           variable("--surface", hexCss(t.codeBackground), "         /* code */") +
+           variable("--surface-edge", mixed(t.codeBackground, t.text, t.isDark ? 0.12 : 0.08)) +
+           variable("--code", hexCss(t.code)) +
+           variable("--quote", hexCss(t.blockquoteBorder), "           /* a quote's bar */") + "}\n" +
+           "a { text-decoration-color: " + underline + "; }\n";
+}
+
+std::string themeCss(const D2DTheme& t, bool file, bool design) {
     std::string css = file ? std::string() : "/* " + utf8(t.name) + " */\n";
-    rule(css, ":root", std::string("color-scheme: ") + (t.isDark ? "dark" : "light") + "; " +
-                           color("accent-color", t.accent));
-    std::string body = color("background-color", t.background) + color("color", t.text);
+    // In the design the colours a variable carries are said once, above:
+    // rules follow for the faces and for what the design has no word on
+    if (design) css += designHead(t);
+    else rule(css, ":root", std::string("color-scheme: ") + (t.isDark ? "dark" : "light") + "; " +
+                                color("accent-color", t.accent));
+    std::string body = design ? std::string() : color("background-color", t.background) + color("color", t.text);
     if (t.fontFamily && *t.fontFamily) body += "font-family: " + faces(t.fontFamily, false, file) + "; ";
     rule(css, "body", body);
-    std::string headings = color("color", t.heading);
+    std::string headings = design ? std::string() : color("color", t.heading);
     // A heading face this PC lacks gives way to the body's (useInstalledFaces)
     if (t.headingFontFamily && *t.headingFontFamily) {
         headings += "font-family: " + family(t.headingFontFamily) +
@@ -90,6 +140,9 @@ std::string themeCss(const D2DTheme& t, bool file) {
                          ? ", " + faces(t.fontFamily, false, true)
                          : file ? std::string(", sans-serif") : std::string()) +
                     "; ";
+    } else if (design && t.fontFamily && *t.fontFamily) {
+        // None of its own: the body's, where the built-in theme has one for headings
+        headings += "font-family: " + faces(t.fontFamily, false, file) + "; ";
     }
     rule(css, "h1, h2, h3, h4, h5, h6", headings);
     bool levels = false;
@@ -101,15 +154,19 @@ std::string themeCss(const D2DTheme& t, bool file) {
     }
     // A table's header row is in the heading colour, which the levels' own no longer say
     if (levels) rule(css, "th", color("color", t.heading));
-    rule(css, "a", color("color", t.link));
+    if (!design) rule(css, "a", color("color", t.link));
     if (t.codeFontFamily && *t.codeFontFamily) rule(css, "code, pre", "font-family: " + faces(t.codeFontFamily, true, file) + "; ");
-    rule(css, "pre", color("background-color", t.codeBackground) + color("color", t.code));
+    if (!design) rule(css, "pre", color("background-color", t.codeBackground) + color("color", t.code));
     // Inside a link everything is the link's colour, code and emphasis too,
     // as Tinta has always drawn it: these colours are for what is in no link
+    // (in the design inline code is the code block's, as in the built-in
+    // themes, unless the theme has a colour for it alone)
     const D2D1_COLOR_F box = themeInlineCodeBackground(t);
-    rule(css, ":not(pre) > code", box.a == 0 ? std::string("background: none; ") : color("background-color", box));
-    rule(css, ":not(pre) > code:not(a *)", color("color", themeInlineCodeColor(t)));
-    rule(css, "blockquote", color("border-left-color", t.blockquoteBorder));
+    if (!design || t.inlineCodeBackground) {
+        rule(css, ":not(pre) > code", box.a == 0 ? std::string("background: none; ") : color("background-color", box));
+    }
+    if (!design || t.inlineCode) rule(css, ":not(pre) > code:not(a *)", color("color", themeInlineCodeColor(t)));
+    if (!design) rule(css, "blockquote", color("border-left-color", t.blockquoteBorder));
     std::string mark;
     if (t.highlightBackground) mark += color("background-color", *t.highlightBackground);
     if (t.highlightText) mark += color("color", *t.highlightText);
@@ -121,7 +178,7 @@ std::string themeCss(const D2DTheme& t, bool file) {
         rule(css, "strong em:not(a *), em strong:not(a *)", color("color", *both));
     }
     if (t.selection) rule(css, "::selection", color("background-color", *t.selection));
-    if (t.rule) rule(css, "hr", color("border-top-color", *t.rule));
+    if (t.rule && !design) rule(css, "hr", color("border-top-color", *t.rule));
     rule(css, ".token.keyword", color("color", t.syntaxKeyword));
     rule(css, ".token.string", color("color", t.syntaxString));
     rule(css, ".token.comment", color("color", t.syntaxComment));
