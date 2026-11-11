@@ -1487,6 +1487,91 @@ void madeFromBuiltIns(App& app, const fs::path& dir) {
     app.width = widthBefore;
     applyTheme(app, 0);
 }
+// THEMES.md, the short guide to a theme of one's own: each CSS example in
+// it is put into the themes folder as the guide says and has to be a
+// theme without a problem, which does what the guide says of it.
+void themesGuide(App& app, const fs::path& dir) {
+    const fs::path guide = fs::path(TINTA_THEME_FIXTURE).parent_path().parent_path().parent_path() / "THEMES.md";
+    std::string text = readAll(guide);
+    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+    check(text.size() > 1000, "THEMES.md is read");
+    const fs::path themes = dir / "themes";
+    std::error_code ignored;
+    fs::create_directories(themes, ignored);
+    std::vector<std::string> names;
+    for (size_t at = text.find("```css\n"); at != std::string::npos; at = text.find("```css\n", at + 1)) {
+        const size_t from = at + 7, to = text.find("\n```", from);
+        if (to == std::string::npos) break;
+        const std::string sheet = text.substr(from, to - from + 1);
+        // Each example starts with its file's name, as the guide tells the reader to name it
+        const size_t open = sheet.find("/* "), close = sheet.find(".css */");
+        check(open == 0 && close != std::string::npos && close < 40, "an example names its file: " + sheet.substr(0, 30));
+        if (open != 0 || close == std::string::npos) continue;
+        names.push_back(sheet.substr(3, close - 3));
+        writeAll(themes / (names.back() + ".css"), sheet);
+    }
+    check(names.size() == 3, "the guide has three examples: " + std::to_string(names.size()));
+    loadCustomThemes();
+    auto placeOf = [](const std::string& name) {
+        for (int i = THEME_COUNT; i < themeCount(); ++i) {
+            if (toUtf8(themeAt(i).name) == name) return i;
+        }
+        return -1;
+    };
+    for (const std::string& name : names) {
+        const int index = placeOf(name);
+        check(index >= 0, name + " is listed under its file's name");
+        if (index < 0) continue;
+        std::string problems;
+        for (const auto& line : themeProblems(index)) problems += " ;; " + toUtf8(line);
+        check(problems.empty(), name + " has no problems" + problems);
+        check(themeSourcePath(index) == (themes / (name + ".css")).wstring(), name + ": Edit opens its file");
+        check(themeAt(index).headingSize[0] == 34 && themeAt(index).headingWeight[1] == 600, name + " has the built-in design's type");
+    }
+    if (const int harbour = placeOf("Harbour"); harbour >= 0) {
+        const D2DTheme& t = themeAt(harbour);
+        check(t.isDark && sameColor(t.background, 0x101820) && sameColor(t.text, 0xD7DDE4) && sameColor(t.heading, 0xF2F5F8) &&
+                  sameColor(t.link, 0xFFB454) && sameColor(t.codeBackground, 0x17222D) && sameColor(t.code, 0x9FD6C2) &&
+                  sameColor(t.blockquoteBorder, 0x3D5166) && sameColor(t.accent, 0xFFB454) && t.rule && sameColor(*t.rule, 0x2A3644),
+              "Harbour: the variables are the theme's colours");
+        check(readsAt(t.text, t.background) >= 7 && readsAt(t.link, t.background) >= 4.5f && readsAt(t.code, t.codeBackground) >= 4.5f,
+              "and they read");
+        const fs::path doc = dir / "builtin-themes-styled.md";
+        const std::string fileBefore = app.currentFile;
+        app.currentFile = toUtf8(doc.wstring());
+        app.root = parseDocument(app.parser, readAll(fs::path(TINTA_THEME_FIXTURE).parent_path() / "builtin-themes-styled.md"), doc.wstring()).root;
+        applyTheme(app, harbour);
+        layoutDocument(app);
+        int blocks = 0;
+        bool underline = false;
+        for (const auto& rect : app.layoutRects) {
+            blocks += rect.radius == 10 && rect.strokeWidth == 1 && sameColor(rect.color, 0x17222D) && sameColor(rect.stroke, 0x2A3644) ? 1 : 0;
+        }
+        for (const auto& line : app.layoutLines) underline = underline || (sameColor(line.color, 0xFFB454) && closeTo(line.color.a, 0.4f, 0.01f));
+        check(blocks == 1 && underline, "Midnight's design in them: the round code block with its edge, the link's underline in its tint");
+        app.currentFile = fileBefore;
+    }
+    if (const int novel = placeOf("Novel"); novel >= 0) {
+        const D2DTheme& t = themeAt(novel);
+        check(!t.isDark && std::wstring(t.fontFamily) == L"Georgia" && t.bodySize == 17 && closeTo(t.lineHeight, 1.65f, 0.001f) &&
+                  sameColor(t.syntaxKeyword, 0xA626A4) && colourOf(t.background) == colourOf(THEMES[0].background),
+              "Novel: Paper with its own face, size, line height and keyword colour");
+    }
+    if (const int daylight = placeOf("Daylight"); daylight >= 0) {
+        check(themeFollowsSystem(daylight), "Daylight follows Windows");
+        themesSetSystemDark(false);
+        const bool light = sameColor(themeAt(daylight).background, 0xFBF8F1) && sameColor(themeAt(daylight).syntaxKeyword, 0x8250DF);
+        themesSetSystemDark(true);
+        const D2DTheme& night = themeAt(daylight);
+        check(light && night.isDark && sameColor(night.background, 0x1B1D22) && sameColor(night.link, 0x88C0D0) &&
+                  sameColor(night.syntaxKeyword, 0x81A1C1) && readsAt(night.text, night.background) >= 7,
+              "light or dark, each with its colours");
+        themesSetSystemDark(false);
+    }
+    for (const std::string& name : names) fs::remove(themes / (name + ".css"), ignored);
+    loadCustomThemes();
+    applyTheme(app, 0);
+}
 }  // namespace
 
 int testPageStyles(App&, const fs::path& dir) {
@@ -1518,6 +1603,7 @@ int testPageStyles(App&, const fs::path& dir) {
     iniThemesAsCss(app, dir);
     chosenByName(app, dir);
     madeFromBuiltIns(app, dir);
+    themesGuide(app, dir);
     DestroyWindow(app.hwnd);
     std::cout << "Page styles: " << failures << " failures\n";
     return failures;

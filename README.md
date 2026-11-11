@@ -299,8 +299,12 @@ Press `T` to open the theme chooser:
 - Ember - Warm charcoal
 - Abyss - Pure black (OLED-friendly)
 
-Custom themes live in `themes.ini` beside the portable executable, or in
-`%APPDATA%\Tinta`. Add `inlinecode` to a `[theme]` section to color inline code
+A theme of your own is a CSS file in the `themes` folder, in `%APPDATA%\Tinta`
+or beside the portable executable: [THEMES.md](THEMES.md) is the short guide,
+with examples to start from.
+
+Themes made in the colour editor (Settings > Appearance > New) live in
+`themes.ini` in the same place. Add `inlinecode` to a `[theme]` section to color inline code
 independently of fenced blocks:
 
 ```ini
