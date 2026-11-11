@@ -1432,7 +1432,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             return 0;
 
+        case WM_MOVE:
+            // On another monitor the text takes that monitor's smoothing
+            if (app && followMonitorText(*app)) InvalidateRect(hwnd, nullptr, FALSE);
+            break;
+
+        case WM_DISPLAYCHANGE:
+            // A display joined, left or turned: the monitor's values anew
+            if (app && followMonitorText(*app, true)) InvalidateRect(hwnd, nullptr, FALSE);
+            break;
+
         case WM_SETTINGCHANGE:
+            // Windows' text settings may be among what changed
+            if (app && followMonitorText(*app, true)) InvalidateRect(hwnd, nullptr, FALSE);
             // Windows switched light/dark mode
             if (app && lParam && wcscmp((const wchar_t*)lParam, L"ImmersiveColorSet") == 0) {
                 themesSetSystemDark(!systemPrefersLight());

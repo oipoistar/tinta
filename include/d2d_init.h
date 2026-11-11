@@ -32,5 +32,19 @@ const wchar_t* installedFace(App& app, const wchar_t* face, bool mono);
 void useInstalledFaces(App& app, D2DTheme& theme);
 void createTypography(App& app);
 bool createRenderTarget(App& app);
+// Text is smoothed for the monitor the window is on: ClearType with that
+// monitor's gamma, contrast and subpixel order, where it took the primary
+// monitor's for every screen. createRenderTarget sets it up; this follows
+// the window to another monitor, and with `reread` takes the monitor's
+// values afresh (the displays or Windows' text settings changed). True when
+// the target now draws with other values, so the window wants a repaint.
+bool followMonitorText(App& app, bool reread = false);
+// Where the above learns a window's monitor and a monitor's values; tests
+// stand a second monitor in here
+struct MonitorTextSource {
+    HMONITOR (*monitorOf)(HWND window);
+    HRESULT (*paramsOf)(IDWriteFactory* factory, HMONITOR monitor, IDWriteRenderingParams** params);
+};
+MonitorTextSource& monitorTextSource();
 
 #endif // TINTA_D2D_INIT_H

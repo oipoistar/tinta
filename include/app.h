@@ -497,6 +497,12 @@ struct App {
     // The warm-up thread flips this and the target is recreated on
     // WM_APP_GPU_READY, after the first frame is already on screen.
     bool useHardwareRT = false;
+    // The monitor the target's text is smoothed for, and that monitor's
+    // gamma, contrast and subpixel order (followMonitorText, d2d_init.h)
+    HMONITOR textMonitor = nullptr;
+    float textGamma = 0.0f;
+    float textContrast = 0.0f;
+    int textPixelGeometry = -1;
 
     // Cached dashed stroke for mermaid edges (factory object: created once,
     // survives render-target recreation)

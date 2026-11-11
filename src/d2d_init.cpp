@@ -741,6 +741,51 @@ void createTypography(App& app) {
     }
 }
 
+namespace {
+HMONITOR windowMonitor(HWND window) { return MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST); }
+HRESULT monitorParams(IDWriteFactory* factory, HMONITOR monitor, IDWriteRenderingParams** params) {
+    return factory->CreateMonitorRenderingParams(monitor, params);
+}
+MonitorTextSource g_monitorText{windowMonitor, monitorParams};
+
+// Gives the target the text settings of `monitor`: its gamma, contrast and
+// subpixel order as ClearType's tuner left them, which differ from screen to
+// screen (a panel with its subpixels in another order shows coloured edges
+// under the primary monitor's). True when they are not the ones it had.
+bool setMonitorText(App& app, HMONITOR monitor) {
+    if (!app.renderTarget || !app.dwriteFactory) return false;
+    IDWriteRenderingParams* base = nullptr;
+    if (!monitor || FAILED(g_monitorText.paramsOf(app.dwriteFactory, monitor, &base)) || !base) {
+        base = nullptr;
+        app.dwriteFactory->CreateRenderingParams(&base);  // the primary monitor's
+    }
+    if (!base) return false;
+    const float gamma = base->GetGamma();
+    const float contrast = base->GetEnhancedContrast();
+    const int geometry = (int)base->GetPixelGeometry();
+    base->Release();
+
+    IDWriteRenderingParams* params = nullptr;
+    app.dwriteFactory->CreateCustomRenderingParams(
+        gamma, contrast,
+        1.0f,  // ClearType level
+        (DWRITE_PIXEL_GEOMETRY)geometry,
+        DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
+        &params);
+    if (!params) return false;
+    app.renderTarget->SetTextRenderingParams(params);
+    params->Release();
+
+    const bool changed = gamma != app.textGamma || contrast != app.textContrast ||
+                         geometry != app.textPixelGeometry;
+    app.textMonitor = monitor;
+    app.textGamma = gamma;
+    app.textContrast = contrast;
+    app.textPixelGeometry = geometry;
+    return changed;
+}
+}  // namespace
+
 bool createRenderTarget(App& app) {
     // Layout and the lightbox now retain their own image references. Drop
     // every old-target drawing before recreating device resources (#220).
@@ -813,32 +858,21 @@ bool createRenderTarget(App& app) {
     app.renderTarget->QueryInterface(__uuidof(ID2D1DeviceContext),
         reinterpret_cast<void**>(&app.deviceContext));
 
-    // Enable high-quality text
+    // Enable high-quality text, smoothed for the window's monitor
     app.renderTarget->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-
-    // Create custom rendering params for improved text quality
-    IDWriteRenderingParams* defaultParams = nullptr;
-    IDWriteRenderingParams* customParams = nullptr;
-
-    app.dwriteFactory->CreateRenderingParams(&defaultParams);
-    if (defaultParams) {
-        app.dwriteFactory->CreateCustomRenderingParams(
-            defaultParams->GetGamma(),
-            defaultParams->GetEnhancedContrast(),
-            1.0f,  // ClearType level
-            defaultParams->GetPixelGeometry(),
-            DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
-            &customParams
-        );
-        defaultParams->Release();
-
-        if (customParams) {
-            app.renderTarget->SetTextRenderingParams(customParams);
-            customParams->Release();
-        }
-    }
+    setMonitorText(app, g_monitorText.monitorOf(app.hwnd));
 
     return true;
+}
+
+MonitorTextSource& monitorTextSource() { return g_monitorText; }
+
+bool followMonitorText(App& app, bool reread) {
+    if (!app.renderTarget || !app.hwnd) return false;
+    HMONITOR monitor = g_monitorText.monitorOf(app.hwnd);
+    // A window dragged about asks on every move: the same monitor is no work
+    if (monitor == app.textMonitor && !reread) return false;
+    return setMonitorText(app, monitor);
 }
 
 // System font families for the theme editor font picker (#82). Enumerated
