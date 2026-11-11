@@ -534,7 +534,7 @@ void renderStartPage(App& app) {
     if (verL) verL->Release();
     if (wm) wm->Release();
 
-    IDWriteTextLayout* tag = spLayout(app, tr(app, "start.tagline"), 14.0f,
+    IDWriteTextLayout* tag = spLayout(app, tr(app, "start.tagline"), 13.0f,
                                       DWRITE_FONT_WEIGHT_NORMAL, leftW);
     DWRITE_TEXT_METRICS tagM = spMetrics(tag);
     float tagY = y0 + heroH + dpi(app, 6.0f);
@@ -628,7 +628,7 @@ void renderStartPage(App& app) {
     if (recH) recH->Release();
     if (!app.startPageRecents.empty()) {
         IDWriteTextLayout* clearL = spLayout(app, tr(app, "start.clear"),
-                                             11.5f, DWRITE_FONT_WEIGHT_NORMAL,
+                                             12.0f, DWRITE_FONT_WEIGHT_NORMAL,
                                              4096.0f);
         DWRITE_TEXT_METRICS cm = spMetrics(clearL);
         float cx = x0 + leftW - cm.width;
@@ -646,7 +646,7 @@ void renderStartPage(App& app) {
     int shown = std::min<int>(5, (int)app.startPageRecents.size());
     if (shown == 0) {
         IDWriteTextLayout* empty = spLayout(app, tr(app, "start.empty"),
-                                            12.5f, DWRITE_FONT_WEIGHT_NORMAL,
+                                            12.0f, DWRITE_FONT_WEIGHT_NORMAL,
                                             leftW);
         spDraw(app, empty, x0, rowY + dpi(app, 10.0f), withA(text, 0.42f));
         if (empty) empty->Release();
@@ -707,7 +707,7 @@ void renderStartPage(App& app) {
         float chipW = spChip(app, digit, x0 + leftW, top + rowH * 0.5f,
                              chipBg, chipFg, true, &chipRect);
         IDWriteTextLayout* whenL =
-            spLayout(app, relativeWhen(app, rd.when), 11.5f,
+            spLayout(app, relativeWhen(app, rd.when), 12.0f,
                      DWRITE_FONT_WEIGHT_NORMAL, 4096.0f);
         DWRITE_TEXT_METRICS whenM = spMetrics(whenL);
         float whenX = x0 + leftW - chipW - dpi(app, 12.0f) - whenM.width;
@@ -716,7 +716,7 @@ void renderStartPage(App& app) {
         if (whenL) whenL->Release();
 
         float nameX = gx + dpi(app, 12.0f) + dpi(app, 12.0f);
-        IDWriteTextLayout* nameL = spLayout(app, name, 13.5f,
+        IDWriteTextLayout* nameL = spLayout(app, name, 13.0f,
                                             DWRITE_FONT_WEIGHT_NORMAL,
                                             leftW * 0.55f, false, true);
         DWRITE_TEXT_METRICS nameM = spMetrics(nameL);

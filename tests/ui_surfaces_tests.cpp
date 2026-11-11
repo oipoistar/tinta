@@ -4,6 +4,7 @@
 #include "overlays.h"
 #include "render.h"
 #include "settings.h"
+#include "startpage.h"
 #include "editrail.h"
 #include "tabs.h"
 #include "ui_frame.h"
@@ -492,6 +493,59 @@ void shortcutList(App& app) {
     applyTheme(app, 0);
 }
 
+// --- The editors' dialogs and the start page ---------------------------------
+//
+// The shortcut editor and the theme editor had their titles at 28 light and
+// rows of 30; the start page had text at 11.5, 12.5 and 13.5.
+
+void dialogsAndStart(App& app) {
+    using namespace uiscale;
+    const float s = app.contentScale;
+    applyTheme(app, 0);
+    app.width = 1050;
+    app.height = 900;
+    updateOverlayFormats(app);
+    check(app.themeTitleFormat && about(app.themeTitleFormat->GetFontSize(), fontSize(Type::Title) * s) &&
+              app.themeTitleFormat->GetFontWeight() == DWRITE_FONT_WEIGHT_SEMI_BOLD,
+          "the editors' titles are in the scale's Title: 20 semibold, where they were 28 light");
+
+    // The shortcut editor
+    app.showShortcutEditor = true;
+    app.shortcutEditorRow = -1;
+    Frame keys = draw(app, [&] { renderShortcutEditor(app); });
+    int rows = 0;
+    bool rowsOk = true, touching = true;
+    float lastBottom = -1.0f;
+    for (const auto& hit : app.shortcutHits) {
+        if (width(hit.first) < 300.0f * s) continue;  // a row, not a button
+        ++rows;
+        rowsOk = rowsOk && about(height(hit.first), rowMenu * s - 4.0f * s);
+        if (lastBottom >= 0.0f && !about(hit.first.top - lastBottom, 4.0f * s)) touching = false;
+        lastBottom = hit.first.bottom;
+    }
+    check(rows >= 10 && rowsOk && touching, "the shortcut editor's rows are a menu's row apart");
+    shot(app, keys, "shortcut-editor");
+    app.showShortcutEditor = false;
+
+    // The theme editor, opened as Settings opens it
+    app.showSettings = true;
+    app.settingsAnimation = 1.0f;
+    app.settingsSection = 1;
+    draw(app, [&] { renderSettingsOverlay(app); });
+    for (const auto& hit : app.settingsHits)
+        if (hit.second == SET_NEW_THEME) { click(app, hit.first); break; }
+    check(app.showThemeEditor && !app.showSettings, "Settings' New opens the theme editor");
+    Frame editor = draw(app, [&] { renderThemeEditor(app); });
+    shot(app, editor, "theme-editor");
+    app.showThemeEditor = false;
+    app.showSettings = false;
+
+    // The start page
+    Frame start = draw(app, [&] { renderStartPage(app); });
+    check(!start.empty(), "the start page draws");
+    shot(app, start, "start-page");
+}
+
 }  // namespace
 
 int runUiSurfacesTests(const char* fixtures) {
@@ -519,6 +573,7 @@ int runUiSurfacesTests(const char* fixtures) {
     menus(app);
     sidePanels(app);
     shortcutList(app);
+    dialogsAndStart(app);
 
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;

@@ -566,10 +566,11 @@ void updateOverlayFormats(App& app) {
         app.signalSmallFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     }
 
-    // Theme chooser formats
-    app.dwriteFactory->CreateTextFormat(L"Segoe UI Light", nullptr,
-        DWRITE_FONT_WEIGHT_LIGHT, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        28.0f * scale, L"en-us", &app.themeTitleFormat);
+    // A dialog's title, in the scale's Title role (ui_scale.h): 20 semibold,
+    // where it was 28 light
+    app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        20.0f * scale, L"en-us", &app.themeTitleFormat);
 
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
         DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,

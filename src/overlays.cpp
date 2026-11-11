@@ -3727,8 +3727,8 @@ void renderShortcutEditor(App& app) {
     app.renderTarget->FillRectangle(
         D2D1::RectF(0, 0, (float)app.width, (float)app.height), app.brush);
 
-    float rowH = dpi(app, 30.0f);
-    float panelW = dpi(app, 430.0f);
+    float rowH = dpi(app, uiscale::rowMenu);
+    float panelW = dpi(app, 432.0f);
     float panelH = dpi(app, 100.0f) + rowH * KEY_ACTION_COUNT + dpi(app, 46.0f);
     float px = (app.width - panelW) / 2, py = (app.height - panelH) / 2;
     D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(
@@ -3736,7 +3736,7 @@ void renderShortcutEditor(App& app) {
     D2D1_COLOR_F bg = base.background; bg.a = 0.99f;
     app.brush->SetColor(themeUiPanel(base, bg));
     app.renderTarget->FillRoundedRectangle(panel, app.brush);
-    D2D1_COLOR_F border = themeUiText(base); border.a = 0.25f;
+    D2D1_COLOR_F border = themeUiText(base); border.a = 0.14f;
     app.brush->SetColor(themeUiBorder(base, border));
     app.renderTarget->DrawRoundedRectangle(panel, app.brush, 1.0f);
 
@@ -3746,8 +3746,8 @@ void renderShortcutEditor(App& app) {
         app.brush->SetColor(tc);
         const wchar_t* title = tr(app, "shortcuts.editor.title");
         app.renderTarget->DrawText(title, (UINT32)wcslen(title), app.themeTitleFormat,
-            D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 16.0f),
-                        px + panelW, py + dpi(app, 52.0f)), app.brush);
+            D2D1::RectF(px + dpi(app, uiscale::sp24), py + dpi(app, uiscale::sp24),
+                        px + panelW, py + dpi(app, uiscale::sp24 + 28.0f)), app.brush);
     }
     {
         D2D1_COLOR_F hc = themeUiText(base); hc.a = 0.55f;
@@ -3847,7 +3847,7 @@ void renderThemeEditor(App& app) {
     D2D1_COLOR_F bg = base.background; bg.a = 0.99f;
     app.brush->SetColor(themeUiPanel(base, bg));
     app.renderTarget->FillRoundedRectangle(panel, app.brush);
-    D2D1_COLOR_F border = themeUiText(base); border.a = 0.25f;
+    D2D1_COLOR_F border = themeUiText(base); border.a = 0.14f;
     app.brush->SetColor(themeUiBorder(base, border));
     app.renderTarget->DrawRoundedRectangle(panel, app.brush, 1.0f);
 
@@ -3857,8 +3857,8 @@ void renderThemeEditor(App& app) {
         app.brush->SetColor(tc);
         const wchar_t* title = tr(app, "theme.editor.title");
         app.renderTarget->DrawText(title, (UINT32)wcslen(title), app.themeTitleFormat,
-            D2D1::RectF(px + dpi(app, 24.0f), py + dpi(app, 16.0f),
-                        px + panelW, py + dpi(app, 52.0f)), app.brush);
+            D2D1::RectF(px + dpi(app, uiscale::sp24), py + dpi(app, uiscale::sp24),
+                        px + panelW, py + dpi(app, uiscale::sp24 + 28.0f)), app.brush);
     }
 
     float x0 = px + dpi(app, 24.0f);
