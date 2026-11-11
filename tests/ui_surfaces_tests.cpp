@@ -2,6 +2,7 @@
 #include "i18n.h"
 #include "input.h"
 #include "overlays.h"
+#include "render.h"
 #include "settings.h"
 #include "editrail.h"
 #include "tabs.h"
@@ -372,6 +373,58 @@ void menus(App& app) {
     app.editMode = false;
 }
 
+// --- The side panels --------------------------------------------------------
+//
+// Contents, the folder browser and the search results had rows of 24 and
+// 26, section labels and footers at 10 and a bold where the rest of the
+// interface is semibold. Their rows are a list's rows now and their small
+// text the scale's smallest role.
+
+void sidePanels(App& app) {
+    using namespace uiscale;
+    const float s = app.contentScale;
+    applyTheme(app, 0);
+    app.width = 1050;
+    app.height = 900;
+    updateOverlayFormats(app);
+
+    // The text the panels share is the scale's
+    auto is = [&](IDWriteTextFormat* f, float size, DWRITE_FONT_WEIGHT weight) {
+        return f && about(f->GetFontSize(), size * s) && f->GetFontWeight() == weight;
+    };
+    check(is(app.folderBrowserFormat, fontSize(Type::Body), DWRITE_FONT_WEIGHT_NORMAL) &&
+              is(app.tocFormat, fontSize(Type::Small), DWRITE_FONT_WEIGHT_NORMAL),
+          "the panels' rows are set in Body and Small");
+    check(is(app.tocFormatBold, fontSize(Type::Strong), DWRITE_FONT_WEIGHT_SEMI_BOLD),
+          "the row in use and a panel's title are semibold, as Strong is, not bold");
+    check(is(app.signalSmallFormat, fontSize(Type::Micro), DWRITE_FONT_WEIGHT_SEMI_BOLD) &&
+              is(app.themeHeaderFormat, fontSize(Type::Micro), DWRITE_FONT_WEIGHT_SEMI_BOLD),
+          "section labels, footers and badges are in Micro: nothing in a panel is under 11");
+
+    // Contents: a row for every heading of the fixture
+    layoutDocument(app);
+    app.showToc = true;
+    app.tocAnimation = 1.0f;
+    app.tocFilter.clear();
+    Frame contents = draw(app, [&] { renderToc(app); });
+    check(app.headings.size() >= 6 && about(tocListContentHeight(app), (float)app.headings.size() * rowList * s),
+          "the contents panel has a list's row for every heading");
+    shot(app, contents, "panel-contents");
+    app.showToc = false;
+    app.tocAnimation = 0.0f;
+
+    // The folder browser
+    app.showFolderBrowser = true;
+    app.folderBrowserAnimation = 1.0f;
+    Frame browser = draw(app, [&] { renderFolderBrowser(app); });
+    const FolderBrowserMetrics g = folderBrowserMetrics(app);
+    check(about(g.itemHeight, rowList * s) && about(g.cardBottom - g.listBottom, rowList * s),
+          "the folder browser's rows and its footer are a list's row high");
+    shot(app, browser, "panel-browser");
+    app.showFolderBrowser = false;
+    app.folderBrowserAnimation = 0.0f;
+}
+
 }  // namespace
 
 int runUiSurfacesTests(const char* fixtures) {
@@ -397,6 +450,7 @@ int runUiSurfacesTests(const char* fixtures) {
 
     themeChooser(app);
     menus(app);
+    sidePanels(app);
 
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;

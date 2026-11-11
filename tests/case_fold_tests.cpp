@@ -2,6 +2,7 @@
 // letters in Find and Replace, in Contents, in the results panel, in links
 // between notes and in the menus that complete what is typed. Each check
 // goes through the keys a reader would press.
+#include "ui_scale.h"
 #include "d2d_init.h"
 #include "editor.h"
 #include "editrail.h"
@@ -259,7 +260,7 @@ void contents(App& app, const fs::path& out) {
         if (!app.showToc) return;
         typeKeys(app, filter.typed);
         check(app.tocFilter == filter.typed, "the filter holds what was typed: " + shown(app.tocFilter));
-        check(tocListContentHeight(app) == dpi(app, 26.0f), "one heading is left");
+        check(tocListContentHeight(app) == dpi(app, uiscale::rowList), "one heading is left");
         if (&filter == &filters[0]) readerFrame(app, out / "contents-filter.png");
         const int want = heading(app, filter.heading);
         check(want >= 0, "the heading is in the document");

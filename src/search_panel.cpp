@@ -7,6 +7,7 @@
 // one press opens such a file in its own tab, at that match. Suggested by
 // Alex (@Lex987).
 
+#include "ui_scale.h"
 #include "search_panel.h"
 
 #include "d2d_init.h"
@@ -44,11 +45,11 @@ bool inside(const D2D1_RECT_F& r, float x, float y) {
 float rowHeight(const App& app, SearchPanelRowKind kind) {
     switch (kind) {
         case SPR_DOCUMENT:
-        case SPR_FILE: return dpi(app, 30.0f);
-        case SPR_CAPTION: return dpi(app, 28.0f);
-        case SPR_MORE: return dpi(app, 22.0f);
-        case SPR_NOTE: return dpi(app, 26.0f);
-        default: return dpi(app, 24.0f);
+        case SPR_FILE: return dpi(app, uiscale::rowMenu);
+        case SPR_CAPTION: return dpi(app, uiscale::rowList);
+        case SPR_MORE: return dpi(app, uiscale::menuLabelRow);
+        case SPR_NOTE: return dpi(app, uiscale::rowList);
+        default: return dpi(app, uiscale::rowList);
     }
 }
 

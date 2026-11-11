@@ -557,10 +557,11 @@ void updateOverlayFormats(App& app) {
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         16.0f * scale, L"en-us", &app.searchTextFormat);
 
-    // Signal chips: subtitles, badges, and the tiny state labels
+    // Signal chips: subtitles, badges and the small state labels, in the
+    // scale's smallest role (Micro, ui_scale.h); it was 10
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
         DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        10.0f * scale, L"en-us", &app.signalSmallFormat);
+        11.0f * scale, L"en-us", &app.signalSmallFormat);
     if (app.signalSmallFormat) {
         app.signalSmallFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
     }
@@ -605,7 +606,7 @@ void updateOverlayFormats(App& app) {
 
     // TOC formats
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
-        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         13.0f * scale, L"en-us", &app.tocFormatBold);
     app.dwriteFactory->CreateTextFormat(L"Segoe UI", nullptr,
         DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,

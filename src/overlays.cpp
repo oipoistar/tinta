@@ -271,8 +271,8 @@ FolderBrowserMetrics folderBrowserMetrics(const App& app) {
     g.btnY = g.headerY + (g.headerH - g.btnSize) * 0.5f;
     float dividerY = g.headerY + g.headerH + dpi(app, 4.0f);
     g.listStartY = dividerY + dpi(app, 3.0f);
-    g.listBottom = g.cardBottom - dpi(app, 26.0f);  // footer band
-    g.itemHeight = dpi(app, 26.0f);
+    g.listBottom = g.cardBottom - dpi(app, uiscale::rowList);  // footer band
+    g.itemHeight = dpi(app, uiscale::rowList);
     g.labelH = dpi(app, 19.0f);
     g.namingOffset = app.folderBrowserNaming != 0 ? g.itemHeight : 0.0f;
     g.dirCount = 0;
@@ -751,13 +751,13 @@ void renderFolderBrowser(App& app) {
                 curColor.a = 0.14f * anim;
                 app.brush->SetColor(curColor);
                 app.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
+                    D2D1::RoundedRect(rowRect, dpi(app, uiscale::radiusControl), dpi(app, uiscale::radiusControl)),
                     app.brush);
                 D2D1_COLOR_F ring = themeUiAccent(app.theme);
                 ring.a = 0.4f * anim;
                 app.brush->SetColor(ring);
                 app.renderTarget->DrawRoundedRectangle(
-                    D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
+                    D2D1::RoundedRect(rowRect, dpi(app, uiscale::radiusControl), dpi(app, uiscale::radiusControl)),
                     app.brush, 1.0f);
             }
             if (isHovered) {
@@ -766,7 +766,7 @@ void renderFolderBrowser(App& app) {
                 hoverColor.a = 0.06f * anim;
                 app.brush->SetColor(hoverColor);
                 app.renderTarget->FillRoundedRectangle(
-                    D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
+                    D2D1::RoundedRect(rowRect, dpi(app, uiscale::radiusControl), dpi(app, uiscale::radiusControl)),
                     app.brush);
             }
 
@@ -804,7 +804,7 @@ void renderFolderBrowser(App& app) {
             app.brush->SetColor(textColor);
             app.renderTarget->DrawText(item.name.c_str(), (UINT32)item.name.length(),
                 isCurrent && app.tocFormatBold ? app.tocFormatBold : browserFormat,
-                D2D1::RectF(textX, itemY + dpi(app, 4.0f), rowRight - dpi(app, 6.0f),
+                D2D1::RectF(textX, itemY + dpi(app, 5.0f), rowRight - dpi(app, 6.0f),
                             itemY + itemHeight),
                 app.brush);
         }
@@ -899,7 +899,7 @@ float tocListContentHeight(const App& app) {
     size_t count = 0;
     for (const auto& heading : app.headings)
         if (needle.empty() || toLower(heading.text).find(needle) != std::wstring::npos) ++count;
-    return count * dpi(app, 26.0f);
+    return count * dpi(app, uiscale::rowList);
 }
 
 float tocMaxScroll(const App& app) {
@@ -912,7 +912,7 @@ float tocMaxScroll(const App& app) {
 // renderToc below.
 int tocItemIndexAt(App& app, float x, float y) {
     const auto rect = tocListRect(app);
-    float itemHeight = dpi(app, 26.0f);
+    float itemHeight = dpi(app, uiscale::rowList);
     if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom)
         return -1;
     int row = (int)((y - rect.top + app.tocScroll) / itemHeight);
@@ -959,9 +959,9 @@ void renderToc(App& app) {
     IDWriteTextFormat* tocNormal = app.tocFormat;
     if (tocBold && tocNormal) {
         float padding = dpi(app, 12.0f);
-        float itemHeight = dpi(app, 26.0f);
+        float itemHeight = dpi(app, uiscale::rowList);
         float headerHeight = dpi(app, 34.0f);
-        float footerHeight = dpi(app, 26.0f);
+        float footerHeight = dpi(app, uiscale::rowList);
 
         // Header: title, count badge, live filter, close cross
         float headerY = cardTop + dpi(app, 9.0f);
@@ -1162,7 +1162,7 @@ void renderToc(App& app) {
                     hoverColor.a = 0.06f * anim;
                     app.brush->SetColor(hoverColor);
                     app.renderTarget->FillRoundedRectangle(
-                        D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
+                        D2D1::RoundedRect(rowRect, dpi(app, uiscale::radiusControl), dpi(app, uiscale::radiusControl)),
                         app.brush);
                 } else if (isCurrent) {
                     // Scroll-spy pill: the accent-washed active row
@@ -1170,7 +1170,7 @@ void renderToc(App& app) {
                     spyColor.a = 0.13f * anim;
                     app.brush->SetColor(spyColor);
                     app.renderTarget->FillRoundedRectangle(
-                        D2D1::RoundedRect(rowRect, dpi(app, 6.0f), dpi(app, 6.0f)),
+                        D2D1::RoundedRect(rowRect, dpi(app, uiscale::radiusControl), dpi(app, uiscale::radiusControl)),
                         app.brush);
                 }
                 if (isCurrent) {
@@ -1206,7 +1206,7 @@ void renderToc(App& app) {
                 app.brush->SetColor(textColor);
                 app.renderTarget->DrawText(heading.text.c_str(),
                     (UINT32)heading.text.length(), fmt,
-                    D2D1::RectF(itemX, itemY + dpi(app, 4.0f),
+                    D2D1::RectF(itemX, itemY + dpi(app, 5.0f),
                                 rowRight - dpi(app, 16.0f), itemY + itemHeight),
                     app.brush);
 
@@ -1215,7 +1215,7 @@ void renderToc(App& app) {
                     app.brush->SetColor(arr);
                     app.renderTarget->DrawText(L"\u2192", 1, tocNormal,
                         D2D1::RectF(rowRight - dpi(app, 15.0f),
-                                    itemY + dpi(app, 4.0f), rowRight,
+                                    itemY + dpi(app, 5.0f), rowRight,
                                     itemY + itemHeight),
                         app.brush);
                 }
