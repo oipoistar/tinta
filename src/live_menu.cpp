@@ -6,6 +6,7 @@
 // Its drawing is DirectWrite's and its rows are few: compiled for size
 #pragma optimize("s", on)
 
+#include "ui_scale.h"
 #include "live_text.h"
 #include "d2d_init.h"
 #include "editor.h"
@@ -201,10 +202,10 @@ std::vector<Row> rowsFor(App& app, const LiveText& e, int sub) {
 
 float rowHeight(App& app, const Row& r) {
     switch (r.kind) {
-        case Row::Separator: return dpi(app, 9.0f);
+        case Row::Separator: return dpi(app, uiscale::menuSeparator);
         case Row::Formats: return dpi(app, 40.0f);
         case Row::Grid: return dpi(app, 16.0f + kGridRows * 18.0f + (kGridRows - 1) * 3.0f + 24.0f);
-        default: return dpi(app, 30.0f);
+        default: return dpi(app, uiscale::rowMenu);
     }
 }
 
@@ -244,7 +245,7 @@ void addPanel(App& app, LiveText& e, int sub, int parentRow) {
     } else {
         // As wide as its widest row: badge, words, and shortcut or arrow
         IDWriteTextFormat* label = paint::textFormat(app, paint::uiFace(), dpi(app, 13.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
-        IDWriteTextFormat* keys = paint::textFormat(app, paint::uiFace(), dpi(app, 11.5f), DWRITE_FONT_WEIGHT_NORMAL, false);
+        IDWriteTextFormat* keys = uiscale::font(app, uiscale::Type::Small);
         float widest = 0;
         for (const Row& r : P.rows) {
             if (r.kind != Row::Action && r.kind != Row::Submenu) continue;
@@ -476,7 +477,7 @@ void drawMenu(App& app, LiveText& e) {
     layout(app, e);
     paint::Surface s = paint::surface(app);
     IDWriteTextFormat* labelFormat = paint::textFormat(app, paint::uiFace(), dpi(app, 13.0f), DWRITE_FONT_WEIGHT_NORMAL, false);
-    IDWriteTextFormat* keysFormat = paint::textFormat(app, paint::uiFace(), dpi(app, 11.5f), DWRITE_FONT_WEIGHT_NORMAL, false);
+    IDWriteTextFormat* keysFormat = uiscale::font(app, uiscale::Type::Small);
     const float radius = dpi(app, 8.0f), u = dpi(app, 1.0f);
     for (size_t k = 0; k < M.panels.size(); ++k) {
         const Panel& P = M.panels[k];
@@ -504,18 +505,18 @@ void drawMenu(App& app, LiveText& e) {
                 continue;
             }
             const bool lit = row.enabled && ((int)i == P.focus || (int)i == leads);
-            if (lit) paint::fillRound(app, r, dpi(app, 5.0f), paint::alpha(s.accent, (int)i == P.focus ? 0.16f : 0.10f));
-            const D2D1_COLOR_F ink = row.enabled ? s.text : paint::alpha(s.text, 0.38f);
-            float x = r.left + dpi(app, 10.0f);
+            if (lit) paint::fillRound(app, r, dpi(app, uiscale::radiusControl), paint::alpha(s.accent, (int)i == P.focus ? 0.18f : 0.10f));
+            const D2D1_COLOR_F ink = row.enabled ? s.text : paint::alpha(s.text, uiscale::inkDisabled);
+            float x = r.left + dpi(app, uiscale::sp8);
             if (row.badge >= 0) {
                 const float b = dpi(app, 20.0f);
                 D2D1_RECT_F mark = D2D1::RectF(r.left + dpi(app, 6.0f), (r.top + r.bottom - b) * 0.5f, r.left + dpi(app, 6.0f) + b,
                                                (r.top + r.bottom + b) * 0.5f);
                 drawBadge(app, row.badge, mark);
-                x = mark.right + dpi(app, 9.0f);
+                x = mark.right + dpi(app, uiscale::sp8);
             }
             // On the right: a submenu's arrow, a tick, or the shortcut
-            float right = r.right - dpi(app, 10.0f);
+            float right = r.right - dpi(app, uiscale::sp8);
             const float cy = (r.top + r.bottom) * 0.5f;
             if (row.kind == Row::Submenu) {
                 const float cx = right - 2 * u;
@@ -532,7 +533,8 @@ void drawMenu(App& app, LiveText& e) {
             } else if (!row.keys.empty()) {
                 IDWriteTextLayout* kl = paint::makeLayout(app, row.keys, keysFormat, dpi(app, 200.0f), r.bottom - r.top);
                 DWRITE_TEXT_METRICS km = paint::metrics(kl);
-                paint::drawText(app, kl, right - km.width, cy - km.height * 0.5f, paint::alpha(s.text, row.enabled ? 0.45f : 0.25f));
+                paint::drawText(app, kl, right - km.width, cy - km.height * 0.5f,
+                                paint::alpha(s.text, row.enabled ? uiscale::inkSecondary : uiscale::inkDisabled));
                 if (kl) kl->Release();
                 right -= km.width + dpi(app, 12.0f);
             }

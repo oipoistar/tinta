@@ -25,6 +25,12 @@ constexpr float rowControl = 40.0f;
 // A row with a label and a line of description under it:
 // sp8 + Body's line + sp2 + Small's line + sp8
 constexpr float rowTwoLine = 52.0f;
+// A menu: the room around its rows, a separator's room and a section
+// label's row. Its rows are rowMenu high; a row's light is the row less
+// the padding at each side, its text sp8 in from that.
+constexpr float menuPad = 4.0f;
+constexpr float menuSeparator = 8.0f;
+constexpr float menuLabelRow = 24.0f;
 // A control in a row: a button, a dropdown, a segmented switch
 constexpr float control = 24.0f;
 constexpr float controlBox = 28.0f;

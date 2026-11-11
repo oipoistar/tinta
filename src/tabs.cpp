@@ -3,6 +3,7 @@
 // document surface with an accent underline, unsaved buffers show a dot,
 // a chevron opens the open-files switcher when the strip is crowded.
 
+#include "ui_paint.h"
 #include "tabs.h"
 #include "d2d_init.h"
 #include "search.h"
@@ -1952,10 +1953,10 @@ int tabMenuClosedEntry(const App& app, int row) {
     return (int)app.closedTabs.size() - 1 - (row - TM_ITEM_COUNT);
 }
 
-float tabMenuItemHeight(const App& app) { return dpi(app, 30.0f); }
-float tabMenuSeparator(const App& app) { return dpi(app, 9.0f); }
-float tabMenuWidth(const App& app) { return app.tabMenuW > 0 ? app.tabMenuW : dpi(app, 235.0f); }
-float tabMenuPadding(const App& app) { return dpi(app, 6.0f); }
+float tabMenuItemHeight(const App& app) { return dpi(app, uiscale::rowMenu); }
+float tabMenuSeparator(const App& app) { return dpi(app, uiscale::menuSeparator); }
+float tabMenuWidth(const App& app) { return app.tabMenuW > 0 ? app.tabMenuW : dpi(app, 236.0f); }
+float tabMenuPadding(const App& app) { return dpi(app, uiscale::menuPad); }
 
 float tabMenuItemTop(const App& app, int index) {
     float y = tabMenuPadding(app);
@@ -2107,94 +2108,33 @@ void renderTabMenu(App& app) {
     }
     float anim = app.tabMenuAnimation;
 
-    IDWriteTextFormat* format = app.folderBrowserFormat;
-    if (!format) return;
-
     float x = app.tabMenuX;
     float y = app.tabMenuY;
     float w = tabMenuWidth(app);
     float h = tabMenuTotalHeight(app);
-
-    D2D1_COLOR_F panelBg = themeUiPanel(app.theme, app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
-                                                                    : hexColor(0xF8F8F8, 0.97f));
-    D2D1_COLOR_F borderColor = themeUiBorder(app.theme, app.theme.isDark ? hexColor(0x3A3A40, 0.9f)
-                                                                         : hexColor(0xC8C8C8, 0.9f));
-    app.brush->SetColor(panelBg);
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6, 6), app.brush);
-    app.brush->SetColor(borderColor);
-    app.renderTarget->DrawRoundedRectangle(
-        D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6, 6), app.brush,
-        1.0f);
+    paint::menuPanel(app, D2D1::RectF(x, y, x + w, y + h), anim);
 
     app.tabMenuHover = tabMenuItemAt(app, (float)app.mouseX, (float)app.mouseY);
 
     float pad = tabMenuPadding(app);
     float itemH = tabMenuItemHeight(app);
-    float inset = dpi(app, 12.0f);
     for (int i = 0; i < tabMenuRows(app); i++) {
         float top = y + tabMenuItemTop(app, i);
         bool enabled = tabMenuItemEnabled(app, i);
-
-        if (i == app.tabMenuHover && enabled) {
-            D2D1_COLOR_F hoverColor = themeUiAccent(app.theme);
-            hoverColor.a = 0.18f * anim;
-            app.brush->SetColor(hoverColor);
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(
-                    D2D1::RectF(x + pad, top, x + w - pad, top + itemH), 4, 4),
-                app.brush);
-        }
-
-        D2D1_COLOR_F textColor = themeUiText(app.theme);
-        textColor.a = (enabled ? 1.0f : 0.35f) * anim;
-        app.brush->SetColor(textColor);
-        float textY = top + (itemH - dpi(app, 18.0f)) / 2;
+        const D2D1_RECT_F row = D2D1::RectF(x + pad, top, x + w - pad, top + itemH);
         if (i >= TM_ITEM_COUNT) {
             // A recently closed tab: its name, set in under the command
             const App::ClosedTab& closed = app.closedTabs[tabMenuClosedEntry(app, i)];
             std::wstring name = titleForPath(app, closed.path);
             if (closed.editorDirty) name += L" \x2022";
-            textColor.a *= 0.8f;
-            app.brush->SetColor(textColor);
-            app.renderTarget->DrawText(
-                name.c_str(), (UINT32)name.size(), format,
-                D2D1::RectF(x + inset + dpi(app, 14.0f), textY, x + w - inset, top + itemH),
-                app.brush);
+            paint::menuRow(app, row, name.c_str(), nullptr, i == app.tabMenuHover, enabled, anim * 0.8f,
+                           dpi(app, uiscale::sp16));
             continue;
         }
         const bool unpin = i == TM_PIN && app.tabs[app.tabMenuIndex].pinned;
         const wchar_t* label = tr(app, unpin ? "tab.menu.unpin" : TAB_MENU[i].key);
-        app.renderTarget->DrawText(
-            label, (UINT32)wcslen(label), format,
-            D2D1::RectF(x + inset, textY, x + w - inset, top + itemH),
-            app.brush);
-
-        if (TAB_MENU[i].shortcut[0]) {
-            IDWriteTextLayout* hint = nullptr;
-            app.dwriteFactory->CreateTextLayout(
-                TAB_MENU[i].shortcut, (UINT32)wcslen(TAB_MENU[i].shortcut),
-                format, 1000.0f, itemH, &hint);
-            if (hint) {
-                DWRITE_TEXT_METRICS metrics{};
-                hint->GetMetrics(&metrics);
-                D2D1_COLOR_F hintColor = themeUiText(app.theme);
-                hintColor.a = 0.4f * anim;
-                app.brush->SetColor(hintColor);
-                app.renderTarget->DrawTextLayout(
-                    D2D1::Point2F(x + w - inset - metrics.width, textY), hint,
-                    app.brush);
-                hint->Release();
-            }
-        }
-
-        if (TAB_MENU[i].separatorAfter) {
-            float sepY = top + itemH + tabMenuSeparator(app) * 0.5f;
-            app.brush->SetColor(borderColor);
-            app.renderTarget->DrawLine(D2D1::Point2F(x + pad, sepY),
-                                       D2D1::Point2F(x + w - pad, sepY),
-                                       app.brush, 1.0f);
-        }
+        paint::menuRow(app, row, label, TAB_MENU[i].shortcut, i == app.tabMenuHover, enabled, anim);
+        if (TAB_MENU[i].separatorAfter) paint::menuSeparator(app, x + pad, x + w - pad, top + itemH, anim);
     }
 }
 

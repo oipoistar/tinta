@@ -3,10 +3,13 @@
 #include "input.h"
 #include "overlays.h"
 #include "settings.h"
+#include "editrail.h"
+#include "tabs.h"
 #include "ui_frame.h"
 #include "ui_scale.h"
 
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -233,6 +236,142 @@ void themeChooser(App& app) {
     app.themeChooserPreviewBase = -1;
     applyTheme(app, 0);
 }
+// --- The menus --------------------------------------------------------------
+//
+// The reading view's menu, a tab's menu and the two editors' menus were four
+// drawings: rows of 30 and of 34, paddings of 4 and 6, corners of 6 and 8,
+// shortcuts in the interface's face here and in the code face there. They
+// share a row, a padding, a separator, a corner and their type now.
+
+// The heights of a menu's rows, read off its hit test down a column
+std::vector<float> rowRuns(const std::function<int(float)>& itemAt, float top, float bottom) {
+    std::vector<float> runs;
+    int current = -2;
+    float start = top;
+    for (float y = top; y <= bottom; y += 1.0f) {
+        const int item = y < bottom ? itemAt(y) : -3;
+        if (item == current) continue;
+        if (current >= 0) runs.push_back(y - start);
+        current = item;
+        start = y;
+    }
+    return runs;
+}
+
+void menus(App& app) {
+    using namespace uiscale;
+    const float s = app.contentScale;
+    applyTheme(app, 0);
+    app.width = 1050;
+    app.height = 900;
+
+    // The reading view's menu
+    openContextMenu(app, 260.0f, 160.0f, false);
+    app.contextMenuAnimation = 1.0f;
+    app.hoveredContextMenuItem = contextMenuEntries(app)[1].action;
+    Frame reading = draw(app, [&] { renderContextMenu(app); });
+    const auto& entries = contextMenuEntries(app);
+    check(about(contextMenuItemHeight(app), rowMenu * s) && about(contextMenuPadding(app), menuPad * s) &&
+              about(contextMenuSeparatorHeight(app), menuSeparator * s),
+          "the reading view's menu has the scale's row, padding and separator");
+    float wanted = menuPad * 2 * s;
+    for (const auto& entry : entries) wanted += rowMenu * s + (entry.separatorAfter ? menuSeparator * s : 0.0f);
+    check(about(contextMenuHeight(app), wanted) && onGrid(app, contextMenuHeight(app)) && onGrid(app, contextMenuWidth(app)),
+          "and is as tall as its rows, on the scale's base");
+    {
+        // The second row is lit: the light is the row less the padding, the page's ground shows beside it
+        const float top = app.contextMenuY + contextMenuItemTop(app, 1);
+        const float mid = top + rowMenu * s * 0.5f;
+        const D2D1_COLOR_F lit = reading.at(app.contextMenuX + contextMenuWidth(app) * 0.5f, top + 3.0f * s);
+        const D2D1_COLOR_F ground = reading.at(app.contextMenuX + contextMenuWidth(app) * 0.5f,
+                                               app.contextMenuY + contextMenuItemTop(app, 0) + 3.0f * s);
+        const D2D1_COLOR_F edge = reading.at(app.contextMenuX + 2.0f * s, mid);
+        check(contrast(lit, ground) > 1.02f && contrast(edge, ground) < 1.02f,
+              "a lit row's light stops a padding short of the menu's edge");
+    }
+    shot(app, reading, "menu-reading");
+    closeContextMenu(app);
+    // In a short window its rows give way so that every entry stays in reach
+    app.height = 420;
+    openContextMenu(app, 260.0f, 60.0f, false);
+    check(contextMenuHeight(app) <= 420.0f * s - chromeTopHeight(app) + 0.5f && contextMenuItemHeight(app) < rowMenu * s,
+          "in a short window the menu's rows give way and every entry stays in reach");
+    closeContextMenu(app);
+    app.height = 900;
+    // The application's menu is the same rows, wider
+    openContextMenu(app, 0.0f, chromeTopHeight(app), true);
+    app.contextMenuAnimation = 1.0f;
+    Frame application = draw(app, [&] { renderContextMenu(app); });
+    check(about(contextMenuItemHeight(app), rowMenu * s) && about(contextMenuWidth(app), 260.0f * s),
+          "the application's menu has the same rows");
+    shot(app, application, "menu-application");
+    closeContextMenu(app);
+
+    // A tab's menu
+    app.tabs.resize(3);
+    app.tabs[0].title = L"Harbour log.md";
+    app.tabs[1].title = L"Tide table.md";
+    app.tabs[2].title = L"Crew list.md";
+    app.activeTab = 0;
+    openTabMenu(app, 1, 240.0f, 40.0f);
+    app.tabMenuAnimation = 1.0f;
+    app.mouseX = (int)(app.tabMenuX + 40.0f);
+    app.mouseY = (int)(app.tabMenuY + menuPad * s + rowMenu * s * 1.5f);
+    Frame tab = draw(app, [&] { renderTabMenu(app); });
+    {
+        const float x = app.tabMenuX + 40.0f * s;
+        const std::vector<float> runs = rowRuns([&](float y) { return tabMenuItemAt(app, x, y); }, app.tabMenuY,
+                                                app.tabMenuY + 600.0f * s);
+        bool rows = runs.size() >= 6;
+        for (float run : runs) rows = rows && about(run, rowMenu * s);
+        check(rows, "a tab's menu has rows of the same height as the reading view's");
+        check(tabMenuItemAt(app, x, app.tabMenuY + menuPad * s * 0.5f) < 0 &&
+                  tabMenuItemAt(app, x, app.tabMenuY + menuPad * s + 1.0f) == 0,
+              "and the same padding above its first row");
+    }
+    shot(app, tab, "menu-tab");
+    closeTabMenu(app);
+    app.tabs.clear();
+    app.mouseX = app.mouseY = -100;
+
+    // The Source editor's menu
+    app.editMode = true;
+    app.editCtxOpen = true;
+    app.editCtxRailOnly = false;
+    app.editCtxSub = 0;
+    app.editCtxX = 300.0f;
+    app.editCtxY = 140.0f;
+    Frame source = draw(app, [&] { renderEditCtxMenu(app); });
+    {
+        bool rows = app.editCtxHits.size() >= 7, stacked = true;
+        float left = 0.0f, right = 0.0f;
+        for (size_t i = 0; i < app.editCtxHits.size(); i++) {
+            const D2D1_RECT_F& r = app.editCtxHits[i].first;
+            rows = rows && about(height(r), rowMenu * s);
+            if (i == 0) { left = r.left; right = r.right; }
+            if (!about(r.left, left) || !about(r.right, right)) stacked = false;
+        }
+        check(rows, "the Source editor's menu has rows of the same height");
+        check(stacked && onGrid(app, right - left + menuPad * 2 * s), "its rows share their edges, a padding inside the menu");
+    }
+    shot(app, source, "menu-source");
+    // Its diagram submenu
+    app.editCtxSub = 2;
+    Frame sub = draw(app, [&] { renderEditCtxMenu(app); });
+    {
+        bool rows = app.editCtxSubHits.size() >= 8, touching = true;
+        for (size_t i = 0; i < app.editCtxSubHits.size(); i++) {
+            rows = rows && about(height(app.editCtxSubHits[i].first), rowMenu * s);
+            if (i && !about(app.editCtxSubHits[i].first.top, app.editCtxSubHits[i - 1].first.bottom)) touching = false;
+        }
+        check(rows && touching, "its submenu's rows are the same height and stand one on the other");
+    }
+    shot(app, sub, "menu-source-diagrams");
+    app.editCtxOpen = false;
+    app.editCtxSub = 0;
+    app.editMode = false;
+}
+
 }  // namespace
 
 int runUiSurfacesTests(const char* fixtures) {
@@ -257,6 +396,7 @@ int runUiSurfacesTests(const char* fixtures) {
     check(openDocumentInViewer(app, (fs::path(fixtures) / "surfaces.md").wstring()), "the fixture opens behind the surfaces");
 
     themeChooser(app);
+    menus(app);
 
     DestroyWindow(app.hwnd);
     app.hwnd = nullptr;

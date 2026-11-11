@@ -240,6 +240,39 @@ void closeCross(App& app, const D2D1_RECT_F& box, D2D1_COLOR_F color) {
                                dpi(app, 1.5f));
 }
 
+void menuPanel(App& app, const D2D1_RECT_F& box, float alpha) {
+    const Surface s = surface(app);
+    const float radius = dpi(app, uiscale::radiusCard);
+    shadow(app, box, radius, paint::alpha(s.shadow, alpha), 1.5f);
+    fillRound(app, box, radius, paint::alpha(s.fill, alpha));
+    strokeRound(app, box, radius, paint::alpha(s.border, alpha), dpi(app, 1.0f));
+}
+
+void menuRow(App& app, const D2D1_RECT_F& row, const wchar_t* label, const wchar_t* keys, bool lit, bool enabled,
+             float alpha, float indent) {
+    using namespace uiscale;
+    if (lit && enabled) {
+        fillRound(app, row, dpi(app, radiusControl), paint::alpha(themeUiAccent(app.theme), 0.18f * alpha));
+    }
+    const float h = row.bottom - row.top;
+    float right = row.right - dpi(app, sp8);
+    if (keys && keys[0]) {
+        const float kw = labelWidth(app, keys, Type::Small);
+        paint::label(app, keys, Type::Small,
+                     D2D1::RectF(right - kw - 1.0f, lineTop(app, row.top, h, Type::Small), right, row.bottom),
+                     ink(app.theme, enabled ? inkSecondary : inkDisabled, alpha));
+        right -= kw + dpi(app, sp12);
+    }
+    paint::label(app, label, Type::Body,
+                 D2D1::RectF(row.left + dpi(app, sp8) + indent, lineTop(app, row.top, h, Type::Body), right, row.bottom),
+                 ink(app.theme, enabled ? inkPrimary : inkDisabled, alpha));
+}
+
+void menuSeparator(App& app, float left, float right, float top, float alpha) {
+    const float y = std::floor(top + dpi(app, uiscale::menuSeparator) * 0.5f) + 0.5f;
+    line(app, D2D1::Point2F(left, y), D2D1::Point2F(right, y), paint::alpha(surface(app).border, alpha), dpi(app, 1.0f));
+}
+
 }  // namespace paint
 
 // The interface's type roles (ui_scale.h)

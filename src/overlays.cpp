@@ -2159,24 +2159,11 @@ void renderContextMenu(App& app) {
     }
     float anim = app.contextMenuAnimation;
 
-    IDWriteTextFormat* format = app.folderBrowserFormat;
-    if (!format) return;
-
     float x = app.contextMenuX;
     float y = app.contextMenuY;
     float w = contextMenuWidth(app);
     float h = contextMenuHeight(app);
-
-    D2D1_COLOR_F panelBg = themeUiPanel(app.theme, app.theme.isDark ? hexColor(0x1E1E1E, 0.97f)
-                                                                    : hexColor(0xF8F8F8, 0.97f));
-    D2D1_COLOR_F borderColor = themeUiBorder(app.theme, app.theme.isDark ? hexColor(0x3A3A40, 0.9f)
-                                                                         : hexColor(0xC8C8C8, 0.9f));
-    app.brush->SetColor(panelBg);
-    app.renderTarget->FillRoundedRectangle(
-        D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6, 6), app.brush);
-    app.brush->SetColor(borderColor);
-    app.renderTarget->DrawRoundedRectangle(
-        D2D1::RoundedRect(D2D1::RectF(x, y, x + w, y + h), 6, 6), app.brush, 1.0f);
+    paint::menuPanel(app, D2D1::RectF(x, y, x + w, y + h), anim);
 
     const auto& entries = contextMenuEntries(app);
 
@@ -2201,60 +2188,18 @@ void renderContextMenu(App& app) {
 
     float pad = contextMenuPadding(app);
     float itemH = contextMenuItemHeight(app);
-    float inset = dpi(app, 12.0f);
     for (int row = 0; row < (int)entries.size(); row++) {
         const auto& entry = entries[row];
         int i = entry.action;
         float top = y + contextMenuItemTop(app, row);
         bool enabled = contextMenuItemEnabled(app, i);
-
-        if (i == app.hoveredContextMenuItem && enabled) {
-            D2D1_COLOR_F hoverColor = themeUiAccent(app.theme);
-            hoverColor.a = 0.18f * anim;
-            app.brush->SetColor(hoverColor);
-            app.renderTarget->FillRoundedRectangle(
-                D2D1::RoundedRect(
-                    D2D1::RectF(x + pad, top, x + w - pad, top + itemH), 4, 4),
-                app.brush);
-        }
-
-        D2D1_COLOR_F textColor = themeUiText(app.theme);
-        textColor.a = (enabled ? 1.0f : 0.35f) * anim;
-        app.brush->SetColor(textColor);
-        float textY = top + (itemH - dpi(app, 18.0f)) / 2;
         // Fold all reads Unfold all while a section is folded (#316)
         const wchar_t* itemLabel =
             tr(app, entry.action == CTX_FOLD_ALL && anySectionFolded(app) ? "ctx.unfold_all" : entry.key);
-        app.renderTarget->DrawText(
-            itemLabel, (UINT32)wcslen(itemLabel), format,
-            D2D1::RectF(x + inset, textY, x + w - inset, top + itemH), app.brush);
-
-        std::wstring hintText = shortcutLabel(entry);
-        if (!hintText.empty()) {
-            IDWriteTextLayout* hint = nullptr;
-            app.dwriteFactory->CreateTextLayout(
-                hintText.c_str(), (UINT32)hintText.size(),
-                format, 1000.0f, itemH, &hint);
-            if (hint) {
-                DWRITE_TEXT_METRICS metrics{};
-                hint->GetMetrics(&metrics);
-                D2D1_COLOR_F hintColor = themeUiText(app.theme);
-                hintColor.a = 0.4f * anim;
-                app.brush->SetColor(hintColor);
-                app.renderTarget->DrawTextLayout(
-                    D2D1::Point2F(x + w - inset - metrics.width, textY),
-                    hint, app.brush);
-                hint->Release();
-            }
-        }
-
-        if (entry.separatorAfter) {
-            float sepY = top + itemH + contextMenuSeparatorHeight(app) * 0.5f;
-            app.brush->SetColor(borderColor);
-            app.renderTarget->DrawLine(
-                D2D1::Point2F(x + pad, sepY), D2D1::Point2F(x + w - pad, sepY),
-                app.brush, 1.0f);
-        }
+        const std::wstring hintText = shortcutLabel(entry);
+        paint::menuRow(app, D2D1::RectF(x + pad, top, x + w - pad, top + itemH), itemLabel, hintText.c_str(),
+                       i == app.hoveredContextMenuItem, enabled, anim);
+        if (entry.separatorAfter) paint::menuSeparator(app, x + pad, x + w - pad, top + itemH, anim);
     }
 }
 

@@ -1,3 +1,4 @@
+#include "ui_scale.h"
 #include "overlays.h"
 
 #include <algorithm>
@@ -47,10 +48,10 @@ const std::vector<ContextMenuEntry>& contextMenuEntries(const App& app) {
                                : (app.editMode ? preview : document);
 }
 
-float contextMenuPadding(const App& app) { return dpi(app, 6.0f); }
-float contextMenuSeparatorHeight(const App& app) { return dpi(app, 9.0f); }
+float contextMenuPadding(const App& app) { return dpi(app, uiscale::menuPad); }
+float contextMenuSeparatorHeight(const App& app) { return dpi(app, uiscale::menuSeparator); }
 float contextMenuWidth(const App& app) {
-    return std::min(dpi(app, app.applicationMenu ? 260.0f : 210.0f), (float)app.width);
+    return std::min(dpi(app, app.applicationMenu ? 260.0f : 208.0f), (float)app.width);
 }
 
 // Keep every action reachable on short windows and at high display scaling.
@@ -60,7 +61,7 @@ float contextMenuItemHeight(const App& app) {
     for (const auto& entry : entries)
         if (entry.separatorAfter) gaps += contextMenuSeparatorHeight(app);
     float available = app.height - chromeTopHeight(app) - gaps;
-    return std::max(1.0f, std::min(dpi(app, 30.0f), available / (float)entries.size()));
+    return std::max(1.0f, std::min(dpi(app, uiscale::rowMenu), available / (float)entries.size()));
 }
 
 float contextMenuHeight(const App& app) {

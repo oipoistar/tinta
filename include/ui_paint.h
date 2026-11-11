@@ -60,5 +60,13 @@ D2D1_COLOR_F ink(const D2DTheme& theme, float share, float alpha = 1.0f);
 D2D1_RECT_F toggle(App& app, const D2D1_RECT_F& slot, bool on, const D2DTheme& theme, float alpha);
 // A dialog's close cross in its box
 void closeCross(App& app, const D2D1_RECT_F& box, D2D1_COLOR_F color);
+// A menu's panel: its shadow, the raised surface and its edge
+void menuPanel(App& app, const D2D1_RECT_F& box, float alpha = 1.0f);
+// A menu's row in `row`, the box its light fills: the light when lit, the
+// label (set in by `indent`) and, at the right, its shortcut
+void menuRow(App& app, const D2D1_RECT_F& row, const wchar_t* label, const wchar_t* keys, bool lit, bool enabled,
+             float alpha = 1.0f, float indent = 0.0f);
+// The line between two groups of a menu's rows, in the separator's room from `top`
+void menuSeparator(App& app, float left, float right, float top, float alpha = 1.0f);
 
 }  // namespace paint
