@@ -1,33 +1,76 @@
-/* Arctic: nordic ice blues, crisp and clean.
+/* Arctic: cool blue, crisp air.
    One of Tinta's ten built-in themes. A theme of your own can start from
-   it with @import "Arctic"; and change what it likes. */
+   it with @import "Arctic"; and change what it likes: the colours are the
+   variables below, and the rules under them are the same in all ten. */
 :root {
   color-scheme: light;
-  accent-color: #2b6cb0;        /* deepened blue */
+  accent-color: #3182ce;
+  --page: #f7fafc;
+  --ink: #2d3748;
+  --ink-strong: #1a365d;      /* headings */
+  --ink-soft: #626a77;        /* quotes and list markers */
+  --link: #2b6cb0;
+  --line: #dfe3e6;            /* hairlines: under headings, between rows, rules */
+  --line-firm: #bec3ca;       /* under a table's header */
+  --surface: #eaf2f8;         /* code */
+  --surface-edge: #dbe3ea;
+  --code: #285e61;
+  --quote: #a3c4e0;           /* a quote's bar */
 }
+
+/* The page and its type */
 body {
-  background-color: #f7fafc;    /* ice white */
-  color: #2d3748;               /* deep slate */
+  background-color: var(--page);
+  color: var(--ink);
   font-family: "Segoe UI", sans-serif;
 }
-h1, h2, h3, h4, h5, h6 { color: #1a365d; }    /* navy */
-a { color: #2b6cb0; }                         /* deepened blue */
-code, pre { font-family: "Cascadia Code", "Cascadia Mono", "Consolas", monospace; }
-pre {
-  background-color: #ebf8ff;    /* light blue */
-  color: #285e61;               /* teal */
-  border: 1px solid #d8e5ed;    /* a hairline, a shade off the block */
-  border-radius: 8px;
+h1, h2, h3, h4, h5, h6 {
+  color: var(--ink-strong);
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
 }
-code { border-radius: 4px; }
-th { background-color: #ebf8ff; }                /* the header row, as code's ground */
-blockquote { border-left-color: #a0c4e8; }
+h1 { font-size: 34px; letter-spacing: -0.02em; }
+h2 { font-size: 25px; font-weight: 600; letter-spacing: -0.015em; }
+h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+h4 { font-size: 17px; font-weight: 600; }
+h5 { font-size: 15px; font-weight: 600; }
+h6 { font-size: 13px; font-weight: 600; letter-spacing: 0.03em; }
+/* A hairline under the two top levels; Settings > Appearance > Heading
+   separators takes it away */
+h1, h2 { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+a { color: var(--link); text-decoration-color: rgba(43, 108, 176, 0.4); }
 
-/* Code, by token */
-.token.keyword { color: #2b6cb0; }            /* aligned with accent */
-.token.string { color: #38795b; }             /* cool pine */
-.token.comment { color: #8295a8; }            /* ice gray */
-.token.number { color: #c05621; }             /* burnt */
-.token.function { color: #2c7a7b; }           /* teal, echoes code */
-.token.class-name { color: #6b5b95; }         /* purple */
-.token.control { color: #805ad5; }            /* violet */
+/* Code */
+code, pre { font-family: "Cascadia Code", "Cascadia Mono", "Consolas", monospace; }
+code { border-radius: 5px; }
+pre {
+  background-color: var(--surface);
+  color: var(--code);
+  border: 1px solid var(--surface-edge);
+  border-radius: 10px;
+}
+.token.keyword { color: #2b6cb0; }
+.token.string { color: #2b7a53; }
+.token.comment { color: #637995; }
+.token.number { color: #b04f1e; }
+.token.function { color: #2a6fb0; }
+.token.class-name { color: #6b46c1; }
+.token.control { color: #7b53d3; }
+
+/* Quotes and callouts */
+blockquote { border-left-color: var(--quote); color: var(--ink-soft); }
+blockquote.alert-note { background-color: rgba(9, 105, 218, 0.07); }
+blockquote.alert-tip { background-color: rgba(26, 127, 55, 0.07); }
+blockquote.alert-important { background-color: rgba(130, 80, 223, 0.07); }
+blockquote.alert-warning { background-color: rgba(154, 103, 0, 0.07); }
+blockquote.alert-caution { background-color: rgba(207, 34, 46, 0.07); }
+blockquote.alert-note, blockquote.alert-tip, blockquote.alert-important, blockquote.alert-warning, blockquote.alert-caution {
+  padding: 10px 18px 0;
+  color: var(--ink);
+}
+
+/* Lists, tables and rules */
+li::marker { color: var(--ink-soft); }
+tr { background-color: transparent; }    /* no stripes */
+th, td { border: none; border-bottom: 1px solid var(--line); padding: 9px 14px; }
+th { background-color: transparent; border-bottom: 2px solid var(--line-firm); }
+hr { border-top: 1px solid var(--line); }

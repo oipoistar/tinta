@@ -140,8 +140,12 @@ void roundTrips() {
               name + ": the faces come back");
         check(sameFace(back.headingFontFamily.empty() ? t.fontFamily : back.headingFontFamily.c_str(), themeHeadingFont(t)),
               name + ": the heading face comes back");
-        check(r.bodySize == 0 && r.codeSize == 0 && r.lineHeight == 0 && r.headingSize[0] == 0,
-              name + ": and Tinta's own type sizes");
+        // The sizes are not in that sheet: they are those of the theme it
+        // starts from, Paper or Midnight, which are every built-in theme's
+        check(r.bodySize == t.bodySize && r.codeSize == t.codeSize && r.lineHeight == t.lineHeight &&
+                  r.headingSize[0] == t.headingSize[0] && r.headingSize[5] == t.headingSize[5] &&
+                  r.headingWeight[1] == t.headingWeight[1],
+              name + ": and the type sizes of the theme it starts from");
     }
 }
 

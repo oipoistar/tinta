@@ -117,8 +117,10 @@ void themeEditorFonts(const std::filesystem::path& dir) {
     };
 
     open(L"Editor fonts");
-    check(app.themeEditorFont == L"Segoe UI" && app.themeEditorHeadingFont.empty() &&
-          app.themeEditorCodeFont == L"Consolas", "the editor starts from Paper's faces");
+    check(app.themeEditorFont == themeAt(0).fontFamily &&
+              app.themeEditorHeadingFont == (themeAt(0).headingFontFamily ? themeAt(0).headingFontFamily : L"") &&
+              app.themeEditorCodeFont == themeAt(0).codeFontFamily,
+          "the editor starts from Paper's faces");
     pick(TE_FONT_HEADING, L"Georgia");
     pick(TE_FONT_CODE, L"Courier New");
     pick(TE_FONT_TEXT, L"Verdana");

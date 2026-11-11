@@ -842,6 +842,16 @@ IDWriteTextFormat* format(App& app, const Style& style, IDWriteTextFormat* fallb
     return made ? made : fallback;
 }
 
+IDWriteTextFormat* scaled(App& app, IDWriteTextFormat* base, float factor) {
+    State* s = app.pageState.get();
+    if (!s || !base) return nullptr;
+    auto found = s->made.find(base);
+    if (found == s->made.end()) return nullptr;
+    FontKey key = found->second;
+    key.size = std::max(1.0f, key.size * factor);
+    return formatFor(app, *s, key);
+}
+
 IDWriteTextFormat* variant(App& app, IDWriteTextFormat* base, bool bold, bool italic) {
     State* s = app.pageState.get();
     if (!s || !base) return nullptr;

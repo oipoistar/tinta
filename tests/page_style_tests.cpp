@@ -214,10 +214,10 @@ void unstyled(App& app) {
     check(discs == 2, "a built-in theme keeps its round bullets");
     const auto* second = runStarting(app, L"Second paragraph");
     check(second && closeTo(second->bounds.left, app.layoutIndent), "and starts every paragraph at the edge");
-    // Its boxes are Paper's own: corners of 4 for inline code and of 8 with a hairline for a code block
+    // Its boxes are Paper's own: corners of 5 for inline code and of 10 with an edge for a code block
     for (const auto& rect : app.layoutRects) {
-        check((rect.radius == 0 && rect.strokeWidth == 0) || (rect.radius == 4 && rect.strokeWidth == 0) ||
-                  (rect.radius == 8 && rect.strokeWidth == 1),
+        check((rect.radius == 0 && rect.strokeWidth == 0) || (rect.radius == 5 && rect.strokeWidth == 0) ||
+                  (rect.radius == 10 && rect.strokeWidth == 1),
               "and Paper's own boxes");
     }
 }
@@ -438,7 +438,9 @@ void inspecting(App& app, const fs::path& dir) {
     layoutDocument(app);
     check(inspectorOpen(app, x, y), "a built-in theme's rules can be looked at too");
     const std::wstring own = inspectorText(app);
-    check(own.find(L"color: #3d3329   body   Paper") != std::wstring::npos && own.find(L".css") == std::wstring::npos,
+    // The quote's colour is one of the theme's variables, shown with its value
+    check(own.find(L"color: var(--ink-soft)   blockquote   Paper") != std::wstring::npos &&
+              own.find(L"--ink-soft: #") != std::wstring::npos && own.find(L".css") == std::wstring::npos,
           "they are named by the theme, with no file");
     inspectorClose(app);
 }
@@ -720,128 +722,207 @@ bool struckThroughTheMiddle(const App& app, const App::LayoutTextRun& run) {
     return false;
 }
 
+// How well one colour reads on another (WCAG's contrast ratio, 1 to 21)
+float readsAt(const D2D1_COLOR_F& ink, const D2D1_COLOR_F& ground) {
+    auto light = [](const D2D1_COLOR_F& c) {
+        auto part = [](float v) { return v <= 0.03928f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f); };
+        return 0.2126f * part(c.r) + 0.7152f * part(c.g) + 0.0722f * part(c.b);
+    };
+    const float a = light(ink), b = light(ground);
+    return (std::max(a, b) + 0.05f) / (std::min(a, b) + 0.05f);
+}
+
 // The built-in themes are CSS files (resources/themes) and hand the page
 // their sheets, so the page draws them as it draws a theme of one's own.
-// Nothing may move for it. Each built-in is set against a themes.ini theme
-// with its colours and faces, which has no sheet: every run, box, line and
-// shape in the same place and colour, at two widths. What the sheets once
-// took away is looked at one by one: a callout's own colours, a footnote
-// number's, the dimming of a link to a missing file. And what the sheets
-// add on purpose, the themes' look: code blocks with round corners and a
-// hairline, round chips for inline code, a table's header on code's ground.
+// That the page's code draws a sheet as it drew without one is held by
+// iniThemesAsCss below. Here: the ten themes' one design, each in its own
+// colours. Their type; hairlines under the two top heading levels, which
+// Heading separators takes away; code blocks with round corners and an
+// edge; chips for inline code; callouts on a tint of their colour with the
+// bar down their side; tables with lines across only and a firmer one
+// under the header; links underlined in a tint of their colour; colours
+// that read: text, links and code against their grounds. And what a sheet
+// once took away: a callout's own colours, the dimming of a link to a
+// missing file, a strike through the letters' middle.
 void builtInsStyled(App& app, const fs::path& dir) {
     const fs::path fixture = fs::path(TINTA_THEME_FIXTURE).parent_path() / "builtin-themes-styled.md";
     std::ifstream in(fixture, std::ios::binary);
     const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     check(source.size() > 1000, "the fixture is read");
-    // themes.ini as it stood, to put back
-    const fs::path ini = dir / "themes.ini";
-    std::error_code ignored;
-    const bool hadIni = fs::exists(ini, ignored);
-    std::string iniBefore;
-    if (hadIni) {
-        std::ifstream was(ini, std::ios::binary);
-        iniBefore.assign((std::istreambuf_iterator<char>(was)), std::istreambuf_iterator<char>());
-    }
     const std::string fileBefore = app.currentFile;
     const int widthBefore = app.width;
+    const bool rulesBefore = app.headingRules;
     const fs::path doc = dir / "builtin-themes-styled.md";
     app.currentFile = toUtf8(doc.wstring());
     app.root = parseDocument(app.parser, source, doc.wstring()).root;
     app.scrollY = app.targetScrollY = 0;
-    // The twins are to have no sheet: their sections are not written as CSS here
-    themesIniBecomesCss() = false;
+    const float sizes[6] = {34, 25, 20, 17, 15, 13};
 
     for (int theme = 0; theme < THEME_COUNT; ++theme) {
         const D2DTheme& own = THEMES[theme];
         const std::string name = toUtf8(own.name);
         check(themeSheet(theme) != nullptr, name + " hands the page its sheet");
-        const int twin = saveCustomTheme(own, std::wstring(L"Twin of ") + own.name, own.fontFamily, own.codeFontFamily,
-                                         own.headingFontFamily ? own.headingFontFamily : L"");
-        check(twin >= THEME_COUNT && !themeSheet(twin), name + "'s twin in themes.ini has no sheet");
-        if (twin < THEME_COUNT) continue;
+
+        // The type: one text face and one for headings, the same scale in every theme
+        // (Segoe UI Variable as the text face too would lay long documents out 1.7 times slower)
+        check(std::wstring(own.fontFamily) == L"Segoe UI" && own.headingFontFamily &&
+                  std::wstring(own.headingFontFamily) == L"Segoe UI Variable Display",
+              name + ": text in Segoe UI, headings in Segoe UI Variable Display, which gives way to Segoe UI where it is missing");
+        bool scale = true;
+        for (int level = 0; level < 6; ++level) {
+            scale = scale && own.headingSize[level] == sizes[level] && own.headingWeight[level] == (level == 0 ? 0 : 600);
+        }
+        check(scale, name + ": headings of 34, 25, 20, 17, 15 and 13 px, the first bold and the others semibold");
+        // Colours that read
+        check(readsAt(own.text, own.background) >= 7.0f, name + ": text reads at 7 to 1 or more on the page");
+        check(readsAt(own.heading, own.background) >= 4.5f, name + ": headings read at 4.5 to 1 or more");
+        check(readsAt(own.link, own.background) >= 4.5f, name + ": links read at 4.5 to 1 or more");
+        check(readsAt(own.code, own.codeBackground) >= 4.5f, name + ": code reads at 4.5 to 1 or more on its ground");
+        for (const D2D1_COLOR_F* token : {&own.syntaxKeyword, &own.syntaxString, &own.syntaxNumber, &own.syntaxFunction,
+                                           &own.syntaxType, &own.syntaxControlFlow}) {
+            check(readsAt(*token, own.codeBackground) >= 4.5f, name + ": every kind of code token reads at 4.5 to 1 or more");
+        }
+        check(readsAt(own.syntaxComment, own.codeBackground) >= 3.8f, name + ": comments, set back, still read at 3.8 to 1");
+        check(own.rule && !own.boldText && !own.italicText && !own.selection, name + ": a hairline colour, and none for emphasis");
+        check(own.isDark == (own.highlightBackground && own.highlightText),
+              name + ": a dark theme marks words in its own gold, a light one with Tinta's yellow");
+
         for (int width : {1000, 600}) {
             const std::string where = name + " at " + std::to_string(width);
             app.width = width;
             applyTheme(app, theme);
+            app.headingRules = true;
             layoutDocument(app);
-            const std::vector<std::string> styled = drawnOf(app);
             const float tall = app.contentHeight;
             check(!app.pageBackground, where + ": the theme's own background is no second one for the page");
-            // The look: by its sheet alone, on boxes that stand where they stood
-            int chips = 0, blocks = 0, headers = 0, others = 0;
+
+            // Code: a block with corners of 10 and an edge, chips with corners of 5
+            int chips = 0, blocks = 0;
             const std::string ground = colourOf(own.codeBackground);
             for (const auto& rect : app.layoutRects) {
                 const bool onGround = colourOf(rect.color) == ground;
-                if (rect.radius == 4 && rect.strokeWidth == 0 && onGround) chips++;
-                else if (rect.radius == 8 && rect.strokeWidth == 1 && onGround && rect.stroke.a == 1 &&
-                         colourOf(rect.stroke) != ground) blocks++;
-                else if (rect.radius == 0 && rect.strokeWidth == 0 && onGround) headers++;
-                else if (rect.radius != 0 || rect.strokeWidth != 0) others++;
+                if (rect.radius == 5 && rect.strokeWidth == 0 && onGround) chips++;
+                if (rect.radius == 10 && rect.strokeWidth == 1 && onGround && rect.stroke.a == 1 && colourOf(rect.stroke) != ground) {
+                    blocks++;
+                }
             }
-            check(chips == 4, where + ": inline code sits in chips with corners of 4: " + std::to_string(chips));
-            check(blocks == 1, where + ": the code block has corners of 8 and a hairline: " + std::to_string(blocks));
-            check(headers >= 1, where + ": the table's header stands on code's ground: " + std::to_string(headers));
-            check(others == 0, where + ": no other box is rounded or edged: " + std::to_string(others));
-            if (own.isDark) {
-                const auto* marked = runOf(app, L"marked words");
-                check(own.highlightBackground && own.highlightText && marked && colourOf(marked->color) == colourOf(*own.highlightText),
-                      where + ": a dark theme marks words in its own gold");
-            } else {
-                check(!own.highlightBackground && !own.highlightText, where + ": a light theme keeps Tinta's yellow marker");
+            check(chips >= 4, where + ": inline code sits in chips with corners of 5: " + std::to_string(chips));
+            check(blocks == 1, where + ": the code block has corners of 10 and an edge: " + std::to_string(blocks));
+
+            // Callouts: a tint of the callout's colour, the bar down its whole side; a plain quote's bar the theme's
+            const uint32_t kinds[5] = {own.isDark ? 0x4493F8u : 0x0969DAu, own.isDark ? 0x3FB950u : 0x1A7F37u,
+                                       own.isDark ? 0xAB7DF8u : 0x8250DFu, own.isDark ? 0xD29922u : 0x9A6700u,
+                                       own.isDark ? 0xF85149u : 0xCF222Eu};
+            int boxed = 0;
+            bool title = false, quoteBar = false;
+            for (const auto& run : app.layoutTextRuns) title = title || sameColor(run.color, kinds[0]);
+            for (const auto& tint : app.layoutRects) {
+                if (tint.color.a > 0.2f || tint.rect.right - tint.rect.left < 200) continue;
+                for (uint32_t kind : kinds) {
+                    if (!sameColor(tint.color, kind)) continue;
+                    for (const auto& bar : app.layoutRects) {
+                        if (sameColor(bar.color, kind) && bar.color.a == 1 && closeTo(bar.rect.right - bar.rect.left, 4, 0.01f) &&
+                            closeTo(bar.rect.left, tint.rect.left, 0.01f) && closeTo(bar.rect.top, tint.rect.top, 0.01f) &&
+                            closeTo(bar.rect.bottom, tint.rect.bottom, 0.01f)) {
+                            boxed++;
+                        }
+                    }
+                }
+            }
+            for (const auto& rect : app.layoutRects) {
+                quoteBar = quoteBar || (colourOf(rect.color) == colourOf(own.blockquoteBorder) && closeTo(rect.rect.right - rect.rect.left, 4, 0.01f));
+            }
+            check(boxed == 6, where + ": each of the six callouts stands on a tint of its colour, its bar down the whole side: " +
+                                  std::to_string(boxed));
+            check(title, where + ": a note's title is the note's colour");
+            check(quoteBar, where + ": a plain quote's bar is the theme's");
+            const auto* quoted = runStarting(app, L"A plain quote");
+            check(quoted && colourOf(quoted->color) != colourOf(own.text) && readsAt(quoted->color, own.background) >= 4.5f,
+                  where + ": a quote's text is set back, and still reads");
+
+            // The table: lines across only, one under every row, the header's firmer; no grounds of its own
+            check(app.tableRects.size() == 1, where + ": the table is laid out");
+            if (app.tableRects.size() == 1) {
+                const D2D1_RECT_F table = app.tableRects[0].bounds;
+                int across = 0, firm = 0, down = 0, grounds = 0;
+                for (const auto& line : app.layoutLines) {
+                    const bool inside = line.p1.y >= table.top - 0.5f && line.p2.y <= table.bottom + 0.5f &&
+                                        line.p1.x >= table.left - 0.5f && line.p2.x <= table.right + 0.5f;
+                    if (!inside) continue;
+                    if (closeTo(line.p1.x, line.p2.x, 0.01f) && line.p2.y - line.p1.y > 20) down++;
+                    if (closeTo(line.p1.y, line.p2.y, 0.01f) && closeTo(line.p1.x, table.left, 0.01f) &&
+                        closeTo(line.p2.x, table.right, 0.01f)) {
+                        (closeTo(line.stroke, 2, 0.01f) ? firm : across)++;
+                        check(line.p1.y > table.top + 1, where + ": no line over the table's header");
+                    }
+                }
+                for (const auto& rect : app.layoutRects) {
+                    grounds += closeTo(rect.rect.left, table.left, 0.01f) && closeTo(rect.rect.right, table.right, 0.01f) &&
+                                       rect.rect.top >= table.top - 0.5f && rect.rect.bottom <= table.bottom + 0.5f
+                                   ? 1 : 0;
+                }
+                check(down == 0 && firm == 1 && across == 3 && grounds == 0,
+                      where + ": the table has lines across only, a firmer one under its header, and no stripes: " +
+                          std::to_string(down) + " down, " + std::to_string(firm) + " firm, " + std::to_string(across) +
+                          " across, " + std::to_string(grounds) + " grounds");
             }
 
-            // A callout's bar and title are the callout's, a plain quote's bar the theme's
-            const uint32_t note = own.isDark ? 0x4493F8 : 0x0969DA;
-            bool title = false, bar = false, quoteBar = false;
-            for (const auto& run : app.layoutTextRuns) title = title || sameColor(run.color, note);
-            for (const auto& rect : app.layoutRects) {
-                bar = bar || (sameColor(rect.color, note) && rect.rect.right - rect.rect.left < 8);
-                quoteBar = quoteBar || (colourOf(rect.color) == colourOf(own.blockquoteBorder) && rect.rect.right - rect.rect.left < 8);
+            // Links: underlined in a tint of their colour; one to a file that is not there is dimmed
+            bool tinted = false;
+            for (const auto& line : app.layoutLines) {
+                tinted = tinted || (colourOf(line.color).substr(0, 6) == colourOf(own.link).substr(0, 6) && closeTo(line.color.a, 0.4f, 0.01f));
             }
-            check(title, where + ": a note's title is the note's colour");
-            check(bar, where + ": and so is its bar");
-            check(quoteBar, where + ": a plain quote's bar is the theme's");
-            // A link to a file that is not there is dimmed, one to the web is not
+            check(tinted, where + ": a link's underline is a tint of its colour");
             const auto* missing = runOf(app, L"missing");
             const auto* found = runOf(app, L"found");
             check(missing && found && closeTo(missing->color.a, found->color.a * 0.45f, 0.01f),
                   where + ": a link to a missing file is dimmed");
-            // Struck through the letters' middle
             const auto* struck = runOf(app, L"struck words");
             check(struck && struckThroughTheMiddle(app, *struck), where + ": a strike goes through the letters' middle");
 
-            applyTheme(app, twin);
+            // The hairlines under the two top levels, from side to side, and the setting that takes them away
+            auto hairlines = [&] {
+                int count = 0;
+                for (const auto& line : app.layoutLines) {
+                    count += closeTo(line.p1.y, line.p2.y, 0.01f) && closeTo(line.stroke, 1, 0.01f) &&
+                                     line.p2.x - line.p1.x > app.layoutMaxWidth - 1 && colourOf(line.color) == colourOf(*own.rule)
+                                 ? 1 : 0;
+                }
+                return count;
+            };
+            const int with = hairlines();
+            app.headingRules = false;
             layoutDocument(app);
-            const std::vector<std::string> plain = drawnOf(app);
-            const auto* struckPlain = runOf(app, L"struck words");
-            check(struckPlain && struckThroughTheMiddle(app, *struckPlain), where + ": and under a theme without a sheet too");
-            check(closeTo(app.contentHeight, tall, 0.01f), where + ": the page is as tall as without a sheet");
-            size_t differing = 0;
-            std::string first;
-            for (size_t i = 0; i < styled.size() && i < plain.size(); ++i) {
-                if (styled[i] == plain[i]) continue;
-                if (differing++ < 8) first += " ;; " + styled[i] + "  |  without: " + plain[i];
-            }
-            check(styled.size() == plain.size() && differing == 0,
-                  where + ": everything stands as without a sheet (" + std::to_string(styled.size()) + " against " +
-                      std::to_string(plain.size()) + " parts, " + std::to_string(differing) + " differ; first: " + first + ")");
+            check(with - hairlines() == 3 && app.contentHeight < tall,
+                  where + ": Heading separators off takes the hairlines under the three h1 and h2 away, and their room: " +
+                      std::to_string(with) + " and " + std::to_string(hairlines()));
+            app.headingRules = true;
         }
     }
-
-    // themes.ini and the theme list as they were
-    if (hadIni) {
-        std::ofstream back(ini, std::ios::binary | std::ios::trunc);
-        back << iniBefore;
-    } else {
-        fs::remove(ini, ignored);
+    // A theme of one's own from a built-in one: its design, one variable changed
+    {
+        const fs::path themes = dir / "themes";
+        std::error_code ignored;
+        fs::create_directories(themes, ignored);
+        { std::ofstream(themes / "Paper in blue.css", std::ios::binary) << "@import \"Paper\";\n:root { --link: #0b6e99; }\n"; }
+        loadCustomThemes();
+        int mine = -1;
+        for (int i = THEME_COUNT; i < themeCount(); ++i) {
+            if (std::wstring(themeAt(i).name) == L"Paper in blue") mine = i;
+        }
+        check(mine >= 0 && sameColor(themeAt(mine).link, 0x0B6E99) && themeAt(mine).headingSize[0] == 34 &&
+                  colourOf(themeAt(mine).background) == colourOf(THEMES[0].background) && themeProblems(mine).empty(),
+              "@import of a built-in theme and one variable is a theme: its design, that colour changed");
+        fs::remove(themes / "Paper in blue.css", ignored);
+        loadCustomThemes();
     }
-    themesIniBecomesCss() = true;
-    loadCustomThemes();
+    app.headingRules = rulesBefore;
     app.currentFile = fileBefore;
     app.width = widthBefore;
     applyTheme(app, 0);
+    layoutDocument(app);
 }
+
 std::string readAll(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
     return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());

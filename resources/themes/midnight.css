@@ -1,34 +1,77 @@
-/* Midnight: deep space, cosmic tranquility.
+/* Midnight: deep navy, quiet and cool.
    One of Tinta's ten built-in themes. A theme of your own can start from
-   it with @import "Midnight"; and change what it likes. */
+   it with @import "Midnight"; and change what it likes: the colours are the
+   variables below, and the rules under them are the same in all ten. */
 :root {
   color-scheme: dark;
-  accent-color: #38c6e4;        /* lifted off the ink boundary */
+  accent-color: #38c6e4;
+  --page: #0d1b2a;
+  --ink: #dfe3e8;
+  --ink-strong: #f0f4f8;      /* headings */
+  --ink-soft: #a8afb7;        /* quotes and list markers */
+  --link: #38c6e4;
+  --line: #2f3b48;            /* hairlines: under headings, between rows, rules */
+  --line-firm: #545f6b;       /* under a table's header */
+  --surface: #16263a;         /* code */
+  --surface-edge: #2e3d4f;
+  --code: #90e0ef;
+  --quote: #415a77;           /* a quote's bar */
 }
+
+/* The page and its type */
 body {
-  background-color: #0d1b2a;    /* deep navy */
-  color: #e0e1dd;               /* soft blue-white */
+  background-color: var(--page);
+  color: var(--ink);
   font-family: "Segoe UI", sans-serif;
 }
-h1, h2, h3, h4, h5, h6 { color: #f0f4f8; }    /* moonlight */
-a { color: #38c6e4; }                         /* lifted electric blue */
-code, pre { font-family: "Cascadia Code", "Cascadia Mono", "Consolas", monospace; }
-pre {
-  background-color: #1b263b;    /* deep blue */
-  color: #90e0ef;               /* cyan */
-  border: 1px solid #374052;    /* a hairline, a shade off the block */
-  border-radius: 8px;
+h1, h2, h3, h4, h5, h6 {
+  color: var(--ink-strong);
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
 }
-code { border-radius: 4px; }
-th { background-color: #1b263b; }                /* the header row, as code's ground */
-mark { background-color: rgba(242, 206, 107, 0.30); color: #f7dc8c; }    /* gold, as the numbers in code */
-blockquote { border-left-color: #415a77; }
+h1 { font-size: 34px; letter-spacing: -0.02em; }
+h2 { font-size: 25px; font-weight: 600; letter-spacing: -0.015em; }
+h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+h4 { font-size: 17px; font-weight: 600; }
+h5 { font-size: 15px; font-weight: 600; }
+h6 { font-size: 13px; font-weight: 600; letter-spacing: 0.03em; }
+/* A hairline under the two top levels; Settings > Appearance > Heading
+   separators takes it away */
+h1, h2 { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+a { color: var(--link); text-decoration-color: rgba(56, 198, 228, 0.4); }
 
-/* Code, by token */
-.token.keyword { color: #38c6e4; }            /* follows accent */
-.token.string { color: #9adba4; }             /* softened green */
-.token.comment { color: #6c7a89; }            /* gray-blue */
-.token.number { color: #f2ce6b; }             /* softened gold */
-.token.function { color: #90e0ef; }           /* cyan */
-.token.class-name { color: #c9a6de; }         /* softened plum */
-.token.control { color: #d793cf; }            /* softened orchid */
+/* Code */
+code, pre { font-family: "Cascadia Code", "Cascadia Mono", "Consolas", monospace; }
+code { border-radius: 5px; }
+pre {
+  background-color: var(--surface);
+  color: var(--code);
+  border: 1px solid var(--surface-edge);
+  border-radius: 10px;
+}
+.token.keyword { color: #38c6e4; }
+.token.string { color: #9adba4; }
+.token.comment { color: #758392; }
+.token.number { color: #f2ce6b; }
+.token.function { color: #90e0ef; }
+.token.class-name { color: #c9a6de; }
+.token.control { color: #d793cf; }
+
+/* Quotes and callouts */
+blockquote { border-left-color: var(--quote); color: var(--ink-soft); }
+blockquote.alert-note { background-color: rgba(68, 147, 248, 0.1); }
+blockquote.alert-tip { background-color: rgba(63, 185, 80, 0.1); }
+blockquote.alert-important { background-color: rgba(171, 125, 248, 0.1); }
+blockquote.alert-warning { background-color: rgba(210, 153, 34, 0.1); }
+blockquote.alert-caution { background-color: rgba(248, 81, 73, 0.1); }
+blockquote.alert-note, blockquote.alert-tip, blockquote.alert-important, blockquote.alert-warning, blockquote.alert-caution {
+  padding: 10px 18px 0;
+  color: var(--ink);
+}
+
+/* Lists, tables and rules */
+li::marker { color: var(--ink-soft); }
+tr { background-color: transparent; }    /* no stripes */
+th, td { border: none; border-bottom: 1px solid var(--line); padding: 9px 14px; }
+th { background-color: transparent; border-bottom: 2px solid var(--line-firm); }
+hr { border-top: 1px solid var(--line); }
+mark { background-color: rgba(242, 206, 107, 0.26); color: #f5da90; }

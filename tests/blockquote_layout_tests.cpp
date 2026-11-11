@@ -124,9 +124,25 @@ void blockCases(App& app) {
     for (const char* source : {"> [!NOTE]\n> Callout body.\n", "> [!TIP]\n"}) {
         layout(app, source);
         check(!app.layoutRects.empty(), "callout bar renders");
-        if (!app.layoutRects.empty())
-            check(closeEnough(app.layoutRects.back().rect.bottom, lastTextBottom(app)),
-                  "callout bar fits the body or standalone title");
+        if (!app.layoutRects.empty()) {
+            // A built-in theme sets a callout on a tint of its colour: a
+            // box, which holds its last line's margin, with the bar down
+            // its whole side. Without a box the bar ends at the last line
+            const float scale = app.contentScale * app.zoomFactor;
+            const D2D1_RECT_F bar = app.layoutRects.back().rect;
+            const App::LayoutRect* ground = nullptr;
+            for (const auto& rect : app.layoutRects) {
+                if (rect.rect.right - rect.rect.left > 100 * scale && rect.rect.top <= bar.top + 0.05f && !ground) ground = &rect;
+            }
+            const float text = lastTextBottom(app);
+            if (ground) {
+                check(closeEnough(bar.top, ground->rect.top) && closeEnough(bar.bottom, ground->rect.bottom) &&
+                          bar.bottom >= text - 0.05f && bar.bottom <= text + 20 * scale,
+                      "callout bar fits the body or standalone title");
+            } else {
+                check(closeEnough(bar.bottom, text), "callout bar fits the body or standalone title");
+            }
+        }
     }
     layout(app, ">\n\nFollowing paragraph.\n");
     quoteBars = bars(app);

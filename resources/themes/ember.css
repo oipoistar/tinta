@@ -1,34 +1,77 @@
-/* Ember: warm charcoal with fire accents.
+/* Ember: warm dark, coals and amber.
    One of Tinta's ten built-in themes. A theme of your own can start from
-   it with @import "Ember"; and change what it likes. */
+   it with @import "Ember"; and change what it likes: the colours are the
+   variables below, and the rules under them are the same in all ten. */
 :root {
   color-scheme: dark;
-  accent-color: #f1975a;        /* lifted off the ink boundary */
+  accent-color: #f1975a;
+  --page: #1a1614;
+  --ink: #d4c5b9;
+  --ink-strong: #f6ad55;      /* headings */
+  --ink-soft: #a4988e;        /* quotes and list markers */
+  --link: #f1975a;
+  --line: #38322e;            /* hairlines: under headings, between rows, rules */
+  --line-firm: #59524c;       /* under a table's header */
+  --surface: #241e19;         /* code */
+  --surface-edge: #39322c;
+  --code: #f0a58c;
+  --quote: #6b5544;           /* a quote's bar */
 }
+
+/* The page and its type */
 body {
-  background-color: #1a1614;    /* warm black */
-  color: #d4c5b9;               /* warm gray */
+  background-color: var(--page);
+  color: var(--ink);
   font-family: "Segoe UI", sans-serif;
 }
-h1, h2, h3, h4, h5, h6 { color: #f6ad55; }    /* amber */
-a { color: #f1975a; }                         /* lifted orange */
-code, pre { font-family: "Consolas", monospace; }
-pre {
-  background-color: #252019;    /* dark warm */
-  color: #fc8181;               /* coral */
-  border: 1px solid #3e372f;    /* a hairline, a shade off the block */
-  border-radius: 8px;
+h1, h2, h3, h4, h5, h6 {
+  color: var(--ink-strong);
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
 }
-code { border-radius: 4px; }
-th { background-color: #252019; }                /* the header row, as code's ground */
-mark { background-color: rgba(246, 173, 85, 0.26); color: #fbd38d; }    /* amber */
-blockquote { border-left-color: #5c4a3a; }
+h1 { font-size: 34px; letter-spacing: -0.02em; }
+h2 { font-size: 25px; font-weight: 600; letter-spacing: -0.015em; }
+h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+h4 { font-size: 17px; font-weight: 600; }
+h5 { font-size: 15px; font-weight: 600; }
+h6 { font-size: 13px; font-weight: 600; letter-spacing: 0.03em; }
+/* A hairline under the two top levels; Settings > Appearance > Heading
+   separators takes it away */
+h1, h2 { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+a { color: var(--link); text-decoration-color: rgba(241, 151, 90, 0.4); }
 
-/* Code, by token */
-.token.keyword { color: #f6ad55; }            /* amber */
-.token.string { color: #a8c98a; }             /* warm olive */
-.token.comment { color: #6b5b4f; }            /* warm gray */
-.token.number { color: #d9a662; }             /* brass */
-.token.function { color: #ed8936; }           /* the old accent orange */
-.token.class-name { color: #c9a0c9; }         /* softened plum */
-.token.control { color: #e08bb0; }            /* warm rose */
+/* Code */
+code, pre { font-family: "Consolas", monospace; }
+code { border-radius: 5px; }
+pre {
+  background-color: var(--surface);
+  color: var(--code);
+  border: 1px solid var(--surface-edge);
+  border-radius: 10px;
+}
+.token.keyword { color: #f6ad55; }
+.token.string { color: #a8c98a; }
+.token.comment { color: #8d7868; }
+.token.number { color: #d9a662; }
+.token.function { color: #ed8936; }
+.token.class-name { color: #c9a0c9; }
+.token.control { color: #e08bb0; }
+
+/* Quotes and callouts */
+blockquote { border-left-color: var(--quote); color: var(--ink-soft); }
+blockquote.alert-note { background-color: rgba(68, 147, 248, 0.1); }
+blockquote.alert-tip { background-color: rgba(63, 185, 80, 0.1); }
+blockquote.alert-important { background-color: rgba(171, 125, 248, 0.1); }
+blockquote.alert-warning { background-color: rgba(210, 153, 34, 0.1); }
+blockquote.alert-caution { background-color: rgba(248, 81, 73, 0.1); }
+blockquote.alert-note, blockquote.alert-tip, blockquote.alert-important, blockquote.alert-warning, blockquote.alert-caution {
+  padding: 10px 18px 0;
+  color: var(--ink);
+}
+
+/* Lists, tables and rules */
+li::marker { color: var(--ink-soft); }
+tr { background-color: transparent; }    /* no stripes */
+th, td { border: none; border-bottom: 1px solid var(--line); padding: 9px 14px; }
+th { background-color: transparent; border-bottom: 2px solid var(--line-firm); }
+hr { border-top: 1px solid var(--line); }
+mark { background-color: rgba(246, 173, 85, 0.26); color: #f8c280; }

@@ -1737,6 +1737,10 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
 
     y += page::before(app, elem->level == 1 ? 16.0f : 20.0f);
     BlockBox box(app, css, y, indent, maxWidth);
+    // Heading separators, the setting (#154), decides the line under a
+    // level 1 or 2 heading whoever draws it: off, a theme's own border
+    // there goes too, with the room it kept for it
+    if (elem->level <= 2 && !app.headingRules) box.edge[2] = box.pad[2] = 0.0f;
     std::wstring number;  // a CSS theme's ::before, its counter() a heading number
     const std::vector<ElementPtr> children = withGenerated(app, css, elem->children, &number);
 
@@ -1747,7 +1751,11 @@ static void layoutHeading(App& app, const ElementPtr& elem, float& y, float inde
     layoutInlineContent(app, children, indent, y, maxWidth, format, color, {},
                         page::lineHeight(app, css, format, 0.0f));
     alignLines(app, start, indent, maxWidth, css);
-    box.close(y, color);
+    // On paper a theme's colours stay behind (page_style.h), its border's
+    // too: the line under a heading is then as faint as Tinta's own
+    D2D1_COLOR_F edgeInk = color;
+    if (app.printLayout) edgeInk.a *= 0.3f;
+    box.close(y, edgeInk);
 
     if (elem->level <= 2 && app.headingRules && !themedRule) {
         y += 6 * scale;
@@ -4304,7 +4312,8 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
     // The theme's grid: the cells' borders across (top, bottom) and down
     // (left, right); its rows' backgrounds in place of Tinta's stripes
     D2D1_COLOR_F acrossColor = borderColor, downColor = borderColor;
-    float across = borderStroke, down = borderStroke, headerRule = borderStroke * 2;
+    float across = borderStroke, down = borderStroke, headerRule = borderStroke * 2, topRule = borderStroke;
+    std::optional<D2D1_COLOR_F> headerColor;
     bool themedRows = false;
     {
         const page::Style& cell = cellCss[rows.size() > 1 ? 1 : 0][0];
@@ -4328,6 +4337,12 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
         const page::Style& head = cellCss[0][0];
         if (head.has(Prop::BorderBottomWidth) || head.has(Prop::BorderBottomStyle)) {
             headerRule = head->border[2].style == css::LineStyle::None ? 0.0f : page::px(app, head->border[2].width);
+            if (head.has(Prop::BorderBottomColor)) headerColor = page::color(head->border[2].color);
+        }
+        // The line over the table is the header cells' top border, when they have a word on it
+        topRule = across;
+        if (head.has(Prop::BorderTopWidth) || head.has(Prop::BorderTopStyle)) {
+            topRule = head->border[0].style == css::LineStyle::None ? 0.0f : page::px(app, head->border[0].width);
         }
         for (size_t r = 1; r < rows.size(); r++) {
             themedRows = themedRows || rowCss[r].has(Prop::BackgroundColor) || cellCss[r][0].has(Prop::BackgroundColor);
@@ -4421,11 +4436,11 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
     for (size_t r = 0; r <= rows.size(); r++) {
         float lineY = tableStartY;
         for (size_t i = 0; i < r; i++) lineY += rowHeights[i];
-        float stroke = (r == 1) ? headerRule : across; // thicker after header
+        float stroke = r == 0 ? topRule : r == 1 ? headerRule : across; // thicker after header
         if (stroke <= 0.0f) continue;
         app.layoutLines.push_back({D2D1::Point2F(indent, lineY),
                                    D2D1::Point2F(indent + totalWidth, lineY),
-                                   acrossColor, stroke});
+                                   r == 1 && headerColor ? *headerColor : acrossColor, stroke});
     }
 
     // Grid lines: vertical

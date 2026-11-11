@@ -128,6 +128,8 @@ D2D1_COLOR_F textColor(const Style& style, D2D1_COLOR_F fallback);
 IDWriteTextFormat* format(App& app, const Style& style, IDWriteTextFormat* fallback);
 // Bold or italic of a format made here; null for Tinta's own formats
 IDWriteTextFormat* variant(App& app, IDWriteTextFormat* base, bool bold, bool italic);
+// A format made here at `factor` of its size (a superscript's); null for Tinta's own
+IDWriteTextFormat* scaled(App& app, IDWriteTextFormat* base, float factor);
 // The OpenType features a style turns on or off, on top of `fallback`'s
 IDWriteTypography* typography(App& app, const Style& style, IDWriteTypography* fallback);
 // The line height for text in `format`, when the theme set one; else `fallback`

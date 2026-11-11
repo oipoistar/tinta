@@ -49,6 +49,19 @@ Tinta's source, under `resources/themes`, and `@import "Paper"` starts from
 Paper's file as it is written. Their rules style the page as yours do, and
 Ctrl+Alt+click shows them under the theme's name.
 
+The ten share one design and differ in their colours, which each file
+keeps as variables at its top (`--page`, `--ink`, `--ink-strong`,
+`--ink-soft`, `--link`, `--line`, `--surface`, `--code`, `--quote`), so
+`@import "Paper"; :root { --link: #0b6e99 }` is a theme. The design:
+headings in Segoe UI Variable Display on a scale of 34, 25, 20, 17, 15 and
+13 px; a hairline under the two top levels; code blocks with round corners
+and an edge; callouts on a tint of their colour; tables with lines across
+only; links underlined in a tint of their colour.
+
+**Settings > Appearance > Heading separators** decides the line under
+level 1 and 2 headings under every theme: off, a theme's own
+`border-bottom` there is not drawn either.
+
 ## What it draws
 
 Every element of the page takes its own rules, as in a browser: the second
@@ -301,9 +314,8 @@ in a written file say what Tinta has always drawn: inside a link, code and
 emphasis keep the link's colour (`code:not(a *)`, `strong:not(a *)`), and
 text that is both bold and italic takes `bolditalic=`, else `bold=`, else
 `italic=`, whichever is inside the other. The lines under level 1 and 2
-headings are not in the file: **Settings > Appearance > Heading
-separators** draws or hides them under every theme that sets no border
-there itself.
+headings are not in the file: Tinta draws them, and **Settings >
+Appearance > Heading separators** takes them away.
 
 The theme in use, and the ones for light and for dark, are kept in
 `settings.ini` by name (`themeName=`, `lightThemeName=`, `darkThemeName=`)

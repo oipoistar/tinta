@@ -1,33 +1,76 @@
-/* Paper: warm sepia, literary manuscript feel.
+/* Paper: warm sepia, a page from a manuscript.
    One of Tinta's ten built-in themes. A theme of your own can start from
-   it with @import "Paper"; and change what it likes. */
+   it with @import "Paper"; and change what it likes: the colours are the
+   variables below, and the rules under them are the same in all ten. */
 :root {
   color-scheme: light;
   accent-color: #b85a3c;
+  --page: #f5f1e8;
+  --ink: #3d3329;
+  --ink-strong: #2a1f16;      /* headings */
+  --ink-soft: #6d645b;        /* quotes and list markers */
+  --link: #aa5337;
+  --line: #dfdad1;            /* hairlines: under headings, between rows, rules */
+  --line-firm: #c1bcb3;       /* under a table's header */
+  --surface: #ece5d8;         /* code */
+  --surface-edge: #ded7ca;
+  --code: #5f4a3c;
+  --quote: #c9b8a0;           /* a quote's bar */
 }
+
+/* The page and its type */
 body {
-  background-color: #f5f1e8;    /* warm cream */
-  color: #3d3329;               /* deep brown */
+  background-color: var(--page);
+  color: var(--ink);
   font-family: "Segoe UI", sans-serif;
 }
-h1, h2, h3, h4, h5, h6 { color: #2a1f16; }    /* dark brown */
-a { color: #b85a3c; }                         /* terracotta */
-code, pre { font-family: "Consolas", monospace; }
-pre {
-  background-color: #ede6da;    /* parchment */
-  color: #6b5344;               /* brown */
-  border: 1px solid #dbd4c8;    /* a hairline, a shade off the block */
-  border-radius: 8px;
+h1, h2, h3, h4, h5, h6 {
+  color: var(--ink-strong);
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
 }
-code { border-radius: 4px; }
-th { background-color: #ede6da; }                /* the header row, as code's ground */
-blockquote { border-left-color: #c4b8a8; }
+h1 { font-size: 34px; letter-spacing: -0.02em; }
+h2 { font-size: 25px; font-weight: 600; letter-spacing: -0.015em; }
+h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+h4 { font-size: 17px; font-weight: 600; }
+h5 { font-size: 15px; font-weight: 600; }
+h6 { font-size: 13px; font-weight: 600; letter-spacing: 0.03em; }
+/* A hairline under the two top levels; Settings > Appearance > Heading
+   separators takes it away */
+h1, h2 { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+a { color: var(--link); text-decoration-color: rgba(170, 83, 55, 0.4); }
 
-/* Code, by token */
-.token.keyword { color: #8b4513; }            /* saddle brown */
-.token.string { color: #3e7d5a; }             /* warm forest */
-.token.comment { color: #9a8f80; }            /* warm gray */
-.token.number { color: #b8860b; }             /* dark goldenrod */
-.token.function { color: #3b5ba5; }           /* softened indigo */
-.token.class-name { color: #8a63a8; }         /* muted plum */
-.token.control { color: #7d4ca0; }            /* grape */
+/* Code */
+code, pre { font-family: "Consolas", monospace; }
+code { border-radius: 5px; }
+pre {
+  background-color: var(--surface);
+  color: var(--code);
+  border: 1px solid var(--surface-edge);
+  border-radius: 10px;
+}
+.token.keyword { color: #8b4513; }
+.token.string { color: #376f50; }
+.token.comment { color: #7a6f61; }
+.token.number { color: #825f08; }
+.token.function { color: #3b5ba5; }
+.token.class-name { color: #7c5599; }
+.token.control { color: #7d4ca0; }
+
+/* Quotes and callouts */
+blockquote { border-left-color: var(--quote); color: var(--ink-soft); }
+blockquote.alert-note { background-color: rgba(9, 105, 218, 0.07); }
+blockquote.alert-tip { background-color: rgba(26, 127, 55, 0.07); }
+blockquote.alert-important { background-color: rgba(130, 80, 223, 0.07); }
+blockquote.alert-warning { background-color: rgba(154, 103, 0, 0.07); }
+blockquote.alert-caution { background-color: rgba(207, 34, 46, 0.07); }
+blockquote.alert-note, blockquote.alert-tip, blockquote.alert-important, blockquote.alert-warning, blockquote.alert-caution {
+  padding: 10px 18px 0;
+  color: var(--ink);
+}
+
+/* Lists, tables and rules */
+li::marker { color: var(--ink-soft); }
+tr { background-color: transparent; }    /* no stripes */
+th, td { border: none; border-bottom: 1px solid var(--line); padding: 9px 14px; }
+th { background-color: transparent; border-bottom: 2px solid var(--line-firm); }
+hr { border-top: 1px solid var(--line); }

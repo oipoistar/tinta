@@ -1,34 +1,77 @@
-/* Forest: deep mystical greens.
+/* Forest: deep green, under the canopy.
    One of Tinta's ten built-in themes. A theme of your own can start from
-   it with @import "Forest"; and change what it likes. */
+   it with @import "Forest"; and change what it likes: the colours are the
+   variables below, and the rules under them are the same in all ten. */
 :root {
   color-scheme: dark;
   accent-color: #68d391;
+  --page: #0d1512;
+  --ink: #b8c5b2;
+  --ink-strong: #9ae6b4;      /* headings */
+  --ink-soft: #8c9788;        /* quotes and list markers */
+  --link: #68d391;
+  --line: #28312c;            /* hairlines: under headings, between rows, rules */
+  --line-firm: #475148;       /* under a table's header */
+  --surface: #17251f;         /* code */
+  --surface-edge: #2a3831;
+  --code: #81e6d9;
+  --quote: #4a6e5a;           /* a quote's bar */
 }
+
+/* The page and its type */
 body {
-  background-color: #0d1512;    /* deep green-black */
-  color: #b8c5b2;               /* sage */
+  background-color: var(--page);
+  color: var(--ink);
   font-family: "Segoe UI", sans-serif;
 }
-h1, h2, h3, h4, h5, h6 { color: #9ae6b4; }    /* bright green */
-a { color: #68d391; }                         /* lime */
-code, pre { font-family: "Consolas", monospace; }
-pre {
-  background-color: #1a2a23;    /* dark green */
-  color: #81e6d9;               /* mint */
-  border: 1px solid #304037;    /* a hairline, a shade off the block */
-  border-radius: 8px;
+h1, h2, h3, h4, h5, h6 {
+  color: var(--ink-strong);
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
 }
-code { border-radius: 4px; }
-th { background-color: #1a2a23; }                /* the header row, as code's ground */
-mark { background-color: rgba(217, 203, 126, 0.24); color: #e6da98; }    /* moss straw */
-blockquote { border-left-color: #4a6e5a; }
+h1 { font-size: 34px; letter-spacing: -0.02em; }
+h2 { font-size: 25px; font-weight: 600; letter-spacing: -0.015em; }
+h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+h4 { font-size: 17px; font-weight: 600; }
+h5 { font-size: 15px; font-weight: 600; }
+h6 { font-size: 13px; font-weight: 600; letter-spacing: 0.03em; }
+/* A hairline under the two top levels; Settings > Appearance > Heading
+   separators takes it away */
+h1, h2 { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+a { color: var(--link); text-decoration-color: rgba(104, 211, 145, 0.4); }
 
-/* Code, by token */
-.token.keyword { color: #9ae6b4; }            /* bright green */
-.token.string { color: #d9cb7e; }             /* moss straw */
-.token.comment { color: #5f7a6a; }            /* muted green */
-.token.number { color: #e8a85c; }             /* ember orange */
-.token.function { color: #68d391; }           /* lime */
-.token.class-name { color: #81e6d9; }         /* mint */
-.token.control { color: #c99be8; }            /* softened lavender */
+/* Code */
+code, pre { font-family: "Consolas", monospace; }
+code { border-radius: 5px; }
+pre {
+  background-color: var(--surface);
+  color: var(--code);
+  border: 1px solid var(--surface-edge);
+  border-radius: 10px;
+}
+.token.keyword { color: #9ae6b4; }
+.token.string { color: #d9cb7e; }
+.token.comment { color: #688574; }
+.token.number { color: #e8a85c; }
+.token.function { color: #68d391; }
+.token.class-name { color: #81e6d9; }
+.token.control { color: #c99be8; }
+
+/* Quotes and callouts */
+blockquote { border-left-color: var(--quote); color: var(--ink-soft); }
+blockquote.alert-note { background-color: rgba(68, 147, 248, 0.1); }
+blockquote.alert-tip { background-color: rgba(63, 185, 80, 0.1); }
+blockquote.alert-important { background-color: rgba(171, 125, 248, 0.1); }
+blockquote.alert-warning { background-color: rgba(210, 153, 34, 0.1); }
+blockquote.alert-caution { background-color: rgba(248, 81, 73, 0.1); }
+blockquote.alert-note, blockquote.alert-tip, blockquote.alert-important, blockquote.alert-warning, blockquote.alert-caution {
+  padding: 10px 18px 0;
+  color: var(--ink);
+}
+
+/* Lists, tables and rules */
+li::marker { color: var(--ink-soft); }
+tr { background-color: transparent; }    /* no stripes */
+th, td { border: none; border-bottom: 1px solid var(--line); padding: 9px 14px; }
+th { background-color: transparent; border-bottom: 2px solid var(--line-firm); }
+hr { border-top: 1px solid var(--line); }
+mark { background-color: rgba(217, 203, 126, 0.26); color: #e2d89e; }

@@ -1,33 +1,76 @@
-/* Sakura: japanese cherry blossom, soft pink elegance.
+/* Sakura: soft pink, cherry blossom.
    One of Tinta's ten built-in themes. A theme of your own can start from
-   it with @import "Sakura"; and change what it likes. */
+   it with @import "Sakura"; and change what it likes: the colours are the
+   variables below, and the rules under them are the same in all ten. */
 :root {
   color-scheme: light;
-  accent-color: #c44569;
+  accent-color: #d25980;
+  --page: #fdf8f8;
+  --ink: #3c3a3d;
+  --ink-strong: #b83a5e;      /* headings */
+  --ink-soft: #6e6b6e;        /* quotes and list markers */
+  --link: #c93967;
+  --line: #e6e1e2;            /* hairlines: under headings, between rows, rules */
+  --line-firm: #c7c3c4;       /* under a table's header */
+  --surface: #f7ebef;         /* code */
+  --surface-edge: #e8dde1;
+  --code: #7c4a64;
+  --quote: #e8b4c4;           /* a quote's bar */
 }
+
+/* The page and its type */
 body {
-  background-color: #fdf8f8;    /* soft blush white */
-  color: #404040;               /* soft charcoal */
+  background-color: var(--page);
+  color: var(--ink);
   font-family: "Segoe UI", sans-serif;
 }
-h1, h2, h3, h4, h5, h6 { color: #c44569; }    /* deep rose */
-a { color: #d25980; }                         /* rose (contrast-fixed) */
-code, pre { font-family: "Consolas", monospace; }
-pre {
-  background-color: #f8ecf0;    /* blush */
-  color: #8b5570;               /* plum */
-  border: 1px solid #e6dbde;    /* a hairline, a shade off the block */
-  border-radius: 8px;
+h1, h2, h3, h4, h5, h6 {
+  color: var(--ink-strong);
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
 }
-code { border-radius: 4px; }
-th { background-color: #f8ecf0; }                /* the header row, as code's ground */
-blockquote { border-left-color: #e8b4c0; }
+h1 { font-size: 34px; letter-spacing: -0.02em; }
+h2 { font-size: 25px; font-weight: 600; letter-spacing: -0.015em; }
+h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+h4 { font-size: 17px; font-weight: 600; }
+h5 { font-size: 15px; font-weight: 600; }
+h6 { font-size: 13px; font-weight: 600; letter-spacing: 0.03em; }
+/* A hairline under the two top levels; Settings > Appearance > Heading
+   separators takes it away */
+h1, h2 { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+a { color: var(--link); text-decoration-color: rgba(201, 57, 103, 0.4); }
 
-/* Code, by token */
-.token.keyword { color: #c44569; }            /* rose */
-.token.string { color: #4e9b6f; }             /* soft leaf */
-.token.comment { color: #a8969c; }            /* pink-tinted gray */
-.token.number { color: #d25980; }             /* rose */
-.token.function { color: #6455b8; }           /* deepened slate blue */
-.token.class-name { color: #8b5570; }         /* plum */
-.token.control { color: #9d5bc8; }            /* orchid */
+/* Code */
+code, pre { font-family: "Consolas", monospace; }
+code { border-radius: 5px; }
+pre {
+  background-color: var(--surface);
+  color: var(--code);
+  border: 1px solid var(--surface-edge);
+  border-radius: 10px;
+}
+.token.keyword { color: #b83280; }
+.token.string { color: #af4e1e; }
+.token.comment { color: #627894; }
+.token.number { color: #7b49e2; }
+.token.function { color: #2b6cb0; }
+.token.class-name { color: #6b46c1; }
+.token.control { color: #c12a78; }
+
+/* Quotes and callouts */
+blockquote { border-left-color: var(--quote); color: var(--ink-soft); }
+blockquote.alert-note { background-color: rgba(9, 105, 218, 0.07); }
+blockquote.alert-tip { background-color: rgba(26, 127, 55, 0.07); }
+blockquote.alert-important { background-color: rgba(130, 80, 223, 0.07); }
+blockquote.alert-warning { background-color: rgba(154, 103, 0, 0.07); }
+blockquote.alert-caution { background-color: rgba(207, 34, 46, 0.07); }
+blockquote.alert-note, blockquote.alert-tip, blockquote.alert-important, blockquote.alert-warning, blockquote.alert-caution {
+  padding: 10px 18px 0;
+  color: var(--ink);
+}
+
+/* Lists, tables and rules */
+li::marker { color: var(--ink-soft); }
+tr { background-color: transparent; }    /* no stripes */
+th, td { border: none; border-bottom: 1px solid var(--line); padding: 9px 14px; }
+th { background-color: transparent; border-bottom: 2px solid var(--line-firm); }
+hr { border-top: 1px solid var(--line); }

@@ -76,17 +76,33 @@ void checkTables(App& app) {
     if (app.tableRects.size() != 2) return;
     for (size_t ti = 0; ti < app.tableRects.size(); ++ti) {
         const auto& table = app.tableRects[ti];
+        // The columns' and rows' edges, from the cells themselves: a theme
+        // may draw the lines across only, as the built-in ones do
         std::vector<float> xs, ys;
-        for (const auto& line : app.layoutLines) {
-            if (closeEnough(line.p1.x, line.p2.x) && closeEnough(line.p1.y, table.bounds.top) && closeEnough(line.p2.y, table.bounds.bottom))
-                xs.push_back(line.p1.x);
-            if (closeEnough(line.p1.y, line.p2.y) && closeEnough(line.p1.x, table.bounds.left) && closeEnough(line.p2.x, table.bounds.right) &&
-                line.p1.y >= table.bounds.top - 0.1f && line.p1.y <= table.bounds.bottom + 0.1f)
-                ys.push_back(line.p1.y);
+        auto edge = [](std::vector<float>& edges, float at) {
+            for (float have : edges) {
+                if (closeEnough(have, at)) return;
+            }
+            edges.push_back(at);
+        };
+        for (const auto& cell : app.tableCellRects) {
+            if (cell.rect.top < table.bounds.top - 0.1f || cell.rect.bottom > table.bounds.bottom + 0.1f) continue;
+            edge(xs, cell.rect.left);
+            edge(xs, cell.rect.right);
+            edge(ys, cell.rect.top);
+            edge(ys, cell.rect.bottom);
         }
         std::sort(xs.begin(), xs.end());
         std::sort(ys.begin(), ys.end());
         check(xs.size() == (ti == 0 ? 14 : 4) && ys.size() == 4, "expected columns and rows remain");
+        // A line under every row, from side to side
+        size_t under = 0;
+        for (const auto& line : app.layoutLines) {
+            if (!closeEnough(line.p1.y, line.p2.y) || !closeEnough(line.p1.x, table.bounds.left) ||
+                !closeEnough(line.p2.x, table.bounds.right)) continue;
+            for (size_t r = 1; r < ys.size(); ++r) under += std::abs(line.p1.y - ys[r]) < 0.1f ? 1 : 0;
+        }
+        check(ys.size() < 2 || under == ys.size() - 1, "a line runs under every row");
         if (xs.size() < 2 || ys.size() < 2) continue;
         auto cellFor = [&](const D2D1_RECT_F& bounds, D2D1_RECT_F& cell) {
             if (bounds.top < table.bounds.top || bounds.top >= table.bounds.bottom) return false;
@@ -298,7 +314,10 @@ int runTableLayoutTests() {
                         app.fitBlocks = fit ? std::vector<unsigned>{0x40000000u, 0x40000001u} : std::vector<unsigned>{};
                         scenario = "theme" + std::to_string(theme) + "-scale" + std::to_string(static_cast<int>(scale * 100)) +
                                    "-width" + std::to_string(width) + (fit ? "-fit" : "-auto");
+                        // The cells' places are kept in edit mode (in-place table editing)
+                        app.editMode = true;
                         layoutDocument(app);
+                        app.editMode = false;
                         checkTables(app);
                         if (originalTsv.empty()) for (const auto& table : app.tableRects) originalTsv.push_back(table.tsv);
                         for (size_t i = 0; i < app.tableRects.size() && i < originalTsv.size(); ++i)

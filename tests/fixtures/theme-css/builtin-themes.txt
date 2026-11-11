@@ -1,60 +1,60 @@
-0 Paper font=Segoe UI heading= code=Consolas dark=0
-  F5F1E8/1.000 3D3329/1.000 2A1F16/1.000 B85A3C/1.000 6B5344/1.000 EDE6DA/1.000 C4B8A8/1.000 B85A3C/1.000
-  8B4513/1.000 3E7D5A/1.000 9A8F80/1.000 B8860B/1.000 3B5BA5/1.000 8A63A8/1.000 7D4CA0/1.000
-  inline - - mark - - bold - - - sel - rule - caret -
-  h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
+0 Paper font=Segoe UI heading=Segoe UI Variable Display code=Consolas dark=0
+  F5F1E8/1.000 3D3329/1.000 2A1F16/1.000 AA5337/1.000 5F4A3C/1.000 ECE5D8/1.000 C9B8A0/1.000 B85A3C/1.000
+  8B4513/1.000 376F50/1.000 7A6F61/1.000 825F08/1.000 3B5BA5/1.000 7C5599/1.000 7D4CA0/1.000
+  inline - - mark - - bold - - - sel - rule DFDAD1/1.000 caret -
+  h -:34:0:0 -:25:600:0 -:20:600:0 -:17:600:0 -:15:600:0 -:13:600:0
   sizes 0 0 0 ui - - - - - src -
-1 Sakura font=Segoe UI heading= code=Consolas dark=0
-  FDF8F8/1.000 404040/1.000 C44569/1.000 D25980/1.000 8B5570/1.000 F8ECF0/1.000 E8B4C0/1.000 C44569/1.000
-  C44569/1.000 4E9B6F/1.000 A8969C/1.000 D25980/1.000 6455B8/1.000 8B5570/1.000 9D5BC8/1.000
-  inline - - mark - - bold - - - sel - rule - caret -
-  h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
+1 Sakura font=Segoe UI heading=Segoe UI Variable Display code=Consolas dark=0
+  FDF8F8/1.000 3C3A3D/1.000 B83A5E/1.000 C93967/1.000 7C4A64/1.000 F7EBEF/1.000 E8B4C4/1.000 D25980/1.000
+  B83280/1.000 AF4E1E/1.000 627894/1.000 7B49E2/1.000 2B6CB0/1.000 6B46C1/1.000 C12A78/1.000
+  inline - - mark - - bold - - - sel - rule E6E1E2/1.000 caret -
+  h -:34:0:0 -:25:600:0 -:20:600:0 -:17:600:0 -:15:600:0 -:13:600:0
   sizes 0 0 0 ui - - - - - src -
-2 Arctic font=Segoe UI heading= code=Cascadia Code dark=0
-  F7FAFC/1.000 2D3748/1.000 1A365D/1.000 2B6CB0/1.000 285E61/1.000 EBF8FF/1.000 A0C4E8/1.000 2B6CB0/1.000
-  2B6CB0/1.000 38795B/1.000 8295A8/1.000 C05621/1.000 2C7A7B/1.000 6B5B95/1.000 805AD5/1.000
-  inline - - mark - - bold - - - sel - rule - caret -
-  h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
+2 Arctic font=Segoe UI heading=Segoe UI Variable Display code=Cascadia Code dark=0
+  F7FAFC/1.000 2D3748/1.000 1A365D/1.000 2B6CB0/1.000 285E61/1.000 EAF2F8/1.000 A3C4E0/1.000 3182CE/1.000
+  2B6CB0/1.000 2B7A53/1.000 637995/1.000 B04F1E/1.000 2A6FB0/1.000 6B46C1/1.000 7B53D3/1.000
+  inline - - mark - - bold - - - sel - rule DFE3E6/1.000 caret -
+  h -:34:0:0 -:25:600:0 -:20:600:0 -:17:600:0 -:15:600:0 -:13:600:0
   sizes 0 0 0 ui - - - - - src -
-3 Meadow font=Segoe UI heading= code=Consolas dark=0
-  F7FAF7/1.000 1A2F1A/1.000 1C4532/1.000 2F855A/1.000 4A5568/1.000 E6FFED/1.000 9AE6B4/1.000 2F855A/1.000
-  2F6B4F/1.000 A0742C/1.000 7E8B7E/1.000 C05621/1.000 38A169/1.000 6B5B95/1.000 7D5BA6/1.000
-  inline - - mark - - bold - - - sel - rule - caret -
-  h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
+3 Meadow font=Segoe UI heading=Segoe UI Variable Display code=Consolas dark=0
+  F7FAF7/1.000 1F2F22/1.000 1C4532/1.000 2D8057/1.000 3F5347/1.000 E8F3EA/1.000 A3D4B0/1.000 38A169/1.000
+  276749/1.000 B04F1E/1.000 637995/1.000 2B6CB0/1.000 2A7A4F/1.000 285E61/1.000 6B46C1/1.000
+  inline - - mark - - bold - - - sel - rule DDE2DD/1.000 caret -
+  h -:34:0:0 -:25:600:0 -:20:600:0 -:17:600:0 -:15:600:0 -:13:600:0
   sizes 0 0 0 ui - - - - - src -
-4 Dusk font=Segoe UI heading= code=Consolas dark=0
-  FFFBF5/1.000 553C10/1.000 9C4221/1.000 A66A12/1.000 5F5030/1.000 FEF5E7/1.000 E8C48D/1.000 A66A12/1.000
-  9C4221/1.000 4E8A5A/1.000 9C8D77/1.000 A66A12/1.000 5B5EA6/1.000 8B4513/1.000 8A4E9E/1.000
-  inline - - mark - - bold - - - sel - rule - caret -
-  h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
+4 Dusk font=Segoe UI heading=Segoe UI Variable Display code=Consolas dark=0
+  FFFBF5/1.000 4A3712/1.000 9C4221/1.000 A06611/1.000 5F5030/1.000 F8EFDF/1.000 E8C48C/1.000 C9831A/1.000
+  9C4221/1.000 2B7952/1.000 807665/1.000 8A6408/1.000 B04F1E/1.000 744210/1.000 975A16/1.000
+  inline - - mark - - bold - - - sel - rule E9E3DA/1.000 caret -
+  h -:34:0:0 -:25:600:0 -:20:600:0 -:17:600:0 -:15:600:0 -:13:600:0
   sizes 0 0 0 ui - - - - - src -
-5 Midnight font=Segoe UI heading= code=Cascadia Code dark=1
-  0D1B2A/1.000 E0E1DD/1.000 F0F4F8/1.000 38C6E4/1.000 90E0EF/1.000 1B263B/1.000 415A77/1.000 38C6E4/1.000
-  38C6E4/1.000 9ADBA4/1.000 6C7A89/1.000 F2CE6B/1.000 90E0EF/1.000 C9A6DE/1.000 D793CF/1.000
-  inline - - mark F2CE6B/0.300 F7DC8C/1.000 bold - - - sel - rule - caret -
-  h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
+5 Midnight font=Segoe UI heading=Segoe UI Variable Display code=Cascadia Code dark=1
+  0D1B2A/1.000 DFE3E8/1.000 F0F4F8/1.000 38C6E4/1.000 90E0EF/1.000 16263A/1.000 415A77/1.000 38C6E4/1.000
+  38C6E4/1.000 9ADBA4/1.000 758392/1.000 F2CE6B/1.000 90E0EF/1.000 C9A6DE/1.000 D793CF/1.000
+  inline - - mark F2CE6B/0.260 F5DA90/1.000 bold - - - sel - rule 2F3B48/1.000 caret -
+  h -:34:0:0 -:25:600:0 -:20:600:0 -:17:600:0 -:15:600:0 -:13:600:0
   sizes 0 0 0 ui - - - - - src -
-6 Dracula font=Segoe UI heading= code=Consolas dark=1
+6 Dracula font=Segoe UI heading=Segoe UI Variable Display code=Consolas dark=1
   282A36/1.000 F8F8F2/1.000 FF79C6/1.000 8BE9FD/1.000 50FA7B/1.000 21222C/1.000 6272A4/1.000 BD93F9/1.000
-  FF79C6/1.000 F1FA8C/1.000 6272A4/1.000 BD93F9/1.000 50FA7B/1.000 8BE9FD/1.000 BD93F9/1.000
-  inline - - mark F1FA8C/0.220 F1FA8C/1.000 bold - - - sel - rule - caret -
-  h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
+  FF79C6/1.000 F1FA8C/1.000 6F7EAB/1.000 BD93F9/1.000 50FA7B/1.000 8BE9FD/1.000 BD93F9/1.000
+  inline - - mark F1FA8C/0.260 F4FBA9/1.000 bold - - - sel - rule 494B54/1.000 caret -
+  h -:34:0:0 -:25:600:0 -:20:600:0 -:17:600:0 -:15:600:0 -:13:600:0
   sizes 0 0 0 ui - - - - - src -
-7 Forest font=Segoe UI heading= code=Consolas dark=1
-  0D1512/1.000 B8C5B2/1.000 9AE6B4/1.000 68D391/1.000 81E6D9/1.000 1A2A23/1.000 4A6E5A/1.000 68D391/1.000
-  9AE6B4/1.000 D9CB7E/1.000 5F7A6A/1.000 E8A85C/1.000 68D391/1.000 81E6D9/1.000 C99BE8/1.000
-  inline - - mark D9CB7E/0.240 E6DA98/1.000 bold - - - sel - rule - caret -
-  h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
+7 Forest font=Segoe UI heading=Segoe UI Variable Display code=Consolas dark=1
+  0D1512/1.000 B8C5B2/1.000 9AE6B4/1.000 68D391/1.000 81E6D9/1.000 17251F/1.000 4A6E5A/1.000 68D391/1.000
+  9AE6B4/1.000 D9CB7E/1.000 688574/1.000 E8A85C/1.000 68D391/1.000 81E6D9/1.000 C99BE8/1.000
+  inline - - mark D9CB7E/0.260 E2D89E/1.000 bold - - - sel - rule 28312C/1.000 caret -
+  h -:34:0:0 -:25:600:0 -:20:600:0 -:17:600:0 -:15:600:0 -:13:600:0
   sizes 0 0 0 ui - - - - - src -
-8 Ember font=Segoe UI heading= code=Consolas dark=1
-  1A1614/1.000 D4C5B9/1.000 F6AD55/1.000 F1975A/1.000 FC8181/1.000 252019/1.000 5C4A3A/1.000 F1975A/1.000
-  F6AD55/1.000 A8C98A/1.000 6B5B4F/1.000 D9A662/1.000 ED8936/1.000 C9A0C9/1.000 E08BB0/1.000
-  inline - - mark F6AD55/0.260 FBD38D/1.000 bold - - - sel - rule - caret -
-  h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
+8 Ember font=Segoe UI heading=Segoe UI Variable Display code=Consolas dark=1
+  1A1614/1.000 D4C5B9/1.000 F6AD55/1.000 F1975A/1.000 F0A58C/1.000 241E19/1.000 6B5544/1.000 F1975A/1.000
+  F6AD55/1.000 A8C98A/1.000 8D7868/1.000 D9A662/1.000 ED8936/1.000 C9A0C9/1.000 E08BB0/1.000
+  inline - - mark F6AD55/0.260 F8C280/1.000 bold - - - sel - rule 38322E/1.000 caret -
+  h -:34:0:0 -:25:600:0 -:20:600:0 -:17:600:0 -:15:600:0 -:13:600:0
   sizes 0 0 0 ui - - - - - src -
-9 Abyss font=Segoe UI Light heading=Segoe UI code=Cascadia Mono dark=1
-  000000/1.000 EDEDED/1.000 2EE6CF/1.000 FF4DD8/1.000 B8F53C/1.000 0F0F0F/1.000 333333/1.000 2EE6CF/1.000
-  FF4DD8/1.000 B8F53C/1.000 5C6660/1.000 FF8A3D/1.000 2EE6CF/1.000 F5E663/1.000 C77DFF/1.000
-  inline - - mark F5E663/0.240 F5E663/1.000 bold - - - sel - rule - caret -
-  h -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0 -:0:0:0
+9 Abyss font=Segoe UI heading=Segoe UI Variable Display code=Cascadia Mono dark=1
+  000000/1.000 E4E4E4/1.000 2EE6CF/1.000 FF4DD8/1.000 B8F53C/1.000 101010/1.000 3A3A3A/1.000 2EE6CF/1.000
+  FF4DD8/1.000 B8F53C/1.000 69746D/1.000 FF8A3D/1.000 2EE6CF/1.000 F5E663/1.000 C77DFF/1.000
+  inline - - mark F5E663/0.260 F8EC8A/1.000 bold - - - sel - rule 242424/1.000 caret -
+  h -:34:0:0 -:25:600:0 -:20:600:0 -:17:600:0 -:15:600:0 -:13:600:0
   sizes 0 0 0 ui - - - - - src -

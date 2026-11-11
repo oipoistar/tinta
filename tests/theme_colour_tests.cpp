@@ -141,9 +141,10 @@ int testEmphasisColours(App& app, const std::filesystem::path& dir) {
     const auto& invalid=themeAt(first+4);
     check(!invalid.boldText && !invalid.italicText && !invalid.boldItalicText && !invalid.selection && !invalid.rule,
           "#310: invalid colours keep inheritance");
+    // A built-in theme colours no emphasis and no selection; its rules are its hairline's colour
     for(int i=0;i<THEME_COUNT;++i)
         check(!themeAt(i).boldText && !themeAt(i).italicText && !themeAt(i).boldItalicText && !themeAt(i).selection &&
-              !themeAt(i).rule,"#310: built-in themes look as before");
+              themeAt(i).rule,"#310: built-in themes colour no emphasis");
     check(same(*themeEmphasisColor(themeAt(first+2),true,true),hexColor(0xAA2200)),"#310: bold and italic text takes bold= without bolditalic=");
     check(same(*themeEmphasisColor(themeAt(first+3),true,true),hexColor(0x007755)) && !themeEmphasisColor(themeAt(first+3),true,false),
           "#310: with italic= alone, text both takes it and bold keeps its colour");

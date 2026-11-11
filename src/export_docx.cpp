@@ -1923,8 +1923,9 @@ bool exportDocxFile(App& app, const std::wstring& path) {
         if (h.has(css::Prop::MarginTop)) ctx.headingBefore[i] = twips(h->margin[0]);
         if (h.has(css::Prop::MarginBottom)) ctx.headingAfter[i] = twips(h->margin[2]);
         const css::Border& rule = h->border[2];
+        // (Heading separators, the setting, takes the line under the two top levels away here too)
         if ((h.has(css::Prop::BorderBottomWidth) || h.has(css::Prop::BorderBottomStyle)) &&
-            rule.style != css::LineStyle::None && rule.width > 0) {
+            rule.style != css::LineStyle::None && rule.width > 0 && (i >= 2 || app.headingRules)) {
             const std::string color = !dark && h.has(css::Prop::BorderBottomColor) ? hex6(page::color(rule.color))
                                                                                    : ctx.borderHex;
             ctx.headingExtra[i] += "<w:pBdr><w:bottom w:val=\"single\" w:sz=\"" +

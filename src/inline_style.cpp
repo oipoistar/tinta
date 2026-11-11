@@ -102,6 +102,9 @@ static IDWriteTextFormat* scriptFormat(App& app, IDWriteTextFormat* around) {
             return app.headingScriptFormats[i];
         }
     }
+    // A face a CSS theme made (an italic heading's, a paragraph's own
+    // size): small in proportion to it, not to the body's
+    if (IDWriteTextFormat* own = page::scaled(app, around, 0.68f)) return own;
     return app.supSubFormat;
 }
 

@@ -123,6 +123,38 @@ namespace {
 
 std::vector<std::unique_ptr<CustomTheme>> g_customThemes;
 
+// What a themes.ini section leaves unsaid: Paper's colours and faces as
+// they were while themes.ini was the only way to write a theme (4.0.3).
+// The built-in Paper has type sizes, rules and faces of its own since,
+// which a section has no keys for and must not take over
+const D2DTheme& iniBaseTheme() {
+    static const D2DTheme base = [] {
+        D2DTheme t{};
+        t.name = L"Paper";
+        t.fontFamily = L"Segoe UI";
+        t.headingFontFamily = nullptr;
+        t.codeFontFamily = L"Consolas";
+        t.isDark = false;
+        t.background = hexColor(0xF5F1E8);
+        t.text = hexColor(0x3D3329);
+        t.heading = hexColor(0x2A1F16);
+        t.link = hexColor(0xB85A3C);
+        t.code = hexColor(0x6B5344);
+        t.codeBackground = hexColor(0xEDE6DA);
+        t.blockquoteBorder = hexColor(0xC4B8A8);
+        t.accent = hexColor(0xB85A3C);
+        t.syntaxKeyword = hexColor(0x8B4513);
+        t.syntaxString = hexColor(0x3E7D5A);
+        t.syntaxComment = hexColor(0x9A8F80);
+        t.syntaxNumber = hexColor(0xB8860B);
+        t.syntaxFunction = hexColor(0x3B5BA5);
+        t.syntaxType = hexColor(0x8A63A8);
+        t.syntaxControlFlow = hexColor(0x7D4CA0);
+        return t;
+    }();
+    return base;
+}
+
 std::wstring themesIniPath() {
     // Follows the config home: portable beside the exe, else %APPDATA%
     std::wstring dir = tintaConfigDir();
@@ -449,7 +481,7 @@ void readCssTheme(CssEntry& entry) {
     std::wstring name = entry.path.substr(entry.path.find_last_of(L"\\/") + 1);
     if (name.size() > 4) name.resize(name.size() - 4);  // .css
     if (!entry.name.empty()) name = entry.name;
-    const D2DTheme* base = entry.fromIni ? &THEMES[0] : nullptr;
+    const D2DTheme* base = entry.fromIni ? &iniBaseTheme() : nullptr;
     auto light = std::make_unique<CustomTheme>();
     light->name = name;
     CssTheme compiled = compileCssTheme(readable ? text : std::string(), wideToUtf8Theme(entry.path), false,
@@ -594,7 +626,7 @@ void convertIniThemes() {
             // The section is the theme, as it always was; its sheet is for the page
             const css::ImportSource none = [](std::string_view, std::string_view, std::string&, std::string&) { return false; };
             CustomTheme unused;
-            entry->sheet = compileCssTheme(wanted, wideToUtf8Theme(path), false, none, unused, &THEMES[0]).sheet;
+            entry->sheet = compileCssTheme(wanted, wideToUtf8Theme(path), false, none, unused, &iniBaseTheme()).sheet;
             FILETIME time{};
             fileTime(path, time);
             entry->files.push_back({path, time});
@@ -768,6 +800,8 @@ void loadCustomThemes() {
 }
 
 static void loadCustomThemesIni() {
+    // Copies of a theme in use still point into these themes' strings
+    for (auto& old : g_customThemes) g_retiredThemes.push_back(std::move(old));
     g_customThemes.clear();
     g_themesIniTime = themesIniTimeNow();
     std::wstring path = themesIniPath();
@@ -792,7 +826,7 @@ static void loadCustomThemesIni() {
         if (line[0] == '[') {
             finalize();
             current = std::make_unique<CustomTheme>();
-            current->theme = THEMES[0];  // colors default to Paper
+            current->theme = iniBaseTheme();  // what it leaves unsaid is Paper's, as of old
             current->fontFamily = L"Segoe UI";
             current->codeFontFamily = L"Consolas";
             continue;
@@ -833,8 +867,15 @@ int saveCustomTheme(const D2DTheme& t, const std::wstring& name,
     slot->theme = t;
     bindStrings(*slot);
     writeThemesIni();
-    // Its CSS file follows, and a sheet of that name is listed where the section stands
+    // Read back, so that the theme is what its section holds: a built-in
+    // theme it was made from has type sizes and rules that no key keeps.
+    // Its CSS file follows, and a sheet of that name is listed where the
+    // section stands
+    loadCustomThemesIni();
     convertIniThemes();
     loadCssThemes();
+    for (size_t i = 0; i < g_customThemes.size(); i++) {
+        if (_wcsicmp(g_customThemes[i]->name.c_str(), name.c_str()) == 0) return THEME_COUNT + (int)i;
+    }
     return index;
 }
