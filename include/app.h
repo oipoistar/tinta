@@ -998,6 +998,21 @@ struct App {
     float settingsAnimation = 0.0f;
     int settingsSection = 0;  // 0 General, 1 Appearance, 2 Editor
     std::vector<std::pair<D2D1_RECT_F, int>> settingsHits;
+    // A page taller than the dialog's room scrolls in it (the wheel)
+    float settingsScroll = 0.0f;
+    float settingsScrollMax = 0.0f;
+    D2D1_RECT_F settingsViewport{};
+    // Where the page's parts were drawn: each row with its label's and its
+    // control's place, the groups' cards and labels (set in render)
+    struct SettingsRowBox {
+        int group = 0;
+        D2D1_RECT_F row{}, text{}, control{};
+        bool stacked = false;       // the control went under the label
+        bool titleTrimmed = false;  // the label did not fit and ends in an ellipsis
+    };
+    std::vector<SettingsRowBox> settingsRows;
+    std::vector<D2D1_RECT_F> settingsCards;
+    std::vector<D2D1_RECT_F> settingsGroupLabels;
     int readingWidthPct = 100;  // mirrors Settings (#82); 100 = full width
     int zenWidthPct = 60;
     bool headingRules = true;   // mirrors Settings (#154)

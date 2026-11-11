@@ -83,6 +83,9 @@ float folderBrowserMaxScroll(const App& app);
 void renderSettingsOverlay(App& app);
 D2D1_RECT_F settingsPanelRect(const App& app);
 D2D1_RECT_F settingsCloseButtonRect(const App& app);
+// The wheel over the dialog: scrolls a page taller than its room. False on
+// the front matter page, which scrolls its own list.
+bool settingsWheel(App& app, float notches);
 
 // Theme editor ("+ New" in settings). Font-list entries encode their
 // absolute family index as TE_FONT_BASE + i; everything else stays < 100.

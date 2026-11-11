@@ -208,6 +208,7 @@ int runTabDropLaunchProbe();
 int runEditorFeatureTests();
 int runUiFontTests();
 int runMonitorTextTests(const char* fixture);
+int runSettingsLayoutTests(const char* fixture);
 int runPrintExportTests();
 int runScrollSyncTests(const char* file);
 int runNotificationSettingTests();
@@ -234,6 +235,7 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--editor-feature-tests") return runEditorFeatureTests();
     if (argc == 2 && std::string(argv[1]) == "--ui-font-tests") return runUiFontTests();
     if (argc == 3 && std::string(argv[1]) == "--monitor-text-tests") return runMonitorTextTests(argv[2]);
+    if (argc == 3 && std::string(argv[1]) == "--settings-layout-tests") return runSettingsLayoutTests(argv[2]);
     if (argc == 2 && std::string(argv[1]) == "--print-export-tests") return runPrintExportTests();
     if (argc == 3 && std::string(argv[1]) == "--scroll-sync-tests") return runScrollSyncTests(argv[2]);
     if (argc == 2 && std::string(argv[1]) == "--notification-setting-tests") return runNotificationSettingTests();

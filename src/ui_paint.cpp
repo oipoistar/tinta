@@ -3,6 +3,7 @@
 #pragma optimize("s", on)
 
 #include "ui_paint.h"
+#include "ui_scale.h"
 #include "d2d_init.h"
 
 #include <algorithm>
@@ -31,6 +32,20 @@ IDWriteTextFormat* textFormat(App& app, const wchar_t* family, float px, DWRITE_
         }
         cache.clear();
         owner = app.dwriteFactory;
+    }
+    // The interface language moved to other CJK faces, or away from them:
+    // the formats made before follow (nullptr is the system's fallback)
+    static int fallbackOrder = -2;
+    if (fallbackOrder != app.uiFontFallbackOrder) {
+        fallbackOrder = app.uiFontFallbackOrder;
+        for (auto& entry : cache) {
+            IDWriteTextFormat1* format1 = nullptr;
+            if (entry.second && SUCCEEDED(entry.second->QueryInterface(__uuidof(IDWriteTextFormat1),
+                                                                      reinterpret_cast<void**>(&format1)))) {
+                format1->SetFontFallback(app.uiFontFallback);
+                format1->Release();
+            }
+        }
     }
     px = std::max(1.0f, std::round(px * 4.0f) / 4.0f);
     std::wstring key = std::wstring(family) + L"|" + std::to_wstring((int)(px * 4)) + L"|" + std::to_wstring((int)weight) +
@@ -153,3 +168,32 @@ Surface surface(const App& app) {
 }
 
 }  // namespace paint
+
+// The interface's type roles (ui_scale.h)
+namespace uiscale {
+
+namespace {
+struct Role {
+    float size, line;
+    bool semibold;
+};
+constexpr Role kRoles[] = {
+    {11.0f, 14.0f, true},   // Micro
+    {12.0f, 16.0f, false},  // Small
+    {13.0f, 18.0f, false},  // Body
+    {13.0f, 18.0f, true},   // Strong
+    {16.0f, 22.0f, true},   // Subtitle
+    {20.0f, 28.0f, true},   // Title
+};
+}  // namespace
+
+float fontSize(Type role) { return kRoles[(int)role].size; }
+float lineHeight(Type role) { return kRoles[(int)role].line; }
+bool semibold(Type role) { return kRoles[(int)role].semibold; }
+
+IDWriteTextFormat* font(App& app, Type role, bool wrap) {
+    return paint::textFormat(app, paint::uiFace(), dpi(app, fontSize(role)),
+                             semibold(role) ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL, wrap);
+}
+
+}  // namespace uiscale

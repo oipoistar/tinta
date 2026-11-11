@@ -897,9 +897,9 @@ static void settingsAction(App& app, HWND hwnd, int action) {
     if (action != SET_KEYS_DROPDOWN) app.settingsKeysOpen = false;
     switch (action) {
         case SET_CLOSE: closeSettings(app, hwnd); return;
-        case SET_SECTION_GENERAL: app.settingsSection = 0; break;
-        case SET_SECTION_APPEARANCE: app.settingsSection = 1; break;
-        case SET_SECTION_EDITOR: app.settingsSection = 2; app.frontmatterMenu = -1; break;
+        case SET_SECTION_GENERAL: app.settingsSection = 0; app.settingsScroll = 0.0f; break;
+        case SET_SECTION_APPEARANCE: app.settingsSection = 1; app.settingsScroll = 0.0f; break;
+        case SET_SECTION_EDITOR: app.settingsSection = 2; app.settingsScroll = 0.0f; app.frontmatterMenu = -1; break;
         case SET_SECTION_FRONTMATTER: app.settingsSection = 3; break;
         case SET_TOGGLE_FOLDERSEARCH:
             app.folderSearchEnabled = !app.folderSearchEnabled;
@@ -1099,7 +1099,8 @@ void handleMouseWheel(App& app, HWND hwnd, WPARAM wParam, LPARAM) {
     }
 
     if (app.showSettings) {
-        frontmatterScroll(app, (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA);
+        const float notches = (float)GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+        if (!settingsWheel(app, notches)) frontmatterScroll(app, notches);
         return;
     }
 
