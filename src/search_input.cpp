@@ -1,4 +1,5 @@
 #include "search.h"
+#include "clipboard_keys.h"
 #include "search_panel.h"
 #include "editor.h"
 #include "input.h"
@@ -218,6 +219,7 @@ bool searchInputKeyDown(App& app, HWND hwnd, WPARAM key) {
     if (!shortcutModifiersAllowed(static_cast<unsigned>(key))) return false;
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    takeClipboardKey(key, ctrl, shift);  // Ctrl+Insert, Shift+Insert, Shift+Delete (#320)
     int field = activeField(app);
     auto& text = textFor(app, field);
     auto& state = app.searchFields[field];

@@ -1,4 +1,5 @@
 #include "frontmatter_ui.h"
+#include "clipboard_keys.h"
 #include "editor.h"
 #include "annotations.h"
 #include "live_editor.h"
@@ -2886,6 +2887,10 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     if (!shortcutModifiersAllowed(static_cast<unsigned>(wParam))) return;
     bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    // The clipboard's older keys are the letters' own: Ctrl+Insert copies,
+    // Shift+Insert pastes, Shift+Delete cuts. The source knew none of them;
+    // Shift+Delete took the selection away without keeping it (#320)
+    takeClipboardKey(wParam, ctrl, shift);
 
     // The insert menu closes on Esc; any other key falls through to the
     // editor after dismissing it
@@ -3075,7 +3080,7 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 return;
             case 'V':
-                editorPasteClipboard(app, hwnd, (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+                editorPasteClipboard(app, hwnd, shift);  // Ctrl+Shift+V: as it is
                 return;
             case 'P':
                 // Print preview of the document as currently edited, saved

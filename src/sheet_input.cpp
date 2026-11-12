@@ -6,6 +6,7 @@
 #pragma optimize("s", on)
 
 #include "sheet_ui.h"
+#include "clipboard_keys.h"
 #include "input.h"
 #include "d2d_init.h"
 #include "document.h"
@@ -2148,6 +2149,8 @@ bool sheetKeyDown(App& app, HWND hwnd, WPARAM key, bool& handled) {
         doc.spaceHeld = true;
         return true;
     }
+    // Cards are copied, cut and pasted by the clipboard's older keys too (#320)
+    takeClipboardKey(key, ctrl, shift);
     if (ctrl) {
         switch (key) {
             case 'Z': runAction(app, hwnd, doc, shift ? ACT_REDO : ACT_UNDO); return true;

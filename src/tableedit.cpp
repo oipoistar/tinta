@@ -1,4 +1,5 @@
 #include "search.h"
+#include "clipboard_keys.h"
 #include "tableedit.h"
 #include "editor.h"
 #include "input.h"
@@ -536,6 +537,7 @@ bool tableEditKeyDown(App& app, HWND hwnd, WPARAM key) {
     if (!shortcutModifiersAllowed(static_cast<unsigned>(key))) return false;
     bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0;
     bool shift=(GetKeyState(VK_SHIFT)&0x8000)!=0;
+    takeClipboardKey(key,ctrl,shift); // Ctrl+Insert, Shift+Insert, Shift+Delete (#320)
     if (ctrl) {
         size_t start=std::min(app.tableEditCaret,app.tableEditAnchor), end=std::max(app.tableEditCaret,app.tableEditAnchor);
         if (key=='A') { app.tableEditAnchor=0; app.tableEditCaret=app.tableEditText.size(); }

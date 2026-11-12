@@ -1,4 +1,5 @@
 #include "annotations.h"
+#include "clipboard_keys.h"
 #include <functional>
 
 #include "editor.h"
@@ -1006,6 +1007,11 @@ bool annotationEditorKeyDown(App& app, HWND hwnd, WPARAM key, bool ctrl) {
     std::wstring& text = app.annotEditorText;
     size_t& caret = app.annotEditorCaret;
     caret = std::min(caret, text.size());
+    // Shift+Insert pastes into the note as Ctrl+V does (#320)
+    if (clipboardKeyLetter(static_cast<unsigned>(key), ctrl, (GetKeyState(VK_SHIFT) & 0x8000) != 0) == 'V') {
+        key = 'V';
+        ctrl = true;
+    }
     switch (key) {
         case VK_ESCAPE:
             annotationEditorCancel(app);

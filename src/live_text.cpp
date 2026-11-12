@@ -6,6 +6,7 @@
 #pragma optimize("s", on)
 
 #include "live_text.h"
+#include "clipboard_keys.h"
 #include "d2d_init.h"
 #include "editor.h"
 #include "i18n.h"
@@ -1959,6 +1960,9 @@ size_t charAfter(const std::wstring& t, size_t at) {
 }  // namespace
 
 Result key(App& app, HWND hwnd, LiveText& e, WPARAM vk, bool ctrl, bool shift, const Host& host) {
+    // Ctrl+Insert, Shift+Insert and Shift+Delete are Ctrl+C, V and X.
+    // Shift+Delete only deleted, and kept nothing (#320)
+    takeClipboardKey(vk, ctrl, shift);
     if (e.popup != LiveText::Popup::None && !e.choices.empty()) {
         int count = (int)e.choices.size();
         switch (vk) {
@@ -2044,11 +2048,8 @@ Result key(App& app, HWND hwnd, LiveText& e, WPARAM vk, bool ctrl, bool shift, c
             break;
         case 'C':
         case 'X':
-        case VK_INSERT:
-            if (!ctrl && !(vk == VK_INSERT && shift)) return Result::Unhandled;
-            if (vk == VK_INSERT && shift) {
-                paste(e, readClipboardText(hwnd));
-            } else if (e.hasSelection()) {
+            if (!ctrl) return Result::Unhandled;
+            if (e.hasSelection()) {
                 copyToClipboard(hwnd, e.text.substr(e.selStart(), e.selEnd() - e.selStart()));
                 if (vk == 'X') replace(e, L"");
             }

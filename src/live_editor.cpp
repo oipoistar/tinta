@@ -10,6 +10,7 @@
 // block it changed, or after a pause, as the source's preview is.
 
 #include "live_editor.h"
+#include "clipboard_keys.h"
 #include "d2d_init.h"
 #include "editor.h"
 #include "i18n.h"
@@ -903,6 +904,8 @@ bool liveKeyDown(App& app, HWND hwnd, WPARAM key, bool& consumed) {
         }
     }
     bool ctrl = keyDown(VK_CONTROL), shift = keyDown(VK_SHIFT);
+    // Shift+Insert pastes as Ctrl+V does, a picture or a table too (#320)
+    takeClipboardKey(key, ctrl, shift);
     // Ctrl+/ shows the source. Ctrl+E reads the page as the reader does,
     // and Ctrl+E there comes back (#308), as Ctrl+Shift+E does
     if (ctrl && key == VK_OEM_2) {

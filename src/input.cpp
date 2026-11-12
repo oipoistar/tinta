@@ -1,4 +1,5 @@
 #include "frontmatter_ui.h"
+#include "clipboard_keys.h"
 #include "input.h"
 #include "live_editor.h"
 #include "sheet_ui.h"
@@ -4489,7 +4490,7 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     if (app.editMode) {
         // An open table cell editor owns the keyboard (#148)
         if (tableEditKeyDown(app, hwnd, wParam)) return false;
-        if (ctrl && wParam == 'C' && app.hasSelection &&
+        if (ctrl && (wParam == 'C' || wParam == VK_INSERT) && app.hasSelection &&
             app.selAnchor != app.selFocus) {
             bool held = false;
             if (!copySelectionRange(app, hwnd,
@@ -4526,7 +4527,8 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     // (printable characters arrive separately via WM_CHAR)
     if (app.showFolderBrowser &&
         (app.folderBrowserEditingPath || app.folderBrowserNaming != 0)) {
-        if (ctrl && wParam == 'V') {
+        if ((ctrl && wParam == 'V') ||
+            clipboardKeyLetter(static_cast<unsigned>(wParam), ctrl, (GetKeyState(VK_SHIFT) & 0x8000) != 0) == 'V') {
             std::wstring pasted = clipboardLine(hwnd);
             if (!pasted.empty()) {
                 if (app.folderBrowserInputSelectAll) {
@@ -4623,6 +4625,7 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
                 }
                 break;
             }
+            case VK_INSERT:  // Ctrl+Insert copies as Ctrl+C does (#320)
             case 'C': {
                 // Copy - copy selected text or all text if select all was used
                 bool copied = false, held = false;
