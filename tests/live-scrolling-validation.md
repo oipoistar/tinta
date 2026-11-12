@@ -94,7 +94,7 @@ PrintWindow (`out/live-307/shots/`), in Midnight:
 
 ## Limitations
 
-- While the find bar is open the pointer goes to it before the page, as
-  before, so the thumb does not light up under the pointer then; a press
-  still drags it.
+- While the find bar was open the pointer went to it before the page, so
+  the thumb did not light up under the pointer then. Since #319 the bar
+  has the pointer over itself only (`find-bar-319-validation.md`).
 - The checks run at one size; the built app was checked at two.

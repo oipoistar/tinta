@@ -209,25 +209,33 @@ static void setFolderBrowserCursor(const App& app, float x, float y) {
     SetCursor(cursorArrow);
 }
 
-static void setSearchCursor(const App& app, float x, float y) {
-    float barWidth = std::min(dpi(app, 500.0f), app.width - dpi(app, 40.0f));
-    float barHeight = dpi(app, 44.0f);
-    float centerWidth = (float)app.width;
-    if (app.editMode) {
-        float paneWidth = editorPaneWidth(app);
-        barWidth = std::min(barWidth, paneWidth - dpi(app, 40.0f));
-        centerWidth = paneWidth;
+// The find bar under the pointer, with the editor's replace row: a hand
+// over its buttons, the beam over what a click there would type into
+// (#119), the arrow over the rest of it. False beside the bar
+static bool searchBarCursor(const App& app, float x, float y) {
+    auto over = [&](const D2D1_RECT_F& r) {
+        return r.right > r.left && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    };
+    const bool replaceRow = app.editMode && app.searchReplaceMode;
+    if (!over(searchBarDrawRect(app)) && !(replaceRow && over(searchReplaceRowRect(app)))) return false;
+    if (replaceRow) {
+        for (const auto& hit : app.searchReplaceHits) {
+            if (hit.second >= 3 && over(hit.first)) {
+                SetCursor(cursorHand);
+                return true;
+            }
+        }
     }
-    float barX = (centerWidth - barWidth) / 2.0f;
-    float barY = dpi(app, 20.0f) * app.searchAnimation -
-                 barHeight * (1.0f - app.searchAnimation);
-    float textX = barX + dpi(app, 42.0f);
-    float textRight = barX + barWidth - dpi(app, 120.0f);
-    if (x >= textX && x <= textRight && y >= barY && y <= barY + barHeight) {
-        SetCursor(cursorIBeam);
-    } else {
-        SetCursor(cursorArrow);
+    for (int field = 0; field < (replaceRow ? 2 : 1); ++field) {
+        const D2D1_RECT_F& text = app.searchFields[field].textRect;
+        const D2D1_RECT_F& row = app.searchFields[field].hitRect;
+        if (over(D2D1::RectF(text.left, row.top, text.right, row.bottom))) {
+            SetCursor(cursorIBeam);
+            return true;
+        }
     }
+    SetCursor(cursorArrow);
+    return true;
 }
 
 // Drag auto-scroll (#83): while a selection drag sits in the edge band,
@@ -1656,10 +1664,21 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
     if (app.showSearch) {
         // Row hover in the results panel follows the pointer (#246)
         if (app.showSearchPanel && mouseMoved) InvalidateRect(hwnd, nullptr, FALSE);
-        if (!searchPanelSetCursor(app, (float)app.mouseX, (float)app.mouseY)) {
-            setSearchCursor(app, (float)app.mouseX, (float)app.mouseY);
+        // A selection being dragged out on the page goes on wherever the
+        // pointer is: every move ended here, so with the bar open no drag
+        // selected anything, in the editor or the reading view (#319)
+        const bool pageDrag = app.selecting || app.editorSelecting || app.draggingSeparator || liveDragging(app);
+        if (!pageDrag) {
+            if (searchPanelSetCursor(app, (float)app.mouseX, (float)app.mouseY)) return;
+            if (searchBarCursor(app, (float)app.mouseX, (float)app.mouseY)) return;
+            // Beside the bar the editor has its own pointer: the beam over
+            // the text, the rail's names, the seam. The reading view keeps
+            // the arrow while it finds
+            if (!app.editMode) {
+                SetCursor(cursorArrow);
+                return;
+            }
         }
-        return;
     }
 
     if (sidePanelResizeAt(app, static_cast<float>(app.mouseX), static_cast<float>(app.mouseY)) != SidePanel::None) {
@@ -1751,21 +1770,6 @@ void handleMouseMove(App& app, HWND hwnd, LPARAM lParam) {
         if (app.editCtxOpen) return;
         // The Read button owns the pointer while it shows (#245)
         if (app.readButtonHover) return;
-        // Replace-bar controls override the pane cursor: hand over the
-        // buttons, text beam over the two input fields (#119 feedback)
-        if (app.showSearch && app.searchReplaceMode &&
-            !app.draggingSeparator && !app.editorSelecting && !app.editorTextDrag.armed) {
-            static HCURSOR replaceIBeam = LoadCursor(nullptr, IDC_IBEAM);
-            for (const auto& hit : app.searchReplaceHits) {
-                if ((float)app.mouseX >= hit.first.left &&
-                    (float)app.mouseX <= hit.first.right &&
-                    (float)app.mouseY >= hit.first.top &&
-                    (float)app.mouseY <= hit.first.bottom) {
-                    SetCursor(hit.second >= 3 ? cursorHand : replaceIBeam);
-                    return;
-                }
-            }
-        }
         // If mouse is in the preview pane and not dragging separator, fall through for link hover etc.
         if ((float)app.mouseX < documentViewportX(app) ||
             app.draggingSeparator || app.editorSelecting || app.editorTextDrag.armed) return;

@@ -36,6 +36,27 @@ ComPtr<IDWriteTextLayout> fieldLayout(App& app, const std::wstring& text) {
     }
     return layout;
 }
+// How far under its top a layout's first line has its baseline
+float baselineOf(IDWriteTextLayout* layout) {
+    if (!layout) return 0;
+    DWRITE_LINE_METRICS first{};
+    UINT32 count = 0;
+    if (SUCCEEDED(layout->GetLineMetrics(&first, 1, &count))) return count ? first.baseline : 0;
+    std::vector<DWRITE_LINE_METRICS> lines(count);  // a pasted line break: more lines than one
+    return count && SUCCEEDED(layout->GetLineMetrics(lines.data(), count, &count)) ? lines[0].baseline : 0;
+}
+// A field's text stands on the line the bar's own words stand on: the
+// placeholder, the count, the buttons. What is typed can come in another
+// face, a Chinese word in the document's face for Chinese (cjkFont=), and
+// a face with more room over its letters has its baseline lower in its
+// line. Drawn from the field's top such a word stood low, with its feet
+// cut off at the field's lower edge (#319). The line is moved so that its
+// baseline is where the bar's own face has it
+float baselineShift(App& app, IDWriteTextLayout* layout) {
+    if (!layout) return 0;
+    auto own = fieldLayout(app, std::wstring());
+    return own ? baselineOf(own.Get()) - baselineOf(layout) : 0;
+}
 float caretX(IDWriteTextLayout* layout, size_t caret) {
     if (!layout || !caret) return 0;
     float x = 0, y = 0;
@@ -302,8 +323,14 @@ void renderSearchField(App& app, int field, const D2D1_RECT_F& textRect,
     auto layout = fieldLayout(app, text);
     followCaret(state, layout.Get());
     bool active = app.searchActive && activeField(app) == field;
-    D2D1_POINT_2F origin = D2D1::Point2F(textRect.left-state.scrollX, textRect.top);
-    app.renderTarget->PushAxisAlignedClip(textRect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    D2D1_POINT_2F origin = D2D1::Point2F(textRect.left-state.scrollX,
+                                         textRect.top + (text.empty() ? 0.0f : baselineShift(app, layout.Get())));
+    // The field ends the text at its sides. Over and under it the bar has
+    // room, which a tall letter may reach into
+    const float room = dpi(app, 10);
+    app.renderTarget->PushAxisAlignedClip(
+        D2D1::RectF(textRect.left, textRect.top-room, textRect.right, textRect.bottom+room),
+        D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     if (active && state.anchor != state.caret && layout) {
         UINT32 count = 0;
         UINT32 start = static_cast<UINT32>(std::min(state.caret, state.anchor));
@@ -312,8 +339,9 @@ void renderSearchField(App& app, int field, const D2D1_RECT_F& textRect,
         std::vector<DWRITE_HIT_TEST_METRICS> hits(count);
         if (count && SUCCEEDED(layout->HitTestTextRange(start, length, origin.x, origin.y, hits.data(), count, &count))) {
             auto color = themeUiAccent(app.theme); color.a = 0.25f * alpha; app.brush->SetColor(color);
+            // As tall as the field, whatever the height of the face's line
             for (const auto& hit : hits) app.renderTarget->FillRectangle(
-                D2D1::RectF(hit.left, hit.top, hit.left+hit.width, hit.top+hit.height), app.brush);
+                D2D1::RectF(hit.left, textRect.top, hit.left+hit.width, textRect.bottom), app.brush);
         }
     }
     auto color = themeUiText(app.theme); color.a = (text.empty() ? 0.4f : 1.0f) * alpha;

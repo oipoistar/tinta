@@ -19,6 +19,7 @@
 #include "print.h"
 #include "render.h"
 #include "scholar.h"
+#include "search.h"
 #include "settings.h"
 #include "signals.h"
 #include "ui_paint.h"
@@ -1095,6 +1096,10 @@ bool liveMouseDown(App& app, HWND hwnd, int x, int y) {
             return true;
         }
     }
+    // A press on the page takes the keys from an open find bar, as a press
+    // in the source does: what is typed next goes where the caret went,
+    // and a selection dragged out is the one that is copied (#319)
+    releaseSearchInput(app);
     size_t at = positionAtShown(app, L, gx, gy, 0);
     unsigned long long now = GetTickCount64();
     bool again = now - L.e.lastClickMs < GetDoubleClickTime() && std::fabs(px - L.pressX) < dpi(app, 4.0f) &&
@@ -1156,6 +1161,8 @@ void liveCaptureLost(App& app) {
     L.dragging = false;
     L.e.selectingWithMouse = false;
 }
+
+bool liveDragging(const App& app) { return app.editMode && state(app).dragging; }
 
 bool liveMouseUp(App& app, HWND hwnd, int, int) {
     LiveEditor& L = state(app);

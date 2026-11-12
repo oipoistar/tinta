@@ -25,6 +25,8 @@ bool liveMouseMove(App& app, HWND hwnd, int x, int y);
 bool liveMouseUp(App& app, HWND hwnd, int x, int y);
 // The mouse went elsewhere mid-drag (WM_CAPTURECHANGED, WM_CANCELMODE)
 void liveCaptureLost(App& app);
+// A selection is being dragged out on Live's page
+bool liveDragging(const App& app);
 // A finger held on the page (touch.cpp) takes its word, as a double-click
 // does, without the mouse's capture; its moves grow the selection by words
 // (liveMouseMove) until it lifts (liveMouseUp). False off the page and on

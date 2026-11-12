@@ -2194,7 +2194,11 @@ D2D1_RECT_F searchBarRect(const App& app) {
     float barHeight = dpi(app, 44.0f);
     float barLeft = 0.0f;
     float barCenterWidth = (float)app.width;
-    if (app.editMode) {
+    // Live has no source pane: its page is the whole editor, beside the
+    // rail, and the bar stands over it as it does over the reading view.
+    // Measured by the source pane, none wide there, the bar was a sliver
+    // at the rail with no room for a word (#319)
+    if (app.editMode && !editorLiveOn(app)) {
         // Center over editor pane (left side)
         float paneWidth = editorPaneWidth(app);
         barLeft = dpi(app, 48); // The edit rail is painted above overlays.
