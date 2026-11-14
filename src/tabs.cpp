@@ -183,6 +183,50 @@ void tabsSeedSession(App& app, const std::vector<std::string>& paths) {
     }
 }
 
+namespace {
+bool sessionPins(const Settings& settings, const std::string& path) {
+    for (const auto& pinned : settings.sessionPinned) {
+        if (_stricmp(pinned.c_str(), path.c_str()) == 0) return true;
+    }
+    return false;
+}
+}  // namespace
+
+// The tabs a launch brings back, in their order: the session's files that
+// are still on the disk. With the setting off only the pinned ones, as a
+// pinned tab stays through every other sweep (#312). The active slot
+// follows its path through the filtering, and falls on the first tab when
+// its own did not come back
+SessionTabs sessionToReopen(const Settings& settings) {
+    SessionTabs session;
+    for (size_t i = 0; i < settings.sessionTabs.size(); i++) {
+        const std::string& path = settings.sessionTabs[i];
+        if (!settings.reopenTabs && !sessionPins(settings, path)) continue;
+        if (GetFileAttributesW(toWide(path).c_str()) == INVALID_FILE_ATTRIBUTES) continue;
+        if ((int)i == settings.sessionActive) session.active = (int)session.paths.size();
+        session.paths.push_back(path);
+    }
+    return session;
+}
+
+// The tabs a closing window leaves for the next launch (untitled buffers
+// have no path to come back to). `settings` is the file as it stands, so
+// the setting is the one picked last in any window. Off, the paths of the
+// tabs that are not pinned are not written at all
+void sessionKeep(Settings& settings, const App& app) {
+    settings.sessionTabs.clear();
+    settings.sessionPinned.clear();
+    settings.sessionActive = 0;
+    for (size_t i = 0; i < app.tabs.size(); i++) {
+        const std::string& path = (int)i == app.activeTab ? app.currentFile : app.tabs[i].path;
+        if (path.empty()) continue;
+        if (!settings.reopenTabs && !app.tabs[i].pinned) continue;
+        if ((int)i == app.activeTab) settings.sessionActive = (int)settings.sessionTabs.size();
+        settings.sessionTabs.push_back(path);
+        if (app.tabs[i].pinned) settings.sessionPinned.push_back(path);
+    }
+}
+
 int tabsPinnedCount(const App& app) {
     int count = 0;
     while (count < (int)app.tabs.size() && app.tabs[count].pinned) ++count;

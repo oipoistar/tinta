@@ -2646,7 +2646,7 @@ std::vector<SettingsGroupSpec> settingsPage(App& app, int section) {
         SettingsRowSpec files;
         files.controlOnly = true;
         page.push_back({tr(app, "settings.group.interface"), {dropdown, dropdown}});
-        page.push_back({tr(app, "settings.group.files"), {toggle, toggle, toggle, toggle}});
+        page.push_back({tr(app, "settings.group.files"), {toggle, toggle, toggle, toggle, toggle}});
         page.push_back({tr(app, "settings.config_files"), {files}});
     } else if (section == 1) {
         const wchar_t* const* fold = settingsFoldLabels(app);
@@ -2954,6 +2954,8 @@ void renderSettingsOverlay(App& app) {
             boxes.text = D2D1::RectF(rect.left + rowPad, top, textRight,
                                      top + lineB + dpi(app, sp2) + dpi(app, lineHeight(Type::Small)));
             boxes.titleTrimmed = settingsTextWidth(app, label, Type::Body) > textRight - rect.left - rowPad + 0.5f;
+            boxes.hintTrimmed =
+                hint && settingsTextWidth(app, hint, Type::Small) > textRight - rect.left - rowPad + 0.5f;
             settingsText(app, label, Type::Body,
                          D2D1::RectF(rect.left + rowPad, top, textRight, top + lineB),
                          settingsInk(app, inkPrimary, anim));
@@ -3103,6 +3105,8 @@ void renderSettingsOverlay(App& app) {
                   app.browserFocusPath, SET_TOGGLE_BROWSEFOCUS);
         toggleRow("settings.open_in_tabs", "settings.open_in_tabs.hint",
                   app.openInTabs, SET_TOGGLE_OPENTABS);
+        toggleRow("settings.reopen_tabs", "settings.reopen_tabs.hint",
+                  app.reopenTabs, SET_TOGGLE_REOPENTABS);
         toggleRow("settings.keep_deleted_tabs", "settings.keep_deleted_tabs.hint",
                   app.keepDeletedTabs, SET_TOGGLE_KEEPDELETED);
         {

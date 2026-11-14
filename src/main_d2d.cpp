@@ -1895,22 +1895,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 // windows never own the session: they re-read the owner's
                 // stored session so their full-file save cannot clobber a
                 // newer one with launch-time data.
+                // With "Reopen tabs from last time" off (#323) only the
+                // pinned tabs are written.
                 if (app->sessionOwner) {
-                    settings.sessionTabs.clear();
-                    settings.sessionPinned.clear();
-                    settings.sessionActive = 0;
-                    for (size_t i = 0; i < app->tabs.size(); i++) {
-                        const std::string& path =
-                            (int)i == app->activeTab ? app->currentFile
-                                                     : app->tabs[i].path;
-                        if (path.empty()) continue;
-                        if ((int)i == app->activeTab) {
-                            settings.sessionActive =
-                                (int)settings.sessionTabs.size();
-                        }
-                        settings.sessionTabs.push_back(path);
-                        if (app->tabs[i].pinned) settings.sessionPinned.push_back(path);
-                    }
+                    sessionKeep(settings, *app);
                 } else {
                     Settings onDisk = loadSettings();
                     settings.sessionTabs = onDisk.sessionTabs;
@@ -2012,6 +2000,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.tabSearchEnabled = savedSettings.tabSearchEnabled;
     app.browserFocusPath = savedSettings.browserFocusPath;
     app.openInTabs = savedSettings.openInTabs;
+    app.reopenTabs = savedSettings.reopenTabs;
     app.keepDeletedTabs = savedSettings.keepDeletedTabs;
     // The title bar's pin as last pressed (#312); applied once the window shows
     app.alwaysOnTop = savedSettings.alwaysOnTop;
@@ -2310,24 +2299,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     // Last session's tabs come back on plain launches (files that vanished
     // from disk in the meantime are dropped). With "Open files in tabs"
     // off the session stays parked: one window, one document — a file
-    // launch must not drag the previous session in as extra tabs (#147)
+    // launch must not drag the previous session in as extra tabs (#147).
+    // With "Reopen tabs from last time" off only the pinned tabs come
+    // back, beside the file the launch was given (#323)
     bool restoreSession = !quickNote && !cascadeWindow && !startInEditMode &&
                           printPagesDir.empty() && savedSettings.openInTabs &&
                           !savedSettings.sessionTabs.empty();
     std::vector<std::string> sessionPaths;
     int sessionActive = 0;
     if (restoreSession) {
-        for (size_t i = 0; i < savedSettings.sessionTabs.size(); i++) {
-            const auto& path = savedSettings.sessionTabs[i];
-            if (GetFileAttributesW(toWide(path).c_str()) !=
-                INVALID_FILE_ATTRIBUTES) {
-                // The active slot follows its path through the filtering
-                if ((int)i == savedSettings.sessionActive) {
-                    sessionActive = (int)sessionPaths.size();
-                }
-                sessionPaths.push_back(path);
-            }
-        }
+        SessionTabs session = sessionToReopen(savedSettings);
+        sessionPaths = std::move(session.paths);
+        sessionActive = session.active;
         if (sessionPaths.empty()) restoreSession = false;
     }
 

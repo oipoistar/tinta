@@ -1,0 +1,12 @@
+if(NOT DEFINED TEST_BINARY OR NOT DEFINED TEST_DIR OR NOT DEFINED TEST_FIXTURES)
+    message(FATAL_ERROR "TEST_BINARY, TEST_DIR and TEST_FIXTURES are required")
+endif()
+file(MAKE_DIRECTORY "${TEST_DIR}")
+file(COPY "${TEST_BINARY}" DESTINATION "${TEST_DIR}")
+file(WRITE "${TEST_DIR}/settings.ini" "[Settings]\nhasAskedFileAssociation=1\ncheckUpdates=0\nfollowSystemTheme=0\nlanguage=en\n")
+get_filename_component(TEST_NAME "${TEST_BINARY}" NAME)
+execute_process(COMMAND "${TEST_DIR}/${TEST_NAME}" --reopen-tabs-tests "${TEST_FIXTURES}"
+    WORKING_DIRECTORY "${TEST_DIR}" RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Reopen tabs tests failed: ${result}")
+endif()

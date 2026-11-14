@@ -40,6 +40,7 @@ int openModeByName(const std::string& name);
 void persistPrintMargin(const App& app);
 void persistSearchScopes(const App& app);
 void persistOpenInTabs(const App& app);
+void persistReopenTabs(const App& app);
 void persistAlwaysOnTop(const App& app);
 
 // The configuration home: the exe's folder in portable mode (a

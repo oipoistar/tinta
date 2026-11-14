@@ -213,6 +213,7 @@ int runUiSurfacesTests(const char* fixtures);
 int runFindBarTests(const char* fixture);
 int runClipboardKeysTests(const char* fixtureRoot);
 int runOpenModeTests(const char* fixtureRoot);
+int runReopenTabsTests(const char* fixtureRoot);
 int runPrintExportTests();
 int runScrollSyncTests(const char* file);
 int runNotificationSettingTests();
@@ -244,6 +245,7 @@ int main(int argc, char** argv) {
     if (argc == 3 && std::string(argv[1]) == "--find-bar-tests") return runFindBarTests(argv[2]);
     if (argc == 3 && std::string(argv[1]) == "--clipboard-keys-tests") return runClipboardKeysTests(argv[2]);
     if (argc == 3 && std::string(argv[1]) == "--open-mode-tests") return runOpenModeTests(argv[2]);
+    if (argc == 3 && std::string(argv[1]) == "--reopen-tabs-tests") return runReopenTabsTests(argv[2]);
     if (argc == 2 && std::string(argv[1]) == "--print-export-tests") return runPrintExportTests();
     if (argc == 3 && std::string(argv[1]) == "--scroll-sync-tests") return runScrollSyncTests(argv[2]);
     if (argc == 2 && std::string(argv[1]) == "--notification-setting-tests") return runNotificationSettingTests();

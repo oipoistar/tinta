@@ -89,6 +89,7 @@ void saveSettings(const Settings& settings) {
     file << "tabSearchEnabled=" << (settings.tabSearchEnabled ? 1 : 0) << "\n";
     file << "browserFocusPath=" << (settings.browserFocusPath ? 1 : 0) << "\n";
     file << "openInTabs=" << (settings.openInTabs ? 1 : 0) << "\n";
+    file << "reopenTabs=" << (settings.reopenTabs ? 1 : 0) << "\n";
     file << "keepDeletedTabs=" << (settings.keepDeletedTabs ? 1 : 0) << "\n";
     file << "showNotifications=" << (settings.showNotifications ? 1 : 0) << "\n";
     file << "readingWidthPct=" << settings.readingWidthPct << "\n";
@@ -249,6 +250,14 @@ void persistOpenInTabs(const App& app) {
     saveSettings(settings);
 }
 
+// "Reopen tabs from last time" (#323) is kept when toggled, as openInTabs
+// is: the window that closes and the next one started both read the file
+void persistReopenTabs(const App& app) {
+    Settings settings = loadSettings();
+    settings.reopenTabs = app.reopenTabs;
+    saveSettings(settings);
+}
+
 // The title bar's pin is kept when pressed, as openInTabs is, so the next
 // window opens on top or not as this one was left (#312)
 void persistAlwaysOnTop(const App& app) {
@@ -401,6 +410,10 @@ Settings loadSettings() {
             settings.browserFocusPath = (value == "1");
         } else if (key == "openInTabs") {
             settings.openInTabs = (value == "1");
+        } else if (key == "reopenTabs") {
+            // Only a plain 0 turns it off: a file from before the setting,
+            // or a value that is neither, keeps the tabs coming back
+            settings.reopenTabs = (value != "0");
         } else if (key == "keepDeletedTabs") {
             settings.keepDeletedTabs = (value == "1");
         } else if (key == "showNotifications") {

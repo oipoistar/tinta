@@ -926,6 +926,12 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             // from clobbering it (they no longer write this flag)
             persistOpenInTabs(app);
             break;
+        case SET_TOGGLE_REOPENTABS:
+            // Kept now: this window's close and the next launch both read
+            // it from settings.ini (#323)
+            app.reopenTabs = !app.reopenTabs;
+            persistReopenTabs(app);
+            break;
         case SET_TOGGLE_NOTIFICATIONS: {
             // Persisted now and left as on disk at exit, like openInTabs:
             // other windows read it when they start (#273)

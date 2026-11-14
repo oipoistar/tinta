@@ -409,6 +409,9 @@ struct Settings {
     // Bottom-right info and success messages (#273); warnings, errors and
     // messages that ask something always show
     bool showNotifications = true;
+    // Whether a launch brings the last session's tabs back (#323). Off,
+    // only the pinned ones are kept and come back
+    bool reopenTabs = true;
     // Last session's open tabs, restored on the next plain launch
     std::vector<std::string> sessionTabs;
     int sessionActive = 0;
@@ -1026,6 +1029,7 @@ struct App {
         D2D1_RECT_F row{}, text{}, control{};
         bool stacked = false;       // the control went under the label
         bool titleTrimmed = false;  // the label did not fit and ends in an ellipsis
+        bool hintTrimmed = false;   // nor did the line under it
     };
     std::vector<SettingsRowBox> settingsRows;
     std::vector<D2D1_RECT_F> settingsCards;
@@ -1484,6 +1488,9 @@ struct App {
     bool browserFocusPath = false;
     // Plain file launches join this window as tabs (settings toggle)
     bool openInTabs = true;
+    // Settings > General > Reopen tabs from last time (#323). Kept when
+    // toggled; the launch and the close read settings.ini's own value
+    bool reopenTabs = true;
     bool keepDeletedTabs = false;
     bool showNotifications = true;  // settings toggle (#273), see signals.h
     int folderSearchGeneration = 0;
