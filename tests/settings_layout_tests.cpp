@@ -265,7 +265,7 @@ int runSettingsLayoutTests(const char* fixture) {
     }
 
     // --- Every page, in every language, at two widths, light and dark ---
-    const std::vector<int> pages[3] = {{2, 4, 1}, {4, 2, 2}, {6, 2}};
+    const std::vector<int> pages[3] = {{2, 4, 1}, {4, 2, 2}, {7, 2}};  // the Editor page has #322's row
     const char* languages[] = {"en", "de", "fr", "it", "ru", "zh", "ja", "ko"};
     int trimmedWide = 0, trimmedNarrow = 0;
     for (const char* language : languages) {

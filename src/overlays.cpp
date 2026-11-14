@@ -2618,6 +2618,15 @@ const wchar_t* const* settingsFoldLabels(App& app) {
     return labels;
 }
 
+// The views a Markdown file can open in (#322), in OpenMode's order
+const wchar_t* const* settingsOpenLabels(App& app) {
+    static const wchar_t* labels[3];
+    labels[0] = tr(app, "settings.open.reading");
+    labels[1] = tr(app, "settings.open.live");
+    labels[2] = tr(app, "settings.open.source");
+    return labels;
+}
+
 float settingsDropdownWidth(const App& app) {
     return dpi(app, 152.0f + uiscale::sp8 + uiscale::controlBox);  // the box, a gap, the pencil
 }
@@ -2652,7 +2661,10 @@ std::vector<SettingsGroupSpec> settingsPage(App& app, int section) {
         page.push_back({tr(app, "settings.group.window"), {side, toggle}});
     } else if (section == 2) {
         const SettingsRowSpec browse{settingsChipWidth(app, tr(app, "settings.browse"))};
-        page.push_back({tr(app, "settings.group.editing"), {toggle, toggle, toggle, toggle, toggle, toggle}});
+        const wchar_t* const* open = settingsOpenLabels(app);
+        const SettingsRowSpec opening{settingsSegmentsWidth(app, {open[0], open[1], open[2]}, false)};
+        page.push_back(
+            {tr(app, "settings.group.editing"), {opening, toggle, toggle, toggle, toggle, toggle, toggle}});
         page.push_back({tr(app, "settings.group.tools"), {browse, browse}});
     }
     return page;
@@ -3141,6 +3153,15 @@ void renderSettingsOverlay(App& app) {
         toggleRow("settings.notifications", "settings.notifications.hint",
                   app.showNotifications, SET_TOGGLE_NOTIFICATIONS);
     } else {  // Editor
+        {
+            // The view a Markdown file opens in (#322): the reading view,
+            // or the editor in Live or on its source. Each segment as wide
+            // as its own word, as the folding row's are
+            const int actions[3] = {SET_OPEN_READING, SET_OPEN_LIVE, SET_OPEN_SOURCE};
+            const int current = app.openMode == OPEN_LIVE ? 1 : app.openMode == OPEN_SOURCE ? 2 : 0;
+            const D2D1_RECT_F slot = row(tr(app, "settings.open_mode"), tr(app, "settings.open_mode.hint"));
+            segments(slot, settingsOpenLabels(app), actions, 3, current, false);
+        }
         toggleRow("settings.word_wrap", "settings.word_wrap.hint", app.editorWordWrap, SET_TOGGLE_WRAP);
         toggleRow("settings.preview_pane", "settings.preview_pane.hint",
                   app.editorShowPreview, SET_TOGGLE_PREVIEW);

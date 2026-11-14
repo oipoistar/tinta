@@ -481,7 +481,11 @@ void searchPanelOpenFile(App& app, HWND hwnd, int file, int match) {
     } else if (!result.matches.empty()) {
         line = result.matches.front().line;
     }
+    // It opens on the page, with its match and the results beside it,
+    // also when files open in the editor (#322)
+    app.openModeHeld = true;
     tabOpenPath(app, hwnd, toUtf8(result.fullPath), true);
+    app.openModeHeld = false;
     if (app.showSearch && !app.editMode) {
         searchPanelLandOnLine(app, line);
         app.searchPanelScroll = 0.0f;

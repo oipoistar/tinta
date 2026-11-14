@@ -6,6 +6,14 @@ it. **Live** shows the page as it reads while you write it, and shows the
 Markdown only where you are typing. The pill at the top of the edit rail
 switches between them, and so does **Ctrl+/**. Tinta remembers the choice.
 
+A Markdown file can open in the editor without `E`: **Settings → Editor →
+Open Markdown files in** offers Reading, Live and Source. With Live or
+Source every Markdown file opened comes up in the editor, at the place it
+was left at; `Esc` still returns to the reading view, and a tab stays in
+the view it was left in. A file opened from the find results is read,
+with its match on the page. `settings.ini` keeps the choice as
+`openMode=reading`, `live` or `source`.
+
 Sheet cards are typed in with the same engine, so a note is written the
 same way on a sheet and in its own tab.
 

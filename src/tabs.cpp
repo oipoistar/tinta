@@ -165,6 +165,10 @@ void tabsSeedSession(App& app, const std::vector<std::string>& paths) {
             _stricmp(path.c_str(), app.currentFile.c_str()) == 0) {
             app.activeTab = (int)app.tabs.size();
             if (app.keepDeletedTabs) tab.viewerSource = app.sourceText;
+        } else {
+            // The others open when they are first shown (#322); the one
+            // in the window is the launch's to place
+            tab.openModePending = true;
         }
         app.tabs.push_back(std::move(tab));
     }
@@ -308,6 +312,12 @@ void tabActivate(App& app, HWND hwnd, int index) {
         // just read the file's time as it is now
         app.lastFileWriteTime = tab.lastWrite;
     }
+    // A tab shown for the first time since its file was opened goes to
+    // the view Markdown files open in (#322)
+    if (tab.openModePending) {
+        tab.openModePending = false;
+        applyOpenMode(app);
+    }
     app.showTabSwitcher = false;
     // An open search follows to the new document: its highlights, count
     // and, in the results panel, the other files from here (#246). The
@@ -337,6 +347,7 @@ void tabOpenPath(App& app, HWND hwnd, const std::string& utf8Path,
     tab.id = ++app.tabIdCounter;
     tab.path = utf8Path;
     tab.title = titleForPath(app, utf8Path);
+    tab.openModePending = !utf8Path.empty();  // placed when first shown (#322)
     cacheViewerSource(app, tab);
     if (!utf8Path.empty() && !tab.viewerSource && !std::ifstream(toWide(utf8Path))) return;
     int index = insertBefore < 0 ? (int)app.tabs.size()

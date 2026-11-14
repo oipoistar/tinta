@@ -2045,6 +2045,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.headingRules = savedSettings.headingRules;
     app.foldSections = savedSettings.foldSections;
     app.foldOnOpen = savedSettings.foldOnOpen;
+    app.openMode = savedSettings.openMode;
     app.tocOnLeft = savedSettings.tocOnLeft;
     app.tocPinned = savedSettings.tocPinned;
     app.browserPinned = savedSettings.browserPinned;
@@ -2408,6 +2409,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
     if (app.alwaysOnTop) {
         SetWindowPos(app.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+    // The file the launch was given, or the tab the session came back on,
+    // goes to the view Markdown files open in (#322). Here, with the
+    // window at its size and nothing drawn yet: the first frame is the
+    // editor's, not the page's for a moment before it
+    if (!quickNote && !startInEditMode && printPagesDir.empty() && (!inputFile.empty() || restoreSession)) {
+        applyOpenMode(app);
     }
     UpdateWindow(app.hwnd);
     app.metrics.showWindowUs = usElapsed(t0);

@@ -474,8 +474,10 @@ static void commitFolderBrowserPath(App& app) {
             closeFolderBrowserInput(app);
         } else if (openDocumentInViewer(app, path)) {
             // Preview mode: the browser stays open beside the document —
-            // close it by clicking the document, pressing B, or Esc
+            // close it by clicking the document, pressing B, or Esc. A
+            // file that opens in the editor (#322) closes it, as E does
             closeFolderBrowserInput(app);
+            applyOpenMode(app);
         } else {
             app.folderBrowserInputError = true;
         }
@@ -958,6 +960,15 @@ static void settingsAction(App& app, HWND hwnd, int action) {
         case SET_TOGGLE_CLOSE_DRAFTS:
             app.closeKeepsDrafts = !app.closeKeepsDrafts;
             persistCloseKeepsDrafts(app);
+            break;
+        case SET_OPEN_READING:
+        case SET_OPEN_LIVE:
+        case SET_OPEN_SOURCE:
+            // The view Markdown files open in (#322), from the next file
+            // opened on; kept now, for the next window to read
+            app.openMode = action == SET_OPEN_LIVE ? OPEN_LIVE
+                         : action == SET_OPEN_SOURCE ? OPEN_SOURCE : OPEN_READING;
+            persistOpenMode(app);
             break;
         case SET_FOLD_OFF:
         case SET_FOLD_ON:
@@ -2773,7 +2784,9 @@ static std::wstring wikiLinkPath(const App& app, const std::string& target);
 static bool openWikiLink(App& app, const std::string& target) {
     if (app.editMode || app.currentFile.empty()) return false;
     std::wstring path = wikiLinkPath(app, target);
-    return !path.empty() && openDocumentInViewer(app, path);
+    if (path.empty() || !openDocumentInViewer(app, path)) return false;
+    applyOpenMode(app);  // the note opens as files do (#322)
+    return true;
 }
 
 // The note a wiki link names, beside the current file
@@ -3901,8 +3914,8 @@ void handleMouseUp(App& app, HWND hwnd, WPARAM, LPARAM lParam) {
                     if (app.tabNewTabIntent || ctrlHeld) {
                         app.tabNewTabIntent = false;
                         tabOpenPath(app, hwnd, toUtf8(fullPath), true);
-                    } else {
-                        openDocumentInViewer(app, fullPath);
+                    } else if (openDocumentInViewer(app, fullPath)) {
+                        applyOpenMode(app);  // in the editor, if files open there (#322)
                     }
                 }
             }

@@ -366,6 +366,10 @@ enum class PanelList { None, Contents, Browser, Search };
 // preview), the editor's text, or a side panel's list
 enum class TouchTarget { None, Document, Editor, List, Sheet, Help };
 
+// The view a Markdown file opens in (#322): the reading view, or the
+// editor on the page (Live) or on its source
+enum OpenMode { OPEN_READING = 0, OPEN_LIVE = 1, OPEN_SOURCE = 2 };
+
 struct Settings {
     int themeIndex = 5;          // Default to Midnight
     float zoomFactor = 1.0f;
@@ -429,6 +433,8 @@ struct Settings {
     // headings, and whether documents open with every section folded
     bool foldSections = true;
     bool foldOnOpen = false;
+    // The view a Markdown file opens in (#322), an OpenMode
+    int openMode = 0;
     // Table of contents panel side: false = right (default), true = left
     bool tocOnLeft = false;
     // Pinned side panels (#156): a pinned panel stops dismissing on
@@ -765,6 +771,9 @@ struct App {
         // Pinned (#312): first in the row, narrow, spared by Close others
         // and the left and right sweeps, and back with the session
         bool pinned = false;
+        // Not shown yet since it was opened: its first showing puts it in
+        // the view Markdown files open in (#322)
+        bool openModePending = false;
         std::wstring editorText;   // parked edit buffer (editMode only)
         bool editorBom = false;    // its file starts with a byte order mark
         float editorScrollY = 0.0f;
@@ -1854,6 +1863,10 @@ struct App {
     float editorLiveAnim = 0.0f;
     // A plain-text, Mermaid or PlantUML file is its own source: no Live
     bool editorRawDocument = false;
+    // The view a Markdown file opens in (#322), an OpenMode; held, a file
+    // opens in the reading view whatever it says
+    int openMode = 0;
+    bool openModeHeld = false;
 
     // Soft-wrap metrics: cumulative visual rows before each logical line
     // (editorRowStarts.size() == lines + 1). Only maintained while

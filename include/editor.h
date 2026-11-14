@@ -7,6 +7,11 @@
 
 // Mode transitions
 void enterEditMode(App& app);
+// The view Markdown files open in (#322). A file just opened goes to the
+// editor, on the page or on its source, when the setting asks for one;
+// openModeApplies says whether the file in the window is one it takes.
+bool openModeApplies(const App& app);
+void applyOpenMode(App& app);
 // Ctrl+N quick note: edit mode on an untitled empty buffer with no backing
 // file; the first save routes through the classic Save As dialog
 void enterQuickNoteMode(App& app);

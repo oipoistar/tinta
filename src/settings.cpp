@@ -6,6 +6,7 @@
 #include <shlobj.h>
 #include <shellapi.h>
 #include <appmodel.h>
+#include <cctype>
 #include <fstream>
 #include <string>
 
@@ -24,6 +25,20 @@ std::wstring getSettingsPath() {
     std::wstring dir = tintaConfigDir();
     if (dir.empty()) return L"";
     return dir + L"\\settings.ini";
+}
+
+// settings.ini has the view by its name, for a hand that edits it; a
+// name it does not know is the reading view
+const char* openModeName(int mode) {
+    return mode == OPEN_LIVE ? "live" : mode == OPEN_SOURCE ? "source" : "reading";
+}
+
+int openModeByName(const std::string& name) {
+    std::string lower;
+    for (char c : name) {
+        if (c != ' ' && c != '\t' && c != '\r') lower += (char)tolower((unsigned char)c);
+    }
+    return lower == "live" ? OPEN_LIVE : lower == "source" ? OPEN_SOURCE : OPEN_READING;
 }
 
 void saveSettings(const Settings& settings) {
@@ -81,6 +96,7 @@ void saveSettings(const Settings& settings) {
     file << "headingRules=" << (settings.headingRules ? 1 : 0) << "\n";
     file << "foldSections=" << (settings.foldSections ? 1 : 0) << "\n";
     file << "foldOnOpen=" << (settings.foldOnOpen ? 1 : 0) << "\n";
+    file << "openMode=" << openModeName(settings.openMode) << "\n";
     file << "tocOnLeft=" << (settings.tocOnLeft ? 1 : 0) << "\n";
     file << "tocPinned=" << (settings.tocPinned ? 1 : 0) << "\n";
     file << "browserPinned=" << (settings.browserPinned ? 1 : 0) << "\n";
@@ -190,6 +206,14 @@ void persistEditorMode(const App& app) {
 void persistWordCount(const App& app) {
     Settings settings = loadSettings();
     settings.showWordCount = app.showWordCount;
+    saveSettings(settings);
+}
+
+// The view Markdown files open in (#322) is kept when picked, as
+// openInTabs is: the next window started reads it from the file
+void persistOpenMode(const App& app) {
+    Settings settings = loadSettings();
+    settings.openMode = app.openMode;
     saveSettings(settings);
 }
 
@@ -339,6 +363,8 @@ Settings loadSettings() {
             settings.foldSections = (value == "1");
         } else if (key == "foldOnOpen") {
             settings.foldOnOpen = (value == "1");
+        } else if (key == "openMode") {
+            settings.openMode = openModeByName(value);
         } else if (key == "tocOnLeft") {
             settings.tocOnLeft = (value == "1");
         } else if (key == "tocPinned") {

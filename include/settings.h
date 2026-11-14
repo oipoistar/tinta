@@ -31,6 +31,11 @@ void settingsGiveThemes(const Settings& settings, int& current, int& light, int&
 void persistEditorMode(const App& app);
 void persistWordCount(const App& app);
 void persistCloseKeepsDrafts(const App& app);
+// The view Markdown files open in (#322), and its name in settings.ini:
+// reading, live or source
+void persistOpenMode(const App& app);
+const char* openModeName(int mode);
+int openModeByName(const std::string& name);
 // Print margins persist when picked in the preview (#257)
 void persistPrintMargin(const App& app);
 void persistSearchScopes(const App& app);

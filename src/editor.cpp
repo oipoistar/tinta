@@ -1806,6 +1806,45 @@ void enterEditMode(App& app) {
     enterEditModeWithContent(app, buf.str());
 }
 
+// The view Markdown files open in (#322). A file that is its own source
+// (plain text, a diagram), a sheet, and a file that is not there to be
+// read open as they always did; so does anything while the setting is
+// held, as a find result is, which opens to show its match on the page
+bool openModeApplies(const App& app) {
+    if (app.openMode != OPEN_LIVE && app.openMode != OPEN_SOURCE) return false;
+    if (app.openModeHeld || app.editMode || app.currentFile.empty()) return false;
+    const std::string& path = app.currentFile;
+    if (isSheetPath(path) || isPlainTextDocumentPath(path) || isMermaidDocumentPath(path) ||
+        isPlantUmlDocumentPath(path)) {
+        return false;
+    }
+    return GetFileAttributesW(toWide(path).c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+// The rail's pill is put where the file opens, then E's own way in: the
+// editor comes up in its view, with nothing to move once it is there
+void applyOpenMode(App& app) {
+    if (!openModeApplies(app)) return;
+    // The editor opens where the file was left, as E opens it at the place
+    // being read (#77). That place waits for a layout a file opening in
+    // the editor never shows: the page is laid out as far as it here, and
+    // E's own way from a place on the page to its line does the rest
+    if (app.pendingScrollRestore > 1.0f && app.renderTarget) {
+        app.scrollY = app.targetScrollY = app.pendingScrollRestore;
+        layoutDocumentViewportFirst(app);
+        const float most = std::max(0.0f, app.contentHeight - (float)app.height);
+        app.scrollY = app.targetScrollY = std::min(app.scrollY, most);
+        app.pendingScrollRestore = -1.0f;
+    }
+    const bool live = app.openMode == OPEN_LIVE;
+    if (app.editorLive != live) {
+        app.editorLive = live;
+        app.editorLiveAnim = live ? 1.0f : 0.0f;  // in its place, not on the way there
+        persistEditorMode(app);
+    }
+    enterEditMode(app);
+}
+
 void enterQuickNoteMode(App& app) {
     app.currentFile.clear();
     app.startPageEmbeddedOpen = false;  // the note replaces any Learn doc
