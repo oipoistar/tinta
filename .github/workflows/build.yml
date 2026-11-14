@@ -55,23 +55,16 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown, Mermaid and PlantUML files
 
-            Citations and papers, themes in CSS, and an interface on one scale. For Live and Sheets, new in 4.0, see the [v4.0.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.0.0).
+            A fix release for 4.1.0, with one new setting. For citations, papers and themes in CSS, new in 4.1, see the [v4.1.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.1.0).
 
             ### Added
-            - Citations: name a BibTeX or CSL-JSON library in the front matter and cite in pandoc's syntax. Citations and references are set in APA, Chicago, IEEE, Nature, GB/T 7714 or any `.csl` style; figures, tables, equations and sections number themselves and `@fig:id` refers to them. HTML, Word and PDF keep it all. See [Citations, figures and tables](https://github.com/oipoistar/tinta/blob/master/docs/citations.md)
-            - Citing as you write: `[@` lists the library's keys, and the Cite button opens Zotero's picker.
-            - Papers: a front matter in pandoc's variables prints as a journal manuscript, with a title block, two columns, page numbers and running heads, and Word gets matching styles.
-            - CSS themes: a `.css` file in the `themes` folder is a theme, with real selectors, variables and `light-dark()`; every element takes its own rules on screen, on paper and in Word. `--ui-*` colours the window, a `tinta.css` styles a folder, Ctrl+Alt+click shows which rules style what, and Typora and Obsidian themes import from Settings. See [THEMES.md](https://github.com/oipoistar/tinta/blob/master/THEMES.md)
-            - Ctrl+Shift+T reopens the tab closed last, with its place and unsaved text; a tab's menu lists the last five.
+            - Settings > Editor > Open Markdown files in: Reading, Live or Source. With Live or Source a Markdown file comes up in the editor however it is opened, at the place it was left at; `Esc` still returns to the reading view. Kept as `openMode=` in `settings.ini`. Requested by @Scawer132 (#322)
 
-            ### Changed
-            - The ten built-in themes are one design in ten palettes, with clearer headings, rounder code blocks, calmer tables and colours that read at 4.5 to 1. A theme of your own can start from one with `@import "Paper"`.
-            - Themes made in the colour editor from a built-in theme keep its new design; themes already in `themes.ini` keep their look.
-            - Settings is grouped under labels and scrolls in a short window, where its last settings could not be reached.
-            - The theme chooser's cards keep their size and scroll; with many themes the names lay over the samples.
-            - Menus look alike everywhere, the shortcut list stands in two columns, and no label in the interface is smaller than 11.
-            - The window has an edge in the theme's colour, and the tab row a line under it, an edged chosen tab and names on one line.
-            - Letters are smoothed for the monitor the window is on.
+            ### Fixed
+            - Ctrl+Insert, Shift+Insert and Shift+Delete copy, paste and cut wherever Ctrl+C, Ctrl+V and Ctrl+X do. Shift+Insert pasted nothing outside Live, and Shift+Delete deleted without keeping the text. Reported by @tferi99 (#320)
+            - A word typed into the find bar stands on the bar's line whatever font draws it; Chinese in a face set with `cjkFont=` stood low and cut off. Reported by @TiegenFang (#319)
+            - With the find bar open, a drag on the page selects text in Source, Live and the reading view. Reported by @TiegenFang (#319)
+            - In Live the find bar stands over the middle of the page, not as a sliver beside the tool rail.
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats

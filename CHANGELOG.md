@@ -1,5 +1,16 @@
 # Changelog
 
+## [v4.1.1] - 2026-11-14
+
+### Added
+- Settings > Editor > Open Markdown files in: Reading, Live or Source. With Live or Source a Markdown file comes up in the editor however it is opened (Explorer, Ctrl+O, a drop, the folder browser, a link, a session's tabs), at the place it was left at. A tab stays in the view it was left in and `Esc` still returns to the reading view; a find result is read, with its match on the page. Diagrams, text files and sheets open as before. `settings.ini` keeps the choice as `openMode=reading`, `live` or `source`. Requested by @Scawer132 (#322)
+
+### Fixed
+- Ctrl+Insert, Shift+Insert and Shift+Delete copy, paste and cut wherever Ctrl+C, Ctrl+V and Ctrl+X do: the source editor, Live, the find and replace fields, table cells, sheets, review notes, the folder browser's path field and the reading view. Shift+Insert pasted nothing outside Live, and Shift+Delete deleted the selection without keeping it. With nothing selected Shift+Delete does nothing now, as Ctrl+X does. Reported by @tferi99 (#320)
+- A word typed into the find bar stands on the bar's line whatever font draws it. Chinese in a face set with `cjkFont=`, and Thai, Hindi, Burmese and Javanese, stood low with their feet cut off. Reported by @TiegenFang (#319)
+- With the find bar open, a drag on the page selects text in Source, in Live and in the reading view, and the editor keeps its own pointer beside the bar; the drag selected nothing. A click on Live's page gives the keyboard back to the page. Reported by @TiegenFang (#319)
+- In Live the find bar stands over the middle of the page; it was a sliver beside the tool rail since 4.0.0.
+
 ## [v4.1.0] - 2026-11-11
 
 ### Added
