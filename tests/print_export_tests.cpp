@@ -256,6 +256,13 @@ int darkIn(const std::vector<uint8_t>& pixels, int w, int h, float left, float t
     return n;
 }
 
+// The same of the preview's page, the box in page DIPs
+int previewDarkIn(const App& app, float left, float top, float right, float bottom, int under) {
+    const float fit = app.printPreviewFit;
+    return darkIn(app.printPreviewPixels, (int)app.printPreviewPxW, (int)app.printPreviewPxH, left * fit, top * fit,
+                  right * fit, bottom * fit, under);
+}
+
 // A stretch of the print layout replayed at 1:1 as a page replays it, its
 // start `offsetY` down a white bitmap
 std::vector<uint8_t> replay(App& app, float yStart, float yEnd, float offsetY, UINT w, UINT h) {
@@ -291,7 +298,8 @@ std::vector<uint8_t> replay(App& app, float yStart, float yEnd, float offsetY, U
 
 // A fenced block longer than the page is left runs over the break. The cut
 // falls between two rows, so the row above ends exactly where the next page
-// starts: it belongs to the page before only.
+// starts: it belongs to the page before only, and neither page draws into
+// its margins - the card stops at the cut, as a column's does.
 void codeBlockPageBreak(App& app) {
     const auto fixture = std::filesystem::path(TINTA_PRINT_EXPORT_FIXTURE).parent_path() / "code-block-page-break.md";
     const std::string source = read(fixture);
@@ -302,7 +310,7 @@ void codeBlockPageBreak(App& app) {
     const float savedMargin = app.printMarginMm;
     app.printPreviewPaper = 0;
     app.printPreviewLandscape = false;
-    const int ink = 160;  // text, not the card under it
+    const int ink = 160, notPaper = 252;  // text; anything but the white page
     for (int theme : {0, 5}) {
         applyTheme(app, theme);
         for (float marginMm : {19.05f, 25.4f}) {
@@ -311,8 +319,19 @@ void codeBlockPageBreak(App& app) {
             openPrintPreview(app, app.hwnd);
             const int pages = (int)app.printPreviewBounds.size() - 1;
             check(app.showPrintPreview && app.printLayout && pages >= 3, context + ": the fixture runs to three pages");
-            const float pageW = app.printPreviewPageW;
+            const float margin = app.printPreviewMarginMm * 96.0f / 25.4f;
+            const float pageW = app.printPreviewPageW, pageH = app.printPreviewPageH;
             const auto& bounds = app.printPreviewBounds;
+
+            bool clipped = (int)app.printPreviewFrames.size() == pages;
+            for (const auto& frame : app.printPreviewFrames) {
+                const float bottom = frame.y + (frame.yEnd - frame.yStart);
+                clipped = clipped && frame.clip.left <= 0.0f && frame.clip.right >= pageW &&
+                          std::abs(frame.clip.top - frame.y) < 0.01f && std::abs(frame.clip.bottom - bottom) < 0.01f &&
+                          std::abs(frame.y - margin) < 0.01f &&
+                          (frame.yEnd > app.contentHeight || bottom <= pageH - margin + 0.01f);
+            }
+            check(clipped, context + ": every page's stretch is clipped to itself, between the margins");
 
             int rowCuts = 0;
             for (int i = 1; i < pages; ++i) {
@@ -358,10 +377,135 @@ void codeBlockPageBreak(App& app) {
                       at + ": the row under the cut opens the next page");
                 check(darkIn(after, w, h, above.left, at80 - rowH + 1, above.right, at80 - 1, ink) == 0,
                       at + ": the row above the cut is not drawn again over the next page");
+
+                // On the pages: the card runs to the cut and from it
+                const float cardX = margin + block->bounds.left + 3.0f;
+                printPreviewSetPage(app, i - 1);
+                check(previewDarkIn(app, cardX, margin + (cut - bounds[i - 1]) - 5.0f, cardX + 8.0f,
+                                    margin + (cut - bounds[i - 1]) - 1.0f, notPaper) > 0,
+                      at + ": the card runs down to the cut");
+                printPreviewSetPage(app, i);
+                check(previewDarkIn(app, cardX, margin + 1.0f, cardX + 8.0f, margin + 5.0f, notPaper) > 0,
+                      at + ": the card runs on from the top of the next page");
             }
             check(rowCuts >= 1, context + ": a page break falls between two rows of a code block");
+
+            for (int page = pages - 1; page >= 0; --page) {
+                printPreviewSetPage(app, page);
+                check(previewDarkIn(app, 0, 0, pageW, margin - 1, notPaper) == 0 &&
+                          previewDarkIn(app, 0, pageH - margin + 1, pageW, pageH, notPaper) == 0,
+                      context + ": page " + std::to_string(page + 1) + " prints nothing in its top and bottom margins");
+                check(previewDarkIn(app, margin, margin, pageW - margin, pageH - margin, ink) > 100,
+                      context + ": page " + std::to_string(page + 1) + " carries text");
+            }
             closePrintPreview(app, app.hwnd);
         }
+    }
+    app.printMarginMm = savedMargin;
+}
+
+// The page-edge fixture's second code block: its card and its first and
+// last rows
+struct EdgeBlock {
+    bool ok = false;
+    D2D1_RECT_F card{}, first{}, last{};
+};
+
+EdgeBlock edgeBlock(const App& app) {
+    EdgeBlock block;
+    if (app.codeBlocks.size() != 2) return block;
+    block.card = app.codeBlocks[1].bounds;
+    for (const auto& run : app.layoutTextRuns) {
+        if (!run.layout || run.bounds.top < block.card.top || run.bounds.bottom > block.card.bottom) continue;
+        if (!block.ok || run.bounds.top < block.first.top) block.first = run.bounds;
+        if (!block.ok || run.bounds.top > block.last.top) block.last = run.bounds;
+        block.ok = true;
+    }
+    return block;
+}
+
+// The smallest painted box around a run
+const App::LayoutRect* boxAround(const App& app, const D2D1_RECT_F& run) {
+    const App::LayoutRect* best = nullptr;
+    for (const auto& rect : app.layoutRects) {
+        const D2D1_RECT_F& r = rect.rect;
+        if (rect.color.a <= 0.0f || r.top > run.top || r.bottom < run.bottom || r.left > run.left || r.right <= run.left) continue;
+        if (!best || r.bottom - r.top < best->rect.bottom - best->rect.top) best = &rect;
+    }
+    return best;
+}
+
+// Pages are clipped to their stretch, so a break keeps a box's edges with
+// its first and last lines: the foot of the first page is moved through a
+// code block's card and a table's header band by the margin alone (the
+// fixture's lines are too short to wrap again), and the break is read back.
+void boxEdgesAtPageBreak(App& app) {
+    const auto fixture = std::filesystem::path(TINTA_PRINT_EXPORT_FIXTURE).parent_path() / "code-block-page-edge.md";
+    const std::string source = read(fixture);
+    auto doc = app.parser.parse(source);
+    check(!source.empty() && doc.success, "page edge fixture opens and parses");
+    if (!doc.success) return;
+    app.root = doc.root;
+    applyTheme(app, 0);
+    const float savedMargin = app.printMarginMm;
+    app.printPreviewPaper = 0;
+    app.printPreviewLandscape = false;
+    app.printMarginMm = 19.05f;
+    openPrintPreview(app, app.hwnd);
+    const EdgeBlock at = edgeBlock(app);
+    const float pageH = app.printPreviewPageH;
+    D2D1_RECT_F band{}, bandText{};
+    const size_t header = app.docText.find(L"Band");
+    for (const auto& run : app.layoutTextRuns) {
+        if (header == std::wstring::npos || !run.docLength || run.docStart > header || header >= run.docStart + run.docLength) continue;
+        if (const App::LayoutRect* box = boxAround(app, run.bounds)) {
+            band = box->rect;
+            bandText = run.bounds;
+        }
+    }
+    closePrintPreview(app, app.hwnd);
+    check(at.ok && at.first.top > at.card.top + 4.0f && at.last.bottom < at.card.bottom - 4.0f && at.last.top > at.first.bottom,
+          "the fixture's second block has rows inside a padded card");
+    check(bandText.top > band.top + 2.0f && band.bottom < at.card.top, "the table's header is set on a padded band");
+    if (!at.ok) return;
+
+    const float rowH = at.first.bottom - at.first.top;
+    struct Case { const char* name; float foot, cut; };
+    const Case cases[] = {
+        {"the header band's top padding", (band.top + bandText.top) / 2, band.top},
+        {"the card's top padding", (at.card.top + at.first.top) / 2, at.card.top},
+        {"the card's first row", at.first.top + rowH / 2, at.card.top},
+        {"the card's second row", at.first.bottom + rowH / 2, at.first.bottom},
+        {"the card's last row", at.last.top + rowH / 2, at.last.top},
+        {"the card's bottom padding", (at.last.bottom + at.card.bottom) / 2, at.last.top},
+        {"the gap under the card", at.card.bottom + 3.0f, at.card.bottom + 3.0f},
+    };
+    for (const Case& c : cases) {
+        const std::string name = std::string("the page's foot in ") + c.name;
+        app.printMarginMm = (pageH - c.foot) / 2.0f * 25.4f / 96.0f;
+        const bool inRange = app.printMarginMm >= 5.0f && app.printMarginMm <= 50.0f;
+        check(inRange, name + ": a margin of " + std::to_string(app.printMarginMm) + " mm puts it there");
+        if (!inRange) continue;
+        openPrintPreview(app, app.hwnd);
+        const EdgeBlock now = edgeBlock(app);
+        const bool laidOut = app.showPrintPreview && app.printPreviewBounds.size() > 2 && now.ok &&
+                             std::abs(now.card.top - at.card.top) < 0.01f && std::abs(now.card.bottom - at.card.bottom) < 0.01f;
+        check(laidOut, name + ": the lines stay as they were at this margin");
+        if (laidOut) {
+            const float cut = app.printPreviewBounds[1];
+            check(std::abs(cut - c.cut) < 0.05f,
+                  name + ": the page breaks at " + std::to_string(c.cut) + ", not " + std::to_string(cut));
+            if (std::abs(c.cut - at.card.top) < 0.01f && std::abs(cut - c.cut) < 0.05f) {
+                // The block opens the next page whole: padding, then its first row
+                const float margin = app.printPreviewMarginMm * 96.0f / 25.4f, pad = at.first.top - at.card.top;
+                printPreviewSetPage(app, 1);
+                check(previewDarkIn(app, margin + at.first.left, margin + 3.0f, margin + at.first.right, margin + pad - 1.0f, 160) == 0 &&
+                          previewDarkIn(app, margin + at.first.left, margin + pad, margin + at.first.right, margin + pad + rowH, 160) > 0 &&
+                          previewDarkIn(app, margin + at.card.left + 3.0f, margin + 3.0f, margin + at.card.left + 9.0f, margin + pad - 1.0f, 252) > 0,
+                      name + ": the card opens the next page with its top padding");
+            }
+        }
+        closePrintPreview(app, app.hwnd);
     }
     app.printMarginMm = savedMargin;
 }
@@ -435,6 +579,7 @@ int runPrintExportTests() {
     updateTextFormats(app);
     listMarkerPagination(app);
     codeBlockPageBreak(app);
+    boxEdgesAtPageBreak(app);
     if (!installed(app, L"SimSun") || !installed(app, L"Courier New") ||
         !installed(app, L"Georgia") || !installed(app, L"Cambria")) {
         std::cout << "Print and export: font checks skipped (fixture font missing), " << failures << " failures\n";

@@ -193,8 +193,8 @@ bool savePreview(App& app, const fs::path& path) {
            SUCCEEDED(encoder->Commit());
 }
 
-// A preview page drawn as print drew every page before paper export: the
-// page's stretch of the layout at the margins, nothing else
+// A preview page drawn as print draws a page that is no paper: the page's
+// stretch of the layout at the margins, clipped to itself, nothing else
 std::vector<uint8_t> pageAsBefore(App& app, int page) {
     std::vector<uint8_t> pixels;
     const UINT w = app.printPreviewPxW, h = app.printPreviewPxH;
@@ -216,8 +216,11 @@ std::vector<uint8_t> pageAsBefore(App& app, int page) {
     dc->Clear(D2D1::ColorF(1.0f, 1.0f, 1.0f));
     ComPtr<ID2D1SolidColorBrush> brush;
     dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
+    const float stretch = app.printPreviewBounds[page + 1] - app.printPreviewBounds[page];
+    dc->PushAxisAlignedClip(D2D1::RectF(0.0f, margin, app.printPreviewPageW, margin + stretch), D2D1_ANTIALIAS_MODE_ALIASED);
     drawLayoutRange(app, dc.Get(), brush.Get(), app.printPreviewBounds[page], app.printPreviewBounds[page + 1], margin,
                     margin);
+    dc->PopAxisAlignedClip();
     dc->SetTransform(D2D1::Matrix3x2F::Identity());
     D2D1_MAPPED_RECT mapped{};
     if (FAILED(dc->EndDraw()) || FAILED(staging->CopyFromBitmap(nullptr, target.Get(), nullptr)) ||
@@ -423,23 +426,24 @@ void notAPaper(App& app, const fs::path& fixtures) {
     for (size_t i = 0; i < app.printPreviewFrames.size(); ++i) {
         const auto& frame = app.printPreviewFrames[i];
         asBefore = asBefore && frame.page == (int)i && within(frame.x, margin, 0.001f) && within(frame.y, margin, 0.001f) &&
-                   frame.clip.right <= frame.clip.left && frame.yStart == app.printPreviewBounds[i] &&
-                   frame.yEnd == app.printPreviewBounds[i + 1];
+                   frame.clip.left <= 0.0f && frame.clip.right >= app.printPreviewPageW &&
+                   within(frame.clip.top, margin, 0.001f) &&
+                   within(frame.clip.bottom, margin + (frame.yEnd - frame.yStart), 0.001f) &&
+                   frame.yStart == app.printPreviewBounds[i] && frame.yEnd == app.printPreviewBounds[i + 1];
     }
-    check(asBefore, "a stretch a page at the margins, unclipped, as print always did");
+    check(asBefore, "a stretch a page at the margins, clipped to itself");
     const int pages = (int)app.printPreviewBounds.size() - 1;
     check(pages >= 2, "the notes run to more than a page");
     for (int page = pages - 1; page >= 0; --page) {
         printPreviewSetPage(app, page);
         const std::vector<uint8_t> before = pageAsBefore(app, page);
         check(!before.empty() && before == app.printPreviewPixels,
-              "page " + std::to_string(page + 1) + " draws pixel for pixel as print drew it before");
-        // A quote cut by the page break still runs into the margin, as
-        // it always did; the middle of the margins stays empty
-        const float mid = app.printPreviewPageW / 2;
-        check(inkIn(app, mid - 60, 0, mid + 60, margin - 1) == 0 &&
-                  inkIn(app, mid - 60, app.printPreviewPageH - margin + 1, mid + 60, app.printPreviewPageH) == 0,
-              "no number and no head on page " + std::to_string(page + 1));
+              "page " + std::to_string(page + 1) + " draws pixel for pixel as its stretch alone");
+        // A quote cut by the page break stops at the cut: nothing of the
+        // document in the margins, no number and no head
+        check(inkIn(app, 0, 0, app.printPreviewPageW, margin - 1) == 0 &&
+                  inkIn(app, 0, app.printPreviewPageH - margin + 1, app.printPreviewPageW, app.printPreviewPageH) == 0,
+              "the margins of page " + std::to_string(page + 1) + " stay empty");
     }
     // Toggled on, notes get numbers and their first heading as a head
     printPreviewToggle(app, PRINT_PAGE_NUMBERS);

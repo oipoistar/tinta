@@ -221,6 +221,49 @@ void leavePrintLayout(App& app, const SavedView& saved) {
     if (app.hwnd) InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
+// A box - a code block's card, a table row's band, a callout's tint - and
+// what it holds: its first line ends at headBottom and its last starts at
+// tailTop. From the box's top to headBottom, and from tailTop to its
+// bottom, a page break has only padding and an edge to cut off.
+struct BoxEdges {
+    bool found = false;
+    float headBottom = 0.0f, tailTop = 0.0f;
+};
+
+BoxEdges boxEdges(const App& app, const D2D1_RECT_F& box) {
+    BoxEdges edges;
+    float firstTop = 0.0f, lastBottom = 0.0f;
+    bool inlineBox = false;
+    auto hold = [&](const D2D1_RECT_F& atom) {
+        if (atom.bottom <= atom.top || atom.bottom <= box.top || atom.top >= box.bottom) return;
+        // A line that crosses an edge: the box is a chip or a mark set in
+        // a line of text, and breaks with that line
+        if (atom.top < box.top - 0.01f || atom.bottom > box.bottom + 0.01f) {
+            inlineBox = true;
+            return;
+        }
+        if (atom.right <= box.left || atom.left >= box.right) return;
+        if (!edges.found || atom.top < firstTop - 0.01f) {
+            firstTop = atom.top;
+            edges.headBottom = atom.bottom;
+        } else if (atom.top < firstTop + 0.01f) {
+            edges.headBottom = std::max(edges.headBottom, atom.bottom);
+        }
+        if (!edges.found || atom.bottom > lastBottom + 0.01f) {
+            lastBottom = atom.bottom;
+            edges.tailTop = atom.top;
+        } else if (atom.bottom > lastBottom - 0.01f) {
+            edges.tailTop = std::min(edges.tailTop, atom.top);
+        }
+        edges.found = true;
+    };
+    for (const auto& run : app.layoutTextRuns) hold(run.bounds);
+    for (const auto& bmp : app.layoutBitmaps) hold(bmp.destRect);
+    for (const auto& shape : app.layoutShapes) hold(shape.rect);
+    if (inlineBox) edges.found = false;
+    return edges;
+}
+
 // Where a stretch of the document that starts at pageTop and may run
 // pageContentH ends. Breaks avoid slicing text lines, images, and diagram
 // shapes by pulling the cut above any straddling atom; an atom taller than
@@ -245,6 +288,16 @@ float breakAfter(const App& app, float pageTop, float pageContentH, bool tallerF
         // Shrink bands page-break as a unit: a scaled diagram split
         // across pages would render discontinuously
         for (const auto& band : app.printShrinkBands) consider(band.top, band.bottom);
+        // A box keeps its edges: pages are clipped to their stretch, so a
+        // cut in a box's padding would leave a sliver of it alone on a page
+        for (const auto& rect : app.layoutRects) {
+            if (!(rect.rect.top < adjusted && rect.rect.bottom > adjusted)) continue;
+            if (rect.color.a <= 0.0f && !(rect.strokeWidth > 0.0f && rect.stroke.a > 0.0f)) continue;
+            const BoxEdges edges = boxEdges(app, rect.rect);
+            if (!edges.found) continue;
+            consider(rect.rect.top, edges.headBottom);
+            consider(edges.tailTop, rect.rect.bottom);
+        }
         if (adjusted == proposed) break;
         proposed = adjusted;
     }
@@ -557,7 +610,12 @@ std::vector<App::PrintFrame> paperFrames(const App& app, const PaperSetup& setup
         breaks.push_back(end + 1.0f);  // final page sentinel
         float y = 0.0f;
         for (size_t i = 0; i < breaks.size(); i++) {
-            frames.push_back({(int)i, y, breaks[i], geo.margin, geo.margin, {}});
+            // A page is clipped to its stretch, across the paper's width: a
+            // card, a quote's bar or a table's lines cut by the break stop
+            // at the cut, where they ran on through the margin to the
+            // paper's edge and under the page number
+            const D2D1_RECT_F clip = D2D1::RectF(0.0f, geo.margin, geo.pageW, geo.margin + (breaks[i] - y));
+            frames.push_back({(int)i, y, breaks[i], geo.margin, geo.margin, clip});
             y = breaks[i];
         }
         return frames;

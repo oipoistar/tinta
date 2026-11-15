@@ -1244,7 +1244,7 @@ struct App {
         int page = 0;
         float yStart = 0, yEnd = 0;  // document Y
         float x = 0, y = 0;          // where yStart lands on the page
-        D2D1_RECT_F clip{};          // the column's box on the page; empty draws unclipped
+        D2D1_RECT_F clip{};          // the stretch's box on the page; empty draws unclipped
     };
     std::vector<PrintFrame> printPreviewFrames;
     // Set while print lays a paper out: its front matter lays out as a
