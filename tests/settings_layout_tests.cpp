@@ -265,7 +265,7 @@ int runSettingsLayoutTests(const char* fixture) {
     }
 
     // --- Every page, in every language, at two widths, light and dark ---
-    const std::vector<int> pages[3] = {{2, 5, 1}, {4, 2, 2}, {7, 2}};  // #323's row in General, #322's in Editor
+    const std::vector<int> pages[3] = {{2, 5, 1}, {5, 2, 2}, {7, 2}};  // #323's row in General, #324's in Appearance, #322's in Editor
     const char* languages[] = {"en", "de", "fr", "it", "ru", "zh", "ja", "ko"};
     int trimmedWide = 0, trimmedNarrow = 0;
     for (const char* language : languages) {
@@ -274,7 +274,7 @@ int runSettingsLayoutTests(const char* fixture) {
             applyTheme(app, theme);
             for (int w : {1050, 650}) {
                 for (int section = 0; section < 3; section++) {
-                    open(app, section, w, 900);
+                    open(app, section, w, 960);  // tall enough for the longest page, Appearance (#324)
                     const std::string name = std::string(language) + " page " + std::to_string(section) + " at " +
                                              std::to_string(w) + (theme ? " dark" : " light");
                     check(!draw(app).pixels.empty(), name + ": the dialog draws");
@@ -327,19 +327,21 @@ int runSettingsLayoutTests(const char* fixture) {
               "at 1050 the sections are a rail at the left, a dialog's padding from the page");
         check(about(app.settingsGroupLabels[0].left, app.settingsRows[0].text.left),
               "group labels and the rows' names share one left edge");
-        // The two reading widths, the heading lines and folding are one group; themes are another
-        check(app.settingsRows[0].group == 0 && app.settingsRows[3].group == 0 && app.settingsRows[4].group == 1 &&
-                  app.settingsRows[5].group == 1 && app.settingsRows[6].group == 2,
+        // The two reading widths, the heading lines, code wrapping (#324) and folding are one group;
+        // themes are another
+        check(app.settingsRows[0].group == 0 && app.settingsRows[4].group == 0 && app.settingsRows[5].group == 1 &&
+                  app.settingsRows[6].group == 1 && app.settingsRows[7].group == 2,
               "Follow Windows theme and Themes are neighbours in a group of their own");
         const D2D1_RECT_F* follow = hitOf(app, SET_TOGGLE_FOLLOW);
         const D2D1_RECT_F* newTheme = hitOf(app, SET_NEW_THEME);
-        check(follow && newTheme && inside(*follow, app.settingsRows[4].row) && inside(*newTheme, app.settingsRows[5].row),
+        check(follow && newTheme && inside(*follow, app.settingsRows[5].row) && inside(*newTheme, app.settingsRows[6].row),
               "each in its own row");
         check(about(height(app.settingsRows[0].row), (rowTwoLine + sp24) * s) &&
                   about(height(app.settingsRows[2].row), rowTwoLine * s),
               "a slider's row is a two-line row and the slider's line");
-        // Before: eight cards of 58 or 84 with 10 between, 718 in all
-        check(height(panel) / s <= 718.0f, "the Appearance page is no taller than it was as eight cards");
+        // Before: eight cards of 58 or 84 with 10 between, 718 in all; a ninth setting since (#324)
+        check(height(panel) / s <= 718.0f + rowTwoLine,
+              "the Appearance page is no taller than it was as eight cards, but for the row added since");
     }
 
     // --- Ink: what explains a setting still reads at 4.5 to 1 ------------
@@ -460,13 +462,14 @@ int runSettingsLayoutTests(const char* fixture) {
         open(app, 1, 430, 1100);
         draw(app);
         structure(app, "at 430", pages[1], false);
-        const auto& themes = app.settingsRows[5];
+        const auto& themes = app.settingsRows[6];
         check(themes.stacked && about(height(themes.row), (rowTwoLine + controlBox + sp8) * s) &&
                   themes.control.top >= themes.text.bottom && about(themes.control.left, themes.text.left),
               "at 430 the four theme buttons go under their label, on its left edge");
         const D2D1_RECT_F* newTheme = hitOf(app, SET_NEW_THEME);
         check(newTheme && inside(*newTheme, themes.row), "and stay inside their row");
-        check(!app.settingsRows[4].stacked && !app.settingsRows[2].stacked, "a switch stays beside its label");
+        check(!app.settingsRows[5].stacked && !app.settingsRows[3].stacked && !app.settingsRows[2].stacked,
+              "a switch stays beside its label");
         saveSettingsPreview(app, dir / "frames" / "narrow-430.png");
     }
 

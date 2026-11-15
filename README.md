@@ -95,6 +95,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Open in the editor** - Settings → Editor → **Open Markdown files in** picks where a Markdown file opens: the reading view (as always), or the editor in Live or on its source, at the place the file was left. `E` and `Esc` still go between reading and editing, and a tab stays as you left it. Diagrams, text files and sheets open as before. Kept as `openMode=reading`, `live` or `source` in `settings.ini`
 - **Emoji shortcodes** - `:rocket:` and friends render as real emoji
 - **Fit to width** - Wide tables and diagrams grow a Fit button that shrinks them to the reading column
+- **Wrapped code** - A line of a code block that is longer than the block wraps at its edge, on the page, in print and PDF and in the HTML export, so a long line is read without scrolling sideways. Settings → Appearance → **Wrap long lines in code blocks** (`wrapCode=0` in `settings.ini`) keeps every line on one row instead
 - **Draft recovery** - Unsaved quick notes are stashed continuously and offered back on the next launch. With **Close without asking** (Settings → Editor), closing Tinta skips the save prompt and keeps unsaved edits as drafts for the next launch
 - **Create on click** - Clicking a missing file reference offers to create the file and opens it ready to type
 - **Text-file references** - `.txt`, `.json`, `.yaml` and friends link like Markdown files and open as highlighted documents

@@ -111,31 +111,42 @@ void printLayout(App& app) {
           "printed text spans the page margins despite a 70% reading width");
     check(!app.headings.empty() && app.headings[0].y < 40.0f,
           "the first page starts at its top margin, not below a title strip");
-    int shrunk = 0;
-    check(app.codeBlocks.size() == 3, "the fixture prints its three code blocks");
-    for (const auto& block : app.codeBlocks) {
-        // The card is the background rect at the block's top-left; long
-        // lines widen it past the column
-        const auto& b = block.bounds;
-        float right = b.right;
-        for (const auto& r : app.layoutRects) {
-            if (std::abs(r.rect.top - b.top) < 0.5f && std::abs(r.rect.left - b.left) < 0.5f)
-                right = std::max(right, r.rect.right);
+    // The code blocks wider than the page, each shrunk to the margins
+    auto shrunkBlocks = [&] {
+        int shrunk = 0;
+        check(app.codeBlocks.size() == 3, "the fixture prints its three code blocks");
+        for (const auto& block : app.codeBlocks) {
+            // The card is the background rect at the block's top-left; long
+            // lines widen it past the column
+            const auto& b = block.bounds;
+            float right = b.right;
+            for (const auto& r : app.layoutRects) {
+                if (std::abs(r.rect.top - b.top) < 0.5f && std::abs(r.rect.left - b.left) < 0.5f)
+                    right = std::max(right, r.rect.right);
+            }
+            check(std::abs(b.left) < 0.5f, "every code block starts at the left margin");
+            if (right <= contentW + 0.5f) {
+                check(std::abs(right - contentW) < 0.5f, "a code block ends at the right margin");
+                continue;
+            }
+            ++shrunk;
+            bool aligned = false;
+            for (const auto& band : app.printShrinkBands) {
+                if (b.top >= band.top - 0.5f && b.bottom <= band.bottom + 0.5f)
+                    aligned = std::abs(right * band.scale - contentW) < 1.0f;
+            }
+            check(aligned, "a code block wider than the page shrinks to the same margins");
         }
-        check(std::abs(b.left) < 0.5f, "every code block starts at the left margin");
-        if (right <= contentW + 0.5f) {
-            check(std::abs(right - contentW) < 0.5f, "a code block ends at the right margin");
-            continue;
-        }
-        ++shrunk;
-        bool aligned = false;
-        for (const auto& band : app.printShrinkBands) {
-            if (b.top >= band.top - 0.5f && b.bottom <= band.bottom + 0.5f)
-                aligned = std::abs(right * band.scale - contentW) < 1.0f;
-        }
-        check(aligned, "a code block wider than the page shrinks to the same margins");
-    }
-    check(shrunk == 1, "the wide code block is the one that shrinks");
+        return shrunk;
+    };
+    // Long lines wrap in print as on the page (#324), so no block is too
+    // wide for the paper; with the setting off the wide one shrinks as it did
+    check(shrunkBlocks() == 0, "with long lines wrapping, no code block has to shrink");
+    closePrintPreview(app, app.hwnd);
+    app.wrapCode = false;
+    openPrintPreview(app, app.hwnd);
+    check(shrunkBlocks() == 1, "with wrapping off, the wide code block is the one that shrinks");
+    app.wrapCode = true;
 
     closePrintPreview(app, app.hwnd);
     check(!app.printLayout && app.theme.fontFamily == screenFont &&

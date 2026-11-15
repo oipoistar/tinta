@@ -432,6 +432,9 @@ struct Settings {
     // Separator line under level 1 and 2 headings (#154): off renders
     // the heading text alone
     bool headingRules = true;
+    // Long lines in code blocks wrap at the block's edge (#324): off, the
+    // block grows as wide as its longest line and the page scrolls sideways
+    bool wrapCode = true;
     // Folding sections in the reading view (#316): the arrows beside
     // headings, and whether documents open with every section folded
     bool foldSections = true;
@@ -1037,6 +1040,7 @@ struct App {
     int readingWidthPct = 100;  // mirrors Settings (#82); 100 = full width
     int zenWidthPct = 60;
     bool headingRules = true;   // mirrors Settings (#154)
+    bool wrapCode = true;       // mirrors Settings (#324)
     // Folding sections (#316), mirroring Settings: the arrows beside
     // headings, and documents opening with every section folded
     bool foldSections = true;

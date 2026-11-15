@@ -1908,6 +1908,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.readingWidthPct = app->readingWidthPct;
                 settings.zenWidthPct = app->zenWidthPct;
                 settings.headingRules = app->headingRules;
+                settings.wrapCode = app->wrapCode;
                 settings.foldSections = app->foldSections;
                 settings.foldOnOpen = app->foldOnOpen;
                 settings.tocOnLeft = app->tocOnLeft;
@@ -2032,6 +2033,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.readingWidthPct = savedSettings.readingWidthPct;
     app.zenWidthPct = savedSettings.zenWidthPct;
     app.headingRules = savedSettings.headingRules;
+    app.wrapCode = savedSettings.wrapCode;
     app.foldSections = savedSettings.foldSections;
     app.foldOnOpen = savedSettings.foldOnOpen;
     app.openMode = savedSettings.openMode;

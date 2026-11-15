@@ -2656,7 +2656,7 @@ std::vector<SettingsGroupSpec> settingsPage(App& app, int section) {
         const SettingsRowSpec themes{settingsChipsWidth(
             app, {tr(app, "settings.browse"), tr(app, "settings.edit"), tr(app, "settings.import"),
                   tr(app, "settings.new")})};
-        page.push_back({tr(app, "settings.group.reading"), {slider, slider, toggle, folding}});
+        page.push_back({tr(app, "settings.group.reading"), {slider, slider, toggle, toggle, folding}});
         page.push_back({tr(app, "settings.group.theme"), {toggle, themes}});
         page.push_back({tr(app, "settings.group.window"), {side, toggle}});
     } else if (section == 2) {
@@ -3125,6 +3125,7 @@ void renderSettingsOverlay(App& app) {
                app.zenWidthPct, SET_SLIDER_ZEN, 1);
         toggleRow("settings.heading_rules", "settings.heading_rules.hint",
                   app.headingRules, SET_TOGGLE_HEADRULES);
+        toggleRow("settings.wrap_code", "settings.wrap_code.hint", app.wrapCode, SET_TOGGLE_WRAPCODE);
         {
             // Folding sections (#316): Off, On (arrows beside headings), or
             // Folded (documents open with every section folded). Each

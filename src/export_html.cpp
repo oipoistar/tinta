@@ -1610,6 +1610,9 @@ std::string themeCss(const App& app, const std::string& bodyFont,
            ";padding:2px 6px;border-radius:4px;font-size:0.9em;}";
     css += "pre{background:" + colorCss(t.codeBackground) +
            ";padding:14px 16px;border-radius:8px;overflow-x:auto;}";
+    // Long lines wrap as they do in the viewer (#324); off, the block
+    // scrolls sideways
+    if (app.wrapCode) css += "pre{white-space:pre-wrap;overflow-wrap:anywhere;}";
     css += "pre code{background:none;padding:0;}";
     if (t.inlineCode) {
         css += "pre code{color:" + colorCss(t.code) + ";}";

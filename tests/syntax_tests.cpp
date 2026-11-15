@@ -262,6 +262,7 @@ void layoutTests(App& app) {
                          qmd::ElementType::BlockQuote, qmd::ElementType::MathInline, qmd::ElementType::MathDisplay})
             check(counts[type] > 0, "surrounding Markdown and math survive parsing");
         app.root = doc.root;
+        app.wrapCode = false;  // a row a line, whatever the window's width (#324)
         layoutDocument(app);
         check(app.codeBlocks.size() == code.size(), "every mixed code block renders");
         float scale = app.contentScale * app.zoomFactor;
@@ -288,6 +289,35 @@ void layoutTests(App& app) {
         check(app.layoutTextRuns.size() == completeColors.size(), "incremental syntax run count matches full layout");
         for (size_t r = 0; r < app.layoutTextRuns.size() && r < completeColors.size(); ++r)
             check(sameColor(app.layoutTextRuns[r].color, completeColors[r]), "incremental and full syntax colours match");
+
+        // Long lines wrapped (#324), in a narrow window so that many are:
+        // the same text and blocks, and the same colours laid out bit by
+        // bit as all at once
+        const int width = app.width;
+        app.wrapCode = true;
+        app.width = 520;
+        layoutDocument(app);
+        check(app.docText == completeText, "wrapped, the document's text is the same");
+        check(app.codeBlocks.size() == completeBlocks.size(), "wrapped, every code block is there");
+        bool taller = false;
+        for (size_t b = 0; b < app.codeBlocks.size() && b < completeBlocks.size(); ++b) {
+            check(app.codeBlocks[b].codeText == completeBlocks[b].codeText, "wrapped, the copy text is unchanged");
+            const float was = completeBlocks[b].bounds.bottom - completeBlocks[b].bounds.top;
+            const float is = app.codeBlocks[b].bounds.bottom - app.codeBlocks[b].bounds.top;
+            check(is > was - .1f, "wrapped, no block loses a row");
+            taller = taller || is > was + 19.0f * scale;
+        }
+        check(taller, "wrapped, a block with a long line gains rows");
+        std::vector<D2D1_COLOR_F> wrappedColors;
+        for (const auto& run : app.layoutTextRuns) wrappedColors.push_back(run.color);
+        check(wrappedColors.size() >= completeColors.size(), "wrapped, no coloured stretch is lost");
+        layoutDocumentViewportFirst(app);
+        ensureLayoutComplete(app);
+        check(app.docText == completeText, "wrapped, incremental layout preserves the complete document text");
+        check(app.layoutTextRuns.size() == wrappedColors.size(), "wrapped, incremental syntax run count matches full layout");
+        for (size_t r = 0; r < app.layoutTextRuns.size() && r < wrappedColors.size(); ++r)
+            check(sameColor(app.layoutTextRuns[r].color, wrappedColors[r]), "wrapped, incremental and full syntax colours match");
+        app.width = width;
     }
 }
 }

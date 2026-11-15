@@ -2910,6 +2910,55 @@ static std::string colorHexNoHash(const D2D1_COLOR_F& c) {
     return buf;
 }
 
+// A row of a code line too long for its block (#324): where it starts in
+// the line, how much of the line it takes, and how much of that is drawn.
+// The spaces a row ends on hang past the edge unseen, as in any wrapped
+// text, so they are left out of what is drawn.
+struct CodeRow {
+    size_t start = 0, length = 0, drawn = 0;
+};
+
+// White space a row may end on without drawing it. DirectWrite lets a tab
+// hang past the edge as it does a space, but counts only the spaces.
+static bool codeRowHangs(wchar_t c) {
+    return c == L' ' || c == L'\t' || c == L'\r' || c == L'\v' || c == L'\f' || c == 0x85 || c == 0x1680 ||
+           (c >= 0x2000 && c <= 0x200A) || c == 0x2028 || c == 0x2029 || c == 0x3000;
+}
+
+// Where a code line goes over to its next rows: at a space or another
+// place a line may break where the row has one, inside a word where it has
+// none. DirectWrite decides, with the block's own font, features and
+// fallback, so a row of mixed scripts is measured as it is drawn.
+static void codeRows(App& app, const std::wstring& line, float width, float lineHeight, std::vector<CodeRow>& rows) {
+    rows.clear();
+    IDWriteTextLayout* layout = nullptr;
+    app.dwriteFactory->CreateTextLayout(line.data(), (UINT32)line.length(), app.codeFormat, width, lineHeight,
+                                        &layout);
+    if (!layout) return;
+    if (app.codeTypography) layout->SetTypography(app.codeTypography, {0, (UINT32)line.length()});
+    if (app.fontFallback) {
+        IDWriteTextLayout2* layout2 = nullptr;
+        if (SUCCEEDED(layout->QueryInterface(__uuidof(IDWriteTextLayout2), reinterpret_cast<void**>(&layout2)))) {
+            layout2->SetFontFallback(app.fontFallback);
+            layout2->Release();
+        }
+    }
+    layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);  // which cuts a word longer than the row
+    UINT32 count = 0;
+    layout->GetLineMetrics(nullptr, 0, &count);
+    std::vector<DWRITE_LINE_METRICS> lines(count);
+    if (count > 0 && SUCCEEDED(layout->GetLineMetrics(lines.data(), count, &count))) {
+        size_t at = 0;
+        for (UINT32 i = 0; i < count; i++) {
+            size_t drawn = lines[i].length - std::min(lines[i].length, lines[i].trailingWhitespaceLength);
+            while (drawn > 0 && codeRowHangs(line[at + drawn - 1])) --drawn;
+            rows.push_back({at, lines[i].length, drawn});
+            at += lines[i].length;
+        }
+    }
+    layout->Release();
+}
+
 static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float indent, float maxWidth) {
     std::string code;
     for (const auto& child : elem->children) {
@@ -3140,39 +3189,30 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
 
     app.docText += L"\n";
 
-    float blockHeight = lineCount * lineHeight + pad[0] + pad[2];
-    size_t bgRectIndex = app.layoutRects.size();
-    // Peeking a plain-text file: the panel already frames the content,
-    // so the whole-file wrapper block skips its own card
-    bool frameless = app.peekFrameless;
-    if (!frameless) {
-        App::LayoutRect card;
-        card.rect = D2D1::RectF(indent, y, indent + maxWidth, y + blockHeight);
-        card.color = css.has(Prop::BackgroundColor) ? page::color(css->backgroundColor) : app.theme.codeBackground;
-        if (css.has(Prop::BorderTopLeftRadius)) card.radius = page::px(app, css->radius[0]);
-        if (css.has(Prop::BorderTopWidth) || css.has(Prop::BorderTopStyle)) {
-            const css::Border& edge = css->border[0];
-            card.strokeWidth = edge.style == css::LineStyle::None ? 0.0f : page::px(app, edge.width);
-            card.stroke = css.has(Prop::BorderTopColor) ? page::color(edge.color) : app.theme.blockquoteBorder;
-        }
-        app.layoutRects.push_back(card);
-        const size_t before = app.layoutRects.size();
-        addShadow(app, bgRectIndex, card.rect, card.radius, css);
-        bgRectIndex += app.layoutRects.size() - before;  // the card moved up past its shadow
-    }
-
     std::wstring wcode = toWide(code);
 
-    // Track code block for copy button
-    app.codeBlocks.push_back({
-        D2D1::RectF(indent, y, indent + maxWidth, y + blockHeight),
-        wcode
-    });
+    // Long lines wrap at the block's inner edge (#324). With the setting
+    // off, or in a block too narrow for a few letters, the block grows as
+    // wide as its longest line and the page scrolls sideways.
+    const float innerWidth = maxWidth - pad[1] - pad[3];
+    const bool wraps = app.wrapCode && innerWidth >= lineHeight * 2.0f;
+    int wrappedRows = 0;  // the rows after each line's first
+
+    const float blockTop = y;
     float textY = y + pad[0];
     SyntaxState syntaxState;
     size_t codeDocStart = app.docText.size();
     size_t lineStart = 0;
     float maxLineWidth = 0.0f;
+
+    // A stretch of a line in one colour, and its layout until a row takes it
+    struct Piece {
+        size_t start = 0, length = 0;
+        D2D1_COLOR_F color{};
+        LayoutInfo info;
+    };
+    std::vector<Piece> pieces;
+    std::vector<CodeRow> rows;
 
     while (lineStart < wcode.length()) {
         size_t lineEnd = wcode.find(L'\n', lineStart);
@@ -3180,14 +3220,13 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
 
         std::wstring wline = wcode.substr(lineStart, lineEnd - lineStart);
         if (!wline.empty() && wline.back() == L'\r') wline.pop_back();
+        const std::wstring_view lineView(wline);
 
         size_t lineDocStart = codeDocStart + lineStart;
-        float lineWidth = 0.0f;
-        size_t lineRun = (size_t)-1;
 
+        pieces.clear();
         if (language > 0) {
             std::vector<SyntaxToken> tokens = tokenizeLine(wline, language, syntaxState);
-            float tokenX = indent + pad[3];
 
             // Merge consecutive same-color tokens into one layout — a line
             // typically collapses to a handful of color runs instead of one
@@ -3213,51 +3252,122 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
                     tj++;
                 }
 
-                LayoutInfo info = createLayout(app, runText, app.codeFormat, lineHeight, app.codeTypography);
-                float runWidth = info.width;
-
-                D2D1_POINT_2F pos = D2D1::Point2F(tokenX, textY);
-                D2D1_RECT_F bounds = D2D1::RectF(tokenX, textY, tokenX + runWidth, textY + lineHeight);
-                addTextRun(app, std::move(info), pos, bounds, runColor,
-                           lineDocStart, 0, false);
-
-                tokenX += runWidth;
-                lineWidth += runWidth;
+                Piece piece;
+                piece.start = (size_t)(runText.data() - wline.data());
+                piece.length = runText.size();
+                piece.color = runColor;
+                pieces.push_back(std::move(piece));
                 ti = tj;
             }
-        } else {
-            LayoutInfo info = createLayout(app, wline, app.codeFormat, lineHeight, app.codeTypography);
-            lineWidth = info.width;
-            D2D1_POINT_2F pos = D2D1::Point2F(indent + pad[3], textY);
-            D2D1_RECT_F bounds = D2D1::RectF(indent + pad[3], textY,
-                                             indent + pad[3] + lineWidth, textY + lineHeight);
-            size_t runsBefore = app.layoutTextRuns.size();
-            addTextRun(app, std::move(info), pos, bounds, codeText,
-                       lineDocStart, wline.length(), false);
-            if (app.layoutTextRuns.size() > runsBefore) {
-                lineRun = app.layoutTextRuns.size() - 1;
+        } else if (!wline.empty()) {
+            Piece piece;
+            piece.length = wline.length();
+            piece.color = codeText;
+            pieces.push_back(std::move(piece));
+        }
+
+        // The line as it is: most lines fit their block and are done
+        float lineWidth = 0.0f;
+        for (Piece& piece : pieces) {
+            piece.info = createLayout(app, lineView.substr(piece.start, piece.length), app.codeFormat, lineHeight,
+                                      app.codeTypography);
+            lineWidth += piece.info.width;
+        }
+
+        // One row: the pieces of [from, from + drawn) side by side, and the
+        // row's place in the document, which runs on over the spaces a
+        // wrapped row ends on
+        auto layRow = [&](size_t from, size_t length, size_t drawn) {
+            float x = indent + pad[3];
+            float rowWidth = 0.0f;
+            size_t rowRun = (size_t)-1;
+            for (Piece& piece : pieces) {
+                const size_t a = std::max(piece.start, from);
+                const size_t b = std::min(piece.start + piece.length, from + drawn);
+                if (a >= b) continue;
+                LayoutInfo info;
+                if (a == piece.start && b == piece.start + piece.length) {
+                    info = piece.info;
+                    piece.info = {};
+                } else {
+                    info = createLayout(app, lineView.substr(a, b - a), app.codeFormat, lineHeight,
+                                        app.codeTypography);
+                }
+                const float runWidth = info.width;
+                D2D1_POINT_2F pos = D2D1::Point2F(x, textY);
+                D2D1_RECT_F bounds = D2D1::RectF(x, textY, x + runWidth, textY + lineHeight);
+                if (language > 0) {
+                    addTextRun(app, std::move(info), pos, bounds, piece.color, lineDocStart, 0, false);
+                } else {
+                    size_t runsBefore = app.layoutTextRuns.size();
+                    addTextRun(app, std::move(info), pos, bounds, piece.color, lineDocStart + a, b - a, false);
+                    if (app.layoutTextRuns.size() > runsBefore) rowRun = app.layoutTextRuns.size() - 1;
+                }
+                x += runWidth;
+                rowWidth += runWidth;
             }
+            if (length > 0) {
+                D2D1_RECT_F rowBounds = D2D1::RectF(indent + pad[3], textY,
+                    indent + pad[3] + rowWidth, textY + lineHeight);
+                // Syntax-highlighted lines have no single covering layout;
+                // monospace interpolation stays accurate there
+                addTextRect(app, rowBounds, lineDocStart + from, length, rowRun);
+            }
+            textY += lineHeight;
+            maxLineWidth = std::max(maxLineWidth, rowWidth);
+        };
+
+        rows.clear();
+        if (wraps && lineWidth > innerWidth) codeRows(app, wline, innerWidth, lineHeight, rows);
+        if (!rows.empty()) {
+            for (const CodeRow& row : rows) layRow(row.start, row.length, row.drawn);
+            wrappedRows += (int)rows.size() - 1;
+            // What no row took whole was laid out again in its parts
+            for (Piece& piece : pieces) {
+                if (piece.info.layout) piece.info.layout->Release();
+                piece.info = {};
+            }
+        } else {
+            layRow(0, wline.length(), wline.length());
         }
 
-        if (!wline.empty()) {
-            D2D1_RECT_F lineBounds = D2D1::RectF(indent + pad[3], textY,
-                indent + pad[3] + lineWidth, textY + lineHeight);
-            // Syntax-highlighted lines have no single covering layout;
-            // monospace interpolation stays accurate there
-            addTextRect(app, lineBounds, lineDocStart, wline.length(), lineRun);
-        }
-
-        maxLineWidth = std::max(maxLineWidth, lineWidth);
-        textY += lineHeight;
         if (lineEnd == wcode.length()) break;
         lineStart = lineEnd + 1;
     }
 
+    float blockHeight = (lineCount + wrappedRows) * lineHeight + pad[0] + pad[2];
+    size_t bgRectIndex = app.layoutRects.size();
+    // Peeking a plain-text file: the panel already frames the content,
+    // so the whole-file wrapper block skips its own card
+    bool frameless = app.peekFrameless;
+    if (!frameless) {
+        App::LayoutRect card;
+        card.rect = D2D1::RectF(indent, blockTop, indent + maxWidth, blockTop + blockHeight);
+        card.color = css.has(Prop::BackgroundColor) ? page::color(css->backgroundColor) : app.theme.codeBackground;
+        if (css.has(Prop::BorderTopLeftRadius)) card.radius = page::px(app, css->radius[0]);
+        if (css.has(Prop::BorderTopWidth) || css.has(Prop::BorderTopStyle)) {
+            const css::Border& edge = css->border[0];
+            card.strokeWidth = edge.style == css::LineStyle::None ? 0.0f : page::px(app, edge.width);
+            card.stroke = css.has(Prop::BorderTopColor) ? page::color(edge.color) : app.theme.blockquoteBorder;
+        }
+        app.layoutRects.push_back(card);
+        const size_t before = app.layoutRects.size();
+        addShadow(app, bgRectIndex, card.rect, card.radius, css);
+        bgRectIndex += app.layoutRects.size() - before;  // the card moved up past its shadow
+    }
+
+    // Track code block for copy button
+    app.codeBlocks.push_back({
+        D2D1::RectF(indent, blockTop, indent + maxWidth, blockTop + blockHeight),
+        wcode
+    });
+
     // Long code lines used to be clipped at the block edge with no way to
     // reach them — extend the block background and the document width so
-    // wide code participates in horizontal scrolling like diagrams do
+    // wide code participates in horizontal scrolling like diagrams do.
+    // Wrapped rows fit; one that is a rounding wider leaves the block alone.
     float widestExtent = maxLineWidth + pad[1] + pad[3];
-    if (widestExtent > maxWidth) {
+    if (widestExtent > maxWidth + (wraps ? 1.0f : 0.0f)) {
         if (!frameless) {
             app.layoutRects[bgRectIndex].rect.right = indent + widestExtent;
         }

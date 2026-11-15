@@ -520,6 +520,8 @@ void testMixedFixture(App& app) {
                      qmd::ElementType::MathDisplay})
         check(counts[type] > 0, "mixed content survives parsing");
     app.root = doc.root;
+    // A row a line: "Wrap long lines in code blocks" off (#324)
+    app.wrapCode = false;
     layoutDocument(app);
     const int rows[] = {1, 1, 2, 4, 1, 1, 1, 1, 1};
     check(app.codeBlocks.size() == std::size(rows), "all nine mixed code blocks render");
@@ -533,6 +535,33 @@ void testMixedFixture(App& app) {
     check(app.docText.find(L"Final heading") != std::wstring::npos,
           "content following the final code block renders");
     check(app.contentWidth > app.width, "wide code still enables horizontal scrolling");
+
+    // On, as it is in a new setup: the wide line goes over rows, the page
+    // is no wider than the window, and the blocks whose lines fit are as
+    // they were
+    std::vector<float> heights;
+    for (const auto& block : app.codeBlocks) heights.push_back(block.bounds.bottom - block.bounds.top);
+    app.wrapCode = true;
+    layoutDocument(app);
+    check(app.codeBlocks.size() == heights.size(), "wrapped, all nine mixed code blocks render");
+    check(app.contentWidth <= app.width + 0.5f, "wrapped, wide code leaves the page as wide as the window");
+    int taller = 0;
+    for (size_t i = 0; i < app.codeBlocks.size() && i < heights.size(); ++i) {
+        const auto& bounds = app.codeBlocks[i].bounds;
+        const float rowsAdded = (bounds.bottom - bounds.top - heights[i]) / (20.0f * scale);
+        check(rowsAdded > -0.01f && std::abs(rowsAdded - std::round(rowsAdded)) < 0.01f,
+              "wrapped, a block is taller by whole rows or not at all");
+        if (rowsAdded > 0.5f) ++taller;
+        if (i) check(bounds.top > app.codeBlocks[i-1].bounds.bottom, "wrapped, mixed code blocks never overlap");
+        for (const auto& item : app.layoutRects) {
+            if (std::abs(item.rect.top - bounds.top) < 0.5f && std::abs(item.rect.left - bounds.left) < 0.5f) {
+                check(item.rect.right <= bounds.right + 0.5f, "wrapped, no block's background grows past the column");
+            }
+        }
+    }
+    check(taller >= 1, "wrapped, the block with the wide line gains rows");
+    check(app.docText.find(L"Final heading") != std::wstring::npos,
+          "wrapped, content following the final code block renders");
 }
 }
 
