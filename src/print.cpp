@@ -277,8 +277,12 @@ void drawDocumentRange(App& app, ID2D1DeviceContext* dc,
                        float yStart, float yEnd,
                        float offsetX, float offsetY,
                        D2D1_DRAW_TEXT_OPTIONS textOptions = D2D1_DRAW_TEXT_OPTIONS_NONE) {
+    // What ends exactly at yStart belongs to the stretch before: a page break
+    // is cut along the top of a row, and the row above it, whose bottom is
+    // that same Y, must not be replayed over the next page as well. A rule
+    // with no height of its own goes with the stretch it starts in.
     auto inRange = [&](float top, float bottom) {
-        return bottom >= yStart && top < yEnd;
+        return top < yEnd && (bottom > yStart || (bottom == yStart && top == bottom));
     };
     float dx = offsetX;
     float dy = offsetY - yStart;

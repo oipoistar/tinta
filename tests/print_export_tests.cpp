@@ -9,7 +9,10 @@
 
 #include "glyph_fonts.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <cwchar>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +20,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <vector>
 
 using Microsoft::WRL::ComPtr;
 
@@ -239,6 +243,129 @@ void listMarkerPagination(App& app) {
     app.printMarginMm = savedMargin;
 }
 
+// Pixels of a BGRA image, in a box, with a channel darker than `under`
+int darkIn(const std::vector<uint8_t>& pixels, int w, int h, float left, float top, float right, float bottom,
+           int under) {
+    int n = 0;
+    for (int y = std::max(0, (int)std::ceil(top)); y < std::min(h, (int)std::floor(bottom)); ++y) {
+        for (int x = std::max(0, (int)std::ceil(left)); x < std::min(w, (int)std::floor(right)); ++x) {
+            const uint8_t* p = &pixels[((size_t)y * w + x) * 4];
+            if (p[0] < under || p[1] < under || p[2] < under) ++n;
+        }
+    }
+    return n;
+}
+
+// A stretch of the print layout replayed at 1:1 as a page replays it, its
+// start `offsetY` down a white bitmap
+std::vector<uint8_t> replay(App& app, float yStart, float yEnd, float offsetY, UINT w, UINT h) {
+    std::vector<uint8_t> pixels;
+    ComPtr<ID2D1Device> device;
+    app.deviceContext->GetDevice(&device);
+    ComPtr<ID2D1DeviceContext> dc;
+    if (!device || FAILED(device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc))) return pixels;
+    const auto format = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
+    ComPtr<ID2D1Bitmap1> target, staging;
+    dc->CreateBitmap(D2D1::SizeU(w, h), nullptr, 0, D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET, format), &target);
+    dc->CreateBitmap(D2D1::SizeU(w, h), nullptr, 0,
+                     D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW, format),
+                     &staging);
+    if (!target || !staging) return pixels;
+    dc->SetTarget(target.Get());
+    dc->BeginDraw();
+    dc->Clear(D2D1::ColorF(1.0f, 1.0f, 1.0f));
+    ComPtr<ID2D1SolidColorBrush> brush;
+    dc->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
+    if (brush) drawLayoutRange(app, dc.Get(), brush.Get(), yStart, yEnd, 0.0f, offsetY);
+    D2D1_MAPPED_RECT mapped{};
+    if (FAILED(dc->EndDraw()) || FAILED(staging->CopyFromBitmap(nullptr, target.Get(), nullptr)) ||
+        FAILED(staging->Map(D2D1_MAP_OPTIONS_READ, &mapped))) {
+        return pixels;
+    }
+    pixels.resize((size_t)w * h * 4);
+    for (UINT row = 0; row < h; row++)
+        memcpy(pixels.data() + (size_t)row * w * 4, mapped.bits + (size_t)row * mapped.pitch, (size_t)w * 4);
+    staging->Unmap();
+    return pixels;
+}
+
+// A fenced block longer than the page is left runs over the break. The cut
+// falls between two rows, so the row above ends exactly where the next page
+// starts: it belongs to the page before only.
+void codeBlockPageBreak(App& app) {
+    const auto fixture = std::filesystem::path(TINTA_PRINT_EXPORT_FIXTURE).parent_path() / "code-block-page-break.md";
+    const std::string source = read(fixture);
+    auto doc = app.parser.parse(source);
+    check(!source.empty() && doc.success, "code block page break fixture opens and parses");
+    if (!doc.success) return;
+    app.root = doc.root;
+    const float savedMargin = app.printMarginMm;
+    app.printPreviewPaper = 0;
+    app.printPreviewLandscape = false;
+    const int ink = 160;  // text, not the card under it
+    for (int theme : {0, 5}) {
+        applyTheme(app, theme);
+        for (float marginMm : {19.05f, 25.4f}) {
+            const std::string context = "theme " + std::to_string(theme) + ", margin " + std::to_string(marginMm);
+            app.printMarginMm = marginMm;
+            openPrintPreview(app, app.hwnd);
+            const int pages = (int)app.printPreviewBounds.size() - 1;
+            check(app.showPrintPreview && app.printLayout && pages >= 3, context + ": the fixture runs to three pages");
+            const float pageW = app.printPreviewPageW;
+            const auto& bounds = app.printPreviewBounds;
+
+            int rowCuts = 0;
+            for (int i = 1; i < pages; ++i) {
+                const float cut = bounds[i];
+                const std::string at = context + ", pages " + std::to_string(i) + " and " + std::to_string(i + 1);
+                bool whole = true;
+                for (const auto& run : app.layoutTextRuns)
+                    whole = whole && !(run.bounds.top < cut - 0.01f && run.bounds.bottom > cut + 0.01f);
+                check(whole, at + ": no row straddles the cut");
+
+                const App::CodeBlockInfo* block = nullptr;
+                for (const auto& candidate : app.codeBlocks)
+                    if (candidate.bounds.top < cut && cut < candidate.bounds.bottom) block = &candidate;
+                if (!block) continue;
+                // The rows on either side of the cut, each the union of its runs
+                D2D1_RECT_F above{}, below{};
+                bool hasAbove = false, hasBelow = false;
+                auto unite = [](D2D1_RECT_F& box, bool& has, const D2D1_RECT_F& r) {
+                    box = has ? D2D1::RectF(std::min(box.left, r.left), r.top, std::max(box.right, r.right), r.bottom) : r;
+                    has = true;
+                };
+                for (const auto& run : app.layoutTextRuns) {
+                    if (!run.layout || run.bounds.right <= run.bounds.left) continue;
+                    if (run.bounds.top < block->bounds.top || run.bounds.bottom > block->bounds.bottom) continue;
+                    if (std::abs(run.bounds.bottom - cut) < 0.01f) unite(above, hasAbove, run.bounds);
+                    if (std::abs(run.bounds.top - cut) < 0.01f) unite(below, hasBelow, run.bounds);
+                }
+                if (!hasAbove || !hasBelow) continue;  // a blank row beside the cut
+                ++rowCuts;
+
+                // Either side of the cut as its page replays it, the cut 80 px down
+                const float rowH = above.bottom - above.top, at80 = 80.0f;
+                const UINT w = (UINT)pageW, h = 160;
+                const std::vector<uint8_t> before = replay(app, bounds[i - 1], cut, at80 - (cut - bounds[i - 1]), w, h);
+                const std::vector<uint8_t> after = replay(app, cut, bounds[i + 1], at80, w, h);
+                check(!before.empty() && !after.empty(), at + ": both sides of the cut replay");
+                if (before.empty() || after.empty()) continue;
+                check(darkIn(before, w, h, above.left, at80 - rowH + 1, above.right, at80 - 1, ink) > 0,
+                      at + ": the row above the cut closes its page");
+                check(darkIn(before, w, h, below.left, at80 + 1, below.right, at80 + rowH - 1, ink) == 0,
+                      at + ": the row under the cut is not drawn on the page before");
+                check(darkIn(after, w, h, below.left, at80 + 1, below.right, at80 + rowH - 1, ink) > 0,
+                      at + ": the row under the cut opens the next page");
+                check(darkIn(after, w, h, above.left, at80 - rowH + 1, above.right, at80 - 1, ink) == 0,
+                      at + ": the row above the cut is not drawn again over the next page");
+            }
+            check(rowCuts >= 1, context + ": a page break falls between two rows of a code block");
+            closePrintPreview(app, app.hwnd);
+        }
+    }
+    app.printMarginMm = savedMargin;
+}
+
 // #256: Word names the faces the screen draws CJK in
 void wordFonts(App& app, const std::filesystem::path& dir) {
     const std::wstring bodyHan = facesOf(app, app.textFormat, kHan);
@@ -307,6 +434,7 @@ int runPrintExportTests() {
     app.height = 900;
     updateTextFormats(app);
     listMarkerPagination(app);
+    codeBlockPageBreak(app);
     if (!installed(app, L"SimSun") || !installed(app, L"Courier New") ||
         !installed(app, L"Georgia") || !installed(app, L"Cambria")) {
         std::cout << "Print and export: font checks skipped (fixture font missing), " << failures << " failures\n";
