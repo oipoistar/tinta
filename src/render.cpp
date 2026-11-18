@@ -318,6 +318,33 @@ static void rollbackTo(App& app, const LayoutSnapshot& s) {
     app.scrollAnchors.resize(s.scrollAnchors);
 }
 
+// Horizontal alignment only changes rectangles added since the snapshot.
+// Buckets are sorted by top, but cells can insert lines before a preceding
+// cell's wrapped lines. Bound the search by the new rectangles' actual tops
+// rather than assuming their buckets form a suffix of the document.
+static void refreshBuckets(App& app, const LayoutSnapshot& from) {
+    if (from.textRects >= app.textRects.size()) return;
+    float low = std::numeric_limits<float>::max();
+    float high = std::numeric_limits<float>::lowest();
+    for (size_t i = from.textRects; i < app.textRects.size(); ++i) {
+        low = std::min(low, app.textRects[i].rect.top);
+        high = std::max(high, app.textRects[i].rect.top);
+    }
+    auto& buckets = app.lineBuckets;
+    auto at = std::lower_bound(buckets.begin(), buckets.end(), low - kLineBucketTolerance, bucketAbove);
+    for (; at != buckets.end() && at->top <= high + kLineBucketTolerance; ++at) {
+        auto& bucket = *at;
+        // Indices are appended to each bucket in increasing order.
+        if (bucket.textRectIndices.empty() || bucket.textRectIndices.back() < from.textRects) continue;
+        bucket.minX = std::numeric_limits<float>::max();
+        bucket.maxX = std::numeric_limits<float>::lowest();
+        for (size_t idx : bucket.textRectIndices) {
+            bucket.minX = std::min(bucket.minX, app.textRects[idx].rect.left);
+            bucket.maxX = std::max(bucket.maxX, app.textRects[idx].rect.right);
+        }
+    }
+}
+
 static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
     if (dx == 0.0f) return;
     for (size_t i = from.textRuns; i < app.layoutTextRuns.size(); i++) {
@@ -369,24 +396,7 @@ static void shiftLayoutItems(App& app, const LayoutSnapshot& from, float dx) {
 
     // A cell can share a line bucket with content laid out before it. Rebuild
     // the affected bucket extents from their rectangles after the shift.
-    for (auto& bucket : app.lineBuckets) {
-        bool affected = false;
-        for (size_t idx : bucket.textRectIndices) {
-            if (idx >= from.textRects) {
-                affected = true;
-                break;
-            }
-        }
-        if (!affected) continue;
-
-        bucket.minX = std::numeric_limits<float>::max();
-        bucket.maxX = std::numeric_limits<float>::lowest();
-        for (size_t idx : bucket.textRectIndices) {
-            const auto& rect = app.textRects[idx].rect;
-            bucket.minX = std::min(bucket.minX, rect.left);
-            bucket.maxX = std::max(bucket.maxX, rect.right);
-        }
-    }
+    refreshBuckets(app, from);
 }
 
 static float getSpaceWidth(App& app, IDWriteTextFormat* format) {
@@ -395,21 +405,6 @@ static float getSpaceWidth(App& app, IDWriteTextFormat* format) {
     if (format == app.italicFormat) return app.spaceWidthItalic;
     if (format == app.codeFormat) return app.spaceWidthCode;
     return measureText(app, L" ", format);
-}
-
-// The bucket extents of the text rects laid out since `from`, after a move
-static void refreshBuckets(App& app, const LayoutSnapshot& from) {
-    for (auto& bucket : app.lineBuckets) {
-        bool affected = false;
-        for (size_t idx : bucket.textRectIndices) affected = affected || idx >= from.textRects;
-        if (!affected) continue;
-        bucket.minX = std::numeric_limits<float>::max();
-        bucket.maxX = std::numeric_limits<float>::lowest();
-        for (size_t idx : bucket.textRectIndices) {
-            bucket.minX = std::min(bucket.minX, app.textRects[idx].rect.left);
-            bucket.maxX = std::max(bucket.maxX, app.textRects[idx].rect.right);
-        }
-    }
 }
 
 // A CSS theme's text-align (page_style.h) for text laid out since `from`
