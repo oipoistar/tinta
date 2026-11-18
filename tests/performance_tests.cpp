@@ -144,6 +144,18 @@ int rowMetricRegressions(App& app) {
         app.editorText = text;
         verify();
     }
+    // Two lines of one length that wrap differently: full-width letters
+    // take more rows than as many ASCII ones. A cache that matched lines
+    // by length would keep the narrow line's count for the wide one.
+    std::wstring narrow;
+    for (int i = 0; i < 40; ++i) narrow += L"abcd ";
+    const std::wstring wide(narrow.size(), wchar_t(0x4E2D));
+    app.editorText = narrow + L"\n" + narrow + L"\n" + narrow;
+    verify();
+    const size_t narrowRows = app.editorTotalRows;
+    app.editorText = narrow + L"\n" + wide + L"\n" + narrow;
+    verify();
+    if (app.editorTotalRows <= narrowRows) ++failures;
     app.editorText.assign(500, L'W');
     auto* factory = app.dwriteFactory;
     app.dwriteFactory = nullptr;

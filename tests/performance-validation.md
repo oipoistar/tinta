@@ -107,6 +107,11 @@ preview toggling, Live/Source switching, empty documents, repeated lines,
 and retrying a failed DirectWrite layout instead of caching its fallback.
 It also checks line bucket extents against their constituent rectangles.
 
+Two comparisons were added after the measurements above, 151 in all: a
+line of full-width letters replaces an ASCII line of the same length and
+must take more rows. With lines matched by length alone, the 149 earlier
+comparisons all still passed; this one fails.
+
 `tests/fixtures/performance-layout.md` mixes aligned pipe tables, wrapped
 cells, an HTML table with row/column spans, headings, lists, quotes,
 emphasis, links and code. The native rendering harness produces images
