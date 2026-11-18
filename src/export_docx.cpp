@@ -1586,7 +1586,12 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
                         grand->type == ElementType::Paragraph ||
                         grand->type == ElementType::CodeBlock ||
                         grand->type == ElementType::BlockQuote ||
-                        grand->type == ElementType::Table;
+                        grand->type == ElementType::Table ||
+                        // An HTML block that holds a table (#325)
+                        (grand->type == ElementType::HtmlBlock &&
+                         std::any_of(grand->children.begin(), grand->children.end(), [](const ElementPtr& e) {
+                             return e->type == ElementType::Table;
+                         }));
                     if (grand->type == ElementType::Paragraph &&
                         !paragraphOpen) {
                         // First paragraph joins the numbered item itself
@@ -1633,6 +1638,10 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
                         ctx.ruleHex + "\"/></w:pBdr></w:pPr></w:p>";
             break;
         case ElementType::Table: {
+            // A <caption> stands over its table
+            for (const auto& child : elem->children) {
+                if (child->type == ElementType::Caption) walkBlocks(ctx, child, props, listDepth);
+            }
             ctx.body +=
                 "<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/>"
                 "<w:tblBorders>"
@@ -1649,27 +1658,40 @@ void walkBlocks(DocxCtx& ctx, const ElementPtr& elem, ParaProps props,
                 "<w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"" +
                 ctx.borderHex + "\"/>"
                 "</w:tblBorders></w:tblPr>";
-            size_t columns = 0;
-            for (const auto& row : elem->children)
-                if (row->type == ElementType::TableRow) columns = std::max(columns, row->children.size());
+            // A pipe table's first row is its header. A table written in
+            // HTML (#325) has the header cells it marks and cells over
+            // several columns (gridSpan) or rows: Word wants a cell in
+            // every row such a cell covers, merged into the one above
+            const TableGrid grid = tableGrid(*elem);
             ctx.body += "<w:tblGrid>";
-            for (size_t col = 0; col < columns; ++col) ctx.body += "<w:gridCol/>";
+            for (int col = 0; col < grid.colCount; ++col) ctx.body += "<w:gridCol/>";
             ctx.body += "</w:tblGrid>";
-            for (size_t rowIndex = 0; rowIndex < elem->children.size();
-                 rowIndex++) {
-                const auto& row = elem->children[rowIndex];
-                if (row->type != ElementType::TableRow) continue;
-                bool header = rowIndex == 0;
+            for (int r = 0; r < grid.rowCount; r++) {
                 ctx.body += "<w:tr>";
-                for (const auto& cell : row->children) {
-                    if (cell->type != ElementType::TableCell) continue;
+                for (int c = 0; c < grid.colCount;) {
+                    const int slot = grid.at(r, c);
+                    if (slot < 0) {
+                        ctx.body += "<w:tc><w:tcPr/><w:p/></w:tc>";
+                        c++;
+                        continue;
+                    }
+                    const TableGrid::Cell& at = grid.cells[(size_t)slot];
+                    const Element* cell = at.cell;
+                    const bool header = at.header;
                     ctx.body += "<w:tc><w:tcPr>";
+                    if (at.colSpan > 1) ctx.body += "<w:gridSpan w:val=\"" + std::to_string(at.colSpan) + "\"/>";
+                    if (at.rowSpan > 1) ctx.body += at.row == r ? "<w:vMerge w:val=\"restart\"/>" : "<w:vMerge/>";
                     if (header) {
                         ctx.body += "<w:shd w:val=\"clear\" "
                                     "w:color=\"auto\" w:fill=\"" +
                                     ctx.codeBgHex + "\"/>";
                     }
                     ctx.body += "</w:tcPr><w:p>";
+                    c += at.colSpan;
+                    if (at.row != r) {
+                        ctx.body += "</w:p></w:tc>";
+                        continue;
+                    }
                     std::string paraProps;
                     if (cell->align == 2) {
                         paraProps += "<w:jc w:val=\"center\"/>";

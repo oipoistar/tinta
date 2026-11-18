@@ -85,6 +85,17 @@ struct ParserContext {
     std::vector<bool> nestPushed;
     std::vector<bool> spanPushed;
     bool escapedSigns = false;  // some text holds an escaped-sign stand-in
+    // An HTML block that ended, at a blank line, with its <table> still
+    // open (#325): the HTML blocks right after it are the rest of it, and
+    // it is read once they are in
+    Element* openTable = nullptr;
+
+    void readOpenTable() {
+        if (!openTable) return;
+        parseHtmlIntoElements(openTable->text, openTable);
+        openTable->text.clear();
+        openTable = nullptr;
+    }
 
     ParserContext() {
         root = std::make_shared<Element>(ElementType::Document);
@@ -199,11 +210,44 @@ struct ParserContext {
 
 static void flushPendingHtml(ParserContext* ctx);
 
+// Whether raw HTML leaves a <table> open: more of them start than end. One
+// named in a comment (a review note's words) is no table
+static bool leavesTableOpen(const std::string& html) {
+    int open = 0;
+    for (size_t at = html.find('<'); at != std::string::npos; at = html.find('<', at + 1)) {
+        if (html.compare(at, 4, "<!--") == 0) {
+            at = html.find("-->", at);
+            if (at == std::string::npos) break;
+            continue;
+        }
+        const bool closing = at + 1 < html.size() && html[at + 1] == '/';
+        const size_t name = at + (closing ? 2 : 1);
+        if (html.size() < name + 5) break;
+        static const char kTable[] = "table";
+        size_t k = 0;
+        while (k < 5 && tolower((unsigned char)html[name + k]) == kTable[k]) k++;
+        if (k < 5) continue;
+        const char after = name + 5 < html.size() ? html[name + 5] : '>';
+        if (after != '>' && after != '/' && !isspace((unsigned char)after)) continue;
+        open = std::max(0, open + (closing ? -1 : 1));
+    }
+    return open > 0;
+}
+
 // MD4C callbacks
 static int enterBlockCallback(MD_BLOCKTYPE type, void* detail, void* userdata) {
     auto* ctx = static_cast<ParserContext*>(userdata);
     flushPendingHtml(ctx);
     ctx->flushText();
+    if (ctx->openTable) {
+        if (type == MD_BLOCK_HTML && ctx->current() == ctx->openTable->parent) {
+            ctx->openTable->text += '\n';
+            ctx->elementStack.push(ctx->openTable);
+            ctx->openTable = nullptr;
+            return 0;
+        }
+        ctx->readOpenTable();
+    }
     ctx->openAnchors = 0;  // inline HTML pairs up within one block
     // A nested block (a sublist after a tight item's text) ends the
     // parent's open inline HTML spans rather than landing inside them
@@ -321,6 +365,7 @@ static int leaveBlockCallback(MD_BLOCKTYPE type, void* /*detail*/, void* userdat
     auto* ctx = static_cast<ParserContext*>(userdata);
     flushPendingHtml(ctx);
     ctx->flushText();
+    ctx->readOpenTable();
     // An unclosed <sub> or <ins> ends with its block, as in a browser
     ctx->closeHtmlSpans();
     ctx->htmlSpans.clear();
@@ -342,8 +387,12 @@ static int leaveBlockCallback(MD_BLOCKTYPE type, void* /*detail*/, void* userdat
             // Parse HTML content and convert to elements
             Element* htmlBlock = ctx->current();
             if (htmlBlock && htmlBlock->type == ElementType::HtmlBlock && !htmlBlock->text.empty()) {
-                parseHtmlIntoElements(htmlBlock->text, htmlBlock);
-                htmlBlock->text.clear(); // Clear raw HTML after parsing
+                if (leavesTableOpen(htmlBlock->text)) {
+                    ctx->openTable = htmlBlock;  // read with what follows it
+                } else {
+                    parseHtmlIntoElements(htmlBlock->text, htmlBlock);
+                    htmlBlock->text.clear(); // Clear raw HTML after parsing
+                }
             }
             ctx->popElement();
             break;
@@ -2066,10 +2115,13 @@ static HtmlTag parseTag(const std::string& tagStr) {
         tag.isSelfClosing = true;
     }
 
-    // Extract common attributes
-    tag.href = extractAttribute(tagStr, "href");
-    tag.title = extractAttribute(tagStr, "title");
-    tag.id = extractAttribute(tagStr, "id");
+    // Extract common attributes, of a tag that has any: a table is
+    // hundreds of bare <tr> and <td>
+    if (tagStr.find('=') != std::string::npos) {
+        tag.href = extractAttribute(tagStr, "href");
+        tag.title = extractAttribute(tagStr, "title");
+        tag.id = extractAttribute(tagStr, "id");
+    }
 
     return tag;
 }
@@ -2081,6 +2133,8 @@ static bool isHtmlBlockLevel(ElementType type) {
         case ElementType::Paragraph: case ElementType::Heading: case ElementType::List:
         case ElementType::ListItem: case ElementType::CodeBlock: case ElementType::BlockQuote:
         case ElementType::HorizontalRule: case ElementType::HardBreak:
+        case ElementType::Table: case ElementType::TableRow: case ElementType::TableCell:
+        case ElementType::Caption:
             return true;
         default:
             return false;
@@ -2182,6 +2236,206 @@ static bool htmlTagNests(const std::string& name, bool& block) {
     return false;
 }
 
+// Runs of spaces and line breaks read as one space, as in a browser. Kept
+// as written, the line breaks of an HTML block made lines its layout never
+// counted: they overlapped each other and the block after them (#325).
+static void collapseSpace(std::string& text) {
+    size_t out = 0;
+    bool space = false;
+    for (char c : text) {
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f') {
+            space = true;
+            continue;
+        }
+        if (space && out > 0) text[out++] = ' ';
+        space = false;
+        text[out++] = c;
+    }
+    if (space && out > 0) text[out++] = ' ';
+    text.resize(out);
+}
+
+// The character references a table of keys is written with: &lt; &gt;
+// &amp; &quot; &apos; &nbsp; and the numbered ones. Any other stays as
+// written, as in Markdown text.
+static void decodeEntities(std::string& text) {
+    size_t amp = text.find('&');
+    if (amp == std::string::npos) return;
+    static const struct { const char* name; const char* text; } kNamed[] = {
+        {"lt", "<"}, {"gt", ">"}, {"amp", "&"}, {"quot", "\""}, {"apos", "'"}, {"nbsp", "\xC2\xA0"}};
+    std::string out;
+    out.reserve(text.size());
+    size_t pos = 0;
+    for (; amp != std::string::npos; amp = text.find('&', pos)) {
+        out.append(text, pos, amp - pos);
+        pos = amp;
+        const size_t end = text.find(';', amp);
+        std::string decoded;
+        if (end != std::string::npos && end - amp >= 3 && end - amp <= 9) {
+            const std::string name = text.substr(amp + 1, end - amp - 1);
+            if (name[0] == '#') {
+                const bool hex = name.size() > 2 && (name[1] == 'x' || name[1] == 'X');
+                char* stop = nullptr;
+                const unsigned long code = strtoul(name.c_str() + (hex ? 2 : 1), &stop, hex ? 16 : 10);
+                if (stop && !*stop && code >= 0x20 && code <= 0x10FFFF && (code < 0xD800 || code > 0xDFFF)) {
+                    if (code < 0x80) {
+                        decoded += (char)code;
+                    } else if (code < 0x800) {
+                        decoded += (char)(0xC0 | (code >> 6));
+                        decoded += (char)(0x80 | (code & 0x3F));
+                    } else if (code < 0x10000) {
+                        decoded += (char)(0xE0 | (code >> 12));
+                        decoded += (char)(0x80 | ((code >> 6) & 0x3F));
+                        decoded += (char)(0x80 | (code & 0x3F));
+                    } else {
+                        decoded += (char)(0xF0 | (code >> 18));
+                        decoded += (char)(0x80 | ((code >> 12) & 0x3F));
+                        decoded += (char)(0x80 | ((code >> 6) & 0x3F));
+                        decoded += (char)(0x80 | (code & 0x3F));
+                    }
+                }
+            } else {
+                for (const auto& named : kNamed)
+                    if (name == named.name) decoded = named.text;
+            }
+        }
+        if (decoded.empty()) {
+            out += '&';
+            pos = amp + 1;
+        } else {
+            out += decoded;
+            pos = end + 1;
+        }
+    }
+    out.append(text, pos, std::string::npos);
+    text.swap(out);
+}
+
+// Tags Tinta draws no box for, whose content still stands on lines of its
+// own, as in a browser: with line breaks read as spaces, a <summary> would
+// run into the text under it and two <div>s into each other
+static bool isPlainBlockTag(const std::string& name) {
+    static const char* const kTags[] = {"div",    "details", "summary",    "section", "article", "header", "footer",
+                                        "nav",    "aside",   "main",       "figure",  "figcaption", "address", "dl",
+                                        "dt",     "dd",      "center",     "fieldset", "form",   "hgroup"};
+    for (const char* tag : kTags)
+        if (name == tag) return true;
+    return false;
+}
+
+// A block's edge is a line break (level 1) only where a line follows it:
+// at the end of what holds it, or before a block, it would be an empty line
+static void pruneBlockEdges(Element* elem) {
+    auto& kids = elem->children;
+    for (size_t i = 0; i < kids.size();) {
+        if (kids[i]->type == ElementType::HardBreak && kids[i]->level == 1) {
+            const Element* next = i + 1 < kids.size() ? kids[i + 1].get() : nullptr;
+            if (!next || (next->type != ElementType::HardBreak && isHtmlBlockLevel(next->type))) {
+                kids.erase(kids.begin() + (ptrdiff_t)i);
+                continue;
+            }
+        }
+        i++;
+    }
+    for (const auto& kid : kids) pruneBlockEdges(kid.get());
+}
+
+// A cell or caption ends without the line breaks and the space its last
+// block left behind
+static void trimCell(Element* cell) {
+    for (;;) {
+        trimTrailingSpace(cell);
+        if (cell->children.empty() || cell->children.back()->type != ElementType::HardBreak) return;
+        cell->children.pop_back();
+    }
+}
+
+// The tables of an HTML block, once it is read (#325): cells trimmed, the
+// rows of the <tfoot> after the others wherever they were written, and a
+// table with nothing in any cell (<table><tr><td> before a blank line,
+// its content in the Markdown after it) taken out rather than drawn as
+// an empty box
+static void finishHtmlTables(Element* elem) {
+    for (size_t i = 0; i < elem->children.size();) {
+        Element* child = elem->children[i].get();
+        if (child->type != ElementType::Table || child->language != "html") {
+            finishHtmlTables(child);
+            i++;
+            continue;
+        }
+        bool any = false;
+        for (const auto& row : child->children) {
+            if (row->type == ElementType::Caption) {
+                trimCell(row.get());
+                any = any || !row->children.empty();
+                continue;
+            }
+            for (const auto& cell : row->children) {
+                trimCell(cell.get());
+                any = any || !cell->children.empty();
+            }
+        }
+        if (!any) {
+            elem->children.erase(elem->children.begin() + (ptrdiff_t)i);
+            continue;
+        }
+        std::stable_partition(child->children.begin(), child->children.end(), [](const ElementPtr& row) {
+            return !(row->type == ElementType::TableRow && row->level == 2);
+        });
+        for (const auto& row : child->children) row->level = 0;
+        i++;
+    }
+}
+
+// An attribute's value, in quotes or bare (rowspan=2)
+static std::string tagAttribute(const std::string& tag, const char* name) {
+    const size_t length = strlen(name);
+    for (size_t i = 1; i + length < tag.size(); i++) {
+        if (!isspace((unsigned char)tag[i - 1])) continue;
+        size_t k = 0;
+        while (k < length && tolower((unsigned char)tag[i + k]) == name[k]) k++;
+        if (k < length) continue;
+        size_t p = i + length;
+        while (p < tag.size() && isspace((unsigned char)tag[p])) p++;
+        if (p >= tag.size() || tag[p] != '=') continue;
+        p++;
+        while (p < tag.size() && isspace((unsigned char)tag[p])) p++;
+        if (p >= tag.size()) break;
+        if (tag[p] == '"' || tag[p] == '\'') {
+            const size_t end = tag.find(tag[p], p + 1);
+            return end == std::string::npos ? std::string() : tag.substr(p + 1, end - p - 1);
+        }
+        size_t end = p;
+        while (end < tag.size() && !isspace((unsigned char)tag[end]) && tag[end] != '>' && tag[end] != '/') end++;
+        return tag.substr(p, end - p);
+    }
+    return {};
+}
+
+// The number a colspan or rowspan gives; `none` when it gives none
+static int spanAttribute(const std::string& tag, const char* name, int none, int most) {
+    const std::string value = trim(tagAttribute(tag, name));
+    if (value.empty() || !isdigit((unsigned char)value[0])) return none;
+    return (int)std::min<unsigned long>(strtoul(value.c_str(), nullptr, 10), (unsigned long)most);
+}
+
+// A cell's alignment, as a pipe table's column gives it: align="right" or
+// a style with text-align
+static int cellAlignment(const std::string& tag) {
+    std::string value = toLower(trim(tagAttribute(tag, "align")));
+    if (value.empty()) {
+        const std::string style = toLower(tagAttribute(tag, "style"));
+        const size_t at = style.find("text-align");
+        if (at != std::string::npos) {
+            const size_t colon = style.find(':', at);
+            if (colon != std::string::npos) {
+                value = trim(style.substr(colon + 1, style.find(';', colon) - colon - 1));
+            }
+        }
+    }
+    return value == "left" ? 1 : value == "center" ? 2 : value == "right" ? 3 : 0;
+}
+
 void parseHtmlIntoElements(const std::string& html, Element* parent) {
     if (!parent) return;
 
@@ -2206,14 +2460,32 @@ void parseHtmlIntoElements(const std::string& html, Element* parent) {
             return;
         }
         Element* top = elementStack.top();
-        // What the text follows on its line: inline content (a space before
-        // the text stays) that may already end in a space (it is not doubled)
-        bool afterInline = false, afterSpace = false;
-        precedingInline(top, parent, afterInline, afterSpace);
         bool lead = isspace((unsigned char)textBuffer.front()) != 0;
         bool tail = isspace((unsigned char)textBuffer.back()) != 0;
         std::string text = trim(textBuffer);
         textBuffer.clear();
+        bool inPre = false;
+        for (Element* e = top; e && e != parent && !inPre; e = e->parent) inPre = e->type == ElementType::CodeBlock;
+        if (!inPre) collapseSpace(text);
+        decodeEntities(text);
+        if (top->type == ElementType::Table || top->type == ElementType::TableRow) {
+            // Text between a table's cells is no cell's: it goes above the
+            // table, where a browser moves it
+            if (text.empty()) return;
+            Element* table = top->type == ElementType::Table ? top : top->parent;
+            Element* around = table->parent;
+            auto textElem = std::make_shared<Element>(ElementType::Text);
+            textElem->text = text;
+            textElem->parent = around;
+            around->children.insert(std::find_if(around->children.begin(), around->children.end(),
+                                                 [&](const ElementPtr& c) { return c.get() == table; }),
+                                    textElem);
+            return;
+        }
+        // What the text follows on its line: inline content (a space before
+        // the text stays) that may already end in a space (it is not doubled)
+        bool afterInline = false, afterSpace = false;
+        precedingInline(top, parent, afterInline, afterSpace);
         if (text.empty()) {
             if (!(inlineTag && afterInline) || afterSpace) return;
             text = " ";  // the space between two inline elements
@@ -2241,6 +2513,199 @@ void parseHtmlIntoElements(const std::string& html, Element* parent) {
             if (isHtmlBlockLevel(e->type)) trimTrailingSpace(e);
             return;
         }
+    };
+
+    // Tables (#325). A table's rows and cells end where the next one
+    // starts, as HTML lets them be written. A cell takes inline content
+    // only, as a pipe table's does: a block inside it starts a line of its
+    // own, a list's items are marked lines and a table is read as lines.
+    int flatTables = 0;          // open tables read as lines: inside a cell, or too deep
+    int tableSection = 0;        // 1 inside <thead>, 2 inside <tfoot>
+    std::vector<int> cellLists;  // the open lists of a cell: 0 bulleted, else the next number
+    auto tablePart = [&]() -> Element* {
+        for (Element* e = elementStack.top(); e && e != parent; e = e->parent) {
+            if (e->type == ElementType::Table || e->type == ElementType::TableRow ||
+                e->type == ElementType::TableCell || e->type == ElementType::Caption) {
+                return e;
+            }
+        }
+        return nullptr;
+    };
+    auto openElement = [&](ElementType type) {
+        auto elem = std::make_shared<Element>(type);
+        elem->parent = elementStack.top();
+        elementStack.top()->children.push_back(elem);
+        elementStack.push(elem.get());
+        return elem.get();
+    };
+    // Ends what is open inside `until`, which stays open
+    auto closeInto = [&](Element* until) {
+        flushText();
+        while (elementStack.size() > 1 && elementStack.top() != until) {
+            if (isHtmlBlockLevel(elementStack.top()->type)) trimTrailingSpace(elementStack.top());
+            elementStack.pop();
+        }
+    };
+    // What follows starts a line of its own, unless it starts one already:
+    // after a block, after a line break, or first in what holds it
+    auto ownLine = [&] {
+        flushText();
+        Element* top = elementStack.top();
+        bool afterInline = false, afterSpace = false;
+        precedingInline(top, parent, afterInline, afterSpace);
+        if (!afterInline) return;
+        auto elem = std::make_shared<Element>(ElementType::HardBreak);
+        elem->level = 1;  // a block's edge (pruneBlockEdges)
+        elem->parent = top;
+        top->children.push_back(elem);
+    };
+    // A table starts outside the paragraph or the spans left open before
+    // it, and ends a table left open
+    auto openTable = [&] {
+        Element* around = elementStack.top();
+        while (around != parent && around->type != ElementType::ListItem &&
+               around->type != ElementType::BlockQuote) {
+            around = around->parent;
+        }
+        closeInto(around);
+        Element* table = openElement(ElementType::Table);
+        table->language = "html";
+        tableSection = 0;
+        cellLists.clear();
+        return table;
+    };
+    // A table tag. False: the tag is not one, and is read as any other.
+    auto tableTag = [&](const HtmlTag& tag, const std::string& tagStr) {
+        const bool cellTag = tag.name == "td" || tag.name == "th";
+        const bool section = tag.name == "thead" || tag.name == "tbody" || tag.name == "tfoot";
+        if (!cellTag && !section && tag.name != "table" && tag.name != "tr" && tag.name != "caption") return false;
+        Element* part = tablePart();
+        const bool inCell = part && (part->type == ElementType::TableCell || part->type == ElementType::Caption);
+        if (flatTables > 0 || (tag.name == "table" && !tag.isClosing &&
+                               (inCell || (!part && openDepth() >= kMaxBlockNesting)))) {
+            // A table read as lines: a row is a line, a space parts its cells
+            if (tag.name == "table") {
+                flatTables += tag.isClosing ? -1 : 1;
+                ownLine();
+            } else if (cellTag) {
+                flushText(true);
+                if (!tag.isClosing) textBuffer = " ";
+            } else if (!tag.isClosing) {
+                ownLine();
+            }
+            return true;
+        }
+        Element* table = part;
+        while (table && table->type != ElementType::Table) table = table->parent;
+        if (tag.name == "table") {
+            if (tag.isClosing) {
+                if (!table) return true;
+                closeInto(table);
+                elementStack.pop();
+                return true;
+            }
+            openTable();
+            return true;
+        }
+        if (tag.isClosing) {
+            // An end tag ends its part and what is open inside it; one
+            // with nothing of its own open ends nothing
+            if (!table) return true;
+            if (section) {
+                closeInto(table);
+                tableSection = 0;
+                return true;
+            }
+            const ElementType type = tag.name == "tr" ? ElementType::TableRow :
+                                     cellTag ? ElementType::TableCell : ElementType::Caption;
+            for (Element* e = elementStack.top(); e != table; e = e->parent) {
+                if (e->type != type || (cellTag && e->header != (tag.name == "th"))) continue;
+                closeInto(e);
+                trimCell(e);
+                elementStack.pop();
+                break;
+            }
+            return true;
+        }
+        if (!table) {
+            // Rows or cells with no <table> around them (the rest of a
+            // table after Markdown inside it) make a table of their own
+            if (section || tag.name == "caption") return true;
+            table = openTable();
+        }
+        if (section) {
+            closeInto(table);
+            tableSection = tag.name == "thead" ? 1 : tag.name == "tfoot" ? 2 : 0;
+            return true;
+        }
+        if (tag.name == "caption") {
+            closeInto(table);
+            openElement(ElementType::Caption);
+            return true;
+        }
+        if (tag.name == "tr") {
+            closeInto(table);
+        } else {
+            // A cell ends the cell open before it, in the row they share
+            Element* row = elementStack.top();
+            while (row != table && row->type != ElementType::TableRow) row = row->parent;
+            closeInto(row);
+        }
+        if (elementStack.top() == table) {
+            Element* row = openElement(ElementType::TableRow);
+            row->header = tableSection == 1;
+            row->level = tableSection == 2 ? 2 : 0;  // a <tfoot> row, until finishHtmlTables
+        }
+        if (cellTag) {
+            Element* cell = openElement(ElementType::TableCell);
+            cell->header = tag.name == "th";
+            if (tagStr.find('=') != std::string::npos) {
+                cell->colSpan = (uint16_t)std::max(1, spanAttribute(tagStr, "colspan", 1, 1000));
+                cell->rowSpan = (uint16_t)spanAttribute(tagStr, "rowspan", 1, 65534);
+                cell->align = cellAlignment(tagStr);
+            }
+            cellLists.clear();
+        }
+        return true;
+    };
+    // A block tag inside a cell or a caption. False: the tag is not one.
+    auto cellBlockTag = [&](const HtmlTag& tag) {
+        const std::string& name = tag.name;
+        const bool heading = name.size() == 2 && name[0] == 'h' && name[1] >= '1' && name[1] <= '6';
+        if (name == "ul" || name == "ol") {
+            if (!tag.isClosing) cellLists.push_back(name == "ol" ? 1 : 0);
+            else if (!cellLists.empty()) cellLists.pop_back();
+            ownLine();
+        } else if (name == "li") {
+            ownLine();
+            if (!tag.isClosing) {
+                int* number = cellLists.empty() || cellLists.back() == 0 ? nullptr : &cellLists.back();
+                auto mark = std::make_shared<Element>(ElementType::Text);
+                mark->text = number ? std::to_string((*number)++) + ". " : "\xE2\x80\xA2 ";
+                mark->parent = elementStack.top();
+                elementStack.top()->children.push_back(mark);
+            }
+        } else if (heading || name == "pre") {
+            const ElementType type = heading ? ElementType::Strong : ElementType::Code;
+            if (!tag.isClosing) {
+                ownLine();
+                openElement(type);
+            } else {
+                for (Element* e = elementStack.top(); e->type != ElementType::TableCell &&
+                                                      e->type != ElementType::Caption; e = e->parent) {
+                    if (e->type != type) continue;
+                    closeInto(e);
+                    elementStack.pop();
+                    break;
+                }
+                ownLine();
+            }
+        } else if (name == "p" || name == "blockquote" || name == "hr" || isPlainBlockTag(name)) {
+            ownLine();
+        } else {
+            return false;
+        }
+        return true;
     };
 
     while (pos < html.length()) {
@@ -2288,6 +2753,20 @@ void parseHtmlIntoElements(const std::string& html, Element* parent) {
             if (!tag.isSelfClosing) flattened[tag.name]++;
             pos = tagEnd + 1;
             continue;
+        }
+
+        // A table's own tags; then, inside a cell, the tags of blocks. A
+        // tag between a table's cells opens nothing there.
+        if (tableTag(tag, tagStr)) {
+            pos = tagEnd + 1;
+            continue;
+        }
+        if (Element* part = tablePart(); part && tagStr.compare(0, 4, "<!--") != 0) {
+            const bool inCell = part->type == ElementType::TableCell || part->type == ElementType::Caption;
+            if (!inCell || cellBlockTag(tag)) {
+                pos = tagEnd + 1;
+                continue;
+            }
         }
 
         // Handle different tags
@@ -2501,8 +2980,13 @@ void parseHtmlIntoElements(const std::string& html, Element* parent) {
                 textBuffer.clear(); // Discard rp content (e.g. parentheses)
             }
         }
-        // Ignore div, span, and other container tags but process their content
-        else if (tag.name == "div" || tag.name == "span") {
+        // A <div>, <details>, <summary> and their like draw no box, but what
+        // they hold stands on lines of its own
+        else if (isPlainBlockTag(tag.name)) {
+            ownLine();
+        }
+        // Ignore span and other tags but process their content
+        else if (tag.name == "span") {
             // Just continue processing content
         }
         // Skip comments
@@ -2523,6 +3007,89 @@ void parseHtmlIntoElements(const std::string& html, Element* parent) {
         elementStack.pop();
     }
     pruneEmptyWrappers(parent);
+    pruneBlockEdges(parent);
+    finishHtmlTables(parent);
+}
+
+TableGrid tableGrid(const Element& table) {
+    // As many columns as md4c gives a pipe table at most
+    constexpr int kMaxColumns = 128;
+    TableGrid grid;
+    for (const auto& child : table.children) {
+        if (child->type == ElementType::TableRow) grid.rows.push_back(child.get());
+    }
+    grid.rowCount = (int)grid.rows.size();
+    if (grid.rows.empty()) return grid;
+    const bool html = table.language == "html";
+    auto cellsOf = [](const Element* row) {
+        int count = 0;
+        for (const auto& cell : row->children) count += cell->type == ElementType::TableCell;
+        return count;
+    };
+
+    if (!html) {
+        grid.headerRows = 1;
+        grid.colCount = table.col_count > 0 ? table.col_count : cellsOf(grid.rows[0]);
+    } else {
+        // The header: the rows of the <thead>, or the first rows whose
+        // cells are all <th>
+        for (const Element* row : grid.rows) {
+            bool head = row->header;
+            if (!head && !row->children.empty()) {
+                head = std::all_of(row->children.begin(), row->children.end(),
+                                   [](const ElementPtr& cell) { return cell->header; });
+            }
+            if (!head) break;
+            grid.headerRows++;
+        }
+    }
+
+    // How many more rows the cell above still covers in each column
+    std::vector<int> covered(html ? kMaxColumns : 0, 0);
+    for (int r = 0; r < grid.rowCount; r++) {
+        const Element* row = grid.rows[(size_t)r];
+        const int count = cellsOf(row);
+        int col = 0, index = 0;
+        for (const auto& cell : row->children) {
+            if (cell->type != ElementType::TableCell) continue;
+            TableGrid::Cell placed;
+            placed.cell = cell.get();
+            placed.row = r;
+            placed.index = index++;
+            placed.count = count;
+            placed.header = r < grid.headerRows || (html && cell->header);
+            if (html) {
+                while (col < kMaxColumns && covered[(size_t)col] > 0) col++;
+                if (col >= kMaxColumns) break;
+                placed.colSpan = 1;
+                while (placed.colSpan < cell->colSpan && col + placed.colSpan < kMaxColumns &&
+                       covered[(size_t)(col + placed.colSpan)] == 0) {
+                    placed.colSpan++;
+                }
+                const int below = grid.rowCount - r;
+                placed.rowSpan = cell->rowSpan == 0 ? below : std::min<int>(cell->rowSpan, below);
+                for (int k = 0; k < placed.colSpan; k++) covered[(size_t)(col + k)] = placed.rowSpan;
+                grid.colCount = std::max(grid.colCount, col + placed.colSpan);
+            } else if (col >= grid.colCount) {
+                break;
+            }
+            placed.col = col;
+            col += placed.colSpan;
+            grid.cells.push_back(placed);
+        }
+        for (int& rows : covered) rows = std::max(0, rows - 1);
+    }
+
+    grid.slots.assign((size_t)grid.rowCount * (size_t)grid.colCount, -1);
+    for (size_t i = 0; i < grid.cells.size(); i++) {
+        const TableGrid::Cell& cell = grid.cells[i];
+        for (int r = cell.row; r < cell.row + cell.rowSpan; r++) {
+            for (int c = cell.col; c < cell.col + cell.colSpan; c++) {
+                grid.slots[(size_t)r * (size_t)grid.colCount + (size_t)c] = (int)i;
+            }
+        }
+    }
+    return grid;
 }
 
 } // namespace qmd

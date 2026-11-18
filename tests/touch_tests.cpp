@@ -164,6 +164,7 @@ void scenario(App& app, const char* path, int width, float scale) {
     app.width = (int)(width * scale);
     app.height = (int)(800 * scale);
     updateTextFormats(app);
+    app.wrapCode = false;  // the long code line on one row, for a page that pans sideways (#324)
     check(openDocumentInViewer(app, toWide(path)), "the fixture opens" + where);
     ensureLayoutComplete(app);
     app.verticalScrollbarVisible = app.contentHeight > app.height;

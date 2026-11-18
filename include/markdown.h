@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 #include <memory>
+#include <cstdint>
 #include <functional>
 
 namespace qmd {
@@ -87,6 +88,12 @@ struct Element {
     int start = 1;            // for ordered lists
     bool isTask = false;      // list item is a - [ ] / - [x] task
     bool taskChecked = false;
+    // A table written in HTML (#325; its Table has language "html"). A
+    // cell: whether it is a <th>, and the columns and rows it covers
+    // (rowSpan 0: to the table's last row). A row: whether it is of the
+    // <thead>
+    bool header = false;
+    uint16_t colSpan = 1, rowSpan = 1;
     size_t taskMarkOffset = SIZE_MAX;  // byte offset of the mark char in the source
     std::string language;     // for code blocks
     int align = 0;            // for table cells (0=default, 1=left, 2=center, 3=right)
@@ -169,6 +176,27 @@ void debugPrintElement(const ElementPtr& elem, int indent = 0);
 
 // Parse HTML content into markdown elements
 void parseHtmlIntoElements(const std::string& html, Element* parent);
+
+// Where the cells of a table sit. A pipe table is a plain grid under one
+// header row. A table written in HTML (#325) has the header rows it marks
+// (its <thead>, or its leading rows of <th> alone), which may be none, and
+// cells that cover several columns or rows: a cell takes the first slot of
+// its row that no cell from a row above covers.
+struct TableGrid {
+    struct Cell {
+        const Element* cell = nullptr;
+        int row = 0, col = 0;          // its first slot
+        int rowSpan = 1, colSpan = 1;  // cut to the table and to its neighbours
+        int index = 0, count = 0;      // its place among its row's cells, and how many they are
+        bool header = false;           // a <th>, or a cell of a header row
+    };
+    int rowCount = 0, colCount = 0, headerRows = 0;
+    std::vector<const Element*> rows;
+    std::vector<Cell> cells;  // row by row, as written
+    std::vector<int> slots;   // rowCount * colCount: the cell over each slot, -1 for none
+    int at(int row, int col) const { return slots[(size_t)row * (size_t)colCount + (size_t)col]; }
+};
+TableGrid tableGrid(const Element& table);
 
 } // namespace qmd
 

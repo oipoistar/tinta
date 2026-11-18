@@ -1442,16 +1442,29 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
         case ElementType::HorizontalRule:
             ctx.out += "<hr/>\n";
             break;
-        case ElementType::Table:
+        case ElementType::Table: {
+            // A pipe table's first row is its header. A table written in
+            // HTML (#325) has the header cells it marks, cells over
+            // several columns or rows, and may have a caption
+            const TableGrid grid = tableGrid(*elem);
+            size_t next = 0;
             ctx.out += "<table>\n";
-            for (size_t i = 0; i < elem->children.size(); i++) {
-                const auto& row = elem->children[i];
+            for (const auto& row : elem->children) {
+                if (row->type == ElementType::Caption) {
+                    ctx.out += "<caption>";
+                    walkChildren(ctx, row);
+                    ctx.out += "</caption>\n";
+                }
                 if (row->type != ElementType::TableRow) continue;
                 ctx.out += "<tr>";
-                const char* cellTag = i == 0 ? "th" : "td";
                 for (const auto& cell : row->children) {
-                    if (cell->type != ElementType::TableCell) continue;
+                    // A cell past the grid's last column has no place
+                    if (next >= grid.cells.size() || grid.cells[next].cell != cell.get()) continue;
+                    const TableGrid::Cell& at = grid.cells[next++];
+                    const char* cellTag = at.header ? "th" : "td";
                     ctx.out += std::string("<") + cellTag;
+                    if (at.colSpan > 1) ctx.out += " colspan=\"" + std::to_string(at.colSpan) + "\"";
+                    if (at.rowSpan > 1) ctx.out += " rowspan=\"" + std::to_string(at.rowSpan) + "\"";
                     if (cell->align == 2) ctx.out += " align=\"center\"";
                     else if (cell->align == 3) ctx.out += " align=\"right\"";
                     ctx.out += ">";
@@ -1462,6 +1475,7 @@ void walk(ExportCtx& ctx, const ElementPtr& elem) {
             }
             ctx.out += "</table>\n";
             break;
+        }
         case ElementType::TableRow:
         case ElementType::TableCell:
             walkChildren(ctx, elem);  // reached only outside a Table
@@ -1610,6 +1624,9 @@ std::string themeCss(const App& app, const std::string& bodyFont,
            ";padding:2px 6px;border-radius:4px;font-size:0.9em;}";
     css += "pre{background:" + colorCss(t.codeBackground) +
            ";padding:14px 16px;border-radius:8px;overflow-x:auto;}";
+    // Long lines wrap as they do in the viewer (#324); off, the block
+    // scrolls sideways
+    if (app.wrapCode) css += "pre{white-space:pre-wrap;overflow-wrap:anywhere;}";
     css += "pre code{background:none;padding:0;}";
     if (t.inlineCode) {
         css += "pre code{color:" + colorCss(t.code) + ";}";

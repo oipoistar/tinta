@@ -355,7 +355,9 @@ bool describe(const Element& e, css::Element& d) {
             if (e.language == "tbl") d.classes = {"table"};
             d.id = e.title;
             break;
-        case ElementType::Caption: d.tag = "figcaption"; break;
+        case ElementType::Caption:
+            d.tag = e.parent && e.parent->type == ElementType::Table ? "caption" : "figcaption";
+            break;
         case ElementType::Bibliography:
             d.tag = "div";
             d.id = "refs";

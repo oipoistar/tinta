@@ -111,6 +111,7 @@ void appendCountableText(const ElementPtr& element, std::wstring& out) {
         case ElementType::Heading:
         case ElementType::ListItem:
         case ElementType::TableCell:
+        case ElementType::Caption:
         case ElementType::HtmlBlock:
             appendChildren(element, out);
             out += L'\n';

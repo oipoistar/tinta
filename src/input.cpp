@@ -991,6 +991,11 @@ static void settingsAction(App& app, HWND hwnd, int action) {
             // is not enough
             app.layoutDirty = true;
             break;
+        case SET_TOGGLE_WRAPCODE:
+            // Long lines in code blocks (#324): the blocks change height
+            app.wrapCode = !app.wrapCode;
+            app.layoutDirty = true;
+            break;
         case SET_LOCATE_PANDOC: {
             wchar_t path[MAX_PATH]{};
             OPENFILENAMEW ofn{};
