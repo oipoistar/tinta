@@ -37,6 +37,19 @@
 
 #define TIMER_EDITOR_REPARSE 2
 
+// Keep counts, not DirectWrite layouts, for the previous source revision.
+// A key normally changes one line; the unchanged prefix and suffix keep
+// their counts even when inserting/deleting a newline moves their offsets.
+// Retaining the COM objects also prevents a released format's address
+// being reused and mistaken for the format that produced these counts.
+struct EditorRowMetrics {
+    std::wstring text;
+    std::vector<size_t> starts, rows;
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> format;
+    Microsoft::WRL::ComPtr<IDWriteFontFallback> fallback;
+    float width = -1, charWidth = 0;
+};
+
 // Markdown assists (defined near the char handler)
 static void editorToggleInlineMark(App& app, HWND hwnd,
                                    const std::wstring& mark);
@@ -280,7 +293,10 @@ static void rebuildEditorRowMetrics(App& app) {
     app.editorRowStarts.clear();
     app.editorTotalRows = 0;
     app.editorRowMetricsWidth = -1.0f;
-    if (!editorWrapOn(app) || !app.editMode || editorLiveOn(app)) return;
+    if (!editorWrapOn(app) || !app.editMode || editorLiveOn(app)) {
+        app.editorRowMetrics.reset();
+        return;
+    }
 
     float maxTextWidth = editorTextMaxWidth(app);
     app.editorRowMetricsWidth = maxTextWidth;
@@ -288,6 +304,24 @@ static void rebuildEditorRowMetrics(App& app) {
         : (app.editorTextFormat ? app.editorTextFormat->GetFontSize() * 0.6f : 10.0f);
 
     size_t lineCount = app.editorLineStarts.size();
+    if (!app.editorRowMetrics) app.editorRowMetrics = std::make_shared<EditorRowMetrics>();
+    EditorRowMetrics& previous = *app.editorRowMetrics;
+    const size_t oldCount = previous.starts.size();
+    size_t prefix = 0, suffix = 0;
+    if (previous.width == maxTextWidth && previous.charWidth == charWidth &&
+        previous.format.Get() == app.editorTextFormat && previous.fallback.Get() == app.fontFallback) {
+        auto sameLine = [&](size_t now, size_t old) {
+            const size_t start = previous.starts[old];
+            const size_t end = old + 1 < oldCount ? previous.starts[old + 1] - 1 : previous.text.size();
+            return std::wstring_view(app.editorText.data() + app.editorLineStarts[now], getLineLength(app, now)) ==
+                   std::wstring_view(previous.text.data() + start, end - start);
+        };
+        while (prefix < lineCount && prefix < oldCount && sameLine(prefix, prefix)) ++prefix;
+        while (suffix < lineCount - prefix && suffix < oldCount - prefix &&
+               sameLine(lineCount - suffix - 1, oldCount - suffix - 1)) ++suffix;
+    }
+    std::vector<size_t> rowCounts(lineCount, 1);
+    bool measured = true;
     app.editorRowStarts.reserve(lineCount + 1);
     app.editorRowStarts.push_back(0);
     for (size_t i = 0; i < lineCount; i++) {
@@ -296,20 +330,39 @@ static void rebuildEditorRowMetrics(App& app) {
         // full-width glyph advances (2x the ASCII cell) — skip the layout
         // for the common short line.
         size_t rows = 1;
-        if (lineLen > 0 && (float)lineLen * charWidth * 2.0f > maxTextWidth) {
+        if (i < prefix) {
+            rows = previous.rows[i];
+        } else if (i >= lineCount - suffix) {
+            rows = previous.rows[oldCount - (lineCount - i)];
+        } else if (lineLen > 0 && (float)lineLen * charWidth * 2.0f > maxTextWidth) {
             IDWriteTextLayout* layout =
                 createEditorLineLayout(app, app.editorLineStarts[i], lineLen);
             if (layout) {
                 DWRITE_TEXT_METRICS tm{};
                 if (SUCCEEDED(layout->GetMetrics(&tm)) && tm.lineCount > 0) {
                     rows = tm.lineCount;
+                } else {
+                    measured = false;
                 }
                 layout->Release();
+            } else {
+                measured = false;
             }
         }
+        rowCounts[i] = rows;
         app.editorRowStarts.push_back(app.editorRowStarts.back() + rows);
     }
     app.editorTotalRows = app.editorRowStarts.back();
+    previous.text = app.editorText;
+    previous.starts = app.editorLineStarts;
+    previous.rows = std::move(rowCounts);
+    previous.width = maxTextWidth;
+    previous.charWidth = charWidth;
+    previous.format = app.editorTextFormat;
+    previous.fallback = app.fontFallback;
+    // A failed layout's one-row fallback is only for this pass. Retry it
+    // next time rather than treating it as a successful cached measure.
+    if (!measured) app.editorRowMetrics.reset();
 }
 
 // Rebuild row metrics if the wrap width changed (resize, zoom, splitter,
@@ -1909,6 +1962,7 @@ void exitEditMode(App& app) {
     app.clearEditorLineLayoutCache();
     app.editorText.clear();
     app.editorLineStarts.clear();
+    app.editorRowMetrics.reset();
     ++app.editorTextRevision;
     app.editorExtraCarets.clear();
     app.undoStack.clear();

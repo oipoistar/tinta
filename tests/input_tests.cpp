@@ -230,7 +230,11 @@ int runLiveTests(const char* fixtureDir);
 int runSourceHighlightTests(const char* fixture);
 int runMathMarkdownTests(const char* fixture);
 
+int runPerformanceTests(bool benchmarks);
+
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--performance-tests") return runPerformanceTests(true);
+    if (argc == 2 && std::string(argv[1]) == "--performance-regressions") return runPerformanceTests(false);
     if (argc == 2 && std::string(argv[1]) == "--deleted-tab-tests") return runDeletedTabTests();
     if (argc == 2 && std::string(argv[1]) == "--file-change-tests") return runFileChangeTests();
     if (argc == 2 && std::string(argv[1]) == "--pinned-tab-tests") return runPinnedTabTests();

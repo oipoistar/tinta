@@ -32,6 +32,8 @@
 
 using namespace qmd;
 
+struct EditorRowMetrics;
+
 // Timing helpers
 using Clock = std::chrono::high_resolution_clock;
 inline int64_t usElapsed(Clock::time_point start) {
@@ -1885,6 +1887,8 @@ struct App {
     std::vector<size_t> editorRowStarts;
     size_t editorTotalRows = 0;
     float editorRowMetricsWidth = -1.0f;  // wrap width the metrics were built for
+    // Source wrapping retains row counts for unchanged lines across edits.
+    std::shared_ptr<EditorRowMetrics> editorRowMetrics;
 
     // Editor cursor & selection
     size_t editorCursorPos = 0;
