@@ -306,6 +306,14 @@ target_link_libraries(tinta PRIVATE
     cabinet
 )
 
+if(MSVC)
+    # These APIs are first used by downloads, dialogs, or the GPU warm-up
+    # after the software frame. Keep them off the process loader's path.
+    target_link_libraries(tinta PRIVATE delayimp)
+    target_link_options(tinta PRIVATE /DELAYLOAD:urlmon.dll /DELAYLOAD:winhttp.dll
+        /DELAYLOAD:comdlg32.dll /DELAYLOAD:d3d11.dll)
+endif()
+
 target_compile_definitions(tinta PRIVATE UNICODE _UNICODE
     TINTA_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     TINTA_VERSION_MINOR=${PROJECT_VERSION_MINOR}

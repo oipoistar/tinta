@@ -3069,6 +3069,37 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
     std::vector<Piece> pieces;
     std::vector<CodeRow> rows;
 
+    // Code repeats keywords, punctuation and indentation. These layouts
+    // are immutable: colour and position live on the drawing run, and the
+    // format, typography, fallback and line height are fixed for this block.
+    // Keep a bounded set of short fragments; every returned reference is
+    // owned by its caller just like a freshly created layout. The cache is
+    // local so a new block, theme, font, zoom or render target starts fresh.
+    struct CachedPiece {
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        float width, height;
+    };
+    std::map<std::wstring, CachedPiece, std::less<>> pieceCache;
+    auto layoutPiece = [&](std::wstring_view text) {
+        const bool cacheable = text.size() <= 128;
+        if (cacheable) {
+            auto found = pieceCache.find(text);
+            if (found != pieceCache.end()) {
+                found->second.layout->AddRef();
+                return LayoutInfo{found->second.layout.Get(), found->second.width, found->second.height};
+            }
+        }
+        LayoutInfo info = createLayout(app, text, app.codeFormat, lineHeight, app.codeTypography);
+        if (cacheable && info.layout && pieceCache.size() < 256) {
+            CachedPiece cached;
+            cached.layout = info.layout;
+            cached.width = info.width;
+            cached.height = info.height;
+            pieceCache.emplace(std::wstring(text), std::move(cached));
+        }
+        return info;
+    };
+
     while (lineStart < wcode.length()) {
         size_t lineEnd = wcode.find(L'\n', lineStart);
         if (lineEnd == std::wstring::npos) lineEnd = wcode.length();
@@ -3124,8 +3155,7 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
         // The line as it is: most lines fit their block and are done
         float lineWidth = 0.0f;
         for (Piece& piece : pieces) {
-            piece.info = createLayout(app, lineView.substr(piece.start, piece.length), app.codeFormat, lineHeight,
-                                      app.codeTypography);
+            piece.info = layoutPiece(lineView.substr(piece.start, piece.length));
             lineWidth += piece.info.width;
         }
 
@@ -3145,8 +3175,7 @@ static void layoutCodeBlock(App& app, const ElementPtr& elem, float& y, float in
                     info = piece.info;
                     piece.info = {};
                 } else {
-                    info = createLayout(app, lineView.substr(a, b - a), app.codeFormat, lineHeight,
-                                        app.codeTypography);
+                    info = layoutPiece(lineView.substr(a, b - a));
                 }
                 const float runWidth = info.width;
                 D2D1_POINT_2F pos = D2D1::Point2F(x, textY);

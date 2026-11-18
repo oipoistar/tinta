@@ -58,6 +58,42 @@
 
 static App* g_app = nullptr;
 
+// Software target creation initializes a process-wide rasterizer. Do that
+// alongside settings/window/font setup, on a private factory: neither the
+// app's single-threaded factory nor any of its resources cross threads.
+// Join on every exit, including a file forwarded to another window. An
+// unavailable worker is harmless; normal target creation still does all
+// initialization itself.
+class SoftwareRenderWarmup {
+    std::thread worker;
+    bool started = false;
+public:
+    void start() noexcept {
+        if (started) return;
+        started = true;
+        try {
+            worker = std::thread([] {
+                const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                if (FAILED(com)) return;
+                {
+                    Microsoft::WRL::ComPtr<ID2D1Factory> factory;
+                    if (SUCCEEDED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, factory.GetAddressOf()))) {
+                        const auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+                            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+                        Microsoft::WRL::ComPtr<ID2D1DCRenderTarget> target;
+                        factory->CreateDCRenderTarget(&props, target.GetAddressOf());
+                    }
+                }
+                CoUninitialize();
+            });
+        } catch (...) {
+            // Thread creation is optional; it must not prevent opening a file.
+        }
+    }
+    void wait() { if (worker.joinable()) worker.join(); }
+    ~SoftwareRenderWarmup() { wait(); }
+};
+
 // Initializes the GPU driver on a worker thread after the first (software)
 // frame is on screen. D3D device creation costs ~200 ms dominated by
 // process-global driver initialization — done here once, the hardware
@@ -1978,6 +2014,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     auto startupStart = Clock::now();
 
+    SoftwareRenderWarmup softwareWarmup;
+    // Most launches with an existing window only hand it a file. Leave
+    // those alone; start below if this launch actually needs its own window.
+    if (!FindWindowW(L"Tinta", nullptr)) softwareWarmup.start();
+
     App app;
     auto t0 = startupStart;
     g_app = &app;
@@ -2160,6 +2201,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     // Ask about file association on first run
     askAndRegisterFileAssociation(savedSettings);
 
+    softwareWarmup.start();
+
     if (lightMode) {
         app.currentThemeIndex = 0;  // Paper (first light theme)
         app.theme = THEMES[0];
@@ -2264,6 +2307,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     // Create render target
     t0 = Clock::now();
+    softwareWarmup.wait();
     if (!createRenderTarget(app)) {
         MessageBoxW(nullptr, tr(app, "error.render_target_failed"),
                    tr(app, "error.title"), MB_OK);
