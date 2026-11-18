@@ -187,6 +187,17 @@ void tokenTests() {
     single(6, L"if test -f file; then", L"if", Type::Keyword);
     single(7, L"if (true) return;", L"if", Type::ControlFlow);
 
+    // Shell and Python only comment with '#': '//' and '/*' are URLs, paths,
+    // globs and floor division there, and must not swallow the rest of the code.
+    single(6, L"curl -s http://169.254.169.254/latest || echo fail", L"echo", Type::Keyword);
+    single(6, L"curl -s http://host/a # note", L"# note", Type::Comment);
+    single(2, L"half = total // 2", L"2", Type::Number);
+    SyntaxState shell;
+    expect(6, shell, L"ls /opt/* | wc -l", L"wc", Type::Plain);
+    expect(6, shell, L"echo done", L"echo", Type::Keyword);
+    single(3, L"run(); // note", L"// note", Type::Comment);
+    single(3, L"run(); /* note */ stop();", L"/* note */", Type::Comment);
+
     // Malformed fragments must always terminate and preserve UTF-16 source,
     // including when a prior line left the scanner inside a string/comment.
     std::mt19937 random(207);

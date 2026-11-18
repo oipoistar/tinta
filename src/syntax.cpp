@@ -181,6 +181,9 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, Sy
     bool& inBlockComment = state.inBlockComment;
     std::vector<SyntaxToken> tokens;
     const std::unordered_set<std::wstring>* keywords = getKeywordsForLanguage(language);
+    // Python and Bash comment only with '#': there '//' and '/*' are floor
+    // division, URLs, paths and globs.
+    const bool slashComments = language != 2 && language != 6;
 
     size_t i = 0;
     while (i < line.length()) {
@@ -213,14 +216,14 @@ std::vector<SyntaxToken> tokenizeLine(const std::wstring& line, int language, Sy
 
         // Line comments
         if (i + 1 < line.length()) {
-            if ((line[i] == L'/' && line[i+1] == L'/') ||  // C/C++/JS/Rust/Go
+            if ((slashComments && line[i] == L'/' && line[i+1] == L'/') ||  // C/C++/JS/Rust/Go
                 ((language == 2 || language == 6) && line[i] == L'#')) {  // Python + Bash
                 tokens.push_back({std::wstring_view(line.data() + i, line.length() - i),
                                   SyntaxTokenType::Comment});
                 return tokens;
             }
             // Block comment start
-            if (line[i] == L'/' && line[i+1] == L'*') {
+            if (slashComments && line[i] == L'/' && line[i+1] == L'*') {
                 size_t endComment = line.find(L"*/", i + 2);
                 if (endComment != std::wstring::npos) {
                     tokens.push_back({std::wstring_view(line.data() + i, endComment + 2 - i),

@@ -20,7 +20,7 @@ openInTabs=0
 checkUpdates=0
 language=en
 "@ | Set-Content -LiteralPath "$taskThemeOutput/runner/settings.ini"
-    foreach ($taskName in @('syntax-languages', 'syntax-multiline', 'syntax-legacy-control', 'markdown-regression-control')) {
+    foreach ($taskName in @('syntax-languages', 'syntax-multiline', 'syntax-legacy-control', 'syntax-shell-paths', 'markdown-regression-control')) {
         $taskSource = Join-Path $PSScriptRoot "fixtures/$taskName.md"
         $taskBefore = (Get-FileHash -LiteralPath $taskSource).Hash
         $taskDest = Join-Path $taskThemeOutput $taskName
