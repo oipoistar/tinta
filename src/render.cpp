@@ -4136,27 +4136,32 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
     float lineHeight = fontSize * themeLineHeight(app.theme);
     float minColWidth = 40.0f * scale;
 
-    // Collect rows
-    std::vector<Element*> rows;
-    for (const auto& child : elem->children) {
-        if (child->type == ElementType::TableRow) {
-            rows.push_back(child.get());
-        }
-    }
-    if (rows.empty()) return;
-
-    // Determine column count
-    int colCount = elem->col_count;
-    if (colCount <= 0 && !rows.empty()) {
-        colCount = (int)rows[0]->children.size();
-    }
-    if (colCount <= 0) return;
+    // Where the cells sit: a pipe table's plain grid under its header row,
+    // or the header rows and the joined cells of a table written in HTML
+    // (#325), which may have no header and whose cells may cover several
+    // columns or rows
+    const TableGrid grid = tableGrid(*elem);
+    const std::vector<const Element*>& rows = grid.rows;
+    const std::vector<TableGrid::Cell>& cells = grid.cells;
+    const int colCount = grid.colCount;
+    const size_t headRows = (size_t)grid.headerRows;
+    if (rows.empty() || colCount <= 0 || cells.empty()) return;
+    // Row r's cells are cells[rowFirst[r]] up to cells[rowFirst[r + 1]]
+    std::vector<size_t> rowFirst(rows.size() + 1, cells.size());
+    for (size_t i = cells.size(); i-- > 0;) rowFirst[(size_t)cells[i].row] = i;
+    for (size_t r = rows.size(); r-- > 0;) rowFirst[r] = std::min(rowFirst[r], rowFirst[r + 1]);
+    bool joined = false;  // some cell covers more than its own slot
+    for (const TableGrid::Cell& at : cells) joined = joined || at.colSpan > 1 || at.rowSpan > 1;
+    // The first cell of the body, which speaks for the grid; the header's
+    // first where there is no body
+    size_t bodyCell = headRows < rows.size() ? rowFirst[headRows] : 0;
+    if (bodyCell >= cells.size()) bodyCell = 0;
 
     // A CSS theme's table (page_style.h), named as the export writes it:
     // thead > tr > th for the header, tbody > tr > td for the rest
     const page::Style& tableCss = page::current(app);
     std::vector<page::Style> rowCss(rows.size());
-    std::vector<std::vector<page::Style>> cellCss(rows.size(), std::vector<page::Style>((size_t)colCount));
+    std::vector<page::Style> cellCss(cells.size());
     if (tableCss) {
         auto named = [](const char* tag, int index, int count) {
             css::Element e;
@@ -4165,64 +4170,91 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
             e.count = e.typeCount = count;
             return e;
         };
-        const int parts = rows.size() > 1 ? 2 : 1;
-        const css::Element head = named("thead", 1, parts), body = named("tbody", 2, parts);
-        const page::Style headCss = page::child(app, tableCss, head);
-        const page::Style bodyCss = page::child(app, tableCss, body, &head, 1);
-        std::vector<css::Element> trs;
-        for (size_t r = 1; r < rows.size(); r++) trs.push_back(named("tr", (int)r, (int)rows.size() - 1));
-        const css::Element headRow = named("tr", 1, 1);
-        std::vector<css::Element> heads, cells;
-        for (int c = 0; c < colCount; c++) {
-            heads.push_back(named("th", c + 1, colCount));
-            cells.push_back(named("td", c + 1, colCount));
-        }
+        const size_t bodyRows = rows.size() - headRows;
+        const int parts = (headRows > 0 ? 1 : 0) + (bodyRows > 0 ? 1 : 0);
+        const css::Element head = named("thead", 1, parts), body = named("tbody", headRows > 0 ? 2 : 1, parts);
+        page::Style headCss, bodyCss;
+        if (headRows > 0) headCss = page::child(app, tableCss, head);
+        if (bodyRows > 0) bodyCss = page::child(app, tableCss, body, headRows > 0 ? &head : nullptr, headRows > 0 ? 1 : 0);
+        std::vector<css::Element> headTrs, bodyTrs;
+        for (size_t r = 0; r < headRows; r++) headTrs.push_back(named("tr", (int)r + 1, (int)headRows));
+        for (size_t r = 0; r < bodyRows; r++) bodyTrs.push_back(named("tr", (int)r + 1, (int)bodyRows));
+        // A row's cells: all th or all td in most rows, named once for
+        // every row of as many cells
+        std::vector<css::Element> uniform[2], mixed;
         for (size_t r = 0; r < rows.size(); r++) {
-            rowCss[r] = r == 0 ? page::child(app, headCss, headRow)
-                               : page::child(app, bodyCss, trs[r - 1], trs.data(), r - 1);
-            const std::vector<css::Element>& kind = r == 0 ? heads : cells;
-            for (int c = 0; c < colCount; c++)
-                cellCss[r][(size_t)c] = page::child(app, rowCss[r], kind[(size_t)c], kind.data(), (size_t)c);
+            rowCss[r] = r < headRows ? page::child(app, headCss, headTrs[r], headTrs.data(), r)
+                                     : page::child(app, bodyCss, bodyTrs[r - headRows], bodyTrs.data(), r - headRows);
+            const size_t first = rowFirst[r], count = rowFirst[r + 1] - first;
+            if (count == 0) continue;
+            int ths = 0;
+            for (size_t k = 0; k < count; k++) ths += cells[first + k].header ? 1 : 0;
+            const std::vector<css::Element>* kind = &mixed;
+            if (ths == 0 || ths == (int)count) {
+                std::vector<css::Element>& same = uniform[ths > 0 ? 1 : 0];
+                if (same.size() != count) {
+                    same.clear();
+                    for (size_t k = 0; k < count; k++) same.push_back(named(ths > 0 ? "th" : "td", (int)k + 1, (int)count));
+                }
+                kind = &same;
+            } else {
+                mixed.clear();
+                int th = 0, td = 0;
+                for (size_t k = 0; k < count; k++) {
+                    const bool header = cells[first + k].header;
+                    css::Element e = named(header ? "th" : "td", (int)k + 1, (int)count);
+                    e.typeIndex = header ? ++th : ++td;
+                    e.typeCount = header ? ths : (int)count - ths;
+                    mixed.push_back(e);
+                }
+            }
+            for (size_t k = 0; k < count; k++)
+                cellCss[first + k] = page::child(app, rowCss[r], (*kind)[k], kind->data(), k);
         }
     }
     // One padding for the grid, the body cells' (or the header's)
     float padX = cellPadding, padY = cellPadding;
     {
-        const page::Style& cell = cellCss[rows.size() > 1 ? 1 : 0][0];
+        const page::Style& cell = cellCss[bodyCell];
         if (cell.has(Prop::PaddingLeft) || cell.has(Prop::PaddingRight))
             padX = page::px(app, std::max(cell->padding[3], cell->padding[1]));
         if (cell.has(Prop::PaddingTop) || cell.has(Prop::PaddingBottom))
             padY = page::px(app, std::max(cell->padding[0], cell->padding[2]));
     }
-    auto cellFormat = [&](size_t r, size_t c) {
-        return page::format(app, cellCss[r][c], r == 0 ? app.boldFormat : app.textFormat);
+    auto cellFormat = [&](size_t i) {
+        return page::format(app, cellCss[i], cells[i].header ? app.boldFormat : app.textFormat);
     };
-    auto cellColor = [&](size_t r, size_t c) {
-        return page::textColor(cellCss[r][c], r == 0 ? app.theme.heading : app.theme.text);
+    auto cellColor = [&](size_t i) {
+        return page::textColor(cellCss[i], cells[i].header ? app.theme.heading : app.theme.text);
     };
     y += page::before(app, 0);
+    // A <caption> stands over its table
+    for (const auto& child : elem->children) {
+        if (child->type == ElementType::Caption) layoutElement(app, child, y, indent, maxWidth);
+    }
 
     // Pass 1: Measure natural widths using plain text extraction (cheap, approximate)
     std::vector<float> colWidths(colCount, minColWidth);
     std::vector<float> rowHeights(rows.size(), lineHeight + padY * 2);
-    std::vector<std::vector<int>> cellAligns(rows.size(), std::vector<int>(colCount, 0));
+    std::vector<int> cellAligns(cells.size(), 0);
     // Per-cell natural width + plain-text flag: a simple cell that fits its
     // final column is exactly one line tall, so the height-measuring trial
     // layout in pass 1b can be skipped for it entirely
-    std::vector<std::vector<float>> cellNatural(rows.size(), std::vector<float>(colCount, 0.0f));
-    std::vector<std::vector<uint8_t>> cellSimple(rows.size(), std::vector<uint8_t>(colCount, 0));
+    std::vector<float> cellNatural(cells.size(), 0.0f);
+    std::vector<uint8_t> cellSimple(cells.size(), 0);
 
     std::wstring tsv;  // per-cell plain text doubles as the copy payload
     for (size_t r = 0; r < rows.size(); r++) {
-        const auto& row = rows[r];
         if (r > 0) tsv += L"\n";
-        for (size_t c = 0; c < row->children.size() && c < (size_t)colCount; c++) {
-            const auto& cell = row->children[c];
-            cellAligns[r][c] = cell->align;
+        int tsvCol = 0;
+        for (size_t i = rowFirst[r]; i < rowFirst[r + 1]; i++) {
+            const TableGrid::Cell& at = cells[i];
+            const Element* cell = at.cell;
+            cellAligns[i] = cell->align;
             // A column's own alignment stands; the theme's fills the rest
-            if (!cell->align && cellCss[r][c].has(Prop::TextAlign)) {
-                const css::TextAlign a = cellCss[r][c]->textAlign;
-                cellAligns[r][c] = a == css::TextAlign::Center ? 2 : a == css::TextAlign::Right ? 3 : 0;
+            if (!cell->align && cellCss[i].has(Prop::TextAlign)) {
+                const css::TextAlign a = cellCss[i]->textAlign;
+                cellAligns[i] = a == css::TextAlign::Center ? 2 : a == css::TextAlign::Right ? 3 : 0;
             }
 
             // Extract plain text for width estimation
@@ -4230,11 +4262,14 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
             std::function<void(const ElementPtr&)> extract = [&](const ElementPtr& e) {
                 if (!e) return;
                 if (e->type == ElementType::Text) text += toWide(e->text);
+                else if (e->type == ElementType::HardBreak) text += L' ';  // a <br>: the words stay apart
                 else for (const auto& ch : e->children) extract(ch);
             };
             for (const auto& ch : cell->children) extract(ch);
 
-            if (c > 0) tsv += L"\t";
+            // A cell's text goes in the column it starts in: the slots a
+            // joined cell covers stay empty in the copy
+            for (; tsvCol < at.col; tsvCol++) tsv += L"\t";
             std::wstring tsvCell = text;
             for (wchar_t& ch : tsvCell) {
                 if (ch == L'\t' || ch == L'\n' || ch == L'\r') ch = L' ';
@@ -4246,7 +4281,7 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
             // layout here picked a different CJK font than the renderer,
             // whose slightly wider advances then wrapped a "fitting" cell
             // one line past its measured row height (#148)
-            IDWriteTextFormat* fmt = cellFormat(r, c);
+            IDWriteTextFormat* fmt = cellFormat(i);
             bool plainCell = cell->children.size() == 1 &&
                              cell->children[0]->type == ElementType::Text;
             float textWidth = 0;
@@ -4268,31 +4303,42 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
                     MeasuringOnly measuring(app);
                     layoutInlineContent(app, cell->children, 0.0f, cy,
                                         kHugeWidth, fmt, app.theme.text, {},
-                                        lineHeight, -1.0f, &cellCss[r][c]);
+                                        lineHeight, -1.0f, &cellCss[i]);
                 }
                 float maxRight = 0.0f;
-                for (size_t i = snap.textRuns; i < app.layoutTextRuns.size();
-                     i++) {
+                for (size_t k = snap.textRuns; k < app.layoutTextRuns.size();
+                     k++) {
                     maxRight = std::max(maxRight,
-                                        app.layoutTextRuns[i].bounds.right);
+                                        app.layoutTextRuns[k].bounds.right);
                 }
-                for (size_t i = snap.rects; i < app.layoutRects.size(); i++) {
+                for (size_t k = snap.rects; k < app.layoutRects.size(); k++) {
                     maxRight = std::max(maxRight,
-                                        app.layoutRects[i].rect.right);
+                                        app.layoutRects[k].rect.right);
                 }
-                for (size_t i = snap.bitmaps; i < app.layoutBitmaps.size(); i++) {
+                for (size_t k = snap.bitmaps; k < app.layoutBitmaps.size(); k++) {
                     maxRight = std::max(maxRight,
-                                        app.layoutBitmaps[i].destRect.right);
+                                        app.layoutBitmaps[k].destRect.right);
                 }
                 rollbackTo(app, snap);
                 textWidth = maxRight;
             }
             float needed = textWidth + padX * 2 + 6.0f * scale;
-            if (needed > colWidths[c]) colWidths[c] = needed;
-            cellNatural[r][c] = needed;
-            cellSimple[r][c] = cell->children.size() == 1 &&
-                               cell->children[0]->type == ElementType::Text;
+            if (at.colSpan == 1 && needed > colWidths[at.col]) colWidths[at.col] = needed;
+            cellNatural[i] = needed;
+            cellSimple[i] = plainCell;
         }
+    }
+    // A cell over several columns widens them by equal shares when it
+    // needs more room than they have between them
+    auto spanWidth = [&](const TableGrid::Cell& at) {
+        float width = 0.0f;
+        for (int k = 0; k < at.colSpan; k++) width += colWidths[at.col + k];
+        return width;
+    };
+    for (size_t i = 0; joined && i < cells.size(); i++) {
+        if (cells[i].colSpan < 2) continue;
+        const float more = cellNatural[i] - spanWidth(cells[i]);
+        for (int k = 0; more > 0.0f && k < cells[i].colSpan; k++) colWidths[cells[i].col + k] += more / cells[i].colSpan;
     }
 
     // Distribute widths like a browser's auto table layout: columns whose
@@ -4366,38 +4412,43 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
     }
 
     // Pass 1b: Measure row heights via layoutInlineContent with snapshot-rollback
-    for (size_t r = 0; r < rows.size(); r++) {
-        float maxRowH = lineHeight + padY * 2;
-        const auto& row = rows[r];
-
-        for (size_t c = 0; c < row->children.size() && c < (size_t)colCount; c++) {
-            const auto& cell = row->children[c];
-            if (cell->children.empty()) continue;
-
-            // A plain-text cell whose natural width fits the column is one
-            // line tall — no trial layout needed (the common case)
-            if (cellSimple[r][c] && cellNatural[r][c] <= colWidths[c]) continue;
-
-            float cellW = colWidths[c] - padX * 2;
+    std::vector<std::pair<size_t, float>> tall;  // the cells over several rows, and their heights
+    for (size_t i = 0; i < cells.size(); i++) {
+        const TableGrid::Cell& at = cells[i];
+        float h = lineHeight + padY * 2;
+        // A plain-text cell whose natural width fits the column is one
+        // line tall — no trial layout needed (the common case)
+        const float width = spanWidth(at);
+        if (!at.cell->children.empty() && !(cellSimple[i] && cellNatural[i] <= width)) {
+            float cellW = width - padX * 2;
             LayoutSnapshot snap = takeSnapshot(app);
             float cellY = 0.0f;
             {
                 MeasuringOnly measuring(app);
-                layoutInlineContent(app, cell->children, 0.0f, cellY, cellW,
-                                    cellFormat(r, c), cellColor(r, c), {}, lineHeight, -1.0f, &cellCss[r][c]);
+                layoutInlineContent(app, at.cell->children, 0.0f, cellY, cellW,
+                                    cellFormat(i), cellColor(i), {}, lineHeight, -1.0f, &cellCss[i]);
             }
             rollbackTo(app, snap);
-
-            float h = cellY + padY * 2;
-            if (h > maxRowH) maxRowH = h;
+            h = std::max(h, cellY + padY * 2);
         }
-        rowHeights[r] = maxRowH;
+        if (at.rowSpan > 1) tall.push_back({i, h});
+        else if (h > rowHeights[(size_t)at.row]) rowHeights[(size_t)at.row] = h;
+    }
+    // A cell over several rows that needs more than they have between
+    // them lengthens the last of them
+    for (const auto& [i, h] : tall) {
+        const TableGrid::Cell& at = cells[i];
+        float have = 0.0f;
+        for (int k = 0; k < at.rowSpan; k++) have += rowHeights[(size_t)(at.row + k)];
+        if (h > have) rowHeights[(size_t)(at.row + at.rowSpan - 1)] += h - have;
     }
 
     // The Table element itself never receives a sourceOffset (the parser
     // stamps the deepest element at text time), so the table's source
     // anchor is its first text-bearing descendant - the same convention
-    // the in-place cell editor's source parser assumes (#148)
+    // the in-place cell editor's source parser assumes (#148). Nothing in a
+    // table written in HTML has a place in the source: it has no anchor,
+    // and so no cell to edit in place and no row or column to add (#325)
     size_t tableSrc = SIZE_MAX;
     {
         std::function<void(const ElementPtr&)> firstSrc =
@@ -4426,7 +4477,7 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
     std::optional<D2D1_COLOR_F> headerColor;
     bool themedRows = false;
     {
-        const page::Style& cell = cellCss[rows.size() > 1 ? 1 : 0][0];
+        const page::Style& cell = cellCss[bodyCell];
         auto side = [&](int s, float& width, D2D1_COLOR_F& color) {
             const Prop w = (Prop)((int)Prop::BorderTopWidth + s * 3);
             if (!cell.has(w) && !cell.has((Prop)((int)w + 1))) return false;
@@ -4444,8 +4495,8 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
         // leaves out is no line at all, as in a browser
         if (themedAcross && !themedDown) down = 0.0f;
         if (themedDown && !themedAcross) across = headerRule = 0.0f;
-        const page::Style& head = cellCss[0][0];
-        if (head.has(Prop::BorderBottomWidth) || head.has(Prop::BorderBottomStyle)) {
+        const page::Style& head = cellCss[0];
+        if (headRows > 0 && (head.has(Prop::BorderBottomWidth) || head.has(Prop::BorderBottomStyle))) {
             headerRule = head->border[2].style == css::LineStyle::None ? 0.0f : page::px(app, head->border[2].width);
             if (head.has(Prop::BorderBottomColor)) headerColor = page::color(head->border[2].color);
         }
@@ -4454,67 +4505,105 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
         if (head.has(Prop::BorderTopWidth) || head.has(Prop::BorderTopStyle)) {
             topRule = head->border[0].style == css::LineStyle::None ? 0.0f : page::px(app, head->border[0].width);
         }
-        for (size_t r = 1; r < rows.size(); r++) {
-            themedRows = themedRows || rowCss[r].has(Prop::BackgroundColor) || cellCss[r][0].has(Prop::BackgroundColor);
+        for (size_t r = headRows; r < rows.size(); r++) {
+            themedRows = themedRows || rowCss[r].has(Prop::BackgroundColor) ||
+                         (rowFirst[r] < rowFirst[r + 1] && cellCss[rowFirst[r]].has(Prop::BackgroundColor));
         }
     }
 
+    // The columns' left edges and the rows' tops, and one past the last of each
+    std::vector<float> colX((size_t)colCount + 1, indent), rowY(rows.size() + 1, y);
+    for (int c = 0; c < colCount; c++) colX[(size_t)c + 1] = colX[(size_t)c] + colWidths[c];
+    for (size_t r = 0; r < rows.size(); r++) rowY[r + 1] = rowY[r] + rowHeights[r];
+    // The table's right edge is its width from its left one, as its rows' bands and lines have it
+    auto edge = [&](int c) { return c >= colCount ? indent + totalWidth : colX[(size_t)c]; };
+    // The slot is its own row's: no cell from a row above covers it
+    auto ownSlot = [&](size_t r, int c) {
+        const int slot = grid.at((int)r, c);
+        return slot < 0 || cells[(size_t)slot].row == (int)r;
+    };
+
     for (size_t r = 0; r < rows.size(); r++) {
-        float cellX = indent;
-        bool isHeader = (r == 0);
-        const auto& row = rows[r];
+        bool isHeader = r < headRows;
+        y = rowY[r];
+        const size_t first = rowFirst[r], end = rowFirst[r + 1];
 
         // Header row background
-        const page::Style& rowBack = cellCss[r][0].has(Prop::BackgroundColor) ? cellCss[r][0] : rowCss[r];
+        const page::Style& rowBack = first < end && cellCss[first].has(Prop::BackgroundColor) ? cellCss[first] : rowCss[r];
+        std::optional<D2D1_COLOR_F> band;
         if (rowBack.has(Prop::BackgroundColor)) {
             const D2D1_COLOR_F back = page::color(rowBack->backgroundColor);
-            if (back.a > 0.0f) {
-                app.layoutRects.push_back({D2D1::RectF(indent, y, indent + totalWidth, y + rowHeights[r]), back});
-            }
+            if (back.a > 0.0f) band = back;
         } else if (isHeader) {
             D2D1_COLOR_F headerBg = app.theme.codeBackground;
             headerBg.a = 0.5f;
-            app.layoutRects.push_back({D2D1::RectF(indent, y, indent + totalWidth, y + rowHeights[r]), headerBg});
-        } else if (r % 2 == 0 && !themedRows) {
+            band = headerBg;
+        } else if ((r - headRows) % 2 == 1 && !themedRows) {
             // Subtle alternating row background
             D2D1_COLOR_F altBg = app.theme.codeBackground;
             altBg.a = 0.15f;
-            app.layoutRects.push_back({D2D1::RectF(indent, y, indent + totalWidth, y + rowHeights[r]), altBg});
+            band = altBg;
+        }
+        if (band && !joined) {
+            app.layoutRects.push_back({D2D1::RectF(indent, y, indent + totalWidth, y + rowHeights[r]), *band});
+        } else if (band) {
+            // The band stops at the cells that come down from the rows
+            // above, and goes down with the cells of this row that cover
+            // the rows below
+            for (int c = 0; c < colCount;) {
+                if (!ownSlot(r, c)) {
+                    c++;
+                    continue;
+                }
+                const int slot = grid.at((int)r, c);
+                const int from = c;
+                float bottom = rowY[r + 1];
+                if (slot >= 0 && cells[(size_t)slot].rowSpan > 1) {
+                    c += cells[(size_t)slot].colSpan;
+                    bottom = rowY[r + (size_t)cells[(size_t)slot].rowSpan];
+                } else {
+                    while (c < colCount && ownSlot(r, c) && (grid.at((int)r, c) < 0 || cells[(size_t)grid.at((int)r, c)].rowSpan == 1)) c++;
+                }
+                app.layoutRects.push_back({D2D1::RectF(colX[(size_t)from], y, edge(c), bottom), *band});
+            }
         }
 
-        for (size_t c = 0; c < row->children.size() && c < (size_t)colCount; c++) {
-            const auto& cell = row->children[c];
-            IDWriteTextFormat* fmt = cellFormat(r, c);
-            D2D1_COLOR_F textColor = cellColor(r, c);
+        for (size_t i = first; i < end; i++) {
+            const TableGrid::Cell& at = cells[i];
+            const Element* cell = at.cell;
+            IDWriteTextFormat* fmt = cellFormat(i);
+            D2D1_COLOR_F textColor = cellColor(i);
+            const float cellX = colX[(size_t)at.col];
+            const float cellWidth = spanWidth(at);
 
             // In-place editing (#148): the preview records every cell's
             // rect keyed by the table's source anchor plus row/col
             if (app.editMode && tableSrc != SIZE_MAX) {
                 app.tableCellRects.push_back(
-                    {tableSrc, (int)r, (int)c,
-                     D2D1::RectF(cellX, y, cellX + colWidths[c],
+                    {tableSrc, (int)r, at.col,
+                     D2D1::RectF(cellX, y, cellX + cellWidth,
                                  y + rowHeights[r])});
             }
 
             if (!cell->children.empty()) {
-                float cellW = colWidths[c] - padX * 2;
+                float cellW = cellWidth - padX * 2;
                 float textX = cellX + padX;
                 float textY = y + padY;
 
-                int align = cellAligns[r][c];
+                int align = cellAligns[i];
                 LayoutSnapshot cellSnap = takeSnapshot(app);
 
                 layoutInlineContent(app, cell->children, textX, textY, cellW,
-                                    fmt, textColor, {}, lineHeight, -1.0f, &cellCss[r][c]);
+                                    fmt, textColor, {}, lineHeight, -1.0f, &cellCss[i]);
 
                 // Apply center/right alignment by shifting all new items
                 if (align == 2 || align == 3) {
                     float maxRight = 0.0f;
-                    for (size_t i = cellSnap.textRuns; i < app.layoutTextRuns.size(); i++) {
-                        maxRight = std::max(maxRight, app.layoutTextRuns[i].bounds.right);
+                    for (size_t k = cellSnap.textRuns; k < app.layoutTextRuns.size(); k++) {
+                        maxRight = std::max(maxRight, app.layoutTextRuns[k].bounds.right);
                     }
-                    for (size_t i = cellSnap.bitmaps; i < app.layoutBitmaps.size(); i++) {
-                        maxRight = std::max(maxRight, app.layoutBitmaps[i].destRect.right);
+                    for (size_t k = cellSnap.bitmaps; k < app.layoutBitmaps.size(); k++) {
+                        maxRight = std::max(maxRight, app.layoutBitmaps[k].destRect.right);
                     }
                     float contentW = maxRight - textX;
                     float dx = 0.0f;
@@ -4533,38 +4622,65 @@ static void layoutTable(App& app, const ElementPtr& elem, float& y, float indent
             // double-click takes one cell's word instead of gluing on its
             // neighbours ("DeltaEchoFoxtrot"), and a copied row pastes into
             // a spreadsheet as columns (#246, spotted by @Lex987)
-            if (c + 1 < row->children.size() && c + 1 < (size_t)colCount) {
+            if (i + 1 < end) {
                 app.docText += L"\t";
             }
-            cellX += colWidths[c];
         }
         app.docText += L"\n";
-        y += rowHeights[r];
     }
+    y = rowY[rows.size()];
 
-    // Grid lines: horizontal
+    // Grid lines: horizontal. A cell over several rows has no line across it
     for (size_t r = 0; r <= rows.size(); r++) {
-        float lineY = tableStartY;
-        for (size_t i = 0; i < r; i++) lineY += rowHeights[i];
-        float stroke = r == 0 ? topRule : r == 1 ? headerRule : across; // thicker after header
+        float lineY = rowY[r];
+        float stroke = r == 0 ? topRule : r == headRows ? headerRule : across; // thicker after header
         if (stroke <= 0.0f) continue;
-        app.layoutLines.push_back({D2D1::Point2F(indent, lineY),
-                                   D2D1::Point2F(indent + totalWidth, lineY),
-                                   r == 1 && headerColor ? *headerColor : acrossColor, stroke});
+        const D2D1_COLOR_F color = r > 0 && r == headRows && headerColor ? *headerColor : acrossColor;
+        if (!joined || r == 0 || r == rows.size()) {
+            app.layoutLines.push_back({D2D1::Point2F(indent, lineY),
+                                       D2D1::Point2F(indent + totalWidth, lineY),
+                                       color, stroke});
+            continue;
+        }
+        for (int c = 0; c < colCount;) {
+            auto parted = [&](int col) {
+                const int above = grid.at((int)r - 1, col);
+                return above < 0 || above != grid.at((int)r, col);
+            };
+            if (!parted(c)) {
+                c++;
+                continue;
+            }
+            const int from = c;
+            while (c < colCount && parted(c)) c++;
+            app.layoutLines.push_back({D2D1::Point2F(colX[(size_t)from], lineY), D2D1::Point2F(edge(c), lineY), color, stroke});
+        }
     }
 
-    // Grid lines: vertical
+    // Grid lines: vertical. A cell over several columns has no line down it
     {
-        float tableEndY = tableStartY;
-        for (size_t r = 0; r < rows.size(); r++) tableEndY += rowHeights[r];
-        float vx = indent;
-        for (int c = 0; c <= colCount; c++) {
-            if (down > 0.0f) {
+        float tableEndY = rowY[rows.size()];
+        for (int c = 0; c <= colCount && down > 0.0f; c++) {
+            const float vx = colX[(size_t)c];
+            if (!joined || c == 0 || c == colCount) {
                 app.layoutLines.push_back({D2D1::Point2F(vx, tableStartY),
                                            D2D1::Point2F(vx, tableEndY),
                                            downColor, down});
+                continue;
             }
-            if (c < colCount) vx += colWidths[c];
+            for (size_t r = 0; r < rows.size();) {
+                auto parted = [&](size_t row) {
+                    const int left = grid.at((int)row, c - 1);
+                    return left < 0 || left != grid.at((int)row, c);
+                };
+                if (!parted(r)) {
+                    r++;
+                    continue;
+                }
+                const size_t from = r;
+                while (r < rows.size() && parted(r)) r++;
+                app.layoutLines.push_back({D2D1::Point2F(vx, rowY[from]), D2D1::Point2F(vx, rowY[r]), downColor, down});
+            }
         }
 
         // Copy-as-TSV hover button hit region
@@ -4799,7 +4915,7 @@ static void layoutElement(App& app, const ElementPtr& elem, float& y, float inde
                                 child->type == ElementType::List ||
                                 child->type == ElementType::HorizontalRule ||
                                 child->type == ElementType::HtmlBlock ||
-                                child->type == ElementType::Table);
+                                child->type == ElementType::Table);  // one written in HTML (#325)
                 if (isBlock) {
                     layoutInlineRun(app, inlineBuffer, y, indent, maxWidth);
                     layoutElement(app, child, y, indent, maxWidth);
