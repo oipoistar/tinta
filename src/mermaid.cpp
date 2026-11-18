@@ -898,12 +898,23 @@ ParseResult parse(std::string_view source) {
                                 "Unmatched subgraph end");
                 }
                 subgraphStack.pop_back();
-            } else if (equalsIgnoreCase(keyword, "direction") ||
-                       equalsIgnoreCase(keyword, "click") ||
+            } else if (equalsIgnoreCase(keyword, "direction")) {
+                // A subgraph's own direction (#326). Outside a subgraph the
+                // header gives the direction and the statement is passed over
+                std::string_view value = readWord(line, position);
+                if (!subgraphStack.empty() && !value.empty()) {
+                    auto& owner =
+                        result.diagram.subgraphs[subgraphStack.back()];
+                    if (!parseDirection(value, owner.direction)) {
+                        return fail(std::move(result), lineNumber,
+                                    "Unsupported flowchart direction");
+                    }
+                    owner.hasDirection = true;
+                }
+            } else if (equalsIgnoreCase(keyword, "click") ||
                        equalsIgnoreCase(keyword, "linkStyle")) {
-                // Direction hints inside subgraphs, click handlers, and edge
-                // styling have nothing to draw natively; the diagram itself
-                // still renders
+                // Click handlers and edge styling have nothing to draw
+                // natively; the diagram itself still renders
             } else if (std::string configName; [&] {
                            // Mermaid 11 config: "e1@{ animate: true }" for
                            // edges, "A@{ img: ..., label: ... }" for nodes
@@ -1022,201 +1033,877 @@ ParseResult parse(std::string_view source) {
     return result;
 }
 
+namespace {
+
+constexpr int kNoGroup = -1;
+constexpr float kNoBox = std::numeric_limits<float>::max();
+
+bool isVertical(Direction direction) {
+    return direction == Direction::TopToBottom ||
+           direction == Direction::BottomToTop;
+}
+
+Rect emptyRect() {
+    return {kNoBox, kNoBox, -kNoBox, -kNoBox};
+}
+
+void grow(Rect& box, const Rect& rect) {
+    box.left = std::min(box.left, rect.left);
+    box.top = std::min(box.top, rect.top);
+    box.right = std::max(box.right, rect.right);
+    box.bottom = std::max(box.bottom, rect.bottom);
+}
+
+void shift(Rect& rect, float dx, float dy) {
+    rect.left += dx;
+    rect.top += dy;
+    rect.right += dx;
+    rect.bottom += dy;
+}
+
+// A gap widened to what group boxes need. Pads that add up to the gap but
+// for rounding leave it, and with it the layout, as it was
+float atLeast(float gap, float needed) {
+    return needed > gap + 0.01f ? needed : gap;
+}
+
+// The box of a subgraph that is not a block: around its own nodes and the
+// boxes of the subgraphs in it, which come later and are boxed already
+Rect groupBox(const Diagram& diagram, size_t subgraph,
+              const std::vector<Rect>& nodes, const std::vector<Rect>& groups,
+              const LayoutOptions& options) {
+    Rect box = emptyRect();
+    for (size_t node : diagram.subgraphs[subgraph].nodes) {
+        if (node < nodes.size()) grow(box, nodes[node]);
+    }
+    for (size_t child = subgraph + 1; child < diagram.subgraphs.size(); child++) {
+        if (diagram.subgraphs[child].parent == subgraph &&
+            child < groups.size() && !isEmpty(groups[child])) {
+            grow(box, groups[child]);
+        }
+    }
+    if (isEmpty(box)) return box;
+    box.left -= options.groupPad;
+    box.top -= options.groupPad + options.groupTitle;
+    box.right += options.groupPad;
+    box.bottom += options.groupPad;
+    return box;
+}
+
+// What the edges of one layout share: the lanes taken beside the nodes and
+// the labels set down so far
+struct EdgeLanes {
+    size_t taken = 0;
+    std::vector<Rect> labels;
+};
+
+// What a rank of a layout covers along the layout's direction
+struct RankBand {
+    float low = kNoBox;
+    float high = -kNoBox;
+    bool block = false;  // a block is among its items
+};
+
+// Where an edge to the next rank bends: half way between its two nodes. A
+// block is far longer than a node of its rank, and half way from that node
+// can lie beside the block, the edge then running through it; the bend
+// moves into the gap between the two ranks
+float clearBend(float bend, const std::vector<RankBand>* bands, size_t fromRank,
+                size_t toRank, float margin) {
+    if (!bands || fromRank >= bands->size() || toRank >= bands->size()) {
+        return bend;
+    }
+    const RankBand& from = (*bands)[fromRank];
+    const RankBand& to = (*bands)[toRank];
+    if (!from.block && !to.block) return bend;
+    float low = from.high <= to.low ? from.high : to.high;
+    float high = from.high <= to.low ? to.low : from.low;
+    if (high - low <= margin * 2.0f) return (low + high) * 0.5f;
+    return std::min(std::max(bend, low + margin), high - margin);
+}
+
+// One edge between two nodes of a layout that runs along `direction`
+EdgeRoute routeEdge(const Diagram& diagram, size_t edgeIndex, Direction direction,
+                    const std::vector<Rect>& nodes,
+                    const std::vector<size_t>& ranks,
+                    const LayoutOptions& options, EdgeLanes& lanes,
+                    const std::vector<RankBand>* bands = nullptr) {
+    const Edge& edge = diagram.edges[edgeIndex];
+    const Rect& from = nodes[edge.from];
+    const Rect& to = nodes[edge.to];
+    EdgeRoute route;
+
+    // A node's left side at mid-height, where a notch has its tip
+    auto leftSide = [&](size_t node) {
+        const Rect& rect = nodes[node];
+        return rect.left + leftNotch(diagram.nodes[node].shape,
+                                     rect.bottom - rect.top);
+    };
+    auto nextLane = [&] {
+        return (options.laneStart + lanes.taken++ * options.laneStep) *
+               options.laneScale;
+    };
+
+    float fromCenterX = (from.left + from.right) * 0.5f;
+    float fromCenterY = (from.top + from.bottom) * 0.5f;
+    float toCenterX = (to.left + to.right) * 0.5f;
+    float toCenterY = (to.top + to.bottom) * 0.5f;
+    bool selfLoop = edge.from == edge.to;
+
+    // Edges that skip over intermediate ranks would cut straight through
+    // the nodes between them (and drop their label onto whatever edge
+    // happens to sit at the midpoint) — route those through an exterior
+    // lane like back-edges instead
+    bool skipsRanks = false;
+    if (edge.from < ranks.size() && edge.to < ranks.size()) {
+        size_t fromRank = ranks[edge.from];
+        size_t toRank = ranks[edge.to];
+        skipsRanks = (fromRank < toRank ? toRank - fromRank
+                                        : fromRank - toRank) > 1;
+    }
+
+    if (isVertical(direction)) {
+        bool topToBottom = direction == Direction::TopToBottom;
+        bool forward = !selfLoop && !skipsRanks &&
+            (topToBottom ? toCenterY > fromCenterY : toCenterY < fromCenterY);
+        if (selfLoop) {
+            float lane = nextLane();
+            Point start{from.right, fromCenterY};
+            Point end{fromCenterX, from.bottom};
+            float laneX = from.right + lane;
+            float laneY = from.bottom + lane;
+            route.points = {
+                start,
+                {laneX, start.y},
+                {laneX, laneY},
+                {end.x, laneY},
+                end,
+            };
+        } else if (forward) {
+            Point start{fromCenterX, topToBottom ? from.bottom : from.top};
+            Point end{toCenterX, topToBottom ? to.top : to.bottom};
+            float middleY = clearBend((start.y + end.y) * 0.5f, bands,
+                                      ranks[edge.from], ranks[edge.to],
+                                      options.groupGap);
+            route.points = {
+                start,
+                {start.x, middleY},
+                {end.x, middleY},
+                end,
+            };
+        } else {
+            float lane = nextLane();
+            Point start{from.right, fromCenterY};
+            Point end{to.right, toCenterY};
+            float laneX = std::max(from.right, to.right) + lane;
+            route.points = {
+                start,
+                {laneX, start.y},
+                {laneX, end.y},
+                end,
+            };
+        }
+    } else {
+        bool leftToRight = direction == Direction::LeftToRight;
+        bool forward = !selfLoop && !skipsRanks &&
+            (leftToRight ? toCenterX > fromCenterX : toCenterX < fromCenterX);
+        if (selfLoop) {
+            float lane = nextLane();
+            Point start{fromCenterX, from.bottom};
+            Point end{from.right, fromCenterY};
+            float laneX = from.right + lane;
+            float laneY = from.bottom + lane;
+            route.points = {
+                start,
+                {start.x, laneY},
+                {laneX, laneY},
+                {laneX, end.y},
+                end,
+            };
+        } else if (forward) {
+            Point start{leftToRight ? from.right : leftSide(edge.from), fromCenterY};
+            Point end{leftToRight ? leftSide(edge.to) : to.right, toCenterY};
+            float middleX = clearBend((start.x + end.x) * 0.5f, bands,
+                                      ranks[edge.from], ranks[edge.to],
+                                      options.groupGap);
+            route.points = {
+                start,
+                {middleX, start.y},
+                {middleX, end.y},
+                end,
+            };
+        } else {
+            float lane = nextLane();
+            Point start{fromCenterX, from.bottom};
+            Point end{toCenterX, to.bottom};
+            float laneY = std::max(from.bottom, to.bottom) + lane;
+            route.points = {
+                start,
+                {start.x, laneY},
+                {end.x, laneY},
+                end,
+            };
+        }
+    }
+
+    if (edgeIndex >= options.edgeLabels.size()) return route;
+    const Size& label = options.edgeLabels[edgeIndex];
+    if (label.width <= 0.0f && label.height <= 0.0f) return route;
+
+    size_t middle = route.points.size() / 2;
+    const Point& middleStart = route.points[middle - 1];
+    const Point& middleEnd = route.points[middle];
+    float centerX = (middleStart.x + middleEnd.x) * 0.5f;
+    float centerY = (middleStart.y + middleEnd.y) * 0.5f;
+    auto chipAt = [&](float cx, float cy) {
+        return Rect{cx - label.width * 0.5f, cy - label.height * 0.5f,
+                    cx + label.width * 0.5f, cy + label.height * 0.5f};
+    };
+    Rect labelRect = chipAt(centerX, centerY);
+
+    // Parallel exterior lanes sit only a few pixels apart, so their
+    // midpoint chips stack on top of each other — slide an overlapping
+    // chip along its own segment until it finds space
+    bool segVertical = std::abs(middleEnd.x - middleStart.x) <
+                       std::abs(middleEnd.y - middleStart.y);
+    float stepX = segVertical ? 0.0f : label.width + options.labelStep;
+    float stepY = segVertical ? label.height + options.labelStep : 0.0f;
+    auto overlapsPlaced = [&](const Rect& rect) {
+        for (const auto& placed : lanes.labels) {
+            if (rect.left < placed.right && rect.right > placed.left &&
+                rect.top < placed.bottom && rect.bottom > placed.top) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (int attempt = 1; attempt <= 8 && overlapsPlaced(labelRect); attempt++) {
+        float side = (attempt % 2 == 1) ? 1.0f : -1.0f;
+        float magnitude = static_cast<float>((attempt + 1) / 2);
+        labelRect = chipAt(centerX + stepX * side * magnitude,
+                           centerY + stepY * side * magnitude);
+    }
+    lanes.labels.push_back(labelRect);
+    route.hasLabel = true;
+    route.label = labelRect;
+    return route;
+}
+
+// A flowchart is one layout, or several: a subgraph that has a direction of
+// its own and no edge across its border is a block (#326). A block is laid
+// out first, on its own and along its direction, and then takes part in the
+// layout around it as one item of the size of its group box. A subgraph
+// with an edge to the outside is none: Mermaid has it take its parent's
+// direction, and its nodes are ranked with the nodes around it.
+class FlowLayout {
+public:
+    FlowLayout(const Diagram& diagram, const std::vector<Size>& nodeSizes,
+               const LayoutOptions& options, Layout& result)
+        : diagram(diagram), nodeSizes(nodeSizes), options(options),
+          result(result) {}
+
+    void run() {
+        const size_t nodeCount = diagram.nodes.size();
+        const size_t groupCount = diagram.subgraphs.size();
+        findBlocks();
+        result.nodes.assign(nodeCount, Rect{});
+        result.ranks.assign(nodeCount, 0);
+        result.directions.assign(nodeCount, diagram.direction);
+        result.scopes.assign(nodeCount, 0);
+        for (size_t node = 0; node < nodeCount; node++) {
+            result.scopes[node] = static_cast<size_t>(nodeScope[node] + 1);
+        }
+        result.blocks = block;
+        result.groups.assign(groupCount, emptyRect());
+        result.groupRanks.assign(groupCount, 0);
+        result.groupScopes.assign(groupCount, 0);
+        for (size_t s = 0; s < groupCount; s++) {
+            result.groupScopes[s] = static_cast<size_t>(groupScope[s] + 1);
+        }
+        blockBounds.assign(groupCount, Rect{});
+        // Inner blocks come later and are laid out first
+        for (size_t s = groupCount; s-- > 0;) {
+            if (block[s]) layoutScope(static_cast<int>(s));
+        }
+        layoutScope(kNoGroup);
+    }
+
+private:
+    // A node, or a block, of one layout
+    struct Item {
+        size_t key = 0;        // where it sorts: a node's index, a block's first node
+        size_t index = 0;      // the node, or the block's subgraph
+        bool block = false;
+        int group = kNoGroup;  // innermost subgraph around it in this layout
+        float width = 0.0f;
+        float height = 0.0f;
+    };
+
+    const Diagram& diagram;
+    const std::vector<Size>& nodeSizes;
+    const LayoutOptions& options;
+    Layout& result;
+
+    std::vector<int> groupOf;        // innermost subgraph of a node
+    std::vector<int> parentOf;       // the subgraph around a subgraph
+    std::vector<bool> block;
+    std::vector<int> nodeScope;      // the block a node is laid out in
+    std::vector<int> groupScope;     // the block around a subgraph
+    std::vector<size_t> firstNode;   // lowest node in a subgraph, nested ones included
+    std::vector<Rect> blockBounds;   // all a block draws, in its own space
+
+    bool holds(int group, size_t node) const {
+        for (int g = groupOf[node]; g != kNoGroup; g = parentOf[g]) {
+            if (g == group) return true;
+        }
+        return false;
+    }
+
+    bool isInside(size_t subgraph, int group) const {
+        for (int g = parentOf[subgraph]; g != kNoGroup; g = parentOf[g]) {
+            if (g == group) return true;
+        }
+        return false;
+    }
+
+    void findBlocks() {
+        const size_t nodeCount = diagram.nodes.size();
+        const size_t groupCount = diagram.subgraphs.size();
+        groupOf.assign(nodeCount, kNoGroup);
+        parentOf.assign(groupCount, kNoGroup);
+        for (size_t s = 0; s < groupCount; s++) {
+            // A subgraph is declared inside its parent, so after it
+            if (diagram.subgraphs[s].parent < s) {
+                parentOf[s] = static_cast<int>(diagram.subgraphs[s].parent);
+            }
+            for (size_t node : diagram.subgraphs[s].nodes) {
+                if (node < nodeCount) groupOf[node] = static_cast<int>(s);
+            }
+        }
+
+        std::vector<bool> populated(groupCount, false);
+        std::vector<bool> crossed(groupCount, false);
+        firstNode.assign(groupCount, SIZE_MAX);
+        for (size_t node = 0; node < nodeCount; node++) {
+            for (int g = groupOf[node]; g != kNoGroup; g = parentOf[g]) {
+                populated[g] = true;
+                firstNode[g] = std::min(firstNode[g], node);
+            }
+        }
+        for (const auto& edge : diagram.edges) {
+            if (edge.from >= nodeCount || edge.to >= nodeCount) continue;
+            for (int g = groupOf[edge.from]; g != kNoGroup; g = parentOf[g]) {
+                if (!holds(g, edge.to)) crossed[g] = true;
+            }
+            for (int g = groupOf[edge.to]; g != kNoGroup; g = parentOf[g]) {
+                if (!holds(g, edge.from)) crossed[g] = true;
+            }
+        }
+
+        block.assign(groupCount, false);
+        for (size_t s = 0; s < groupCount; s++) {
+            block[s] = diagram.subgraphs[s].hasDirection && populated[s] &&
+                       !crossed[s];
+        }
+        auto nearestBlock = [&](int group) {
+            while (group != kNoGroup && !block[group]) group = parentOf[group];
+            return group;
+        };
+        nodeScope.assign(nodeCount, kNoGroup);
+        for (size_t node = 0; node < nodeCount; node++) {
+            nodeScope[node] = nearestBlock(groupOf[node]);
+        }
+        groupScope.assign(groupCount, kNoGroup);
+        for (size_t s = 0; s < groupCount; s++) {
+            groupScope[s] = nearestBlock(parentOf[s]);
+        }
+    }
+
+    // Lays out the diagram (kNoGroup) or one block. The blocks inside it
+    // are laid out already
+    void layoutScope(int scope) {
+        const size_t nodeCount = diagram.nodes.size();
+        const size_t groupCount = diagram.subgraphs.size();
+        const Direction direction = scope == kNoGroup
+            ? diagram.direction
+            : diagram.subgraphs[scope].direction;
+        const bool vertical = isVertical(direction);
+        const float nodeGap = options.nodeGap;
+
+        std::vector<Item> items;
+        for (size_t node = 0; node < nodeCount; node++) {
+            if (nodeScope[node] != scope) continue;
+            Item item;
+            item.key = node;
+            item.index = node;
+            item.group = groupOf[node] == scope ? kNoGroup : groupOf[node];
+            item.width = std::max(1.0f, nodeSizes[node].width);
+            item.height = std::max(1.0f, nodeSizes[node].height);
+            items.push_back(item);
+        }
+        bool hasBlocks = false;
+        for (size_t s = 0; s < groupCount; s++) {
+            if (!block[s] || groupScope[s] != scope) continue;
+            Item item;
+            item.key = firstNode[s];
+            item.index = s;
+            item.block = true;
+            item.group = parentOf[s] == scope ? kNoGroup : parentOf[s];
+            const Rect& bounds = blockBounds[s];
+            item.width = bounds.right - bounds.left + options.groupPad * 2.0f;
+            if (s < options.groupTitles.size()) {
+                item.width = std::max(item.width, options.groupTitles[s]);
+            }
+            item.height = bounds.bottom - bounds.top + options.groupPad * 2.0f +
+                          options.groupTitle;
+            items.push_back(item);
+            hasBlocks = true;
+        }
+        if (hasBlocks) {
+            std::sort(items.begin(), items.end(),
+                      [](const Item& left, const Item& right) {
+                          return left.key < right.key;
+                      });
+        }
+        const size_t itemCount = items.size();
+        if (itemCount == 0) return;
+
+        std::vector<size_t> itemOf(nodeCount, SIZE_MAX);
+        for (size_t i = 0; i < itemCount; i++) {
+            if (!items[i].block) itemOf[items[i].index] = i;
+        }
+
+        // The edges of this layout. An edge never leaves it: one that did
+        // would cross a block's border, and the block would be none
+        std::vector<size_t> scopeEdges;
+        std::vector<std::vector<size_t>> outgoing(itemCount);
+        std::vector<std::vector<size_t>> incoming(itemCount);
+        std::vector<size_t> indegree(itemCount, 0);
+        for (size_t e = 0; e < diagram.edges.size(); e++) {
+            const auto& edge = diagram.edges[e];
+            if (edge.from >= nodeCount || edge.to >= nodeCount) continue;
+            if (nodeScope[edge.from] != scope || nodeScope[edge.to] != scope) {
+                continue;
+            }
+            size_t from = itemOf[edge.from];
+            size_t to = itemOf[edge.to];
+            outgoing[from].push_back(to);
+            incoming[to].push_back(from);
+            indegree[to]++;
+            scopeEdges.push_back(e);
+        }
+
+        std::deque<size_t> ready;
+        for (size_t i = 0; i < itemCount; i++) {
+            if (indegree[i] == 0) ready.push_back(i);
+        }
+
+        std::vector<size_t> rank(itemCount, 0);
+        std::vector<bool> processed(itemCount, false);
+        size_t maxRank = 0;
+        while (!ready.empty()) {
+            size_t item = ready.front();
+            ready.pop_front();
+            processed[item] = true;
+            maxRank = std::max(maxRank, rank[item]);
+
+            for (size_t target : outgoing[item]) {
+                rank[target] = std::max(rank[target], rank[item] + 1);
+                if (--indegree[target] == 0) ready.push_back(target);
+            }
+        }
+
+        bool processedAny = std::any_of(
+            processed.begin(), processed.end(), [](bool value) { return value; });
+        size_t nextRank = processedAny ? maxRank + 1 : 0;
+        for (size_t i = 0; i < itemCount; i++) {
+            if (!processed[i]) rank[i] = nextRank++;
+        }
+        for (size_t value : rank) maxRank = std::max(maxRank, value);
+
+        std::vector<std::vector<size_t>> ranks(maxRank + 1);
+        for (size_t i = 0; i < itemCount; i++) ranks[rank[i]].push_back(i);
+
+        // Subgraph members must stay adjacent within a rank so their group
+        // box encloses them without swallowing strangers
+        std::vector<float> order(itemCount, 0.0f);
+        for (size_t level = 0; level < ranks.size(); level++) {
+            if (level > 0) {
+                std::stable_sort(ranks[level].begin(), ranks[level].end(),
+                    [&](size_t left, size_t right) {
+                        auto barycenter = [&](size_t item) {
+                            if (incoming[item].empty()) {
+                                return static_cast<float>(items[item].key);
+                            }
+                            float total = 0.0f;
+                            size_t count = 0;
+                            for (size_t parent : incoming[item]) {
+                                if (rank[parent] < level) {
+                                    total += order[parent];
+                                    count++;
+                                }
+                            }
+                            return count > 0 ? total / static_cast<float>(count)
+                                             : static_cast<float>(items[item].key);
+                        };
+                        return barycenter(left) < barycenter(right);
+                    });
+            }
+            if (groupCount > 0 && ranks[level].size() > 1) {
+                std::vector<float> position(itemCount, 0.0f);
+                for (size_t i = 0; i < ranks[level].size(); i++) {
+                    position[ranks[level][i]] = static_cast<float>(i);
+                }
+                std::vector<float> groupTotal(groupCount, 0.0f);
+                std::vector<int> groupSize(groupCount, 0);
+                for (size_t item : ranks[level]) {
+                    int group = items[item].group;
+                    if (group >= 0) {
+                        groupTotal[group] += position[item];
+                        groupSize[group]++;
+                    }
+                }
+                auto sortKey = [&](size_t item) {
+                    int group = items[item].group;
+                    if (group < 0 || groupSize[group] == 0) {
+                        return position[item];
+                    }
+                    return groupTotal[group] / groupSize[group];
+                };
+                std::stable_sort(ranks[level].begin(), ranks[level].end(),
+                    [&](size_t left, size_t right) {
+                        return sortKey(left) < sortKey(right);
+                    });
+            }
+            for (size_t i = 0; i < ranks[level].size(); i++) {
+                order[ranks[level][i]] = static_cast<float>(i);
+            }
+        }
+
+        // A rank gap is at least as long as the labels that sit in it
+        float rankGap = options.rankGap;
+        for (size_t e : scopeEdges) {
+            if (e >= options.edgeLabels.size()) break;
+            const Size& label = options.edgeLabels[e];
+            if (label.width <= 0.0f && label.height <= 0.0f) continue;
+            float extent = vertical ? label.height : label.width;
+            rankGap = std::max(rankGap, extent + options.labelRankGap);
+        }
+
+        // Group boxes reach past their members by a pad, and by a title
+        // strip above them. Two items a box border runs between are set
+        // that much further apart, so the boxes of neighbours stay clear of
+        // each other: nodeGap alone is less than a pad, a title and a pad.
+        // (Ranks are still centred one by one, so two groups whose members
+        // spread unevenly over the ranks can meet.)
+        std::vector<std::vector<int>> chains(itemCount);
+        std::vector<size_t> firstRank(groupCount, SIZE_MAX);
+        std::vector<size_t> lastRank(groupCount, 0);
+        for (size_t i = 0; i < itemCount; i++) {
+            for (int g = items[i].group; g != kNoGroup && g != scope;
+                 g = parentOf[g]) {
+                chains[i].push_back(g);
+                firstRank[g] = std::min(firstRank[g], rank[i]);
+                lastRank[g] = std::max(lastRank[g], rank[i]);
+            }
+        }
+        auto bordersBetween = [&](size_t item, size_t other) {
+            int borders = 0;
+            for (int g : chains[item]) {
+                if (std::find(chains[other].begin(), chains[other].end(), g) ==
+                    chains[other].end()) {
+                    borders++;
+                }
+            }
+            return borders;
+        };
+        // Along a rank: the later item's boxes show their left side, or in
+        // a layout that runs sideways their top with its title
+        const float alongAfter = options.groupPad;
+        const float alongBefore =
+            options.groupPad + (vertical ? 0.0f : options.groupTitle);
+        // From rank to rank: where ranks run downwards a box that ends shows
+        // its bottom and one that starts its top; upwards it is the reverse
+        float acrossEnd = options.groupPad;
+        float acrossStart = options.groupPad;
+        if (direction == Direction::TopToBottom) {
+            acrossStart += options.groupTitle;
+        } else if (direction == Direction::BottomToTop) {
+            acrossEnd += options.groupTitle;
+        }
+
+        std::vector<std::vector<float>> gapAfter(ranks.size());
+        std::vector<float> rankGapAfter(ranks.size(), rankGap);
+        for (size_t level = 0; level < ranks.size(); level++) {
+            const auto& row = ranks[level];
+            gapAfter[level].assign(row.size(), nodeGap);
+            for (size_t i = 0; i + 1 < row.size(); i++) {
+                int ends = bordersBetween(row[i], row[i + 1]);
+                int starts = bordersBetween(row[i + 1], row[i]);
+                if (ends + starts == 0) continue;
+                gapAfter[level][i] = atLeast(
+                    nodeGap, static_cast<float>(ends) * alongAfter +
+                                 static_cast<float>(starts) * alongBefore +
+                                 options.groupGap);
+            }
+            if (level + 1 == ranks.size()) continue;
+            int ends = 0;
+            int starts = 0;
+            for (size_t item : row) {
+                int count = 0;
+                for (int g : chains[item]) {
+                    if (lastRank[g] == level) count++;
+                }
+                ends = std::max(ends, count);
+            }
+            for (size_t item : ranks[level + 1]) {
+                int count = 0;
+                for (int g : chains[item]) {
+                    if (firstRank[g] == level + 1) count++;
+                }
+                starts = std::max(starts, count);
+            }
+            if (ends + starts == 0) continue;
+            rankGapAfter[level] = atLeast(
+                rankGap, static_cast<float>(ends) * acrossEnd +
+                             static_cast<float>(starts) * acrossStart +
+                             options.groupGap);
+        }
+
+        // Ranks follow each other along the direction; the items of a rank
+        // sit side by side across it, centred on the widest rank
+        auto along = [&](const Item& item) {
+            return vertical ? item.width : item.height;
+        };
+        auto across = [&](const Item& item) {
+            return vertical ? item.height : item.width;
+        };
+        std::vector<float> rankLength(ranks.size(), 0.0f);
+        std::vector<float> rankDepth(ranks.size(), 0.0f);
+        float longest = 0.0f;
+        for (size_t level = 0; level < ranks.size(); level++) {
+            float widened = 0.0f;
+            for (size_t i = 0; i < ranks[level].size(); i++) {
+                const Item& item = items[ranks[level][i]];
+                rankLength[level] += along(item);
+                rankDepth[level] = std::max(rankDepth[level], across(item));
+                widened += gapAfter[level][i] - nodeGap;
+            }
+            if (ranks[level].size() > 1) {
+                rankLength[level] +=
+                    nodeGap * static_cast<float>(ranks[level].size() - 1);
+            }
+            if (widened > 0.0f) rankLength[level] += widened;
+            longest = std::max(longest, rankLength[level]);
+        }
+
+        std::vector<Rect> rects(itemCount);
+        float depth = 0.0f;
+        for (size_t level = 0; level < ranks.size(); level++) {
+            float offset = (longest - rankLength[level]) * 0.5f;
+            for (size_t i = 0; i < ranks[level].size(); i++) {
+                size_t index = ranks[level][i];
+                const Item& item = items[index];
+                float centred = depth + (rankDepth[level] - across(item)) * 0.5f;
+                if (vertical) {
+                    rects[index] = {offset, centred, offset + item.width,
+                                    centred + item.height};
+                } else {
+                    rects[index] = {centred, offset, centred + item.width,
+                                    offset + item.height};
+                }
+                offset += along(item) + gapAfter[level][i];
+            }
+            depth += rankDepth[level];
+            if (level + 1 < ranks.size()) depth += rankGapAfter[level];
+        }
+        const float width = vertical ? longest : depth;
+        const float height = vertical ? depth : longest;
+
+        if (direction == Direction::BottomToTop) {
+            for (auto& rect : rects) {
+                float oldTop = rect.top;
+                rect.top = height - rect.bottom;
+                rect.bottom = height - oldTop;
+            }
+        } else if (direction == Direction::RightToLeft) {
+            for (auto& rect : rects) {
+                float oldLeft = rect.left;
+                rect.left = width - rect.right;
+                rect.right = width - oldLeft;
+            }
+        }
+
+        for (size_t i = 0; i < itemCount; i++) {
+            const Item& item = items[i];
+            if (!item.block) {
+                result.nodes[item.index] = rects[i];
+                result.ranks[item.index] = rank[i];
+                result.directions[item.index] = direction;
+                continue;
+            }
+            // The block's box is the item; what it holds moves inside it,
+            // to the middle of a box that its title made wider
+            const Rect& bounds = blockBounds[item.index];
+            float spare = item.width -
+                          (bounds.right - bounds.left + options.groupPad * 2.0f);
+            float dx = rects[i].left + spare * 0.5f + options.groupPad -
+                       bounds.left;
+            float dy = rects[i].top + options.groupPad + options.groupTitle -
+                       bounds.top;
+            const int moved = static_cast<int>(item.index);
+            for (size_t node = 0; node < nodeCount; node++) {
+                if (holds(moved, node)) shift(result.nodes[node], dx, dy);
+            }
+            for (size_t s = 0; s < groupCount; s++) {
+                if (isInside(s, moved) && !isEmpty(result.groups[s])) {
+                    shift(result.groups[s], dx, dy);
+                }
+            }
+            result.groups[item.index] = rects[i];
+            result.groupRanks[item.index] = rank[i];
+        }
+
+        Rect bounds{0.0f, 0.0f, width, height};
+        for (size_t s = groupCount; s-- > 0;) {
+            if (block[s] || groupScope[s] != scope) continue;
+            result.groups[s] =
+                groupBox(diagram, s, result.nodes, result.groups, options);
+            if (!isEmpty(result.groups[s])) grow(bounds, result.groups[s]);
+        }
+
+        if (scope == kNoGroup) {
+            result.width = width;
+            result.height = height;
+            return;
+        }
+        // A block's box holds its edges too: the lanes of those that turn
+        // back or skip a rank, and the labels
+        EdgeLanes lanes;
+        for (size_t e : scopeEdges) {
+            EdgeRoute route = routeEdge(diagram, e, direction, result.nodes,
+                                        result.ranks, options, lanes);
+            for (const Point& point : route.points) {
+                grow(bounds, {point.x - options.arrow, point.y - options.arrow,
+                              point.x + options.arrow, point.y + options.arrow});
+            }
+            if (route.hasLabel) grow(bounds, route.label);
+        }
+        blockBounds[scope] = bounds;
+    }
+};
+
+} // namespace
+
+LayoutOptions drawingOptions(float scale) {
+    LayoutOptions options;
+    options.nodeGap = 32.0f * scale;
+    options.rankGap = 78.0f * scale;
+    options.groupPad = 10.0f * scale;
+    options.groupTitle = 20.0f * scale;
+    options.groupGap = 12.0f * scale;
+    options.labelRankGap = 20.0f * scale;
+    options.labelStep = 8.0f * scale;
+    options.laneStart = 36.0f;
+    options.laneStep = 14.0f;
+    options.laneScale = scale;
+    options.arrow = 8.0f * scale;
+    return options;
+}
+
 Layout layout(const Diagram& diagram, const std::vector<Size>& nodeSizes,
-              float nodeGap, float rankGap) {
+              const LayoutOptions& given) {
     Layout result;
     const size_t nodeCount = diagram.nodes.size();
     if (nodeCount == 0 || nodeSizes.size() != nodeCount) return result;
 
-    nodeGap = std::max(0.0f, nodeGap);
-    rankGap = std::max(0.0f, rankGap);
+    LayoutOptions options = given;
+    options.nodeGap = std::max(0.0f, options.nodeGap);
+    options.rankGap = std::max(0.0f, options.rankGap);
 
-    std::vector<std::vector<size_t>> outgoing(nodeCount);
-    std::vector<std::vector<size_t>> incoming(nodeCount);
-    std::vector<size_t> indegree(nodeCount, 0);
-    for (const auto& edge : diagram.edges) {
-        if (edge.from >= nodeCount || edge.to >= nodeCount) continue;
-        outgoing[edge.from].push_back(edge.to);
-        incoming[edge.to].push_back(edge.from);
-        indegree[edge.to]++;
-    }
-
-    std::deque<size_t> ready;
-    for (size_t i = 0; i < nodeCount; i++) {
-        if (indegree[i] == 0) ready.push_back(i);
-    }
-
-    std::vector<size_t> rank(nodeCount, 0);
-    std::vector<bool> processed(nodeCount, false);
-    size_t maxRank = 0;
-    while (!ready.empty()) {
-        size_t node = ready.front();
-        ready.pop_front();
-        processed[node] = true;
-        maxRank = std::max(maxRank, rank[node]);
-
-        for (size_t target : outgoing[node]) {
-            rank[target] = std::max(rank[target], rank[node] + 1);
-            if (--indegree[target] == 0) ready.push_back(target);
-        }
-    }
-
-    bool processedAny = std::any_of(
-        processed.begin(), processed.end(), [](bool value) { return value; });
-    size_t nextRank = processedAny ? maxRank + 1 : 0;
-    for (size_t i = 0; i < nodeCount; i++) {
-        if (!processed[i]) rank[i] = nextRank++;
-    }
-    for (size_t value : rank) maxRank = std::max(maxRank, value);
-
-    std::vector<std::vector<size_t>> ranks(maxRank + 1);
-    for (size_t i = 0; i < nodeCount; i++) ranks[rank[i]].push_back(i);
-    result.ranks = rank;
-
-    // Subgraph members must stay adjacent within a rank so their group box
-    // encloses them without swallowing strangers
-    std::vector<int> subgraphOf(nodeCount, -1);
-    for (size_t s = 0; s < diagram.subgraphs.size(); s++) {
-        for (size_t node : diagram.subgraphs[s].nodes) {
-            if (node < nodeCount) subgraphOf[node] = static_cast<int>(s);
-        }
-    }
-
-    std::vector<float> order(nodeCount, 0.0f);
-    for (size_t level = 0; level < ranks.size(); level++) {
-        if (level > 0) {
-            std::stable_sort(ranks[level].begin(), ranks[level].end(),
-                [&](size_t left, size_t right) {
-                    auto barycenter = [&](size_t node) {
-                        if (incoming[node].empty()) {
-                            return static_cast<float>(node);
-                        }
-                        float total = 0.0f;
-                        size_t count = 0;
-                        for (size_t parent : incoming[node]) {
-                            if (rank[parent] < level) {
-                                total += order[parent];
-                                count++;
-                            }
-                        }
-                        return count > 0 ? total / static_cast<float>(count)
-                                         : static_cast<float>(node);
-                    };
-                    return barycenter(left) < barycenter(right);
-                });
-        }
-        if (!diagram.subgraphs.empty() && ranks[level].size() > 1) {
-            std::vector<float> position(nodeCount, 0.0f);
-            for (size_t i = 0; i < ranks[level].size(); i++) {
-                position[ranks[level][i]] = static_cast<float>(i);
-            }
-            std::vector<float> groupTotal(diagram.subgraphs.size(), 0.0f);
-            std::vector<int> groupCount(diagram.subgraphs.size(), 0);
-            for (size_t node : ranks[level]) {
-                int group = subgraphOf[node];
-                if (group >= 0) {
-                    groupTotal[group] += position[node];
-                    groupCount[group]++;
-                }
-            }
-            auto sortKey = [&](size_t node) {
-                int group = subgraphOf[node];
-                if (group < 0 || groupCount[group] == 0) {
-                    return position[node];
-                }
-                return groupTotal[group] / groupCount[group];
-            };
-            std::stable_sort(ranks[level].begin(), ranks[level].end(),
-                [&](size_t left, size_t right) {
-                    return sortKey(left) < sortKey(right);
-                });
-        }
-        for (size_t i = 0; i < ranks[level].size(); i++) {
-            order[ranks[level][i]] = static_cast<float>(i);
-        }
-    }
-
-    result.nodes.resize(nodeCount);
-    bool vertical = diagram.direction == Direction::TopToBottom ||
-                    diagram.direction == Direction::BottomToTop;
-
-    if (vertical) {
-        std::vector<float> rankWidths(ranks.size(), 0.0f);
-        std::vector<float> rankHeights(ranks.size(), 0.0f);
-        for (size_t level = 0; level < ranks.size(); level++) {
-            for (size_t node : ranks[level]) {
-                rankWidths[level] += std::max(1.0f, nodeSizes[node].width);
-                rankHeights[level] = std::max(
-                    rankHeights[level], std::max(1.0f, nodeSizes[node].height));
-            }
-            if (ranks[level].size() > 1) {
-                rankWidths[level] += nodeGap * static_cast<float>(ranks[level].size() - 1);
-            }
-            result.width = std::max(result.width, rankWidths[level]);
-        }
-
-        float y = 0.0f;
-        for (size_t level = 0; level < ranks.size(); level++) {
-            float x = (result.width - rankWidths[level]) * 0.5f;
-            for (size_t node : ranks[level]) {
-                float width = std::max(1.0f, nodeSizes[node].width);
-                float height = std::max(1.0f, nodeSizes[node].height);
-                float nodeY = y + (rankHeights[level] - height) * 0.5f;
-                result.nodes[node] = {x, nodeY, x + width, nodeY + height};
-                x += width + nodeGap;
-            }
-            y += rankHeights[level];
-            if (level + 1 < ranks.size()) y += rankGap;
-        }
-        result.height = y;
-
-        if (diagram.direction == Direction::BottomToTop) {
-            for (auto& rect : result.nodes) {
-                float oldTop = rect.top;
-                rect.top = result.height - rect.bottom;
-                rect.bottom = result.height - oldTop;
-            }
-        }
-    } else {
-        std::vector<float> rankWidths(ranks.size(), 0.0f);
-        std::vector<float> rankHeights(ranks.size(), 0.0f);
-        for (size_t level = 0; level < ranks.size(); level++) {
-            for (size_t node : ranks[level]) {
-                rankWidths[level] = std::max(
-                    rankWidths[level], std::max(1.0f, nodeSizes[node].width));
-                rankHeights[level] += std::max(1.0f, nodeSizes[node].height);
-            }
-            if (ranks[level].size() > 1) {
-                rankHeights[level] += nodeGap * static_cast<float>(ranks[level].size() - 1);
-            }
-            result.height = std::max(result.height, rankHeights[level]);
-        }
-
-        float x = 0.0f;
-        for (size_t level = 0; level < ranks.size(); level++) {
-            float y = (result.height - rankHeights[level]) * 0.5f;
-            for (size_t node : ranks[level]) {
-                float width = std::max(1.0f, nodeSizes[node].width);
-                float height = std::max(1.0f, nodeSizes[node].height);
-                float nodeX = x + (rankWidths[level] - width) * 0.5f;
-                result.nodes[node] = {nodeX, y, nodeX + width, y + height};
-                y += height + nodeGap;
-            }
-            x += rankWidths[level];
-            if (level + 1 < ranks.size()) x += rankGap;
-        }
-        result.width = x;
-
-        if (diagram.direction == Direction::RightToLeft) {
-            for (auto& rect : result.nodes) {
-                float oldLeft = rect.left;
-                rect.left = result.width - rect.right;
-                rect.right = result.width - oldLeft;
-            }
-        }
-    }
-
+    FlowLayout(diagram, nodeSizes, options, result).run();
     return result;
+}
+
+Layout layout(const Diagram& diagram, const std::vector<Size>& nodeSizes,
+              float nodeGap, float rankGap) {
+    LayoutOptions options;
+    options.nodeGap = nodeGap;
+    options.rankGap = rankGap;
+    return layout(diagram, nodeSizes, options);
+}
+
+Placement place(const Diagram& diagram, const Layout& layout,
+                const LayoutOptions& options, float originX, float originY) {
+    Placement placed;
+    const size_t nodeCount = diagram.nodes.size();
+    const size_t groupCount = diagram.subgraphs.size();
+    if (layout.nodes.size() != nodeCount || layout.ranks.size() != nodeCount ||
+        layout.scopes.size() != nodeCount ||
+        layout.directions.size() != nodeCount ||
+        layout.blocks.size() != groupCount ||
+        layout.groups.size() != groupCount ||
+        layout.groupScopes.size() != groupCount ||
+        layout.groupRanks.size() != groupCount) {
+        return placed;
+    }
+
+    placed.nodes.reserve(nodeCount);
+    for (const auto& rect : layout.nodes) {
+        placed.nodes.push_back({originX + rect.left, originY + rect.top,
+                                originX + rect.right, originY + rect.bottom});
+    }
+
+    // Children were declared after their parents, so a reverse pass
+    // finalizes leaves first and parents grow around them
+    placed.groups.assign(groupCount, emptyRect());
+    for (size_t s = groupCount; s-- > 0;) {
+        if (!layout.blocks[s]) {
+            placed.groups[s] =
+                groupBox(diagram, s, placed.nodes, placed.groups, options);
+        } else if (!isEmpty(layout.groups[s])) {
+            const Rect& box = layout.groups[s];
+            placed.groups[s] = {originX + box.left, originY + box.top,
+                                originX + box.right, originY + box.bottom};
+        }
+    }
+
+    // What each rank of each layout covers, for the edges that pass a block
+    std::vector<std::vector<RankBand>> bands(groupCount + 1);
+    auto cover = [&](size_t scope, size_t rank, const Rect& rect, bool block) {
+        if (scope >= bands.size()) return;
+        Direction direction = scope == 0 ? diagram.direction
+                                         : diagram.subgraphs[scope - 1].direction;
+        if (bands[scope].size() <= rank) bands[scope].resize(rank + 1);
+        RankBand& band = bands[scope][rank];
+        band.low = std::min(band.low, isVertical(direction) ? rect.top : rect.left);
+        band.high = std::max(band.high,
+                             isVertical(direction) ? rect.bottom : rect.right);
+        if (block) band.block = true;
+    };
+    for (size_t node = 0; node < nodeCount; node++) {
+        if (node < layout.ranks.size()) {
+            cover(layout.scopes[node], layout.ranks[node], placed.nodes[node], false);
+        }
+    }
+    for (size_t s = 0; s < groupCount; s++) {
+        if (layout.blocks[s] && !isEmpty(placed.groups[s])) {
+            cover(layout.groupScopes[s], layout.groupRanks[s], placed.groups[s], true);
+        }
+    }
+
+    placed.edges.resize(diagram.edges.size());
+    std::vector<EdgeLanes> lanes(groupCount + 1);
+    for (size_t e = 0; e < diagram.edges.size(); e++) {
+        const auto& edge = diagram.edges[e];
+        if (edge.from >= nodeCount || edge.to >= nodeCount) continue;
+        size_t scope = layout.scopes[edge.from];
+        if (scope >= lanes.size()) continue;
+        placed.edges[e] = routeEdge(diagram, e, layout.directions[edge.from],
+                                    placed.nodes, layout.ranks, options,
+                                    lanes[scope], &bands[scope]);
+    }
+    return placed;
 }
 
 } // namespace mermaid

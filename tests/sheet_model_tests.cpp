@@ -415,6 +415,14 @@ void mermaidBridge() {
     check(importFlowchart("Some notes\n\n```mermaid\ngraph TD\nX --> Y\n```\n", flow, 200, 100) &&
               flow.cards.size() == 2 && !flow.leftToRight && flow.cards[0].y < flow.cards[1].y,
           "a fenced flowchart inside text imports top to bottom");
+    // A subgraph with a direction of its own keeps it on the sheet (#326)
+    check(importFlowchart("flowchart LR\n    subgraph one [One]\n        direction TB\n        A --> B\n    end\n"
+                          "    subgraph two [Two]\n        direction TB\n        C --> D\n    end\n",
+                          flow, 240, 120) &&
+              flow.cards.size() == 4 && flow.cards[0].x == flow.cards[1].x && flow.cards[0].y < flow.cards[1].y &&
+              flow.cards[2].x == flow.cards[3].x && flow.cards[2].y < flow.cards[3].y &&
+              flow.cards[1].y < flow.cards[2].y,
+          "a subgraph's own direction places its cards");
     check(!importFlowchart("sequenceDiagram\nA->>B: hi\n", flow, 200, 100), "other diagrams do not");
     check(!importFlowchart("just text", flow, 200, 100), "plain text does not");
 

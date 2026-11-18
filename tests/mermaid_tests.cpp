@@ -1689,6 +1689,587 @@ void testClassAndErLayouts() {
 
 } // namespace
 
+// --- Subgraph directions (#326) ---
+// A subgraph's "direction" was read and dropped, and every node of a diagram
+// was ranked along the diagram's direction. In a left-to-right diagram the
+// boxes of two groups, one above the other, also ran 8 px into each other:
+// the nodes of a rank were 32 apart, and a box reaches 10 below its nodes
+// and 30, with its title, above them.
+
+struct DrawnFlowchart {
+    mermaid::ParseResult parsed;
+    mermaid::LayoutOptions options;
+    mermaid::Layout layout;
+    mermaid::Placement placed;
+};
+
+// Lays a flowchart out with the viewer's distances: nodes as wide as their
+// labels, a label chip on every labelled edge, a title on every group
+DrawnFlowchart drawFlowchart(const std::string& source) {
+    DrawnFlowchart drawn;
+    drawn.parsed = mermaid::parse(source);
+    if (!drawn.parsed.success) return drawn;
+    const auto& diagram = drawn.parsed.diagram;
+    std::vector<mermaid::Size> sizes;
+    for (const auto& node : diagram.nodes) {
+        sizes.push_back({std::max(120.0f, 36.0f + 9.0f * static_cast<float>(node.label.size())),
+                         node.shape == mermaid::NodeShape::Diamond ? 82.0f : 52.0f});
+    }
+    drawn.options = mermaid::drawingOptions(1.0f);
+    for (const auto& edge : diagram.edges) {
+        drawn.options.edgeLabels.push_back(
+            edge.label.empty()
+                ? mermaid::Size{}
+                : mermaid::Size{std::min(180.0f, 13.0f + 9.0f * static_cast<float>(edge.label.size())),
+                                28.0f});
+    }
+    for (const auto& subgraph : diagram.subgraphs) {
+        drawn.options.groupTitles.push_back(16.0f + 9.0f * static_cast<float>(subgraph.label.size()));
+    }
+    drawn.layout = mermaid::layout(diagram, sizes, drawn.options);
+    drawn.placed = mermaid::place(diagram, drawn.layout, drawn.options, 40.0f, 25.0f);
+    return drawn;
+}
+
+size_t nodeIndex(const mermaid::Diagram& diagram, const std::string& id) {
+    for (size_t i = 0; i < diagram.nodes.size(); i++) {
+        if (diagram.nodes[i].id == id) return i;
+    }
+    return SIZE_MAX;
+}
+
+size_t groupIndex(const mermaid::Diagram& diagram, const std::string& id) {
+    for (size_t i = 0; i < diagram.subgraphs.size(); i++) {
+        if (diagram.subgraphs[i].id == id) return i;
+    }
+    return SIZE_MAX;
+}
+
+mermaidcheck::Box boxOf(const mermaid::Rect& rect) {
+    return {rect.left, rect.top, rect.right, rect.bottom};
+}
+
+std::string describe(const mermaid::Rect& rect) {
+    return mermaidcheck::describe(boxOf(rect));
+}
+
+// How a row of nodes runs: each after the one before it along the
+// direction, and all on one line across it (inLine; a rank that holds more
+// than the node is centred as a whole, and its node is off that line)
+bool runsAlong(const DrawnFlowchart& drawn, const std::vector<std::string>& ids,
+               mermaid::Direction direction, bool inLine = true) {
+    const auto& diagram = drawn.parsed.diagram;
+    for (size_t i = 0; i < ids.size(); i++) {
+        size_t node = nodeIndex(diagram, ids[i]);
+        if (node == SIZE_MAX) return false;
+        if (drawn.layout.directions[node] != direction) return false;
+        if (i == 0) continue;
+        const auto& before = drawn.placed.nodes[nodeIndex(diagram, ids[i - 1])];
+        const auto& rect = drawn.placed.nodes[node];
+        const float centreX = (rect.left + rect.right) * 0.5f;
+        const float centreY = (rect.top + rect.bottom) * 0.5f;
+        const float beforeX = inLine ? (before.left + before.right) * 0.5f : centreX;
+        const float beforeY = inLine ? (before.top + before.bottom) * 0.5f : centreY;
+        switch (direction) {
+            case mermaid::Direction::TopToBottom:
+                if (!(before.bottom < rect.top && std::abs(centreX - beforeX) < 0.5f)) return false;
+                break;
+            case mermaid::Direction::BottomToTop:
+                if (!(rect.bottom < before.top && std::abs(centreX - beforeX) < 0.5f)) return false;
+                break;
+            case mermaid::Direction::LeftToRight:
+                if (!(before.right < rect.left && std::abs(centreY - beforeY) < 0.5f)) return false;
+                break;
+            case mermaid::Direction::RightToLeft:
+                if (!(rect.right < before.left && std::abs(centreY - beforeY) < 0.5f)) return false;
+                break;
+        }
+    }
+    return true;
+}
+
+// What must hold for the group boxes of any drawn flowchart: a box holds its
+// nodes and the boxes inside it, the boxes of two groups that are not inside
+// one another stay apart, and no box runs over a node that is not in it. A
+// block also holds the edges and the labels of its nodes.
+void checkGroupBoxes(const DrawnFlowchart& drawn, const std::string& name) {
+    const auto& diagram = drawn.parsed.diagram;
+    const auto& placed = drawn.placed;
+    check(placed.nodes.size() == diagram.nodes.size() &&
+          placed.groups.size() == diagram.subgraphs.size() &&
+          placed.edges.size() == diagram.edges.size(),
+          (name + ": every node, group and edge is placed").c_str());
+    if (placed.nodes.size() != diagram.nodes.size() ||
+        placed.groups.size() != diagram.subgraphs.size()) {
+        return;
+    }
+    auto parentOf = [&](size_t group) { return diagram.subgraphs[group].parent; };
+    auto inside = [&](size_t group, size_t outer) {
+        for (size_t g = parentOf(group); g != SIZE_MAX; g = parentOf(g)) {
+            if (g == outer) return true;
+        }
+        return false;
+    };
+    std::vector<size_t> groupOf(diagram.nodes.size(), SIZE_MAX);
+    for (size_t s = 0; s < diagram.subgraphs.size(); s++) {
+        for (size_t node : diagram.subgraphs[s].nodes) groupOf[node] = s;
+    }
+    auto holds = [&](size_t group, size_t node) {
+        for (size_t g = groupOf[node]; g != SIZE_MAX; g = parentOf(g)) {
+            if (g == group) return true;
+        }
+        return false;
+    };
+
+    for (size_t s = 0; s < diagram.subgraphs.size(); s++) {
+        const auto& box = placed.groups[s];
+        const std::string group = name + ": group " + diagram.subgraphs[s].id;
+        if (mermaid::isEmpty(box)) continue;
+        for (size_t node = 0; node < diagram.nodes.size(); node++) {
+            const auto& rect = placed.nodes[node];
+            if (holds(s, node)) {
+                check(mermaidcheck::within(boxOf(rect), boxOf(box)),
+                      (group + " holds its node " + diagram.nodes[node].id + ": " +
+                       describe(rect) + " in " + describe(box)).c_str());
+            } else {
+                check(!mermaidcheck::overlap(boxOf(rect), boxOf(box)),
+                      (group + " " + describe(box) + " keeps off node " +
+                       diagram.nodes[node].id + " " + describe(rect)).c_str());
+            }
+        }
+        for (size_t other = s + 1; other < diagram.subgraphs.size(); other++) {
+            const auto& otherBox = placed.groups[other];
+            if (mermaid::isEmpty(otherBox)) continue;
+            if (inside(other, s)) {
+                check(mermaidcheck::within(boxOf(otherBox), boxOf(box)),
+                      (group + " holds the group " + diagram.subgraphs[other].id).c_str());
+            } else {
+                // Not only apart: with room for both borders between them
+                mermaidcheck::Box grown = boxOf(box);
+                grown.left -= 4.0f;
+                grown.top -= 4.0f;
+                grown.right += 4.0f;
+                grown.bottom += 4.0f;
+                check(!mermaidcheck::overlap(grown, boxOf(otherBox)),
+                      (group + " " + describe(box) + " stays apart from group " +
+                       diagram.subgraphs[other].id + " " + describe(otherBox)).c_str());
+            }
+        }
+        if (!drawn.layout.blocks[s]) continue;
+        for (size_t e = 0; e < diagram.edges.size(); e++) {
+            if (!holds(s, diagram.edges[e].from)) continue;
+            const auto& route = placed.edges[e];
+            bool held = !route.points.empty();
+            for (const auto& point : route.points) {
+                held = held && point.x >= box.left && point.x <= box.right &&
+                       point.y >= box.top && point.y <= box.bottom;
+            }
+            if (route.hasLabel) {
+                held = held && mermaidcheck::within(boxOf(route.label), boxOf(box));
+            }
+            check(held, (group + " holds edge " + std::to_string(e + 1) + " and its label").c_str());
+        }
+    }
+    // An edge of the diagram stays out of the blocks beside its nodes
+    for (size_t e = 0; e < diagram.edges.size(); e++) {
+        const auto& edge = diagram.edges[e];
+        const auto& route = placed.edges[e];
+        for (size_t s = 0; s < diagram.subgraphs.size(); s++) {
+            if (!drawn.layout.blocks[s] || holds(s, edge.from) || holds(s, edge.to)) continue;
+            if (drawn.layout.ranks[edge.from] + 1 != drawn.layout.ranks[edge.to]) continue;
+            for (size_t i = 1; i < route.points.size(); i++) {
+                mermaidcheck::Segment line{{route.points[i - 1].x, route.points[i - 1].y},
+                                           {route.points[i].x, route.points[i].y}};
+                check(!mermaidcheck::pierces(line, boxOf(placed.groups[s])),
+                      (name + ": edge " + std::to_string(e + 1) + " keeps out of block " +
+                       diagram.subgraphs[s].id).c_str());
+            }
+        }
+    }
+}
+
+const char* const kReportedSubgraphDirections = R"(flowchart LR
+    subgraph current [Current]
+        direction TB
+        A1[Start] --> A2[Process] --> A3[Finish]
+    end
+    subgraph expected [Expected]
+        direction TB
+        B1[Start] --> B2[Review] --> B3[Finish]
+    end
+)";
+
+void testSubgraphDirectionParsing() {
+    using mermaid::Direction;
+    auto reported = mermaid::parse(kReportedSubgraphDirections);
+    check(reported.success && reported.diagram.subgraphs.size() == 2,
+          "the reported flowchart parses with its two subgraphs");
+    if (reported.success && reported.diagram.subgraphs.size() == 2) {
+        check(reported.diagram.direction == Direction::LeftToRight,
+              "a subgraph's direction leaves the diagram's as it is");
+        for (const auto& subgraph : reported.diagram.subgraphs) {
+            check(subgraph.hasDirection && subgraph.direction == Direction::TopToBottom,
+                  ("subgraph " + subgraph.id + " keeps direction TB").c_str());
+        }
+    }
+
+    const struct {
+        const char* value;
+        Direction direction;
+    } values[] = {{"TB", Direction::TopToBottom}, {"TD", Direction::TopToBottom},
+                  {"BT", Direction::BottomToTop}, {"LR", Direction::LeftToRight},
+                  {"RL", Direction::RightToLeft}, {"lr", Direction::LeftToRight}};
+    for (const auto& value : values) {
+        auto parsed = mermaid::parse(std::string("flowchart TB\n  subgraph S\n    direction ") +
+                                     value.value + ";\n    a --> b\n  end\n");
+        check(parsed.success && parsed.diagram.subgraphs.size() == 1 &&
+              parsed.diagram.subgraphs[0].hasDirection &&
+              parsed.diagram.subgraphs[0].direction == value.direction,
+              (std::string("direction ") + value.value + " is kept").c_str());
+    }
+
+    auto nested = mermaid::parse(
+        "flowchart LR\n  subgraph outer\n    direction TB\n    subgraph inner\n"
+        "      direction RL\n      a --> b\n    end\n    subgraph plain\n      c --> d\n    end\n"
+        "  end\n");
+    check(nested.success && nested.diagram.subgraphs.size() == 3, "nested directions parse");
+    if (nested.success && nested.diagram.subgraphs.size() == 3) {
+        const auto& groups = nested.diagram.subgraphs;
+        check(groups[0].hasDirection && groups[0].direction == Direction::TopToBottom,
+              "the outer subgraph keeps its own direction");
+        check(groups[1].hasDirection && groups[1].direction == Direction::RightToLeft,
+              "the inner subgraph keeps its own direction");
+        check(!groups[2].hasDirection, "a subgraph with no statement has no direction");
+    }
+
+    auto twice = mermaid::parse(
+        "flowchart LR\n  subgraph S\n    direction TB\n    a --> b\n    direction RL\n  end\n");
+    check(twice.success && twice.diagram.subgraphs[0].direction == Direction::RightToLeft,
+          "the last direction of a subgraph counts");
+
+    auto unsupported = mermaid::parse(
+        "flowchart LR\n  subgraph S\n    direction XY\n    a --> b\n  end\n");
+    check(!unsupported.success && unsupported.errorLine == 3 &&
+          unsupported.error == "Unsupported flowchart direction",
+          "an unsupported subgraph direction is reported with its line");
+    auto header = mermaid::parse("flowchart XY\n  a --> b\n");
+    check(!header.success && header.error == unsupported.error,
+          "as an unsupported direction after flowchart is");
+
+    auto outside = mermaid::parse("flowchart LR\n  direction TB\n  a --> b\n");
+    check(outside.success && outside.diagram.direction == Direction::LeftToRight,
+          "a direction outside any subgraph is passed over, as before");
+    auto empty = mermaid::parse("flowchart LR\n  subgraph S\n    direction\n    a --> b\n  end\n");
+    check(empty.success && !empty.diagram.subgraphs[0].hasDirection,
+          "a direction with no value sets none");
+}
+
+void testSubgraphDirectionLayout() {
+    using mermaid::Direction;
+
+    // The reported flowchart: each group top to bottom, the two groups one
+    // below the other as two unlinked nodes of a left-to-right diagram are
+    auto reported = drawFlowchart(kReportedSubgraphDirections);
+    check(reported.parsed.success, "the reported flowchart lays out");
+    if (reported.parsed.success) {
+        const auto& diagram = reported.parsed.diagram;
+        check(reported.layout.blocks.size() == 2 && reported.layout.blocks[0] &&
+              reported.layout.blocks[1],
+              "both reported groups are laid out on their own");
+        check(runsAlong(reported, {"A1", "A2", "A3"}, Direction::TopToBottom),
+              "Current runs top to bottom: one x, growing y");
+        check(runsAlong(reported, {"B1", "B2", "B3"}, Direction::TopToBottom),
+              "Expected runs top to bottom: one x, growing y");
+        const auto& current = reported.placed.groups[0];
+        const auto& expected = reported.placed.groups[1];
+        check(current.bottom < expected.top &&
+              std::abs(current.left - expected.left) < 0.5f,
+              "the diagram stays left to right: its two unlinked groups share a rank");
+        check(reported.layout.scopes[nodeIndex(diagram, "A1")] == 1 &&
+              reported.layout.scopes[nodeIndex(diagram, "B3")] == 2,
+              "each node belongs to its group's layout");
+        // An edge of a top-to-bottom group leaves below and arrives on top
+        const auto& route = reported.placed.edges[0];
+        const auto& from = reported.placed.nodes[nodeIndex(diagram, "A1")];
+        const auto& to = reported.placed.nodes[nodeIndex(diagram, "A2")];
+        check(route.points.size() == 4 && route.points.front().y == from.bottom &&
+              route.points.back().y == to.top &&
+              route.points.front().x == route.points.back().x,
+              "an edge inside the group runs straight down");
+        checkGroupBoxes(reported, "reported");
+    }
+
+    // The same with no direction: left to right as before, the boxes apart
+    auto plain = drawFlowchart(
+        "flowchart LR\n  subgraph current [Current]\n    A1 --> A2 --> A3\n  end\n"
+        "  subgraph expected [Expected]\n    B1 --> B2 --> B3\n  end\n");
+    check(plain.parsed.success, "the reported flowchart with no direction lays out");
+    if (plain.parsed.success) {
+        check(!plain.layout.blocks[0] && !plain.layout.blocks[1],
+              "a group with no direction is no layout of its own");
+        check(runsAlong(plain, {"A1", "A2", "A3"}, Direction::LeftToRight) &&
+              runsAlong(plain, {"B1", "B2", "B3"}, Direction::LeftToRight),
+              "with no direction the groups follow the diagram");
+        check(plain.placed.groups[1].top - plain.placed.groups[0].bottom >=
+                  plain.options.groupGap - 0.01f,
+              "the box below starts under the box above");
+        checkGroupBoxes(plain, "no direction");
+    }
+
+    // All four, side by side in a top-to-bottom diagram
+    auto four = drawFlowchart(
+        "flowchart TB\n"
+        "  subgraph down\n    direction TB\n    d1 --> d2 --> d3\n  end\n"
+        "  subgraph up\n    direction BT\n    u1 --> u2 --> u3\n  end\n"
+        "  subgraph right\n    direction LR\n    r1 --> r2 --> r3\n  end\n"
+        "  subgraph left\n    direction RL\n    l1 --> l2 --> l3\n  end\n");
+    check(four.parsed.success, "four directions lay out");
+    if (four.parsed.success) {
+        check(runsAlong(four, {"d1", "d2", "d3"}, Direction::TopToBottom), "TB runs down");
+        check(runsAlong(four, {"u1", "u2", "u3"}, Direction::BottomToTop), "BT runs up");
+        check(runsAlong(four, {"r1", "r2", "r3"}, Direction::LeftToRight), "LR runs right");
+        check(runsAlong(four, {"l1", "l2", "l3"}, Direction::RightToLeft), "RL runs left");
+        const auto& groups = four.placed.groups;
+        check(groups[0].right < groups[1].left && groups[1].right < groups[2].left &&
+              groups[2].right < groups[3].left,
+              "in a top-to-bottom diagram the unlinked groups sit side by side");
+        checkGroupBoxes(four, "four directions");
+    }
+
+    // Nested: blocks inside a block, beside linked nodes of the diagram
+    auto nested = drawFlowchart(
+        "flowchart LR\n  Source --> Target\n"
+        "  subgraph outer [Outer, top to bottom]\n    direction TB\n    o1 --> o2\n"
+        "    subgraph inner1 [Inner, right to left]\n      direction RL\n      i1 --> i2 --> i3\n    end\n"
+        "    subgraph inner2 [Inner, bottom to top]\n      direction BT\n      j1 --> j2\n    end\n"
+        "  end\n");
+    check(nested.parsed.success, "nested directions lay out");
+    if (nested.parsed.success) {
+        const auto& diagram = nested.parsed.diagram;
+        check(nested.layout.blocks[0] && nested.layout.blocks[1] && nested.layout.blocks[2],
+              "the outer and both inner groups are layouts of their own");
+        check(runsAlong(nested, {"Source", "Target"}, Direction::LeftToRight, false),
+              "the diagram's own nodes run left to right");
+        check(runsAlong(nested, {"o1", "o2"}, Direction::TopToBottom, false),
+              "the outer group's nodes run top to bottom");
+        check(runsAlong(nested, {"i1", "i2", "i3"}, Direction::RightToLeft),
+              "an inner group runs right to left");
+        check(runsAlong(nested, {"j1", "j2"}, Direction::BottomToTop),
+              "the other inner group runs bottom to top");
+        check(nested.layout.groupScopes[1] == 1 && nested.layout.groupScopes[2] == 1 &&
+              nested.layout.groupScopes[0] == 0,
+              "the inner groups are items of the outer one, the outer of the diagram");
+        // The title is wider than the two nodes: the box grows to it
+        const auto& inner2 = nested.placed.groups[groupIndex(diagram, "inner2")];
+        check(inner2.right - inner2.left >= nested.options.groupTitles[2] - 0.01f,
+              "a block is as wide as its title");
+        const auto& low = nested.placed.nodes[nodeIndex(diagram, "j1")];
+        check(std::abs((low.left + low.right) - (inner2.left + inner2.right)) < 1.0f,
+              "and its nodes sit in the middle of it");
+        checkGroupBoxes(nested, "nested");
+    }
+
+    // Mermaid's limitation: a node linked to the outside, and the group
+    // takes its parent's direction
+    auto linked = drawFlowchart(
+        "flowchart LR\n  subgraph kept\n    direction TB\n    top1 --> bottom1\n  end\n"
+        "  subgraph linked\n    direction TB\n    top2 --> bottom2\n  end\n"
+        "  Outside --> top2\n");
+    check(linked.parsed.success, "a group linked to the outside lays out");
+    if (linked.parsed.success) {
+        check(linked.layout.blocks[0] && !linked.layout.blocks[1],
+              "only the group with no edge to the outside is a layout of its own");
+        check(runsAlong(linked, {"top1", "bottom1"}, Direction::TopToBottom),
+              "the unlinked group keeps its direction");
+        check(runsAlong(linked, {"Outside", "top2", "bottom2"}, Direction::LeftToRight, false),
+              "the linked group runs with the diagram");
+        checkGroupBoxes(linked, "linked");
+
+        // The linked group is laid out as if it had no direction at all
+        auto bare = drawFlowchart(
+            "flowchart LR\n  subgraph kept\n    direction TB\n    top1 --> bottom1\n  end\n"
+            "  subgraph linked\n    top2 --> bottom2\n  end\n"
+            "  Outside --> top2\n");
+        bool same = bare.parsed.success && bare.placed.nodes.size() == linked.placed.nodes.size();
+        for (size_t i = 0; same && i < bare.placed.nodes.size(); i++) {
+            same = bare.placed.nodes[i].left == linked.placed.nodes[i].left &&
+                   bare.placed.nodes[i].top == linked.placed.nodes[i].top;
+        }
+        check(same, "an ignored direction changes nothing");
+    }
+
+    // The link may as well leave the group as enter it
+    auto leaving = drawFlowchart(
+        "flowchart LR\n  subgraph leaving\n    direction TB\n    a --> b\n  end\n  b --> Out\n");
+    check(leaving.parsed.success && !leaving.layout.blocks[0] &&
+          runsAlong(leaving, {"a", "b", "Out"}, Direction::LeftToRight),
+          "a group with an edge out of it runs with the diagram");
+    auto entered = drawFlowchart(
+        "flowchart LR\n  subgraph entered\n    direction TB\n    a --> b\n  end\n  In --> a\n");
+    check(entered.parsed.success && !entered.layout.blocks[0] &&
+          runsAlong(entered, {"In", "a", "b"}, Direction::LeftToRight),
+          "a group with an edge into it runs with the diagram");
+
+    // A linked outer group, and inside it a group with no link of its own
+    auto service = drawFlowchart(
+        "flowchart TB\n  subgraph service\n    direction LR\n    api --> worker\n"
+        "    subgraph retry\n      direction LR\n      try1 --> wait1 --> again\n    end\n  end\n"
+        "  Client --> api\n  worker --> Store\n");
+    check(service.parsed.success, "a block inside a linked group lays out");
+    if (service.parsed.success) {
+        check(!service.layout.blocks[0] && service.layout.blocks[1],
+              "the linked outer group is none, the inner group is a layout of its own");
+        check(runsAlong(service, {"Client", "api", "worker", "Store"}, Direction::TopToBottom, false),
+              "the linked group runs with the diagram");
+        check(runsAlong(service, {"try1", "wait1", "again"}, Direction::LeftToRight),
+              "the inner group keeps its direction");
+        checkGroupBoxes(service, "service");
+    }
+
+    // A group with no direction inside a block follows the block
+    auto lane = drawFlowchart(
+        "flowchart TB\n  subgraph lane\n    direction LR\n    p1 --> p2\n"
+        "    subgraph sign\n      p3 --> p4\n    end\n    p2 --> p3\n  end\n  Start --> End\n");
+    check(lane.parsed.success, "a plain group inside a block lays out");
+    if (lane.parsed.success) {
+        check(lane.layout.blocks[0] && !lane.layout.blocks[1],
+              "the plain inner group is part of the block's layout");
+        check(runsAlong(lane, {"p1", "p2", "p3", "p4"}, Direction::LeftToRight),
+              "its nodes run along the block's direction");
+        checkGroupBoxes(lane, "lane");
+    }
+
+    // Edges that turn back, return to their own node or carry a label stay
+    // inside their block, and the block beside it stays clear of them
+    auto loops = drawFlowchart(
+        "flowchart LR\n"
+        "  subgraph review\n    direction TB\n    w1 -->|send for review| w2{Approved?}\n"
+        "    w2 -->|yes| w3\n    w2 -- no, a second round --> w1\n  end\n"
+        "  subgraph build\n    direction TB\n    b1 --> b2\n    b2 -->|flaky| b2\n    b2 --> b3\n  end\n");
+    check(loops.parsed.success, "loops inside blocks lay out");
+    if (loops.parsed.success) {
+        const auto& back = loops.placed.edges[2];
+        const auto& node = loops.placed.nodes[nodeIndex(loops.parsed.diagram, "w2")];
+        check(back.points.size() == 4 && back.points[1].x > node.right && back.hasLabel,
+              "the edge back takes a lane beside the nodes");
+        checkGroupBoxes(loops, "loops");
+    }
+
+    // A narrow node above a wide block: its edge to the next rank bends in
+    // the gap between the ranks, not beside the block
+    auto beside = drawFlowchart(
+        "flowchart LR\n  In --> Out\n  subgraph wide\n    direction LR\n"
+        "    s1 --> s2 --> s3 --> s4\n  end\n");
+    check(beside.parsed.success, "a node above a wide block lays out");
+    if (beside.parsed.success) {
+        const auto& block = beside.placed.groups[0];
+        const auto& route = beside.placed.edges[0];
+        check(route.points.size() == 4 && route.points[1].x > block.right,
+              "the edge bends past the block");
+        checkGroupBoxes(beside, "beside");
+    }
+}
+
+// Groups with no direction: the layout is the one from before, but for the
+// room between the boxes of neighbours
+void testNeighbouringGroupBoxes() {
+    const char* const nestedRanks =
+        "flowchart %s\n  subgraph north\n    subgraph northInner\n      a --> b\n    end\n  end\n"
+        "  subgraph south\n    subgraph southInner\n      c --> d\n    end\n  end\n  b --> c\n";
+    const char* const stacked =
+        "flowchart %s\n  subgraph one\n    a1 --> a2\n  end\n"
+        "  subgraph two\n    subgraph twoInner\n      b1 --> b2\n    end\n  end\n"
+        "  subgraph three\n    c1 --> c2\n  end\n";
+    for (const char* direction : {"TB", "BT", "LR", "RL"}) {
+        for (const char* shape : {nestedRanks, stacked}) {
+            std::string source = shape;
+            source.replace(source.find("%s"), 2, direction);
+            auto drawn = drawFlowchart(source);
+            check(drawn.parsed.success, "a flowchart of plain groups lays out");
+            if (!drawn.parsed.success) continue;
+            checkGroupBoxes(drawn, std::string(shape == stacked ? "stacked " : "nested ") + direction);
+        }
+    }
+
+    // With no group, and with the distances a caller gave before, nothing
+    // moves: the nodes of a rank stay nodeGap apart and the ranks rankGap
+    auto parsed = mermaid::parse("flowchart LR\n  subgraph g\n    b\n  end\n"
+                                 "  subgraph h\n    c\n  end\n  a --> b\n  a --> c\n");
+    check(parsed.success, "the spacing fixture parses");
+    if (parsed.success) {
+        std::vector<mermaid::Size> sizes(parsed.diagram.nodes.size(), {100.0f, 40.0f});
+        auto layout = mermaid::layout(parsed.diagram, sizes, 20.0f, 60.0f);
+        check(layout.nodes.size() == 3 && layout.nodes[0].left == 160.0f &&
+              layout.nodes[1].top - layout.nodes[0].bottom == 20.0f,
+              "without box sizes the nodes of two groups keep the node gap");
+        mermaid::LayoutOptions options = mermaid::drawingOptions(1.0f);
+        auto drawn = mermaid::layout(parsed.diagram, sizes, options);
+        check(drawn.nodes.size() == 3 &&
+              std::abs(drawn.nodes[1].top - drawn.nodes[0].bottom -
+                       (options.groupPad * 2.0f + options.groupTitle + options.groupGap)) < 0.01f,
+              "with them a pad, a title, a pad and the gap lie between the nodes");
+    }
+}
+
+// Mermaid fences of a Markdown file, those inside a block quote too
+std::vector<std::string> quotedMermaidFences(const std::string& markdown) {
+    std::string plain;
+    size_t position = 0;
+    while (position < markdown.size()) {
+        size_t newline = markdown.find('\n', position);
+        if (newline == std::string::npos) newline = markdown.size();
+        std::string line = markdown.substr(position, newline - position);
+        if (line.rfind("> ", 0) == 0) {
+            line.erase(0, 2);
+        } else if (line == ">" || line == ">\r") {
+            line.erase(0, 1);
+        }
+        plain += line + "\n";
+        position = newline + 1;
+    }
+    return mermaidFences(plain);
+}
+
+// The fixture: every fence but the last draws, with the groups its text
+// says are laid out on their own, and its boxes hold what they should
+void testSubgraphDirectionFixture() {
+    std::ifstream file(TINTA_MERMAID_SUBGRAPH_DIRECTION_FIXTURE, std::ios::binary);
+    check(static_cast<bool>(file), "subgraph direction fixture opens");
+    const std::string markdown((std::istreambuf_iterator<char>(file)),
+                               std::istreambuf_iterator<char>());
+    const auto fences = quotedMermaidFences(markdown);
+    // Per fence, the ids of the subgraphs laid out on their own
+    const std::vector<std::string> blocks = {
+        "current expected", "", "down up right left", "steps", "outer inner1 inner2",
+        "lane", "kept", "retry", "review build notes", "", ""};
+    check(fences.size() == blocks.size() + 1, "the fixture has twelve Mermaid fences");
+    for (size_t i = 0; i < fences.size() && i < blocks.size(); ++i) {
+        const std::string name = "fixture fence " + std::to_string(i + 1);
+        auto drawn = drawFlowchart(fences[i]);
+        if (!drawn.parsed.success) {
+            std::cerr << "  fence " << i + 1 << ':' << drawn.parsed.errorLine << ": "
+                      << drawn.parsed.error << '\n';
+        }
+        check(drawn.parsed.success, (name + " parses").c_str());
+        if (!drawn.parsed.success) continue;
+        std::string own;
+        for (size_t s = 0; s < drawn.parsed.diagram.subgraphs.size(); s++) {
+            if (!drawn.layout.blocks[s]) continue;
+            if (!own.empty()) own += ' ';
+            own += drawn.parsed.diagram.subgraphs[s].id;
+        }
+        check(own == blocks[i],
+              (name + " lays out on their own: " + blocks[i] + " (got: " + own + ")").c_str());
+        checkGroupBoxes(drawn, name);
+    }
+    if (fences.size() == blocks.size() + 1) {
+        auto unsupported = mermaid::parse(fences.back());
+        check(!unsupported.success && unsupported.errorLine == 3 &&
+              unsupported.error == "Unsupported flowchart direction",
+              "the fixture's last fence reports its unsupported direction");
+    }
+}
+
 int main(int argc, char** argv) {
     testStyledFlowchart();
     testGraphAliasesAndChaining();
@@ -1716,6 +2297,10 @@ int main(int argc, char** argv) {
     testAsymmetricShape();
     testLongLinks();
     testAsymmetricFixture();
+    testSubgraphDirectionParsing();
+    testSubgraphDirectionLayout();
+    testNeighbouringGroupBoxes();
+    testSubgraphDirectionFixture();
     testFiles(argc, argv);
 
     if (failures != 0) {

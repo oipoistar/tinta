@@ -1924,11 +1924,11 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
         float width = 0.0f;
         float height = 0.0f;
     };
-    bool vertical = diagram.direction == mermaid::Direction::TopToBottom ||
-                    diagram.direction == mermaid::Direction::BottomToTop;
     float labelPaddingX = 6.0f * scale;
     float labelPaddingY = 4.0f * scale;
-    float rankGap = 78.0f * scale;
+    // The layout widens a rank gap to the labels that sit in it
+    mermaid::LayoutOptions layoutOptions = mermaid::drawingOptions(scale);
+    layoutOptions.edgeLabels.resize(diagram.edges.size());
     std::vector<MeasuredMermaidEdgeLabel> edgeLabels(diagram.edges.size());
     for (size_t i = 0; i < diagram.edges.size(); i++) {
         if (diagram.edges[i].label.empty()) continue;
@@ -1962,13 +1962,21 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
         edgeLabel.height = std::max(
             28.0f * scale, measured.height + labelPaddingY * 2.0f);
         if (measured.layout) measured.layout->Release();
-
-        float labelExtent = vertical ? edgeLabel.height : edgeLabel.width;
-        rankGap = std::max(rankGap, labelExtent + 20.0f * scale);
+        layoutOptions.edgeLabels[i] = {edgeLabel.width, edgeLabel.height};
     }
 
-    mermaid::Layout graphLayout = mermaid::layout(
-        diagram, nodeSizes, 32.0f * scale, rankGap);
+    // A block (a subgraph laid out along its own direction) is as wide as
+    // its title at least; a title that wrapped would sit on the nodes
+    layoutOptions.groupTitles.reserve(diagram.subgraphs.size());
+    for (const auto& subgraph : diagram.subgraphs) {
+        float titleWidth =
+            std::ceil(measureText(app, toWide(subgraph.label), app.textFormat)) + 1.0f;
+        layoutOptions.groupTitles.push_back(
+            std::min(titleWidth, 360.0f * scale) + 16.0f * scale);
+    }
+
+    mermaid::Layout graphLayout =
+        mermaid::layout(diagram, nodeSizes, layoutOptions);
     if (graphLayout.nodes.size() != diagram.nodes.size()) return false;
 
     float baseX = indent;
@@ -1979,21 +1987,35 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
     if (!diagram.subgraphs.empty()) {
         // Group boxes extend above their topmost node by pad + title
         // height; reserve that room so they stay inside the block
-        baseY += 30.0f * scale;
+        float reserve = 30.0f * scale;
+        // A subgraph laid out on its own (#326) has its box inside the
+        // layout, not above it: with such a subgraph, the room is what the
+        // boxes do reach above the layout
+        if (std::find(graphLayout.blocks.begin(), graphLayout.blocks.end(), true) !=
+            graphLayout.blocks.end()) {
+            reserve = 0.0f;
+            for (const auto& box : graphLayout.groups) {
+                if (!mermaid::isEmpty(box)) reserve = std::max(reserve, -box.top);
+            }
+        }
+        baseY += reserve;
     }
     float diagramLeft = baseX;
     float diagramTop = baseY;
     float diagramRight = baseX + graphLayout.width;
     float diagramBottom = baseY + graphLayout.height;
 
+    // Nodes, group boxes and edges where they are drawn. A subgraph with a
+    // direction of its own is laid out along it (#326), so an edge runs
+    // along the direction of the layout its nodes are part of
+    const mermaid::Placement placed =
+        mermaid::place(diagram, graphLayout, layoutOptions, baseX, baseY);
+    if (placed.nodes.size() != diagram.nodes.size()) return false;
     std::vector<D2D1_RECT_F> nodeRects;
-    nodeRects.reserve(graphLayout.nodes.size());
-    for (const auto& rect : graphLayout.nodes) {
-        nodeRects.push_back(D2D1::RectF(
-            baseX + rect.left,
-            baseY + rect.top,
-            baseX + rect.right,
-            baseY + rect.bottom));
+    nodeRects.reserve(placed.nodes.size());
+    for (const auto& rect : placed.nodes) {
+        nodeRects.push_back(
+            D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom));
     }
 
     struct MermaidTextItem {
@@ -2009,42 +2031,20 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
 
     // Subgraph group boxes: fill goes through layoutRects (drawn before the
     // connectors), the border rides with the node shapes, the title with the
-    // node labels. Children were declared after their parents, so a reverse
-    // pass finalizes leaves first and parents grow around them.
+    // node labels.
     if (!diagram.subgraphs.empty()) {
-        float boxPad = 10.0f * scale;
-        float titleHeight = 20.0f * scale;
-        constexpr float kEmpty = std::numeric_limits<float>::max();
-        std::vector<D2D1_RECT_F> boxes(
-            diagram.subgraphs.size(),
-            D2D1::RectF(kEmpty, kEmpty, -kEmpty, -kEmpty));
-        auto grow = [](D2D1_RECT_F& box, const D2D1_RECT_F& rect) {
-            box.left = std::min(box.left, rect.left);
-            box.top = std::min(box.top, rect.top);
-            box.right = std::max(box.right, rect.right);
-            box.bottom = std::max(box.bottom, rect.bottom);
-        };
-        for (size_t s = diagram.subgraphs.size(); s-- > 0;) {
-            for (size_t node : diagram.subgraphs[s].nodes) {
-                if (node < nodeRects.size()) grow(boxes[s], nodeRects[node]);
-            }
-            for (size_t c = s + 1; c < diagram.subgraphs.size(); c++) {
-                if (diagram.subgraphs[c].parent == s &&
-                    boxes[c].left != kEmpty) {
-                    grow(boxes[s], boxes[c]);
-                }
-            }
-            if (boxes[s].left == kEmpty) continue;
-            boxes[s].left -= boxPad;
-            boxes[s].top -= boxPad + titleHeight;
-            boxes[s].right += boxPad;
-            boxes[s].bottom += boxPad;
+        float titleHeight = layoutOptions.groupTitle;
+        std::vector<D2D1_RECT_F> boxes;
+        boxes.reserve(placed.groups.size());
+        for (const auto& box : placed.groups) {
+            boxes.push_back(
+                D2D1::RectF(box.left, box.top, box.right, box.bottom));
         }
         D2D1_COLOR_F groupFill = colors.clusterFill;
         D2D1_COLOR_F groupBorder = colors.clusterBorder;
         D2D1_COLOR_F groupTitle = colors.clusterText;
         for (size_t s = 0; s < diagram.subgraphs.size(); s++) {
-            if (boxes[s].left == kEmpty) continue;
+            if (mermaid::isEmpty(placed.groups[s])) continue;
             app.layoutRects.push_back({boxes[s], groupFill});
             app.layoutShapes.push_back({
                 App::LayoutShapeType::Rectangle,
@@ -2069,21 +2069,11 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
 
     app.layoutConnectors.reserve(
         app.layoutConnectors.size() + diagram.edges.size());
-    // A node's left side at mid-height, where a notch has its tip
-    auto leftSide = [&](size_t node) {
-        const auto& rect = nodeRects[node];
-        return rect.left + mermaid::leftNotch(diagram.nodes[node].shape,
-                                              rect.bottom - rect.top);
-    };
-    size_t exteriorLane = 0;
-    std::vector<D2D1_RECT_F> placedLabelRects;
-    placedLabelRects.reserve(diagram.edges.size());
     for (size_t edgeIndex = 0; edgeIndex < diagram.edges.size(); edgeIndex++) {
         const auto& edge = diagram.edges[edgeIndex];
         if (edge.from >= nodeRects.size() || edge.to >= nodeRects.size()) continue;
 
-        const auto& from = nodeRects[edge.from];
-        const auto& to = nodeRects[edge.to];
+        const mermaid::EdgeRoute& route = placed.edges[edgeIndex];
         App::LayoutConnector connector;
         connector.color = connectorColor;
         connector.stroke = 1.4f * scale * edge.strokeScale;
@@ -2091,109 +2081,12 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
         connector.directed = edge.directed;
         connector.dashed = edge.dashed;
 
-        float fromCenterX = (from.left + from.right) * 0.5f;
-        float fromCenterY = (from.top + from.bottom) * 0.5f;
-        float toCenterX = (to.left + to.right) * 0.5f;
-        float toCenterY = (to.top + to.bottom) * 0.5f;
-        bool selfLoop = edge.from == edge.to;
-
-        // Edges that skip over intermediate ranks would cut straight through
-        // the nodes between them (and drop their label onto whatever edge
-        // happens to sit at the midpoint) — route those through an exterior
-        // lane like back-edges instead
-        bool skipsRanks = false;
-        if (edge.from < graphLayout.ranks.size() &&
-            edge.to < graphLayout.ranks.size()) {
-            size_t fromRank = graphLayout.ranks[edge.from];
-            size_t toRank = graphLayout.ranks[edge.to];
-            skipsRanks = (fromRank < toRank ? toRank - fromRank
-                                            : fromRank - toRank) > 1;
-        }
-
-        if (vertical) {
-            bool topToBottom =
-                diagram.direction == mermaid::Direction::TopToBottom;
-            bool forward = !selfLoop && !skipsRanks &&
-                (topToBottom ? toCenterY > fromCenterY : toCenterY < fromCenterY);
-            if (selfLoop) {
-                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
-                D2D1_POINT_2F start = D2D1::Point2F(from.right, fromCenterY);
-                D2D1_POINT_2F end = D2D1::Point2F(fromCenterX, from.bottom);
-                float laneX = from.right + lane;
-                float laneY = from.bottom + lane;
-                connector.points = {
-                    start,
-                    D2D1::Point2F(laneX, start.y),
-                    D2D1::Point2F(laneX, laneY),
-                    D2D1::Point2F(end.x, laneY),
-                    end,
-                };
-            } else if (forward) {
-                D2D1_POINT_2F start = D2D1::Point2F(
-                    fromCenterX, topToBottom ? from.bottom : from.top);
-                D2D1_POINT_2F end = D2D1::Point2F(
-                    toCenterX, topToBottom ? to.top : to.bottom);
-                float middleY = (start.y + end.y) * 0.5f;
-                connector.points = {
-                    start,
-                    D2D1::Point2F(start.x, middleY),
-                    D2D1::Point2F(end.x, middleY),
-                    end,
-                };
-            } else {
-                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
-                D2D1_POINT_2F start = D2D1::Point2F(from.right, fromCenterY);
-                D2D1_POINT_2F end = D2D1::Point2F(to.right, toCenterY);
-                float laneX = std::max(from.right, to.right) + lane;
-                connector.points = {
-                    start,
-                    D2D1::Point2F(laneX, start.y),
-                    D2D1::Point2F(laneX, end.y),
-                    end,
-                };
-            }
-        } else {
-            bool leftToRight =
-                diagram.direction == mermaid::Direction::LeftToRight;
-            bool forward = !selfLoop && !skipsRanks &&
-                (leftToRight ? toCenterX > fromCenterX : toCenterX < fromCenterX);
-            if (selfLoop) {
-                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
-                D2D1_POINT_2F start = D2D1::Point2F(fromCenterX, from.bottom);
-                D2D1_POINT_2F end = D2D1::Point2F(from.right, fromCenterY);
-                float laneX = from.right + lane;
-                float laneY = from.bottom + lane;
-                connector.points = {
-                    start,
-                    D2D1::Point2F(start.x, laneY),
-                    D2D1::Point2F(laneX, laneY),
-                    D2D1::Point2F(laneX, end.y),
-                    end,
-                };
-            } else if (forward) {
-                D2D1_POINT_2F start = D2D1::Point2F(
-                    leftToRight ? from.right : leftSide(edge.from), fromCenterY);
-                D2D1_POINT_2F end = D2D1::Point2F(
-                    leftToRight ? leftSide(edge.to) : to.right, toCenterY);
-                float middleX = (start.x + end.x) * 0.5f;
-                connector.points = {
-                    start,
-                    D2D1::Point2F(middleX, start.y),
-                    D2D1::Point2F(middleX, end.y),
-                    end,
-                };
-            } else {
-                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
-                D2D1_POINT_2F start = D2D1::Point2F(fromCenterX, from.bottom);
-                D2D1_POINT_2F end = D2D1::Point2F(toCenterX, to.bottom);
-                float laneY = std::max(from.bottom, to.bottom) + lane;
-                connector.points = {
-                    start,
-                    D2D1::Point2F(start.x, laneY),
-                    D2D1::Point2F(end.x, laneY),
-                    end,
-                };
-            }
+        // Routed by the layout: straight to the next rank, or along a lane
+        // beside the nodes for an edge that turns back, skips a rank or
+        // returns to its own node
+        connector.points.reserve(route.points.size());
+        for (const auto& point : route.points) {
+            connector.points.push_back(D2D1::Point2F(point.x, point.y));
         }
 
         connector.bounds = D2D1::RectF(
@@ -2217,46 +2110,13 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
         diagramBottom = std::max(diagramBottom, connector.bounds.bottom);
         app.layoutConnectors.push_back(std::move(connector));
 
-        if (!edge.label.empty()) {
+        if (route.hasLabel) {
             const auto& edgeLabel = edgeLabels[edgeIndex];
-            const auto& points = app.layoutConnectors.back().points;
-            size_t middle = points.size() / 2;
-            const auto& middleStart = points[middle - 1];
-            const auto& middleEnd = points[middle];
-            float centerX = (middleStart.x + middleEnd.x) * 0.5f;
-            float centerY = (middleStart.y + middleEnd.y) * 0.5f;
-            auto chipAt = [&](float cx, float cy) {
-                return D2D1::RectF(
-                    cx - edgeLabel.width * 0.5f,
-                    cy - edgeLabel.height * 0.5f,
-                    cx + edgeLabel.width * 0.5f,
-                    cy + edgeLabel.height * 0.5f);
-            };
-            D2D1_RECT_F labelRect = chipAt(centerX, centerY);
-
-            // Parallel exterior lanes sit only a few pixels apart, so their
-            // midpoint chips stack on top of each other — slide an
-            // overlapping chip along its own segment until it finds space
-            bool segVertical = std::abs(middleEnd.x - middleStart.x) <
-                               std::abs(middleEnd.y - middleStart.y);
-            float stepX = segVertical ? 0.0f : edgeLabel.width + 8.0f * scale;
-            float stepY = segVertical ? edgeLabel.height + 8.0f * scale : 0.0f;
-            auto overlapsPlaced = [&](const D2D1_RECT_F& rect) {
-                for (const auto& placed : placedLabelRects) {
-                    if (rect.left < placed.right && rect.right > placed.left &&
-                        rect.top < placed.bottom && rect.bottom > placed.top) {
-                        return true;
-                    }
-                }
-                return false;
-            };
-            for (int attempt = 1; attempt <= 8 && overlapsPlaced(labelRect); attempt++) {
-                float direction = (attempt % 2 == 1) ? 1.0f : -1.0f;
-                float magnitude = (float)((attempt + 1) / 2);
-                labelRect = chipAt(centerX + stepX * direction * magnitude,
-                                   centerY + stepY * direction * magnitude);
-            }
-            placedLabelRects.push_back(labelRect);
+            // Set on the middle of the edge by the layout, and slid along
+            // it where the label of another edge sat there already
+            D2D1_RECT_F labelRect = D2D1::RectF(
+                route.label.left, route.label.top,
+                route.label.right, route.label.bottom);
             // Draw the label as a visible chip on the edge — an invisible
             // background-colored pill erases the line under it, which makes
             // edges look disconnected and labels look like floating text

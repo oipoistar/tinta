@@ -740,7 +740,8 @@ if(BUILD_TESTING)
     target_compile_definitions(mermaid_tests PRIVATE
         TINTA_MERMAID_FRONT_MATTER_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mermaid-front-matter-261.md"
         TINTA_MERMAID_C4_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mermaid-c4-labels.md"
-        TINTA_MERMAID_ASYMMETRIC_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mermaid-asymmetric-shape.md")
+        TINTA_MERMAID_ASYMMETRIC_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mermaid-asymmetric-shape.md"
+        TINTA_MERMAID_SUBGRAPH_DIRECTION_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mermaid-subgraph-direction-326.md")
     add_test(NAME mermaid_parser COMMAND mermaid_tests)
 
     # Sheets: the JSON Canvas model, the .smd format and the layouts

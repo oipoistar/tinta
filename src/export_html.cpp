@@ -477,14 +477,15 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& source,
         styles.push_back(flowResolveStyle(app, diagram, node, scale));
     }
 
-    bool vertical = diagram.direction == mermaid::Direction::TopToBottom ||
-                    diagram.direction == mermaid::Direction::BottomToTop;
     struct FlowEdgeLabel {
         std::wstring text;
         float width = 0.0f;
         float height = 0.0f;
     };
-    float rankGap = 78.0f * scale;
+    // The viewer's distances; the layout widens a rank gap to the labels
+    // that sit in it
+    mermaid::LayoutOptions layoutOptions = mermaid::drawingOptions(scale);
+    layoutOptions.edgeLabels.resize(diagram.edges.size());
     std::vector<FlowEdgeLabel> edgeLabels(diagram.edges.size());
     for (size_t i = 0; i < diagram.edges.size(); i++) {
         if (diagram.edges[i].label.empty()) continue;
@@ -506,47 +507,27 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& source,
             textStyle, scale);
         edgeLabel.height =
             std::max(28.0f * scale, wrapped.height + labelPadY * 2.0f);
-        float labelExtent = vertical ? edgeLabel.height : edgeLabel.width;
-        rankGap = std::max(rankGap, labelExtent + 20.0f * scale);
+        layoutOptions.edgeLabels[i] = {edgeLabel.width, edgeLabel.height};
+    }
+
+    // As in the viewer: a block is as wide as its title at least
+    layoutOptions.groupTitles.reserve(diagram.subgraphs.size());
+    for (const auto& subgraph : diagram.subgraphs) {
+        WrappedLines title =
+            wrapLines(app, toWide(subgraph.label), 0.0f, textStyle, scale);
+        layoutOptions.groupTitles.push_back(
+            std::min(std::ceil(title.width) + 1.0f, 360.0f * scale) + 16.0f * scale);
     }
 
     mermaid::Layout graphLayout =
-        mermaid::layout(diagram, nodeSizes, 32.0f * scale, rankGap);
+        mermaid::layout(diagram, nodeSizes, layoutOptions);
     if (graphLayout.nodes.size() != diagram.nodes.size()) return result;
-    const auto& nodeRects = graphLayout.nodes;
-
-    // Subgraph group boxes, finalized leaves-first exactly like the viewer
-    constexpr float kNoBox = 3.0e38f;
-    std::vector<mermaid::Rect> subBoxes(
-        diagram.subgraphs.size(), {kNoBox, kNoBox, -kNoBox, -kNoBox});
-    {
-        const float boxPad = 10.0f * scale;
-        const float titleHeight = 20.0f * scale;
-        auto grow = [](mermaid::Rect& box, const mermaid::Rect& rect) {
-            box.left = std::min(box.left, rect.left);
-            box.top = std::min(box.top, rect.top);
-            box.right = std::max(box.right, rect.right);
-            box.bottom = std::max(box.bottom, rect.bottom);
-        };
-        for (size_t sub = diagram.subgraphs.size(); sub-- > 0;) {
-            for (size_t node : diagram.subgraphs[sub].nodes) {
-                if (node < nodeRects.size()) {
-                    grow(subBoxes[sub], nodeRects[node]);
-                }
-            }
-            for (size_t c = sub + 1; c < diagram.subgraphs.size(); c++) {
-                if (diagram.subgraphs[c].parent == sub &&
-                    subBoxes[c].left != kNoBox) {
-                    grow(subBoxes[sub], subBoxes[c]);
-                }
-            }
-            if (subBoxes[sub].left == kNoBox) continue;
-            subBoxes[sub].left -= boxPad;
-            subBoxes[sub].top -= boxPad + titleHeight;
-            subBoxes[sub].right += boxPad;
-            subBoxes[sub].bottom += boxPad;
-        }
-    }
+    // Nodes, subgraph group boxes and edges exactly as the viewer has them
+    const mermaid::Placement placed =
+        mermaid::place(diagram, graphLayout, layoutOptions, 0.0f, 0.0f);
+    if (placed.nodes.size() != diagram.nodes.size()) return result;
+    const auto& nodeRects = placed.nodes;
+    const auto& subBoxes = placed.groups;
 
     const FlowchartColors colors = flowchartColors(app);
     D2D1_COLOR_F connectorColor = colors.line;
@@ -572,132 +553,25 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& source,
     float boundsL = 0.0f, boundsT = 0.0f;
     float boundsR = graphLayout.width, boundsB = graphLayout.height;
     for (const auto& box : subBoxes) {
-        if (box.left == kNoBox) continue;
+        if (mermaid::isEmpty(box)) continue;
         boundsL = std::min(boundsL, box.left);
         boundsT = std::min(boundsT, box.top);
         boundsR = std::max(boundsR, box.right);
         boundsB = std::max(boundsB, box.bottom);
     }
-    // A node's left side at mid-height, where a notch has its tip
-    auto leftSide = [&](size_t node) {
-        const auto& rect = nodeRects[node];
-        return rect.left + mermaid::leftNotch(diagram.nodes[node].shape,
-                                              rect.bottom - rect.top);
-    };
-    size_t exteriorLane = 0;
-    std::vector<mermaid::Rect> placedLabelRects;
-    placedLabelRects.reserve(diagram.edges.size());
     for (size_t edgeIndex = 0; edgeIndex < diagram.edges.size(); edgeIndex++) {
         const auto& edge = diagram.edges[edgeIndex];
         if (edge.from >= nodeRects.size() || edge.to >= nodeRects.size())
             continue;
-        const auto& from = nodeRects[edge.from];
-        const auto& to = nodeRects[edge.to];
+        const mermaid::EdgeRoute& route = placed.edges[edgeIndex];
         FlowConn conn;
         conn.stroke = 1.4f * scale * edge.strokeScale;
         conn.directed = edge.directed;
         conn.dashed = edge.dashed;
 
-        float fromCenterX = (from.left + from.right) * 0.5f;
-        float fromCenterY = (from.top + from.bottom) * 0.5f;
-        float toCenterX = (to.left + to.right) * 0.5f;
-        float toCenterY = (to.top + to.bottom) * 0.5f;
-        bool selfLoop = edge.from == edge.to;
-        bool skipsRanks = false;
-        if (edge.from < graphLayout.ranks.size() &&
-            edge.to < graphLayout.ranks.size()) {
-            size_t fromRank = graphLayout.ranks[edge.from];
-            size_t toRank = graphLayout.ranks[edge.to];
-            skipsRanks = (fromRank < toRank ? toRank - fromRank
-                                            : fromRank - toRank) > 1;
-        }
-
-        if (vertical) {
-            bool topToBottom =
-                diagram.direction == mermaid::Direction::TopToBottom;
-            bool forward = !selfLoop && !skipsRanks &&
-                (topToBottom ? toCenterY > fromCenterY
-                             : toCenterY < fromCenterY);
-            if (selfLoop) {
-                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
-                D2D1_POINT_2F start = D2D1::Point2F(from.right, fromCenterY);
-                D2D1_POINT_2F end = D2D1::Point2F(fromCenterX, from.bottom);
-                float laneX = from.right + lane;
-                float laneY = from.bottom + lane;
-                conn.points = {
-                    start,
-                    D2D1::Point2F(laneX, start.y),
-                    D2D1::Point2F(laneX, laneY),
-                    D2D1::Point2F(end.x, laneY),
-                    end,
-                };
-            } else if (forward) {
-                D2D1_POINT_2F start = D2D1::Point2F(
-                    fromCenterX, topToBottom ? from.bottom : from.top);
-                D2D1_POINT_2F end = D2D1::Point2F(
-                    toCenterX, topToBottom ? to.top : to.bottom);
-                float middleY = (start.y + end.y) * 0.5f;
-                conn.points = {
-                    start,
-                    D2D1::Point2F(start.x, middleY),
-                    D2D1::Point2F(end.x, middleY),
-                    end,
-                };
-            } else {
-                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
-                D2D1_POINT_2F start = D2D1::Point2F(from.right, fromCenterY);
-                D2D1_POINT_2F end = D2D1::Point2F(to.right, toCenterY);
-                float laneX = std::max(from.right, to.right) + lane;
-                conn.points = {
-                    start,
-                    D2D1::Point2F(laneX, start.y),
-                    D2D1::Point2F(laneX, end.y),
-                    end,
-                };
-            }
-        } else {
-            bool leftToRight =
-                diagram.direction == mermaid::Direction::LeftToRight;
-            bool forward = !selfLoop && !skipsRanks &&
-                (leftToRight ? toCenterX > fromCenterX
-                             : toCenterX < fromCenterX);
-            if (selfLoop) {
-                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
-                D2D1_POINT_2F start = D2D1::Point2F(fromCenterX, from.bottom);
-                D2D1_POINT_2F end = D2D1::Point2F(from.right, fromCenterY);
-                float laneX = from.right + lane;
-                float laneY = from.bottom + lane;
-                conn.points = {
-                    start,
-                    D2D1::Point2F(start.x, laneY),
-                    D2D1::Point2F(laneX, laneY),
-                    D2D1::Point2F(laneX, end.y),
-                    end,
-                };
-            } else if (forward) {
-                D2D1_POINT_2F start = D2D1::Point2F(
-                    leftToRight ? from.right : leftSide(edge.from), fromCenterY);
-                D2D1_POINT_2F end = D2D1::Point2F(
-                    leftToRight ? leftSide(edge.to) : to.right, toCenterY);
-                float middleX = (start.x + end.x) * 0.5f;
-                conn.points = {
-                    start,
-                    D2D1::Point2F(middleX, start.y),
-                    D2D1::Point2F(middleX, end.y),
-                    end,
-                };
-            } else {
-                float lane = (36.0f + exteriorLane++ * 14.0f) * scale;
-                D2D1_POINT_2F start = D2D1::Point2F(fromCenterX, from.bottom);
-                D2D1_POINT_2F end = D2D1::Point2F(toCenterX, to.bottom);
-                float laneY = std::max(from.bottom, to.bottom) + lane;
-                conn.points = {
-                    start,
-                    D2D1::Point2F(start.x, laneY),
-                    D2D1::Point2F(end.x, laneY),
-                    end,
-                };
-            }
+        conn.points.reserve(route.points.size());
+        for (const auto& point : route.points) {
+            conn.points.push_back(D2D1::Point2F(point.x, point.y));
         }
 
         for (const auto& point : conn.points) {
@@ -707,42 +581,9 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& source,
             boundsB = std::max(boundsB, point.y + arrowSize);
         }
 
-        if (!edge.label.empty()) {
+        if (route.hasLabel) {
             const auto& edgeLabel = edgeLabels[edgeIndex];
-            size_t middle = conn.points.size() / 2;
-            const auto& middleStart = conn.points[middle - 1];
-            const auto& middleEnd = conn.points[middle];
-            float centerX = (middleStart.x + middleEnd.x) * 0.5f;
-            float centerY = (middleStart.y + middleEnd.y) * 0.5f;
-            auto chipAt = [&](float cx, float cy) {
-                return mermaid::Rect{
-                    cx - edgeLabel.width * 0.5f, cy - edgeLabel.height * 0.5f,
-                    cx + edgeLabel.width * 0.5f, cy + edgeLabel.height * 0.5f};
-            };
-            mermaid::Rect labelRect = chipAt(centerX, centerY);
-            bool segVertical = std::abs(middleEnd.x - middleStart.x) <
-                               std::abs(middleEnd.y - middleStart.y);
-            float stepX =
-                segVertical ? 0.0f : edgeLabel.width + 8.0f * scale;
-            float stepY =
-                segVertical ? edgeLabel.height + 8.0f * scale : 0.0f;
-            auto overlapsPlaced = [&](const mermaid::Rect& rect) {
-                for (const auto& placed : placedLabelRects) {
-                    if (rect.left < placed.right && rect.right > placed.left &&
-                        rect.top < placed.bottom && rect.bottom > placed.top) {
-                        return true;
-                    }
-                }
-                return false;
-            };
-            for (int attempt = 1;
-                 attempt <= 8 && overlapsPlaced(labelRect); attempt++) {
-                float direction = (attempt % 2 == 1) ? 1.0f : -1.0f;
-                float magnitude = (float)((attempt + 1) / 2);
-                labelRect = chipAt(centerX + stepX * direction * magnitude,
-                                   centerY + stepY * direction * magnitude);
-            }
-            placedLabelRects.push_back(labelRect);
+            const mermaid::Rect& labelRect = route.label;
             boundsL = std::min(boundsL, labelRect.left);
             boundsT = std::min(boundsT, labelRect.top);
             boundsR = std::max(boundsR, labelRect.right);
@@ -757,7 +598,7 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& source,
     std::vector<Prim> texts;
     for (size_t sub = 0; sub < subBoxes.size(); sub++) {
         const auto& box = subBoxes[sub];
-        if (box.left == kNoBox) continue;
+        if (mermaid::isEmpty(box)) continue;
         Prim fill;
         fill.type = PrimType::Rect;
         fill.x1 = box.left;
