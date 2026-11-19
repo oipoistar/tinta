@@ -55,16 +55,22 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown, Mermaid and PlantUML files
 
-            A fix release for 4.1.0, with one new setting. For citations, papers and themes in CSS, new in 4.1, see the [v4.1.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.1.0).
+            HTML tables, wrapped code lines, a setting for the last session's tabs, and fixes. For citations, papers and themes in CSS, new in 4.1, see the [v4.1.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.1.0).
 
             ### Added
-            - Settings > Editor > Open Markdown files in: Reading, Live or Source. With Live or Source a Markdown file comes up in the editor however it is opened, at the place it was left at; `Esc` still returns to the reading view. Kept as `openMode=` in `settings.ini`. Requested by @Scawer132 (#322)
+            - Tables written in HTML are drawn as tables, with `rowspan` and `colspan`, and exported to HTML and Word; their text ran together. Reported by @suhail-enosis (#325)
+            - Long lines in code blocks wrap at the block's edge, on screen, on paper and in PDF and HTML; a copy still gets one line. Settings > Appearance > Wrap long lines in code blocks turns it off (`wrapCode=`). Reported by @TiegenFang (#324)
+            - Settings > General > Reopen tabs from last time. Off, a file opens alone and a launch with no file shows the start page; pinned tabs still come back. Kept as `reopenTabs=` in `settings.ini`. Requested by @aweib888 (#323)
+
+            ### Changed
+            - Typing in Source with word wrap on is about twenty times faster in a long document, and documents with many centred or right-aligned table cells are laid out faster. (#328)
 
             ### Fixed
-            - Ctrl+Insert, Shift+Insert and Shift+Delete copy, paste and cut wherever Ctrl+C, Ctrl+V and Ctrl+X do. Shift+Insert pasted nothing outside Live, and Shift+Delete deleted without keeping the text. Reported by @tferi99 (#320)
-            - A word typed into the find bar stands on the bar's line whatever font draws it; Chinese in a face set with `cjkFont=` stood low and cut off. Reported by @TiegenFang (#319)
-            - With the find bar open, a drag on the page selects text in Source, Live and the reading view. Reported by @TiegenFang (#319)
-            - In Live the find bar stands over the middle of the page, not as a sliver beside the tool rail.
+            - A flowchart subgraph is laid out along its own `direction`, and the boxes of neighbouring groups no longer run into each other. Reported by @JiangHe12 (#326)
+            - In `bash`, `sh`, `zsh` and `python` code blocks `//` and `/*` do not start a comment, so URLs, paths and globs keep their colours. By @sudowardo (#327)
+            - A code block over a page break printed the row at the break twice.
+            - A printed page is clipped to its text: a code block's card, a table's bands and a quote's bar ran through the margins to the paper's edge.
+            - In an HTML block, line breaks read as spaces and entities such as `&lt;` and `&nbsp;` are the characters they name.
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats

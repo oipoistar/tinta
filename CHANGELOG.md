@@ -1,5 +1,23 @@
 # Changelog
 
+## [v4.1.2] - 2026-11-19
+
+### Added
+- Tables written in HTML are drawn as tables: `<table>`, `<thead>`, `<tbody>`, `<tfoot>`, `<tr>`, `<th>`, `<td>` and `<caption>`, with `rowspan` and `colspan`, rows left without a `</tr>` and `<br>` in a cell. Their tags were dropped, so the cells' text ran together and lay over the paragraph after it. The HTML export keeps the joined cells and Word gets them as merged cells. A cell holds inline content, as a pipe table's does, and such a table is not edited in place. Reported by @suhail-enosis (#325)
+- Long lines in code blocks wrap at the block's edge, at a space or inside a word that has none, and keep their colours over the rows. Selecting, copying and searching see one line. A block grew as wide as its longest line and the page scrolled sideways with it. Print and PDF wrap too, where a block with a long line was shrunk whole to fit the paper, and the HTML export's `pre` wraps. Settings > Appearance > Wrap long lines in code blocks turns it off; `settings.ini` keeps it as `wrapCode=`. Reported by @TiegenFang (#324)
+- Settings > General > Reopen tabs from last time. Off, a file opened from Explorer opens alone and a launch with no file shows the start page; pinned tabs still come back, and files opened afterwards join the window as tabs as before. `settings.ini` keeps it as `reopenTabs=`, and on is how it was. Requested by @aweib888 (#323)
+
+### Changed
+- Typing in Source with word wrap on is about twenty times faster in a long document: 30,000 wrapped lines took 142 ms a key and take 6. Only the lines a key changes are measured again. (#328)
+- A document with many centred or right-aligned table cells is laid out faster, 10,000 small tables in 0.8 s where they took 2.3 s. (#328)
+
+### Fixed
+- A flowchart subgraph is laid out along its own `direction`: in a `flowchart LR` the steps of a group with `direction TB` ran left to right. As in Mermaid, a subgraph with a node linked to the outside takes its parent's direction. The boxes of neighbouring groups no longer run into each other. Reported by @JiangHe12 (#326)
+- In `bash`, `sh`, `zsh` and `python` code blocks `//` and `/*` do not start a comment: a URL, a path, a glob or a floor division coloured the rest of its line as one, and `ls /opt/*` the lines after it. By @sudowardo (#327)
+- A code block over a page break printed the row at the break twice, at the foot of its page and again over the top margin of the next. Print, the PDF export and the preview all showed it.
+- A printed page is clipped to its text: a code block's card, a table's bands, a quote's bar and a diagram cut by a page break ran on through the margins to the paper's edge. A break no longer leaves a box's top edge or a table band alone on a page.
+- In an HTML block, runs of spaces and line breaks read as one space, so a `<div>` or `<p>` written over several lines is one paragraph, and `&lt;`, `&gt;`, `&amp;`, `&quot;`, `&apos;`, `&nbsp;` and numbered references are the characters they name.
+
 ## [v4.1.1] - 2026-11-14
 
 ### Added
