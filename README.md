@@ -142,6 +142,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Ctrl+E` | In Source, show/hide the preview pane; in Live, read the page at full width, and `Ctrl+E` again to go back |
 | `Ctrl+Shift+E` | Read the unsaved edits at full width; `Esc` returns to the source (in edit mode) |
 | `Ctrl+W` | Toggle word wrap (in edit mode) |
+| `Ctrl+Backspace` / `Ctrl+Delete` | Delete the word before or after the caret (in edit mode, at every caret) |
 | `Alt+↑` / `Alt+↓` | Move the current line, or the selected lines, up or down (in edit mode) |
 | Drag / `Ctrl`+drag | Move the selected text to where you let go, or leave a copy there; `Esc` cancels (in edit mode) |
 | `Ctrl+Alt+↑` / `Ctrl+Alt+↓` / `Alt+Click` | Add a caret above, below or at the click; `Esc` returns to one caret (in edit mode) |

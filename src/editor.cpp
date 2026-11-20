@@ -1075,6 +1075,76 @@ static void editorEditAtCarets(App& app, const std::function<void(size_t)>& edit
     editorStoreCarets(app, std::move(carets), primary);
 }
 
+// Ctrl+Backspace and Ctrl+Delete take a word (#330): the spaces and ASCII
+// punctuation beside the caret, then the run a double click would select, a
+// word of letters or a run of Chinese apart. No further than the caret's own
+// line or the next caret; at a line's edge the line break alone. A selection
+// goes as Backspace takes it.
+static size_t editorDeleteWordStart(const App& app, size_t pos, size_t floor) {
+    while (pos > floor && editorCharClass(app.editorText[pos - 1]) == 0) --pos;
+    if (pos > floor) {
+        const int kind = editorCharClass(app.editorText[pos - 1]);
+        while (pos > floor && editorCharClass(app.editorText[pos - 1]) == kind) --pos;
+    }
+    return pos;
+}
+
+static size_t editorDeleteWordEnd(const App& app, size_t pos, size_t ceiling) {
+    while (pos < ceiling && editorCharClass(app.editorText[pos]) == 0) ++pos;
+    if (pos < ceiling) {
+        const int kind = editorCharClass(app.editorText[pos]);
+        while (pos < ceiling && editorCharClass(app.editorText[pos]) == kind) ++pos;
+    }
+    return pos;
+}
+
+static void editorDeleteWord(App& app, bool forward) {
+    std::vector<App::EditorCaret> carets;
+    if (!app.editorExtraCarets.empty()) {
+        // The carets as the round below meets them, in the document's order
+        editorStoreCarets(app, editorAllCarets(app), app.editorExtraCarets.size());
+        carets = editorAllCarets(app);
+        std::sort(carets.begin(), carets.end(), [](const App::EditorCaret& a, const App::EditorCaret& b) {
+            return caretStart(a) < caretStart(b);
+        });
+    }
+    editorEditAtCarets(app, [&](size_t rank) {
+        app.editorDesiredCol = -1;
+        if (app.editorHasSelection) {
+            editorDeleteSelection(app);
+            return;
+        }
+        const size_t at = app.editorCursorPos;
+        size_t from = at, to = at;
+        if (forward) {
+            if (at >= app.editorText.size()) return;
+            if (app.editorText[at] == L'\n') {
+                to = at + 1;
+            } else {
+                size_t ceiling = std::min(app.editorText.find(L'\n', at), app.editorText.size());
+                if (rank + 1 < carets.size()) ceiling = std::min(ceiling, caretStart(carets[rank + 1]));
+                to = editorDeleteWordEnd(app, at, ceiling);
+            }
+        } else {
+            if (at == 0) return;
+            if (app.editorText[at - 1] == L'\n') {
+                from = at - 1;
+            } else {
+                const size_t lineBreak = app.editorText.rfind(L'\n', at - 1);
+                size_t floor = lineBreak == std::wstring::npos ? 0 : lineBreak + 1;
+                if (rank > 0 && rank < carets.size()) floor = std::max(floor, caretEnd(carets[rank - 1]));
+                from = editorDeleteWordStart(app, at, floor);
+            }
+        }
+        if (from >= to) return;
+        const std::wstring deleted = app.editorText.substr(from, to - from);
+        app.editorText.erase(from, to - from);
+        app.editorCursorPos = from;
+        pushUndo(app, App::EditAction::Delete, from, deleted, at, from);
+        rebuildLineStarts(app);
+    });
+}
+
 // Moves every caret with a one-caret motion, then merges those that meet
 static void editorMoveAtCarets(App& app, const std::function<void()>& move) {
     if (app.editorExtraCarets.empty()) {
@@ -3108,6 +3178,18 @@ void handleEditorKeyDown(App& app, HWND hwnd, WPARAM wParam) {
         return;
     }
 
+    // Ctrl+Backspace and Ctrl+Delete take the word before and after the
+    // caret. The source knew neither: Ctrl+Delete did nothing, and
+    // Ctrl+Backspace typed the character Windows makes of it, a DEL nobody
+    // sees, into the file (#330)
+    if (ctrl && (wParam == VK_BACK || wParam == VK_DELETE)) {
+        editorDeleteWord(app, wParam == VK_DELETE);
+        scheduleReparse(app);
+        editorEnsureCursorVisible(app);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
     if (ctrl) {
         switch (wParam) {
             case 'S':
@@ -4030,6 +4112,8 @@ static void editorCharInputAtCaret(App& app, HWND hwnd, WPARAM wParam) {
 
     if (ch == 27) return; // ESC handled in KeyDown
     if (ch < 32 && ch != L'\n') return; // Ignore other control chars
+    // Ctrl+Backspace's character: the key-down took the word (#330)
+    if (ch == 0x7F) return;
 
     // A quote, bracket or Markdown marker typed over a selection wraps it
     // (#251); the assists switch turns this off with the other helpers

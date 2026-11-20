@@ -6,6 +6,7 @@
 #include "i18n.h"
 #include "signals.h"
 #include "input.h"
+#include "live_text.h"
 #include "render.h"
 #include "selection.h"
 #include "utils.h"
@@ -1024,14 +1025,16 @@ bool annotationEditorKeyDown(App& app, HWND hwnd, WPARAM key, bool ctrl) {
                 caret++;
             }
             break;
+        // With Ctrl a word, as in Live and the find bar (#330)
         case VK_BACK:
             if (caret > 0) {
-                text.erase(caret - 1, 1);
-                caret--;
+                const size_t from = ctrl ? live::wordLeft(text, caret) : caret - 1;
+                text.erase(from, caret - from);
+                caret = from;
             }
             break;
         case VK_DELETE:
-            if (caret < text.size()) text.erase(caret, 1);
+            if (caret < text.size()) text.erase(caret, (ctrl ? live::wordRight(text, caret) : caret + 1) - caret);
             break;
         case VK_LEFT:
             if (caret > 0) caret--;
@@ -1065,7 +1068,8 @@ bool annotationEditorKeyDown(App& app, HWND hwnd, WPARAM key, bool ctrl) {
 
 bool annotationEditorChar(App& app, WPARAM ch) {
     if (!app.annotEditorOpen) return false;
-    if (ch == L'\r' || ch == L'\n' || (ch < 0x20 && ch != L'\t')) return true;
+    // 0x7F is what Windows makes of Ctrl+Backspace: a DEL nobody sees (#330)
+    if (ch == L'\r' || ch == L'\n' || (ch < 0x20 && ch != L'\t') || ch == 0x7F) return true;
     app.annotEditorCaret = std::min(app.annotEditorCaret, app.annotEditorText.size());
     app.annotEditorText.insert(app.annotEditorCaret, 1, (wchar_t)ch);
     app.annotEditorCaret++;
