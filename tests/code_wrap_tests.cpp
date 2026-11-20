@@ -22,6 +22,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -584,6 +585,74 @@ void printAndExport(App& app) {
     app.height = 900;
 }
 
+// Repeated code fragments share immutable layouts, but their drawing runs
+// still own their references, colours, positions and source ranges.
+void repeatedFragments(App& app) {
+    std::string source = "```cpp\n";
+    for (int i = 0; i < 600; ++i)
+        source += "const auto value = compute(1234); // a repeated comment\n";
+    source += "```\n\n```cpp\nconst auto value = compute(1234); // a repeated comment\n```\n";
+    check(lay(app, source, 1000, true), "repeated code parses");
+    auto blocks = blocksOf(app);
+    check(blocks.size() == 2, "repeated code remains two blocks");
+    if (blocks.size() == 2) {
+        std::set<IDWriteTextLayout*> layouts;
+        for (const auto* run : blocks[0].runs) layouts.insert(run->layout);
+        check(blocks[0].runs.size() > 600 && layouts.size() < 30,
+              "hundreds of code lines reuse a bounded number of layouts");
+        for (const auto* run : blocks[1].runs)
+            check(!layouts.count(run->layout), "a different block gets its own layouts");
+        check(blocks[0].lines == 600 && blocks[0].rows.size() == 600,
+              "reused layouts keep all 600 rows and their source ranges");
+        wrapsWhole(app, blocks, "repeated code");
+    }
+
+    // More unique fragments than the cache can retain, and a fragment
+    // longer than its key limit: bounded caching must not omit anything.
+    source = "```cpp\n";
+    for (int i = 0; i < 700; ++i)
+        source += "int unique_" + std::to_string(i) + " = " + std::to_string(i) + ";\n";
+    source += "// " + std::string(500, 'x') + "\n```\n";
+    check(lay(app, source, 440, true), "code beyond the cache limits parses");
+    blocks = blocksOf(app);
+    check(blocks.size() == 1 && blocks[0].lines == 701, "all unique and long lines survive cache limits");
+    wrapsWhole(app, blocks, "code beyond cache limits");
+
+    const std::string fixture = readAll(g_fixtures / "startup-code.md");
+    check(!fixture.empty(), "the mixed startup-code fixture is there");
+    for (int theme : {0, 5}) {
+        applyTheme(app, theme);
+        for (int width : {440, 1100}) {
+            check(lay(app, fixture, width, true), "the mixed startup-code fixture parses");
+            wrapsWhole(app, blocksOf(app), "mixed startup code");
+            std::vector<const App::LayoutTextRun*> ints;
+            // Highlighted runs point to their source line; the row owns
+            // its selectable length. Both of these lines contain only int.
+            for (const auto& run : app.layoutTextRuns)
+                if (app.docText.substr(run.docStart, 4) == L"int\n")
+                    ints.push_back(&run);
+            check(ints.size() == 2, "the fixture has an int in a comment and an int keyword");
+            if (ints.size() == 2) {
+                check(ints[0]->layout == ints[1]->layout, "identical text can share a layout across token types");
+                const auto a = ints[0]->color, b = ints[1]->color;
+                check(a.r != b.r || a.g != b.g || a.b != b.b,
+                      "a shared layout keeps each token's own syntax colour");
+            }
+            const auto frame = pageFrame(app, width, 900);
+            const std::string name = "startup-code-" + std::to_string(theme) + "-" + std::to_string(width) + ".png";
+            check(uiframe::save(app, frame, (g_frames / name).wstring()), "a picture of " + name);
+        }
+    }
+    // Target recreation drops the scene's references without affecting a
+    // fresh block's cache. Printing and export use the same code path.
+    check(createRenderTarget(app), "the target can be recreated after shared code layouts");
+    applyTheme(app, 0);
+    check(lay(app, fixture, 1000, true), "code relayout after target recreation");
+    check(printDebugPages(app, (g_frames / "startup-code-print").wstring()) > 0, "shared code layouts print");
+    check(exportHtmlFile(app, (g_work / "startup-code.html").wstring()), "shared code layouts export as HTML");
+    check(exportDocxFile(app, (g_work / "startup-code.docx").wstring()), "shared code layouts export as Word");
+}
+
 // --- How long it takes -----------------------------------------------------------
 
 void timing(App& app) {
@@ -801,6 +870,7 @@ int runCodeWrapTests(const char* fixtureRoot) {
             theFixture(window.app);
             awkwardLines(window.app);
             printAndExport(window.app);
+            repeatedFragments(window.app);
             timing(window.app);
             settingsRow(window.app);
         }
