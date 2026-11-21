@@ -55,22 +55,19 @@ jobs:
             - Portable: download `tinta.exe` below and run it (SmartScreen may ask: "More info", then "Run anyway")
             - Optionally run `tinta.exe /register` to register Markdown, Mermaid and PlantUML files
 
-            HTML tables, wrapped code lines, a setting for the last session's tabs, and fixes. For citations, papers and themes in CSS, new in 4.1, see the [v4.1.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.1.0).
+            Middle-click autoscroll, F3 and Ctrl+PgDn for the next match and the next tab, font names in the interface's language, a faster start, and a fix for Ctrl+Backspace in Source. For citations, papers and themes in CSS, new in 4.1, see the [v4.1.0 notes](https://github.com/oipoistar/tinta/releases/tag/v4.1.0).
 
             ### Added
-            - Tables written in HTML are drawn as tables, with `rowspan` and `colspan`, and exported to HTML and Word; their text ran together. Reported by @suhail-enosis (#325)
-            - Long lines in code blocks wrap at the block's edge, on screen, on paper and in PDF and HTML; a copy still gets one line. Settings > Appearance > Wrap long lines in code blocks turns it off (`wrapCode=`). Reported by @TiegenFang (#324)
-            - Settings > General > Reopen tabs from last time. Off, a file opens alone and a launch with no file shows the start page; pinned tabs still come back. Kept as `reopenTabs=` in `settings.ini`. Requested by @aweib888 (#323)
+            - Middle-click autoscroll: click the mouse wheel on the page or on the editor's text and the view scrolls towards the pointer, faster the further away it is, until a click or a key; or hold the wheel and drag. `middleClickScroll=0` in `settings.ini` turns it off. Suggested by @fengctm (#331)
+            - F3 and Shift+F3 go to the next and the previous search match; with the find bar closed, F3 opens it on the word searched last. Requested by @stmuecke (#335)
+            - Ctrl+PgDn and Ctrl+PgUp go to the next and the previous tab. Requested by @stmuecke (#334)
 
             ### Changed
-            - Typing in Source with word wrap on is about twenty times faster in a long document, and documents with many centred or right-aligned table cells are laid out faster. (#328)
+            - The theme editor's font list names fonts in the interface's language, as Windows' own font lists do: Chinese fonts by their Chinese names in a Chinese interface. Reported by @evitca (#332)
+            - Tinta starts faster: a small file's first frame is drawn about 15% sooner, and a file with a 10,000-line code block in half the time. (#329)
 
             ### Fixed
-            - A flowchart subgraph is laid out along its own `direction`, and the boxes of neighbouring groups no longer run into each other. Reported by @JiangHe12 (#326)
-            - In `bash`, `sh`, `zsh` and `python` code blocks `//` and `/*` do not start a comment, so URLs, paths and globs keep their colours. By @sudowardo (#327)
-            - A code block over a page break printed the row at the break twice.
-            - A printed page is clipped to its text: a code block's card, a table's bands and a quote's bar ran through the margins to the paper's edge.
-            - In an HTML block, line breaks read as spaces and entities such as `&lt;` and `&nbsp;` are the characters they name.
+            - In Source, Ctrl+Backspace typed an invisible character into the file instead of deleting a word. Ctrl+Backspace and Ctrl+Delete now delete the word before and after the caret. Reported by @Fallgrim (#330)
 
             ### What's included
             - Export as HTML, DOCX, or PDF, plus optional Pandoc formats

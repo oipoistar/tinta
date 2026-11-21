@@ -1,5 +1,19 @@
 # Changelog
 
+## [v4.1.3] - 2026-11-21
+
+### Added
+- Middle-click autoscroll: a click of the mouse wheel on the page or on the editor's text leaves a mark, and the view scrolls towards the pointer, faster the further the pointer is from the mark and not at all while it rests on it. A page wider than its window goes sideways the same way. Any click, any key or the wheel ends it; with the wheel kept down and dragged, it ends where the button is let go. It works in the reading view, on the page beside the editor, in Live and on the source's text; a tab still closes with a middle click and a sheet still pans. `middleClickScroll=0` in `settings.ini` turns it off. Suggested by @fengctm (#331)
+- F3 and Shift+F3 go to the next and the previous search match, from the find bar or from the text beside it. With the bar closed, F3 opens it again on the word searched last, at the match after the one it was closed on. A command bound to F3 in a Custom shortcut profile keeps the key. Requested by @stmuecke (#335)
+- Ctrl+PgDn and Ctrl+PgUp go to the next and the previous tab, as Ctrl+Tab and Ctrl+Shift+Tab do, from the reading view and from the editor. Requested by @stmuecke (#334)
+
+### Changed
+- The theme editor's font list names each family in the interface's language where the font has such a name, as Windows' own font lists do: 微软雅黑 for Microsoft YaHei in a Chinese interface, and likewise in Japanese and Korean. The list is sorted as that language sorts. A theme still keeps the family's English name, and one written by hand may use either. Reported by @evitca (#332)
+- Tinta starts faster: the first frame of a small file is drawn in 54 ms where it took 64, and a file with a 10,000-line code block in 224 ms where it took 455. The software renderer is set up beside the window, four system libraries load when they are first needed, and equal pieces of a code block share one layout. (#329)
+
+### Fixed
+- In Source, Ctrl+Backspace deleted nothing and typed an invisible character into the text and, with the next save, into the file: the count of characters went up with every press. Ctrl+Backspace and Ctrl+Delete now delete the word before and after the caret, at every caret, and no further than the caret's line. A note on the page had the same fault. Files the key was used in before may still hold those characters. Reported by @Fallgrim (#330)
+
 ## [v4.1.2] - 2026-11-19
 
 ### Added
