@@ -45,6 +45,7 @@
 #include "input.h"
 #include "live_editor.h"
 #include "touch.h"
+#include "autoscroll.h"
 #include "editor.h"
 #include "print.h"
 #include "export.h"
@@ -1098,6 +1099,9 @@ render_document:
 // Everything above the page or the sheet: prompts, chips, the tab strip,
 // overlays and dialogs, then the end of the frame
 static void renderChromeAndEnd(App& app) {
+    // Middle-click autoscroll's mark, where the click fell (#331)
+    renderAutoScrollMark(app);
+
     // The source's citation list under its caret, over the page beside it
     if (app.editMode) renderEditorCompletion(app);
 
@@ -1238,6 +1242,10 @@ static void updateCheckWorker(HWND hwnd) {
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     App* app = g_app;
+
+    // Middle-click autoscroll takes the pointer and every click while it
+    // is on (#331)
+    if (app && autoScrollMessage(*app, hwnd, msg, wParam, lParam)) return 0;
 
     switch (msg) {
         case WM_NCCALCSIZE: {
@@ -1394,6 +1402,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
                 // A sheet pans with the middle button held
                 if (sheetMiddleDown(*app, hwnd, mx, my)) return 0;
+                // The page and the editor's text scroll towards the pointer (#331)
+                if (autoScrollStart(*app, hwnd, POINT{mx, my}, touchClockMs())) return 0;
             }
             break;
 
@@ -1945,6 +1955,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 settings.zenWidthPct = app->zenWidthPct;
                 settings.headingRules = app->headingRules;
                 settings.wrapCode = app->wrapCode;
+                settings.middleClickScroll = app->middleClickScroll;
                 settings.foldSections = app->foldSections;
                 settings.foldOnOpen = app->foldOnOpen;
                 settings.tocOnLeft = app->tocOnLeft;
@@ -2075,6 +2086,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     app.zenWidthPct = savedSettings.zenWidthPct;
     app.headingRules = savedSettings.headingRules;
     app.wrapCode = savedSettings.wrapCode;
+    app.middleClickScroll = savedSettings.middleClickScroll;
     app.foldSections = savedSettings.foldSections;
     app.foldOnOpen = savedSettings.foldOnOpen;
     app.openMode = savedSettings.openMode;

@@ -1,0 +1,14 @@
+if(NOT DEFINED TEST_BINARY OR NOT DEFINED TEST_DIR OR NOT DEFINED TEST_DOC)
+    message(FATAL_ERROR "TEST_BINARY, TEST_DIR and TEST_DOC are required")
+endif()
+file(MAKE_DIRECTORY "${TEST_DIR}")
+file(COPY "${TEST_BINARY}" DESTINATION "${TEST_DIR}")
+file(WRITE "${TEST_DIR}/settings.ini" "[Settings]\nhasAskedFileAssociation=1\ncheckUpdates=0\n")
+# TEST_DOC is the fixture folder; the test works on a copy of it
+get_filename_component(TEST_NAME "${TEST_BINARY}" NAME)
+
+execute_process(COMMAND "${TEST_DIR}/${TEST_NAME}" --tab-find-keys-tests "${TEST_DOC}"
+    WORKING_DIRECTORY "${TEST_DIR}" RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Tab and find key tests failed: ${result}")
+endif()

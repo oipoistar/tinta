@@ -1,0 +1,15 @@
+if(NOT DEFINED TEST_BINARY OR NOT DEFINED TEST_DIR OR NOT DEFINED TEST_DOC)
+    message(FATAL_ERROR "TEST_BINARY, TEST_DIR and TEST_DOC are required")
+endif()
+file(MAKE_DIRECTORY "${TEST_DIR}")
+file(COPY "${TEST_BINARY}" DESTINATION "${TEST_DIR}")
+file(WRITE "${TEST_DIR}/settings.ini" "[Settings]\nhasAskedFileAssociation=1\ncheckUpdates=0\n")
+# The test opens a copy: a failing run must not save into the fixture
+file(COPY "${TEST_DOC}" DESTINATION "${TEST_DIR}")
+get_filename_component(TEST_NAME "${TEST_BINARY}" NAME)
+get_filename_component(TEST_DOC_NAME "${TEST_DOC}" NAME)
+execute_process(COMMAND "${TEST_DIR}/${TEST_NAME}" --autoscroll-tests "${TEST_DIR}/${TEST_DOC_NAME}"
+    WORKING_DIRECTORY "${TEST_DIR}" RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Middle-click scroll tests failed: ${result}")
+endif()

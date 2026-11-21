@@ -1886,12 +1886,12 @@ std::vector<HelpSection> helpSections(const App& app) {
     }});
     sections.push_back({tr(app, "help.section.view"), {
         {kSearch,          tr(app, "help.view.search")},
-        {L"Enter",         tr(app, "help.view.next_match")},
+        {L"Enter / F3",    tr(app, "help.view.next_match")},
         {L"Ctrl+Shift+F",  tr(app, "help.view.search_results")},
         {keyLabel(app.keymap[KA_BROWSE]), tr(app, "help.view.folder_browser")},
         {keyLabel(app.keymap[KA_TOC]),    tr(app, "help.view.toc")},
         {L"Ctrl+T",        tr(app, "help.view.new_tab")},
-        {L"Ctrl+Tab",      tr(app, "help.view.next_tab")},
+        {L"Ctrl+Tab / Ctrl+PgDn", tr(app, "help.view.next_tab")},
         {L"Ctrl+W / Ctrl+F4", tr(app, "help.view.close_tab")},
         {L"Ctrl+Shift+T",  tr(app, "tab.menu.reopen")},
         {keyLabel(app.keymap[KA_THEME]),  tr(app, "help.view.theme")},
@@ -4173,7 +4173,8 @@ void renderThemeEditor(App& app) {
             // (#284)
             int row = 0;
             for (size_t i = 0; !chosen.empty() && i < app.systemFontFamilies.size(); i++) {
-                if (_wcsicmp(app.systemFontFamilies[i].c_str(), chosen.c_str()) == 0) {
+                if (_wcsicmp(app.systemFontFamilies[i].c_str(), chosen.c_str()) == 0 ||
+                    _wcsicmp(app.systemFontLabels[i].c_str(), chosen.c_str()) == 0) {
                     row = (int)i + lead;
                     break;
                 }
@@ -4189,8 +4190,13 @@ void renderThemeEditor(App& app) {
             const std::wstring fam = same ? (app.themeEditorFont.empty() ? std::wstring(L"Segoe UI")
                                                                          : app.themeEditorFont)
                                           : app.systemFontFamilies[i - lead];
-            const std::wstring shown = same ? std::wstring(tr(app, "theme.editor.font.same")) : fam;
-            bool selected = same ? chosen.empty() : _wcsicmp(fam.c_str(), chosen.c_str()) == 0;
+            // The family's name in the interface's language (#332); a
+            // theme written by hand may name it either way
+            const std::wstring shown = same ? std::wstring(tr(app, "theme.editor.font.same"))
+                                            : app.systemFontLabels[i - lead];
+            bool selected = same ? chosen.empty()
+                                 : _wcsicmp(fam.c_str(), chosen.c_str()) == 0 ||
+                                   _wcsicmp(shown.c_str(), chosen.c_str()) == 0;
             if (selected) {
                 D2D1_COLOR_F hl = themeUiAccent(base); hl.a = 0.18f;
                 app.brush->SetColor(hl);

@@ -28,6 +28,10 @@ void closeSearchInput(App& app);
 void focusSourceEditor(App& app);
 bool sourceEditorHasFocus(const App& app);
 bool searchInputKeyDown(App& app, HWND hwnd, WPARAM key);
+// F3 and Shift+F3 (#335): the next or the previous match of the open bar,
+// wherever the keyboard is. With the bar closed it opens on the word
+// searched last, at the match after (or before) the one it was closed on
+void searchInputRepeat(App& app, HWND hwnd, bool backward);
 void searchInputChar(App& app, HWND hwnd, wchar_t ch);
 bool searchInputMouseDown(App& app, HWND hwnd, float x, float y);
 bool searchInputMouseMove(App& app, float x, float y);

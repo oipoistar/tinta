@@ -54,6 +54,7 @@ inline int64_t usElapsed(Clock::time_point start) {
 #define TIMER_TOUCH_HOLD 14
 #define TIMER_TOUCH_FLING 15
 #define TIMER_EDITOR_DRAG_SCROLL 16
+#define TIMER_AUTO_SCROLL 17
 
 // Posted to continue an incomplete document layout in time-budgeted chunks
 #define WM_APP_LAYOUT_CHUNK (WM_APP + 1)
@@ -437,6 +438,7 @@ struct Settings {
     // Long lines in code blocks wrap at the block's edge (#324): off, the
     // block grows as wide as its longest line and the page scrolls sideways
     bool wrapCode = true;
+    bool middleClickScroll = true;  // a middle click scrolls the view towards the pointer (#331)
     // Folding sections in the reading view (#316): the arrows beside
     // headings, and whether documents open with every section folded
     bool foldSections = true;
@@ -1043,6 +1045,7 @@ struct App {
     int zenWidthPct = 60;
     bool headingRules = true;   // mirrors Settings (#154)
     bool wrapCode = true;       // mirrors Settings (#324)
+    bool middleClickScroll = true;  // mirrors Settings (#331)
     // Folding sections (#316), mirroring Settings: the arrows beside
     // headings, and documents opening with every section folded
     bool foldSections = true;
@@ -1090,7 +1093,9 @@ struct App {
     bool themeEditorHeadingsOpen = false;
     float themeEditorColorScroll = 0.0f;
     D2D1_RECT_F themeEditorColorListRect{};
-    std::vector<std::wstring> systemFontFamilies;  // enumerated on first open
+    std::vector<std::wstring> systemFontFamilies;  // enumerated on first open; the name a theme keeps
+    std::vector<std::wstring> systemFontLabels;    // each family's name in the interface's language (#332)
+    int systemFontLanguage = -1;                   // the language the labels were read in
     std::vector<std::pair<D2D1_RECT_F, int>> themeEditorHits;
     D2D1_RECT_F themeEditorFontListRect{};  // for wheel routing (set in render)
 
@@ -1324,6 +1329,21 @@ struct App {
         std::string flingFile;
         bool flingEdit = false;
     } touch;
+    // Middle-click autoscroll (#331, autoscroll.h)
+    struct AutoScroll {
+        bool active = false;
+        bool held = false;     // the middle button that began it is still down
+        bool dragged = false;  // and has left the mark: letting go ends it
+        TouchTarget target = TouchTarget::None;
+        bool across = false;   // a page wider than its view goes sideways too
+        POINT origin{}, pointer{};
+        float x = 0, y = 0;    // where the view has got to, fractions kept
+        double ms = 0;         // the last step's time
+        int tab = -1;
+        std::string file;
+        bool edit = false;
+        UINT swallowUp = 0;    // the release of the click that ended it
+    } autoScroll;
     float tocAnimation = 0.0f;  // 0 to 1 slide-in from the chosen side
     // A clicked heading stays the active row even when the scroll cannot
     // reach it (short documents); any real scroll hands back to the spy
@@ -1741,6 +1761,15 @@ struct App {
     };
     SearchField searchFields[2];
     int searchSelectingField = -1;
+    // The word the bar was closed with and the match it was on, for F3
+    // with the bar closed (#335)
+    struct SearchMemory {
+        std::wstring query;
+        bool hasPos = false;
+        size_t pos = 0;     // the match's start in the text searched
+        bool edit = false;  // found in the editor's text, not the page's
+        std::string file;
+    } searchLast;
 
     // File watching (auto-reload)
     FILETIME lastFileWriteTime = {};

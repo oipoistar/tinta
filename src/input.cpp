@@ -16,6 +16,7 @@
 #include "scholar.h"
 #include "file_utils.h"
 #include "utils.h"
+#include "autoscroll.h"
 #include "search.h"
 #include "search_panel.h"
 #include "d2d_init.h"
@@ -4190,6 +4191,12 @@ static void toggleZenMode(App& app, HWND hwnd) {
 bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     // Typing, scrolling and clicking all put the tab hover card away
     tabHoverCardDismiss(app, hwnd);
+    // A key ends middle-click autoscroll (#331) and then does what it
+    // does; Esc only ends it. Shift, Ctrl and Alt by themselves are no key
+    if (autoScrollActive(app) && wParam != VK_SHIFT && wParam != VK_CONTROL && wParam != VK_MENU) {
+        autoScrollStop(app, hwnd);
+        if (wParam == VK_ESCAPE) return true;
+    }
     // Ctrl+Alt+Up/Down add editor carets (#251) before the AltGr guard
     if (editorAltArrowKey(app, hwnd, wParam)) return true;
     // Esc puts the CSS inspector's card away
@@ -4418,6 +4425,12 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
             tabCycle(app, hwnd, shift ? -1 : 1);
             return false;
         }
+        // Ctrl+PgDn and Ctrl+PgUp: the next and the previous tab, as in a
+        // browser (#334). With one tab the keys are left as they were
+        if ((wParam == VK_NEXT || wParam == VK_PRIOR) && !shift && app.tabs.size() > 1) {
+            tabCycle(app, hwnd, wParam == VK_NEXT ? 1 : -1);
+            return true;
+        }
         if (wParam == 'W' && !app.editMode) {
             // In edit mode Ctrl+W keeps its documented word-wrap toggle
             tabCloseIndex(app, hwnd, app.activeTab);
@@ -4492,6 +4505,14 @@ bool handleKeyDown(App& app, HWND hwnd, WPARAM wParam) {
     if (ctrl && shiftDown && wParam == 'F' && !app.editMode &&
         !app.confirmExitPending) {
         openSearchPanel(app);
+        return true;
+    }
+    // F3 and Shift+F3: the next and the previous match (#335), from the
+    // bar or from the text beside it. With the bar closed F3 opens it on
+    // the word searched last. A command bound to F3 keeps the key
+    if (wParam == VK_F3 && !ctrl && !app.confirmExitPending &&
+        translateActionKey(app.keymap, VK_F3, false) == VK_F3) {
+        searchInputRepeat(app, hwnd, shiftDown);
         return true;
     }
     // Focus transitions precede cell keyboard capture, including Ctrl+H (#223).

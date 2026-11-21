@@ -315,6 +315,18 @@ double touchClockMs() {
     return static_cast<double>(now.QuadPart) / perMs;
 }
 
+void touchScrollPosition(const App& app, TouchTarget target, PanelList list, float& x, float& y) {
+    scrollOf(app, target, list, x, y);
+}
+
+void touchScrollRange(const App& app, TouchTarget target, PanelList list, float& maxX, float& maxY) {
+    scrollRange(app, target, list, maxX, maxY);
+}
+
+bool touchScrollTo(App& app, TouchTarget target, PanelList list, float& x, float& y) {
+    return scrollTo(app, target, list, x, y);
+}
+
 TouchTarget touchTargetAt(const App& app, POINT pt, PanelList& list) {
     list = PanelList::None;
     const float x = static_cast<float>(pt.x), y = static_cast<float>(pt.y);

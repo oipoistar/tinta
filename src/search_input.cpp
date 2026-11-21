@@ -196,7 +196,68 @@ void openSearchInput(App& app, bool replace) {
     state.anchor = 0;
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
+// The match after (or before) a place in the text, round the ends
+template <typename Matches>
+static int matchBeside(const Matches& matches, size_t pos, bool backward) {
+    const int count = static_cast<int>(matches.size());
+    if (backward) {
+        for (int i = count - 1; i >= 0; --i) if (matches[i].startPos < pos) return i;
+        return count - 1;
+    }
+    for (int i = 0; i < count; ++i) if (matches[i].startPos > pos) return i;
+    return 0;
+}
+// Enter, the arrows and F3: one match on, or one back, round the ends
+static void stepMatch(App& app, bool backward) {
+    int count = static_cast<int>(app.editMode ? app.editorSearchMatches.size() : app.searchMatches.size());
+    int& index = app.editMode ? app.editorSearchCurrentIndex : app.searchCurrentIndex;
+    if (count) index = (index + (backward ? count-1 : 1)) % count;
+    if (app.editMode) { app.searchCurrentIndex = index; scrollEditorToMatch(app); }
+    else scrollToCurrentMatch(app);
+}
+void searchInputRepeat(App& app, HWND hwnd, bool backward) {
+    if (app.showSearch) {
+        if (app.editMode) editorSearchRefresh(app);
+        stepMatch(app, backward);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+    // The bar clears its word as it closes: these are what it left
+    const App::SearchMemory last = app.searchLast;
+    openSearchInput(app);
+    if (last.query.empty()) return;
+    app.searchQuery = last.query;
+    auto& state = app.searchFields[0];
+    state.caret = last.query.size();
+    state.anchor = 0;  // selected, so typing starts another search
+    if (app.editMode) performEditorSearch(app);
+    else performSearch(app);
+    // In the document and view it was closed in, on from the match it was
+    // closed on; anywhere else from the first, or backwards from the last
+    const bool same = last.hasPos && last.edit == app.editMode && last.file == app.currentFile;
+    int& index = app.editMode ? app.editorSearchCurrentIndex : app.searchCurrentIndex;
+    const int count = static_cast<int>(app.editMode ? app.editorSearchMatches.size() : app.searchMatches.size());
+    if (count) {
+        if (!same) index = backward ? count - 1 : 0;
+        else if (app.editMode) index = matchBeside(app.editorSearchMatches, last.pos, backward);
+        else index = matchBeside(app.searchMatches, last.pos, backward);
+    }
+    if (app.editMode) { app.searchCurrentIndex = index; scrollEditorToMatch(app); }
+    else scrollToCurrentMatch(app);
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
 void closeSearchInput(App& app) {
+    // What F3 opens the bar on again (#335)
+    if (!app.searchQuery.empty()) {
+        auto& last = app.searchLast;
+        last.query = app.searchQuery;
+        last.edit = app.editMode;
+        last.file = app.currentFile;
+        const int index = app.editMode ? app.editorSearchCurrentIndex : app.searchCurrentIndex;
+        const int count = static_cast<int>(app.editMode ? app.editorSearchMatches.size() : app.searchMatches.size());
+        last.hasPos = index >= 0 && index < count;
+        if (last.hasPos) last.pos = app.editMode ? app.editorSearchMatches[index].startPos : app.searchMatches[index].startPos;
+    }
     releaseSearchInput(app);
     closeSearchPanel(app);  // the results panel lives with the bar (#246)
     app.showSearch = false;
@@ -247,13 +308,7 @@ bool searchInputKeyDown(App& app, HWND hwnd, WPARAM key) {
     } else if (key == VK_RETURN || key == VK_UP || key == VK_DOWN) {
         if (key == VK_RETURN && app.searchReplaceMode && ctrl) editorReplaceAll(app, hwnd);
         else if (key == VK_RETURN && field) editorReplaceCurrent(app, hwnd);
-        else {
-            int count = static_cast<int>(app.editMode ? app.editorSearchMatches.size() : app.searchMatches.size());
-            int& index = app.editMode ? app.editorSearchCurrentIndex : app.searchCurrentIndex;
-            if (count) index = (index + ((key == VK_UP || (key == VK_RETURN && shift)) ? count-1 : 1)) % count;
-            if (app.editMode) { app.searchCurrentIndex = index; scrollEditorToMatch(app); }
-            else scrollToCurrentMatch(app);
-        }
+        else stepMatch(app, key == VK_UP || (key == VK_RETURN && shift));
     } else if (key == VK_LEFT || key == VK_RIGHT || key == VK_HOME || key == VK_END) {
         bool forward = key == VK_RIGHT;
         if (key == VK_HOME) state.caret = 0;

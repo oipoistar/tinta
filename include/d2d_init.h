@@ -10,6 +10,12 @@ void applyTheme(App& app, int themeIndex);
 void applyWindowChrome(App& app);
 void updateTextFormats(App& app);
 void enumerateSystemFontFamilies(App& app);
+// Which of a family's names a font list shows (#332): the one in the
+// interface's language where the font has one, as Windows' own lists do
+// (Microsoft YaHei under its Chinese name in a Chinese interface), else
+// the en-US one, else its first. `locales` are the names' locales as the
+// font gives them; -1 when there are none
+int fontNameChoice(const std::vector<std::wstring>& locales, const std::wstring& uiLocale);
 void updateOverlayFormats(App& app);
 void ensureThemePreviewFormats(App& app);
 // Interface text takes the fonts of a Chinese, Japanese or Korean interface

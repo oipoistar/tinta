@@ -11,8 +11,10 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cwctype>
 #include <initializer_list>
 #include <string>
+#include <vector>
 
 // Older SDK headers may lack these
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
@@ -883,32 +885,94 @@ bool followMonitorText(App& app, bool reread) {
     return setMonitorText(app, monitor);
 }
 
-// System font families for the theme editor font picker (#82). Enumerated
-// once per session, sorted, en-US names preferred with first-locale
-// fallback so localized-only families still appear.
+static std::wstring loweredLocale(std::wstring locale) {
+    for (auto& ch : locale) ch = static_cast<wchar_t>(towlower(ch));
+    return locale;
+}
+
+// Simplified and Traditional Chinese name a font differently: 1 and 2,
+// and 0 for every other language
+static int chineseScript(const std::wstring& locale) {
+    if (locale.rfind(L"zh", 0) != 0) return 0;
+    for (const wchar_t* traditional : {L"zh-tw", L"zh-hk", L"zh-mo", L"zh-hant"}) {
+        if (locale.rfind(traditional, 0) == 0) return 2;
+    }
+    return 1;
+}
+
+int fontNameChoice(const std::vector<std::wstring>& locales, const std::wstring& uiLocale) {
+    const std::wstring want = loweredLocale(uiLocale);
+    const std::wstring language = want.substr(0, want.find(L'-'));
+    int sameLanguage = -1, english = -1;
+    for (size_t i = 0; i < locales.size(); i++) {
+        const std::wstring have = loweredLocale(locales[i]);
+        if (have == want) return static_cast<int>(i);
+        if (sameLanguage < 0 && !language.empty() && have.substr(0, have.find(L'-')) == language &&
+            chineseScript(have) == chineseScript(want)) {
+            sameLanguage = static_cast<int>(i);
+        }
+        if (english < 0 && have == L"en-us") english = static_cast<int>(i);
+    }
+    if (sameLanguage >= 0) return sameLanguage;
+    if (english >= 0) return english;
+    return locales.empty() ? -1 : 0;
+}
+
+// System font families for the theme editor font picker (#82), sorted as
+// the interface's language sorts them. A theme keeps a family's en-US
+// name, or its first where it has none, so localized-only families still
+// appear; the list shows the name in the interface's language (#332).
+// Enumerated once, and again when the language changes.
 void enumerateSystemFontFamilies(App& app) {
-    if (!app.systemFontFamilies.empty() || !app.dwriteFactory) return;
+    if (!app.dwriteFactory) return;
+    if (!app.systemFontFamilies.empty() && app.systemFontLanguage == app.currentLanguageIndex) return;
+    app.systemFontFamilies.clear();
+    app.systemFontLabels.clear();
+    app.systemFontLanguage = app.currentLanguageIndex;
     IDWriteFontCollection* fonts = nullptr;
     if (FAILED(app.dwriteFactory->GetSystemFontCollection(&fonts)) || !fonts) return;
+    const std::wstring uiLocale = dateLocale(app.currentLanguageIndex);
+    struct Row { std::wstring family, label; };
+    std::vector<Row> rows;
     UINT32 count = fonts->GetFontFamilyCount();
-    app.systemFontFamilies.reserve(count);
+    rows.reserve(count);
     for (UINT32 i = 0; i < count; i++) {
         IDWriteFontFamily* family = nullptr;
         if (FAILED(fonts->GetFontFamily(i, &family)) || !family) continue;
         IDWriteLocalizedStrings* names = nullptr;
         if (SUCCEEDED(family->GetFamilyNames(&names)) && names) {
-            UINT32 index = 0;
-            BOOL exists = FALSE;
-            names->FindLocaleName(L"en-us", &index, &exists);
-            if (!exists) index = 0;
-            wchar_t name[128] = {};
-            if (SUCCEEDED(names->GetString(index, name, 128)) && name[0]) {
-                app.systemFontFamilies.push_back(name);
+            std::vector<std::wstring> locales, strings;
+            for (UINT32 n = 0; n < names->GetCount(); n++) {
+                UINT32 localeLength = 0, length = 0;
+                names->GetLocaleNameLength(n, &localeLength);
+                names->GetStringLength(n, &length);
+                std::wstring locale(localeLength + 1, L'\0'), name(length + 1, L'\0');
+                if (FAILED(names->GetLocaleName(n, locale.data(), localeLength + 1))) locale.clear();
+                if (FAILED(names->GetString(n, name.data(), length + 1))) name.clear();
+                locale.resize(wcslen(locale.c_str()));
+                name.resize(wcslen(name.c_str()));
+                locales.push_back(locale);
+                strings.push_back(name);
+            }
+            const int kept = fontNameChoice(locales, L"en-US");
+            const int shown = fontNameChoice(locales, uiLocale);
+            if (kept >= 0 && !strings[kept].empty()) {
+                rows.push_back({strings[kept], strings[shown].empty() ? strings[kept] : strings[shown]});
             }
             names->Release();
         }
         family->Release();
     }
     fonts->Release();
-    std::sort(app.systemFontFamilies.begin(), app.systemFontFamilies.end());
+    std::sort(rows.begin(), rows.end(), [&](const Row& a, const Row& b) {
+        const int order = CompareStringEx(uiLocale.c_str(), LINGUISTIC_IGNORECASE, a.label.c_str(),
+                                          static_cast<int>(a.label.size()), b.label.c_str(),
+                                          static_cast<int>(b.label.size()), nullptr, nullptr, 0);
+        if (order && order != CSTR_EQUAL) return order == CSTR_LESS_THAN;
+        return a.label != b.label ? a.label < b.label : a.family < b.family;
+    });
+    for (auto& row : rows) {
+        app.systemFontFamilies.push_back(std::move(row.family));
+        app.systemFontLabels.push_back(std::move(row.label));
+    }
 }

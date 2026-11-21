@@ -88,7 +88,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Pin on top** - A pushpin in the title bar keeps the window above every other app, and Tinta remembers it for the next window
 - **Rich tables** - Tables with bold, italic, code, and clickable links in cells
 - **HTML tables** - A `<table>` written in HTML is drawn like a pipe table, with its header cells, a caption, formatting and line breaks in cells, and the end tags HTML lets a table leave out. Cells joined with `rowspan` and `colspan` cover their rows and columns on the page, in print and PDF and in the HTML and Word exports
-- **Tabs** - Win11 Notepad-style tabs in the title bar: files opened from Explorer join the window as tabs, Ctrl+Tab or the mouse wheel over the strip cycles, Ctrl+W or Ctrl+F4 closes (Ctrl+F4 also while editing, where Ctrl+W is word wrap), middle-click closes, Ctrl+Shift+T reopens the tab closed last (with its place, scroll and any unsaved text; a sweep of closes comes back together), Ctrl+T opens the start page in a new tab, unsaved buffers show a dot, resting the pointer on a tab shows its full name, its folder and what its dot means, and dragging reorders tabs. Right-click a tab for close operations (close, close all but this, close all to the left/right), pin tab, copy path and reveal in Explorer, then reopen closed tab with the last five closed tabs by name. A pinned tab moves to the start of the row and shrinks to its name's first letter, stays when the others are closed, and comes back pinned with the session. Pulling a tab out of the strip floats it as a card: drop it on open space for a new window (which keeps the tab row), or onto another Tinta window to move it there — and dropping a single-file window onto a tab strip merges it back. Single-file windows stay tabless; turn the Explorer behavior off with the "Open files in tabs" setting. Tinta starts with the tabs it was closed with; with Settings → General → **Reopen tabs from last time** off (`reopenTabs=0` in `settings.ini`) a file opens alone and only the pinned tabs come back
+- **Tabs** - Win11 Notepad-style tabs in the title bar: files opened from Explorer join the window as tabs, Ctrl+Tab, Ctrl+PgDn and Ctrl+PgUp or the mouse wheel over the strip cycle, Ctrl+W or Ctrl+F4 closes (Ctrl+F4 also while editing, where Ctrl+W is word wrap), middle-click closes, Ctrl+Shift+T reopens the tab closed last (with its place, scroll and any unsaved text; a sweep of closes comes back together), Ctrl+T opens the start page in a new tab, unsaved buffers show a dot, resting the pointer on a tab shows its full name, its folder and what its dot means, and dragging reorders tabs. Right-click a tab for close operations (close, close all but this, close all to the left/right), pin tab, copy path and reveal in Explorer, then reopen closed tab with the last five closed tabs by name. A pinned tab moves to the start of the row and shrinks to its name's first letter, stays when the others are closed, and comes back pinned with the session. Pulling a tab out of the strip floats it as a card: drop it on open space for a new window (which keeps the tab row), or onto another Tinta window to move it there — and dropping a single-file window onto a tab strip merges it back. Single-file windows stay tabless; turn the Explorer behavior off with the "Open files in tabs" setting. Tinta starts with the tabs it was closed with; with Settings → General → **Reopen tabs from last time** off (`reopenTabs=0` in `settings.ini`) a file opens alone and only the pinned tabs come back
 - **Folder browser** - Press B to browse and open Markdown or Mermaid files (Ctrl+click a file to open it in a new tab)
 - **Table of contents** - Press Tab to see document headings, click to jump; the panel follows your reading position, and typing filters the headings
 - **Folding sections** - In the reading view, the arrow beside a heading folds its section and opens it again, and right-clicking the page offers Fold all sections. Contents still lists every heading, fainter when folded, and jumping to one, following a link to it or searching for a word in a folded section opens the sections around it. Settings → Appearance → Fold sections turns the arrows off, or opens every document folded
@@ -97,11 +97,12 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 - **Emoji shortcodes** - `:rocket:` and friends render as real emoji
 - **Fit to width** - Wide tables and diagrams grow a Fit button that shrinks them to the reading column
 - **Wrapped code** - A line of a code block that is longer than the block wraps at its edge, on the page, in print and PDF and in the HTML export, so a long line is read without scrolling sideways. Settings → Appearance → **Wrap long lines in code blocks** (`wrapCode=0` in `settings.ini`) keeps every line on one row instead
+- **Middle-click autoscroll** - Click the mouse wheel on the page or on the editor's text and the view scrolls towards the pointer, faster the further the pointer is from the mark the click left, and not at all while it rests on the mark; a page wider than its window goes sideways the same way. Any click, any key or the wheel ends it. Or keep the wheel pressed and drag: the view scrolls until the button is let go. `middleClickScroll=0` in `settings.ini` turns it off
 - **Draft recovery** - Unsaved quick notes are stashed continuously and offered back on the next launch. With **Close without asking** (Settings → Editor), closing Tinta skips the save prompt and keeps unsaved edits as drafts for the next launch
 - **Create on click** - Clicking a missing file reference offers to create the file and opens it ready to type
 - **Text-file references** - `.txt`, `.json`, `.yaml` and friends link like Markdown files and open as highlighted documents
 - **Update check** - Portable builds check GitHub once a day and offer a new release as a quiet, dismissible chip
-- **Search** - Find text with F or Ctrl+F, cycle through matches with Enter; every match shows as a tick on the scrollbar. Ctrl+Shift+F, or the list button at the end of the search bar, opens a results panel beside the page: every match with a snippet, grouped under its heading, then the matches in your other open tabs and in the document's folder, by line. A click jumps to a match, or opens another file in its own tab at that match
+- **Search** - Find text with F or Ctrl+F, cycle through matches with Enter or F3 (Shift+Enter or Shift+F3 for the one before); F3 with the bar closed opens it again on the word searched last, at the next match; every match shows as a tick on the scrollbar. Ctrl+Shift+F, or the list button at the end of the search bar, opens a results panel beside the page: every match with a snippet, grouped under its heading, then the matches in your other open tabs and in the document's folder, by line. A click jumps to a match, or opens another file in its own tab at that match
 - **Persistent settings** - Remembers your theme, zoom level, and window position
 - **Portable mode** - Create a `settings.ini` next to `tinta.exe` (an empty file works) and the whole configuration — settings, custom themes, languages, drafts — lives beside the executable and travels with it; without one, everything stays in `%APPDATA%\Tinta`
 - **Localized interface** - English, Simplified Chinese, Japanese, Korean, German, French, and Italian UI; follows Windows or a chosen language
@@ -119,7 +120,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Tab` | Toggle table of contents (type to filter, Enter jumps) |
 | `A` | Annotate the selected text |
 | `F` / `Ctrl+F` | Open search |
-| `Enter` | Next search match |
+| `Enter` / `F3` | Next search match; `Shift+Enter` / `Shift+F3` the one before. With the bar closed, `F3` opens it on the word searched last |
 | `Ctrl+Shift+F` | Search results panel: every match beside the page |
 | `ESC` | Close overlay / Quit |
 | `T` | Open theme chooser |
@@ -127,6 +128,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | `Ctrl+C` | Copy selected text (or all if none selected) |
 | `Ctrl+A` | Select all text |
 | `Ctrl+Scroll` | Zoom in/out |
+| `Middle click` | Autoscroll: the view follows the pointer until a click or a key; or hold and drag |
 | `Arrow keys` / `J/K` | Scroll |
 | `Mouse back/forward` / `Alt+←/→` | Walk link jumps with scroll restore |
 | `Page Up/Down` | Page scroll |
@@ -147,6 +149,7 @@ It's a viewer first: perfect as the double-click default for `.md` and `.mmd` fi
 | Drag / `Ctrl`+drag | Move the selected text to where you let go, or leave a copy there; `Esc` cancels (in edit mode) |
 | `Ctrl+Alt+↑` / `Ctrl+Alt+↓` / `Alt+Click` | Add a caret above, below or at the click; `Esc` returns to one caret (in edit mode) |
 | `Ctrl+D` | Select the word, then add its next occurrence as another caret (in edit mode) |
+| `Ctrl+PgDn` / `Ctrl+PgUp` | Next / previous tab, as `Ctrl+Tab` and `Ctrl+Shift+Tab` |
 | `Ctrl+F4` | Close the current tab (viewer and edit mode) |
 | `Ctrl+Shift+T` | Reopen the tab closed last, with its place, scroll and unsaved text; again for the one before |
 | `Q` | Quit |
@@ -308,7 +311,10 @@ or beside the portable executable: [THEMES.md](THEMES.md) is the short guide,
 with examples to start from.
 
 Themes made in the colour editor (Settings > Appearance > New) live in
-`themes.ini` in the same place. Add `inlinecode` to a `[theme]` section to color inline code
+`themes.ini` in the same place. The editor's font list names each family in
+the interface's language where the font has such a name, as Windows' own font
+lists do; a theme keeps the family's English name, and one written by hand
+may use either. Add `inlinecode` to a `[theme]` section to color inline code
 independently of fenced blocks:
 
 ```ini

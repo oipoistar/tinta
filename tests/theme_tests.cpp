@@ -26,6 +26,7 @@ int testCssThemes(App& app, const std::filesystem::path& dir);
 int testPageStyles(App& app, const std::filesystem::path& dir);
 int testThemeChrome(App& app, const std::filesystem::path& dir);
 int testHandEditedThemes(App& app, const std::filesystem::path& dir);
+int testFontNames();
 
 
 namespace {
@@ -661,6 +662,7 @@ int main(int argc, char** argv) {
         themeEditorFontsApply(app, read(TINTA_THEME_FONTS_FIXTURE));
     }
     themeEditorFonts(dir);
+    failures += testFontNames();
     inlineCodeBackground(dir);  // these two rewrite themes.ini
     missingFaces(dir);
     CoUninitialize();
