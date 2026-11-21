@@ -1932,11 +1932,15 @@ static bool layoutMermaidDiagram(App& app, const std::string& source,
         edgeLabel.text = toWide(diagram.edges[i].label);
         // A pixel of slack: laid out again at exactly its measured width, a
         // label could wrap its last letter onto a line of its own (#281)
-        edgeLabel.width = std::min(
-            180.0f * scale,
-            std::max(60.0f * scale,
-                     std::ceil(measureText(app, edgeLabel.text, app.textFormat)) + 1.0f +
-                         labelPaddingX * 2.0f));
+        // Each value by name, not nested in std::min(std::max()): MSVC 19.52
+        // at /O2 made 0 of the nested form, and a label of no width has no
+        // text (v4.1.3's first release run)
+        const float labelNatural =
+            std::ceil(measureText(app, edgeLabel.text, app.textFormat)) + 1.0f + labelPaddingX * 2.0f;
+        const float labelLeast = 60.0f * scale;
+        const float labelMost = 180.0f * scale;
+        edgeLabel.width = labelNatural < labelLeast ? labelLeast
+                        : labelNatural > labelMost ? labelMost : labelNatural;
         LayoutInfo measured = createWrappedLayout(
             app, edgeLabel.text, app.textFormat,
             edgeLabel.width - labelPaddingX * 2.0f, measureHeight);

@@ -496,9 +496,13 @@ mermaidext::Built buildFlowchartPrims(App& app, const std::string& source,
         // Sized as in the viewer (#281): a pixel of slack, and a word longer
         // than the cap widens the label, up to twice the cap, rather than
         // break in the middle
-        edgeLabel.width = std::min(
-            180.0f * scale,
-            std::max(60.0f * scale, std::ceil(single.width) + 1.0f + labelPadX * 2.0f));
+        // Each value by name, as in the viewer: MSVC 19.52 made 0 of this
+        // nested in std::min(std::max()) there
+        const float labelNatural = std::ceil(single.width) + 1.0f + labelPadX * 2.0f;
+        const float labelLeast = 60.0f * scale;
+        const float labelMost = 180.0f * scale;
+        edgeLabel.width = labelNatural < labelLeast ? labelLeast
+                        : labelNatural > labelMost ? labelMost : labelNatural;
         edgeLabel.width = std::max(
             edgeLabel.width,
             std::min(360.0f * scale, std::ceil(single.minWidth) + 1.0f + labelPadX * 2.0f));
