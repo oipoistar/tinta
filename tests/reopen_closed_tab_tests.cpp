@@ -351,6 +351,19 @@ int runReopenClosedTabTests() {
     check(startPageActive(app) && app.tabs.size() == 5, "Ctrl+T opens the start page in a new tab");
     keystroke(app, 'W', {true, false, false});
     check(app.tabs.size() == 4 && app.closedTabs.empty(), "closing the start page leaves nothing to reopen");
+
+    // The strip's + opens the start page too, not an empty note in the editor
+    paintStrip(app);
+    if (const App::TabHit* plus = hitOf(app, -2)) {
+        tabStripMouseDown(app, app.hwnd, (int)((plus->rect.left + plus->rect.right) / 2),
+                          (int)((plus->rect.top + plus->rect.bottom) / 2), false);
+        check(startPageActive(app) && !app.editMode && app.tabs.size() == 5,
+              "the + button opens the start page in a new tab");
+        keystroke(app, 'W', {true, false, false});
+        check(app.tabs.size() == 4 && app.closedTabs.empty(), "and closing it leaves nothing to reopen");
+    } else {
+        check(false, "the strip draws a + button");
+    }
     tabCloseIndex(app, app.hwnd, indexOf(app, files[2]), TabClose::Internal);
     check(app.tabs.size() == 3 && app.closedTabs.empty(), "an internal close is not remembered");
     tabOpenPath(app, app.hwnd, toUtf8(files[2].wstring()), false, 2);
