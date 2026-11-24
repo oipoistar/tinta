@@ -1931,9 +1931,9 @@ bool tabStripMouseDown(App& app, HWND hwnd, int x, int y, bool middle) {
             continue;
         }
         if (hit.index == -2) {
-            // + = new untitled quick-note tab (Ctrl+T still opens the
-            // browser into a new tab for picking an existing file)
-            if (!middle) tabOpenQuickNote(app, hwnd);
+            // + = new tab on the start page, as Ctrl+T: pick a recent
+            // file or press New document there (Ctrl+N for a quick note)
+            if (!middle) tabOpenStartPage(app, hwnd);
             return true;
         }
         if (hit.index == -3) {

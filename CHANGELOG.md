@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The + button at the end of the tab strip opens the start page in a new tab, as Ctrl+T does, instead of an empty note in the editor. A recent file can be picked from a new tab, and New document (N) on the start page still starts an untitled note (#336)
+
 ## [v4.1.3] - 2026-11-21
 
 ### Added
